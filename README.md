@@ -26,8 +26,20 @@ The first implementation phase establishes project scope, architecture, configur
 
 ## Quick start
 
-- Windows: run `./scripts/setup.ps1`
-- Linux or macOS: run `./scripts/setup.sh`
-- The setup script guides the user through simulator or hardware mode, installs a local .NET toolchain if needed, writes a local config override, and launches the app.
+- New install on Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "& { $tmp = Join-Path $env:TEMP 'jkmonitor-install.ps1'; Invoke-WebRequest 'https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-github.ps1' -OutFile $tmp; & $tmp -Repository 'https://github.com/BieleckiLtd/JkMonitorV2' -Branch 'dev' }"
+```
+
+- New install on Linux or macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-github.sh | bash -s -- https://github.com/BieleckiLtd/JkMonitorV2 dev
+```
+
+- Already installed locally: use `./scripts/update.ps1` or `./scripts/update.sh` inside the installed folder to refresh from the default `dev` branch.
+
+The installer guides the user through simulator or hardware mode, installs a local .NET toolchain if needed, writes a local config override, and launches the app.
 
 See `Docs/GETTING_STARTED.md` for a step-by-step first run and deployment path.

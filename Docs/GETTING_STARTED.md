@@ -1,11 +1,65 @@
 # Getting Started
 
-The user entry point is now one command.
+The real user-facing entry point is a one-line GitHub install command. Local script paths are only for users who already have the repository or an existing install on disk.
 
-## Run It
+## New Install
 
-- Windows: `./scripts/setup.ps1`
-- Linux or macOS: `./scripts/setup.sh`
+Windows:
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "& { $tmp = Join-Path $env:TEMP 'jkmonitor-install.ps1'; Invoke-WebRequest 'https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-github.ps1' -OutFile $tmp; & $tmp -Repository 'https://github.com/BieleckiLtd/JkMonitorV2' -Branch 'dev' }"
+```
+
+Linux or macOS:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-github.sh | bash -s -- https://github.com/BieleckiLtd/JkMonitorV2 dev
+```
+
+These commands:
+
+- Download the installer straight from GitHub.
+- Download the selected branch of the application.
+- Install or update the local application folder.
+- Start the guided setup flow.
+
+## Already Cloned Or Already Installed
+
+If the repo is already on disk, or the software was already installed previously, use the local scripts from that folder:
+
+- Windows: `./scripts/setup.ps1` or `./scripts/update.ps1`
+- Linux or macOS: `./scripts/setup.sh` or `./scripts/update.sh`
+
+## Install Directly From GitHub
+
+If you need a customizable GitHub install command instead of the default repo and branch, use these forms.
+
+Windows example:
+
+`powershell -ExecutionPolicy Bypass -File .\scripts\install-from-github.ps1 -Repository https://github.com/BieleckiLtd/JkMonitorV2 -Branch dev`
+
+Linux or macOS example:
+
+`./scripts/install-from-github.sh https://github.com/BieleckiLtd/JkMonitorV2 dev`
+
+These GitHub bootstrap scripts:
+
+- Download the selected branch as a ZIP archive from GitHub.
+- Extract it into a local installation folder.
+- Update an existing installation in place when the destination already exists.
+- Preserve local appsettings override files and the cached local `.dotnet` toolchain.
+- Start the same guided setup flow from that downloaded copy.
+
+The scripts accept either the full GitHub URL or `owner/repo` form.
+
+## Update An Existing Install
+
+If the software is already installed from this repository and you just want the latest `dev` branch without re-entering the repo or branch values:
+
+- Windows: `./scripts/update.ps1`
+- Linux or macOS: `./scripts/update.sh`
+
+These wrappers refresh the current installation folder from `https://github.com/BieleckiLtd/JkMonitorV2`, preserve local config and the cached local `.dotnet` toolchain, and then run the guided setup again.
 
 The setup script does the following:
 
