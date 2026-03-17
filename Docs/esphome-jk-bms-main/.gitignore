@@ -1,0 +1,15 @@
+.idea/
+secrets.yaml
+.esphome/
+/tests/.gitignore
+**/.pioenvs/
+**/.piolibdeps/
+**/lib/
+**/src/
+**/partitions.csv
+
+__pycache__/
+*.py[cod]
+*$py.class
+
+local/

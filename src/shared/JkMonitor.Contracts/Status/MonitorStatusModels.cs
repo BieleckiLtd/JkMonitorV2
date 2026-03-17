@@ -1,0 +1,45 @@
+namespace JkMonitor.Contracts.Status;
+
+public sealed record class DeviceRuntimeState
+{
+    public required string DeviceId { get; init; }
+
+    public required string DisplayName { get; init; }
+
+    public required string Protocol { get; init; }
+
+    public bool Enabled { get; init; }
+
+    public bool IsMaster { get; init; }
+
+    public int PollIntervalMilliseconds { get; init; }
+
+    public DateTimeOffset? LastPollStartedAt { get; init; }
+
+    public DateTimeOffset? LastPollCompletedAt { get; init; }
+
+    public string LastOutcome { get; init; } = "NotStarted";
+
+    public string? LastError { get; init; }
+
+    public DateTimeOffset? LastPersistedAt { get; init; }
+
+    public DeviceTelemetrySnapshot? LatestTelemetry { get; init; }
+}
+
+public sealed record class MonitorRuntimeStatus
+{
+    public required string ServiceName { get; init; }
+
+    public required string EnvironmentName { get; init; }
+
+    public required DateTimeOffset StartedAt { get; init; }
+
+    public required DateTimeOffset ReportedAt { get; init; }
+
+    public int ConfiguredDeviceCount { get; init; }
+
+    public int EnabledDeviceCount { get; init; }
+
+    public required IReadOnlyList<DeviceRuntimeState> Devices { get; init; }
+}
