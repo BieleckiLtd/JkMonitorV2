@@ -19,6 +19,18 @@ This path:
 - Creates a reusable launcher at `~/jkmonitor/start.sh`.
 - Can install and start a `systemd` service for headless operation.
 
+For headless SSH automation, the release installer also accepts environment variables instead of prompts:
+
+```bash
+JKMONITOR_INSTALL_RUNTIME=y \
+JKMONITOR_MODE=1 \
+JKMONITOR_USE_DB=n \
+JKMONITOR_INSTALL_SERVICE=y \
+wget -qO- https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-release.sh | bash -s -- https://github.com/BieleckiLtd/JkMonitorV2 dev-latest
+```
+
+Supported variables are `JKMONITOR_INSTALL_RUNTIME`, `JKMONITOR_MODE`, `JKMONITOR_USE_DB`, `JKMONITOR_CONNECTION_STRING`, `JKMONITOR_SERIAL_PORT`, and `JKMONITOR_INSTALL_SERVICE`.
+
 Windows:
 
 ```powershell

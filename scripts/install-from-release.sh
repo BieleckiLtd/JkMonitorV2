@@ -14,6 +14,12 @@ INSTALL_SCRIPT="${TMPDIR:-/tmp}/dotnet-install-jkmonitor-runtime.sh"
 SERVICE_NAME='jkmonitor.service'
 SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
 ENV_PATH="$DESTINATION/jkmonitor.env"
+NONINTERACTIVE_MODE="${JKMONITOR_MODE:-}"
+NONINTERACTIVE_USE_DB="${JKMONITOR_USE_DB:-}"
+NONINTERACTIVE_CONNECTION_STRING="${JKMONITOR_CONNECTION_STRING:-}"
+NONINTERACTIVE_SERIAL_PORT="${JKMONITOR_SERIAL_PORT:-}"
+NONINTERACTIVE_INSTALL_RUNTIME="${JKMONITOR_INSTALL_RUNTIME:-}"
+NONINTERACTIVE_INSTALL_SERVICE="${JKMONITOR_INSTALL_SERVICE:-}"
 
 section() {
   echo
@@ -193,6 +199,46 @@ read_validated_choice() {
   done
 }
 
+get_configured_choice() {
+  local configured_value="$1"
+  local prompt="$2"
+  local type="$3"
+  local default_value="$4"
+
+  if [ -n "$configured_value" ]; then
+    local normalized="${configured_value,,}"
+
+    if [ "$type" = 'startup' ]; then
+      case "$normalized" in
+        1|sim|simulator)
+          echo '1'
+          return
+          ;;
+        2|hw|hardware)
+          echo '2'
+          return
+          ;;
+      esac
+    elif [ "$type" = 'yesno' ]; then
+      case "$normalized" in
+        y|yes|true|1)
+          echo 'y'
+          return
+          ;;
+        n|no|false|0)
+          echo 'n'
+          return
+          ;;
+      esac
+    fi
+
+    echo "Unsupported configured value '$configured_value' for $prompt." >&2
+    exit 1
+  fi
+
+  read_validated_choice "$prompt" "$type" "$default_value"
+}
+
 install_local_runtime() {
   section 'Installing local ASP.NET Core runtime'
   mkdir -p "$LOCAL_DOTNET_ROOT"
@@ -342,7 +388,7 @@ write_start_script
 section 'Checking ASP.NET Core runtime'
 DOTNET_CMD="$(get_dotnet)"
 if [ -z "$DOTNET_CMD" ]; then
-  answer="$(read_validated_choice 'No compatible ASP.NET Core 10 runtime was found. Install a local copy into this folder?' 'yesno' 'y')"
+  answer="$(get_configured_choice "$NONINTERACTIVE_INSTALL_RUNTIME" 'No compatible ASP.NET Core 10 runtime was found. Install a local copy into this folder?' 'yesno' 'y')"
   if [ "${answer,,}" != 'y' ]; then
     echo 'An ASP.NET Core 10 runtime is required to run this published build.'
     exit 1
@@ -353,14 +399,18 @@ if [ -z "$DOTNET_CMD" ]; then
 fi
 
 section 'Configuring startup mode'
-MODE="$(read_validated_choice 'Choose startup mode: 1 = simulator, 2 = hardware' 'startup' '1')"
+MODE="$(get_configured_choice "$NONINTERACTIVE_MODE" 'Choose startup mode: 1 = simulator, 2 = hardware' 'startup' '1')"
 ENVIRONMENT='Development'
 TARGET_CONFIG="$APP_ROOT/appsettings.Development.Local.json"
 
 if [ "$MODE" = '1' ]; then
-  USE_DB="$(read_validated_choice 'Enable PostgreSQL and TimescaleDB persistence now?' 'yesno' 'n')"
+  USE_DB="$(get_configured_choice "$NONINTERACTIVE_USE_DB" 'Enable PostgreSQL and TimescaleDB persistence now?' 'yesno' 'n')"
   if [ "${USE_DB,,}" = 'y' ]; then
-    read -r -p 'PostgreSQL connection string: ' CONNECTION_STRING
+    if [ -n "$NONINTERACTIVE_CONNECTION_STRING" ]; then
+      CONNECTION_STRING="$NONINTERACTIVE_CONNECTION_STRING"
+    else
+      read -r -p 'PostgreSQL connection string: ' CONNECTION_STRING
+    fi
     cat > "$TARGET_CONFIG" <<EOF
 {
   "Monitor": {
@@ -386,16 +436,24 @@ EOF
 else
   ENVIRONMENT='Production'
   TARGET_CONFIG="$APP_ROOT/appsettings.Production.Local.json"
-  read -r -p 'RS485 serial port (example: /dev/ttyUSB0): ' SERIAL_PORT
+  if [ -n "$NONINTERACTIVE_SERIAL_PORT" ]; then
+    SERIAL_PORT="$NONINTERACTIVE_SERIAL_PORT"
+  else
+    read -r -p 'RS485 serial port (example: /dev/ttyUSB0): ' SERIAL_PORT
+  fi
   if [ -z "$SERIAL_PORT" ]; then
     echo 'A serial port is required for hardware mode.'
     exit 1
   fi
 
-  USE_DB="$(read_validated_choice 'Enable PostgreSQL and TimescaleDB persistence?' 'yesno' 'y')"
+  USE_DB="$(get_configured_choice "$NONINTERACTIVE_USE_DB" 'Enable PostgreSQL and TimescaleDB persistence?' 'yesno' 'y')"
   CONNECTION_STRING=''
   if [ "${USE_DB,,}" = 'y' ]; then
-    read -r -p 'PostgreSQL connection string: ' CONNECTION_STRING
+    if [ -n "$NONINTERACTIVE_CONNECTION_STRING" ]; then
+      CONNECTION_STRING="$NONINTERACTIVE_CONNECTION_STRING"
+    else
+      read -r -p 'PostgreSQL connection string: ' CONNECTION_STRING
+    fi
   fi
 
   cat > "$TARGET_CONFIG" <<EOF
@@ -429,7 +487,7 @@ write_env_file "$ENVIRONMENT"
 
 INSTALL_SERVICE='n'
 if command -v systemctl >/dev/null 2>&1; then
-  INSTALL_SERVICE="$(read_validated_choice 'Install and start a systemd service for headless operation?' 'yesno' 'y')"
+  INSTALL_SERVICE="$(get_configured_choice "$NONINTERACTIVE_INSTALL_SERVICE" 'Install and start a systemd service for headless operation?' 'yesno' 'y')"
 fi
 
 section 'Starting JK Monitor'
