@@ -4,13 +4,28 @@ The real user-facing entry point is a one-line GitHub install command. Local scr
 
 ## New Install
 
+Raspberry Pi or other Linux ARM64 device using a prebuilt runtime artifact:
+
+```bash
+wget -qO- https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-release.sh | bash -s -- https://github.com/BieleckiLtd/JkMonitorV2 dev-latest
+```
+
+This path:
+
+- Downloads a `linux-arm64` published build from GitHub Releases.
+- Installs only the ASP.NET Core runtime when it is missing.
+- Avoids compiling on the device.
+- Writes local config overrides into the published app folder.
+- Creates a reusable launcher at `~/jkmonitor/start.sh`.
+- Can install and start a `systemd` service for headless operation.
+
 Windows:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -Command "& { $tmp = Join-Path $env:TEMP 'jkmonitor-install.ps1'; Invoke-WebRequest 'https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-github.ps1' -OutFile $tmp; & $tmp -Repository 'https://github.com/BieleckiLtd/JkMonitorV2' -Branch 'dev' }"
 ```
 
-Linux or macOS:
+Linux or macOS developer install from source:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-github.sh | bash -s -- https://github.com/BieleckiLtd/JkMonitorV2 dev
@@ -19,7 +34,7 @@ curl -fsSL https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts
 These commands:
 
 - Download the installer straight from GitHub.
-- Download the selected branch of the application.
+- Download either a prebuilt release artifact or the selected branch of the application, depending on the script.
 - Install or update the local application folder.
 - Start the guided setup flow.
 
@@ -34,6 +49,10 @@ If the repo is already on disk, or the software was already installed previously
 
 If you need a customizable GitHub install command instead of the default repo and branch, use these forms.
 
+Linux ARM64 runtime artifact example:
+
+`./scripts/install-from-release.sh https://github.com/BieleckiLtd/JkMonitorV2 dev-latest`
+
 Windows example:
 
 `powershell -ExecutionPolicy Bypass -File .\scripts\install-from-github.ps1 -Repository https://github.com/BieleckiLtd/JkMonitorV2 -Branch dev`
@@ -44,11 +63,11 @@ Linux or macOS example:
 
 These GitHub bootstrap scripts:
 
-- Download the selected branch as a ZIP archive from GitHub.
+- Either download the selected branch as a ZIP archive from GitHub or download a prebuilt release artifact from GitHub Releases.
 - Extract it into a local installation folder.
 - Update an existing installation in place when the destination already exists.
-- Preserve local appsettings override files and the cached local `.dotnet` toolchain.
-- Start the same guided setup flow from that downloaded copy.
+- Preserve local appsettings override files and the cached local `.dotnet` runtime or toolchain.
+- Start the guided setup flow.
 
 The scripts accept either the full GitHub URL or `owner/repo` form.
 
@@ -59,24 +78,37 @@ If the software is already installed from this repository and you just want the 
 - Windows: `./scripts/update.ps1`
 - Linux or macOS: `./scripts/update.sh`
 
+If the software was installed from a published Linux release artifact and you want the latest `dev-latest` artifact again:
+
+- Linux ARM64: `./scripts/update-from-release.sh`
+
 These wrappers refresh the current installation folder from `https://github.com/BieleckiLtd/JkMonitorV2`, preserve local config and the cached local `.dotnet` toolchain, and then run the guided setup again.
 
 The setup script does the following:
 
-- Detects whether a suitable .NET toolchain already exists.
-- Installs a local .NET 10 SDK into the repository if needed.
+- Detects whether a suitable .NET runtime or toolchain already exists.
+- Installs a local ASP.NET Core 10 runtime for published builds, or a local .NET 10 SDK for source builds, when needed.
 - Asks whether to start in simulator mode or hardware mode.
 - On Windows hardware mode, auto-detects available COM ports and lets the user choose from a list.
 - Writes a local override file so the user does not have to edit JSON manually.
-- Waits for the backend to be reachable, then opens the app on `http://localhost:5074`.
+- Optionally installs and starts a `systemd` service for headless Raspberry Pi deployments.
+- Waits for the backend to be reachable, then opens the app on `http://localhost:5074` when running interactively.
 
-## Why The Script Installs The SDK
+## Uninstall A Release Install
 
-Right now this repository runs the application from source with `dotnet run`, which requires the SDK rather than only the runtime.
+If the software was installed through the published Linux runtime path, remove it with:
 
-The important point for the user is that they do not need to know that in advance. The setup script handles it automatically and installs the SDK locally inside the repo when required.
+- Linux ARM64: `./scripts/uninstall-release.sh`
 
-Longer term, the cleaner end-user path is a published installer or self-contained package that only needs a runtime or no runtime at all.
+This removes the install folder and disables the `jkmonitor.service` systemd unit if it exists.
+
+## Runtime Install Versus Source Install
+
+For Raspberry Pi installs, the preferred path is now the published `linux-arm64` artifact plus the ASP.NET Core runtime. That keeps the device out of the build loop and avoids installing the SDK.
+
+The source-based installer still exists for local development and debugging. That path runs the app from source with `dotnet run`, which requires the SDK rather than only the runtime.
+
+The important point for the user is that they do not need to know this in advance. The installer handles the dependency it needs for the chosen path.
 
 ## What The User Sees
 

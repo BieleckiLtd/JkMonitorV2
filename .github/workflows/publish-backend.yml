@@ -1,0 +1,88 @@
+name: publish-backend
+
+on:
+  push:
+    branches:
+      - dev
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+env:
+  DOTNET_VERSION: 10.0.x
+  PROJECT_PATH: src/backend/JkMonitor.Backend/JkMonitor.Backend.csproj
+  PUBLISH_DIR: artifacts/linux-arm64
+  ASSET_NAME: jkmonitor-backend-linux-arm64.tar.gz
+
+jobs:
+  publish-linux-arm64:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore ${{ env.PROJECT_PATH }}
+
+      - name: Publish linux-arm64 backend
+        run: >-
+          dotnet publish ${{ env.PROJECT_PATH }}
+          --configuration Release
+          --runtime linux-arm64
+          --self-contained false
+          -p:UseAppHost=false
+          --output ${{ env.PUBLISH_DIR }}
+
+      - name: Package artifact
+        shell: bash
+        run: |
+          rm -f "${{ env.ASSET_NAME }}"
+          tar -C artifacts -czf "${{ env.ASSET_NAME }}" linux-arm64
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: jkmonitor-backend-linux-arm64
+          path: ${{ env.ASSET_NAME }}
+
+      - name: Resolve release channel
+        id: release
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "title=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=dev-latest" >> "$GITHUB_OUTPUT"
+            echo "title=dev-latest" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create or update release asset
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          tag="${{ steps.release.outputs.tag }}"
+          title="${{ steps.release.outputs.title }}"
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${{ env.ASSET_NAME }}" --clobber
+            exit 0
+          fi
+
+          if [[ "${{ steps.release.outputs.prerelease }}" == "true" ]]; then
+            gh release create "$tag" "${{ env.ASSET_NAME }}" --title "$title" --notes "Latest development build for Raspberry Pi runtime installs." --prerelease
+          else
+            gh release create "$tag" "${{ env.ASSET_NAME }}" --title "$title" --notes "Release build for Raspberry Pi runtime installs."
+          fi
