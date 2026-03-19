@@ -110,6 +110,10 @@ type SetupFormState = {
 
 const refreshIntervalMilliseconds = 5000
 
+function getPortRefreshStatus(portCount: number) {
+  return portCount === 1 ? "Detected 1 serial port" : `Detected ${portCount} serial ports`
+}
+
 const modeCards: Array<{
   mode: StartupMode
   title: string
@@ -228,8 +232,14 @@ function App() {
 
       startTransition(() => {
         setSetupState(payload)
-        setSetupStatus(`Current mode: ${payload.currentStartupMode}`)
         setSetupFeedback(payload.applyMessage)
+
+        if (options?.isPortRefresh) {
+          setSetupStatus(getPortRefreshStatus(payload.serialPorts.length))
+          return
+        }
+
+        setSetupStatus(`Current mode: ${payload.currentStartupMode}`)
         setForm({
           startupMode: payload.currentStartupMode,
           useDatabase: payload.useDatabase,
