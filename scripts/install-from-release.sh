@@ -24,9 +24,45 @@ NONINTERACTIVE_INSTALL_RUNTIME="${JKMONITOR_INSTALL_RUNTIME:-}"
 NONINTERACTIVE_INSTALL_SERVICE="${JKMONITOR_INSTALL_SERVICE:-}"
 CONFIGURE_SCRIPT_PATH="$DESTINATION/configure.sh"
 
+if [ -t 1 ]; then
+  COLOR_RESET='\033[0m'
+  COLOR_SECTION='\033[1;38;5;208m'
+  COLOR_INFO='\033[38;5;111m'
+  COLOR_SUCCESS='\033[1;38;5;78m'
+  COLOR_WARNING='\033[1;38;5;214m'
+  COLOR_MUTED='\033[38;5;247m'
+else
+  COLOR_RESET=''
+  COLOR_SECTION=''
+  COLOR_INFO=''
+  COLOR_SUCCESS=''
+  COLOR_WARNING=''
+  COLOR_MUTED=''
+fi
+
+paint() {
+  printf '%b%s%b\n' "$1" "$2" "$COLOR_RESET"
+}
+
 section() {
   echo
-  echo "$1"
+  paint "$COLOR_SECTION" "$1"
+}
+
+info() {
+  paint "$COLOR_INFO" "$1"
+}
+
+success() {
+  paint "$COLOR_SUCCESS" "$1"
+}
+
+warn() {
+  paint "$COLOR_WARNING" "$1"
+}
+
+muted() {
+  paint "$COLOR_MUTED" "$1"
 }
 
 run_elevated() {
@@ -446,6 +482,7 @@ set -euo pipefail
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ROOT="$SCRIPT_ROOT/app"
 LOCAL_DOTNET="$SCRIPT_ROOT/.dotnet/dotnet"
+ENV_PATH="$SCRIPT_ROOT/jkmonitor.env"
 
 if command -v dotnet >/dev/null 2>&1 && dotnet --list-runtimes 2>/dev/null | grep -q '^Microsoft.AspNetCore.App 10\.'; then
   DOTNET_CMD="$(command -v dotnet)"
@@ -456,8 +493,15 @@ else
   exit 1
 fi
 
+if [ -f "$ENV_PATH" ]; then
+  set -a
+  # shellcheck disable=SC1090
+  . "$ENV_PATH"
+  set +a
+fi
+
 export ASPNETCORE_ENVIRONMENT="${ASPNETCORE_ENVIRONMENT:-Development}"
-export ASPNETCORE_URLS="${ASPNETCORE_URLS:-$APP_BIND_URL}"
+export ASPNETCORE_URLS="${ASPNETCORE_URLS:-http://0.0.0.0:5074}"
 
 cd "$APP_ROOT"
 exec "$DOTNET_CMD" ./JkMonitor.Backend.dll
@@ -555,19 +599,21 @@ cleanup() {
 trap cleanup EXIT
 
 section 'JK Monitor release bootstrap'
-echo "Repository: $NORMALIZED_REPOSITORY"
-echo "Release tag: $RELEASE_TAG"
-echo "Destination: $DESTINATION"
+muted "Repository: $NORMALIZED_REPOSITORY"
+muted "Release tag: $RELEASE_TAG"
+muted "Destination: $DESTINATION"
 
 section 'Downloading release artifact'
+info 'Fetching the published build from GitHub Releases.'
 download_file "$ASSET_URL" "$ARCHIVE_PATH"
 
 section 'Extracting release artifact'
+info 'Unpacking the application files.'
 tar -xzf "$ARCHIVE_PATH" -C "$EXTRACT_PATH"
 
 section 'Preparing installation folder'
 if [ -d "$DESTINATION" ]; then
-  echo 'Existing installation found. Preserving local config and cached runtime.'
+  warn 'Existing installation found. Preserving local config and cached runtime.'
   preserve_existing_state "$DESTINATION" "$PRESERVE_PATH"
   rm -rf "$DESTINATION"
 fi
@@ -596,8 +642,8 @@ if has_existing_runtime_configuration; then
   MODE="$(get_configured_choice "$NONINTERACTIVE_MODE" 'Choose startup mode: 1 = simulator, 2 = hardware' 'startup' '1')"
 else
   MODE='1'
-  echo 'Starting in simulator mode for the first run so the web UI is available immediately.'
-  echo "When you are ready for RS485 hardware, run $CONFIGURE_SCRIPT_PATH on the device."
+  info 'Starting in simulator mode for the first run so the web UI is available immediately.'
+  muted 'You can switch to real hardware later from the Setup panel in the app.'
 fi
 ENVIRONMENT='Development'
 TARGET_CONFIG="$APP_ROOT/appsettings.Development.Local.json"
@@ -696,19 +742,20 @@ if command -v systemctl >/dev/null 2>&1; then
 fi
 
 section 'Starting JK Monitor'
-echo "Environment: $ENVIRONMENT"
-echo "Installed app root: $APP_ROOT"
-echo "Reusable launch command: $DESTINATION/start.sh"
-echo "Service file path: $SERVICE_PATH"
-echo "Local access URL: $APP_LOCAL_URL"
-echo "LAN access URL: $ACCESS_URL"
+info "Environment: $ENVIRONMENT"
+muted "Installed app root: $APP_ROOT"
+muted "Reusable launch command: $DESTINATION/start.sh"
+muted "Service file path: $SERVICE_PATH"
+success "Local access URL: $APP_LOCAL_URL"
+success "LAN access URL: $ACCESS_URL"
+muted 'Tip: most terminals let you Ctrl+Click the URL to open it.'
 
 if [ "${INSTALL_SERVICE,,}" = 'y' ]; then
   section 'Installing systemd service'
   install_systemd_service
 
   if wait_for_health; then
-    echo "JK Monitor is running under systemd. Open $ACCESS_URL from your PC."
+    success "JK Monitor is running under systemd. Open $ACCESS_URL from your PC."
   else
     echo 'The systemd service was installed, but the health endpoint did not become ready in time.' >&2
     echo "Inspect service logs with: sudo journalctl -u $SERVICE_NAME -n 200 --no-pager" >&2
@@ -718,8 +765,9 @@ if [ "${INSTALL_SERVICE,,}" = 'y' ]; then
   exit 0
 fi
 
-echo "Opening $APP_LOCAL_URL on the device after the backend is ready."
-echo "From your PC, browse to $ACCESS_URL once the device is reachable on your network."
+info "Opening $APP_LOCAL_URL on the device after the backend is ready."
+success "From your PC, open $ACCESS_URL once the device is reachable on your network."
+muted 'Tip: Ctrl+Click usually works directly from the terminal output.'
 
 BROWSER_PID=''
 open_browser_when_ready

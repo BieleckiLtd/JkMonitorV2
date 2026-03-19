@@ -18,51 +18,17 @@ concurrency:
 env:
   DOTNET_VERSION: 10.0.x
   PROJECT_PATH: src/backend/JkMonitor.Backend/JkMonitor.Backend.csproj
-  PUBLISH_DIR: artifacts/linux-arm64
-  ASSET_NAME: jkmonitor-backend-linux-arm64.tar.gz
-  CHECKSUM_NAME: jkmonitor-backend-linux-arm64.tar.gz.sha256
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
-  publish-linux-arm64:
+  resolve-release:
     runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      title: ${{ steps.release.outputs.title }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-
-      - name: Restore
-        run: dotnet restore ${{ env.PROJECT_PATH }}
-
-      - name: Publish linux-arm64 backend
-        run: >-
-          dotnet publish ${{ env.PROJECT_PATH }}
-          --configuration Release
-          --runtime linux-arm64
-          --self-contained false
-          -p:UseAppHost=false
-          --output ${{ env.PUBLISH_DIR }}
-
-      - name: Package artifact
-        shell: bash
-        run: |
-          rm -f "${{ env.ASSET_NAME }}"
-          rm -f "${{ env.CHECKSUM_NAME }}"
-          tar -C artifacts -czf "${{ env.ASSET_NAME }}" linux-arm64
-          sha256sum "${{ env.ASSET_NAME }}" > "${{ env.CHECKSUM_NAME }}"
-
-      - name: Upload workflow artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: jkmonitor-backend-linux-arm64
-          path: |
-            ${{ env.ASSET_NAME }}
-            ${{ env.CHECKSUM_NAME }}
-
       - name: Resolve release channel
         id: release
         shell: bash
@@ -77,33 +43,136 @@ jobs:
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Create or update release asset
-        env:
-          GH_TOKEN: ${{ github.token }}
+  publish-linux-arm64:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore ${{ env.PROJECT_PATH }}
+
+      - name: Publish linux-arm64 backend
+        run: >-
+          dotnet publish ${{ env.PROJECT_PATH }}
+          --configuration Release
+          --runtime linux-arm64
+          --self-contained false
+          -p:UseAppHost=false
+          --output artifacts/linux-arm64
+
+      - name: Package linux artifact
         shell: bash
         run: |
-          tag="${{ steps.release.outputs.tag }}"
-          title="${{ steps.release.outputs.title }}"
-          notes_file="release-notes.md"
+          tar -C artifacts -czf jkmonitor-backend-linux-arm64.tar.gz linux-arm64
+          sha256sum jkmonitor-backend-linux-arm64.tar.gz > jkmonitor-backend-linux-arm64.tar.gz.sha256
 
+      - name: Upload linux workflow artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: release-linux-arm64
+          path: |
+            jkmonitor-backend-linux-arm64.tar.gz
+            jkmonitor-backend-linux-arm64.tar.gz.sha256
+
+  publish-windows-x64:
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore ${{ env.PROJECT_PATH }}
+
+      - name: Publish win-x64 backend
+        run: >-
+          dotnet publish ${{ env.PROJECT_PATH }}
+          --configuration Release
+          --runtime win-x64
+          --self-contained false
+          -p:UseAppHost=true
+          --output artifacts/win-x64
+
+      - name: Package windows artifact
+        shell: pwsh
+        run: |
+          Compress-Archive -Path artifacts/win-x64/* -DestinationPath jkmonitor-backend-win-x64.zip -Force
+          $hash = (Get-FileHash -Algorithm SHA256 jkmonitor-backend-win-x64.zip).Hash.ToLowerInvariant()
+          "$hash  jkmonitor-backend-win-x64.zip" | Set-Content -Path jkmonitor-backend-win-x64.zip.sha256 -Encoding ascii
+
+      - name: Upload windows workflow artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: release-win-x64
+          path: |
+            jkmonitor-backend-win-x64.zip
+            jkmonitor-backend-win-x64.zip.sha256
+
+  publish-release:
+    runs-on: ubuntu-latest
+    needs:
+      - resolve-release
+      - publish-linux-arm64
+      - publish-windows-x64
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create release notes
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.tag }}
+        run: |
           printf '%s\n' \
             'Install on a Linux ARM64 device directly from GitHub:' \
             '' \
             '```bash' \
-            "wget -qO- https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-release.sh | bash -s -- https://github.com/BieleckiLtd/JkMonitorV2 $tag" \
+            "wget -qO- https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-release.sh | bash -s -- https://github.com/BieleckiLtd/JkMonitorV2 $RELEASE_TAG" \
             '```' \
             '' \
-            'This installer downloads the published app artifact from GitHub Releases, installs the ASP.NET Core runtime when needed, installs and starts a systemd service, and prints the LAN URL for opening the web UI from another PC.' \
-            > "$notes_file"
+            'Install on Windows x64 directly from GitHub:' \
+            '' \
+            '```powershell' \
+            "powershell -ExecutionPolicy Bypass -Command \"& { \\$tmp = Join-Path \\$env:TEMP 'jkmonitor-release-install.ps1'; Invoke-WebRequest 'https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-release.ps1' -OutFile \\$tmp; & powershell -ExecutionPolicy Bypass -File \\$tmp -Repository 'https://github.com/BieleckiLtd/JkMonitorV2' -ReleaseTag '$RELEASE_TAG' }\"" \
+            '```' \
+            '' \
+            'Both installers download the published app artifact from GitHub Releases, install the ASP.NET Core runtime when needed, start in simulator mode for an immediate first run, and let the user finish RS485 setup from the browser UI.' \
+            > release-notes.md
 
-          if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "${{ env.ASSET_NAME }}" "${{ env.CHECKSUM_NAME }}" --clobber
-            gh release edit "$tag" --title "$title" --notes-file "$notes_file"
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.tag }}
+          RELEASE_TITLE: ${{ needs.resolve-release.outputs.title }}
+          RELEASE_PRERELEASE: ${{ needs.resolve-release.outputs.prerelease }}
+        shell: bash
+        run: |
+          mapfile -t assets < <(find release-assets -maxdepth 1 -type f | sort)
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+            gh release edit "$RELEASE_TAG" --title "$RELEASE_TITLE" --notes-file release-notes.md
             exit 0
           fi
 
-          if [[ "${{ steps.release.outputs.prerelease }}" == "true" ]]; then
-            gh release create "$tag" "${{ env.ASSET_NAME }}" "${{ env.CHECKSUM_NAME }}" --title "$title" --notes-file "$notes_file" --prerelease
+          if [[ "$RELEASE_PRERELEASE" == "true" ]]; then
+            gh release create "$RELEASE_TAG" "${assets[@]}" --title "$RELEASE_TITLE" --notes-file release-notes.md --prerelease
           else
-            gh release create "$tag" "${{ env.ASSET_NAME }}" "${{ env.CHECKSUM_NAME }}" --title "$title" --notes-file "$notes_file"
+            gh release create "$RELEASE_TAG" "${assets[@]}" --title "$RELEASE_TITLE" --notes-file release-notes.md
           fi

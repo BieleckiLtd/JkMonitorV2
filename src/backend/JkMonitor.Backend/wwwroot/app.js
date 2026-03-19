@@ -8,7 +8,21 @@ const setupBanner = document.querySelector("#setup-banner");
 const setupTitle = document.querySelector("#setup-title");
 const setupCopy = document.querySelector("#setup-copy");
 const setupModeChip = document.querySelector("#setup-mode-chip");
-const setupCommand = document.querySelector("#setup-command");
+const setupNote = document.querySelector("#setup-note");
+const setupForm = document.querySelector("#setup-form");
+const setupStatus = document.querySelector("#setup-status");
+const setupFeedback = document.querySelector("#setup-feedback");
+const useDatabaseInput = document.querySelector("#use-database");
+const connectionStringInput = document.querySelector("#connection-string");
+const connectionGroup = document.querySelector("#connection-group");
+const serialGroup = document.querySelector("#serial-group");
+const serialPortSelect = document.querySelector("#serial-port-select");
+const serialPortInput = document.querySelector("#serial-port-input");
+const serialPortHint = document.querySelector("#serial-port-hint");
+const refreshPortsButton = document.querySelector("#refresh-ports");
+const applySetupButton = document.querySelector("#apply-setup");
+
+let latestSetupState = null;
 
 const metricFormatters = {
   totalVoltageVolts: (value) => `${value.toFixed(2)} V`,
@@ -37,6 +51,23 @@ async function refresh() {
   } catch (error) {
     serviceStatus.innerHTML = `<span class="pill">API unavailable</span>`;
     lastRefresh.textContent = error.message;
+  }
+}
+
+async function loadSetupState() {
+  setupStatus.textContent = "Loading current configuration";
+
+  try {
+    const response = await fetch("/api/setup");
+    if (!response.ok) {
+      throw new Error(`Setup request failed (${response.status})`);
+    }
+
+    latestSetupState = await response.json();
+    renderSetupState(latestSetupState);
+  } catch (error) {
+    setupStatus.textContent = "Setup unavailable";
+    setupFeedback.textContent = error.message;
   }
 }
 
@@ -77,14 +108,153 @@ function renderSetupBanner(health) {
 
   if (isSimulator) {
     setupTitle.textContent = "JK Monitor is live in simulator mode";
-    setupCopy.textContent = "The UI is ready now. When you want real RS485 hardware, SSH into the device later and run the local configure command to switch modes without reinstalling.";
-    setupCommand.textContent = "~/jkmonitor/configure.sh";
+    setupCopy.textContent = "The UI is ready now. Use the setup panel below whenever you want to switch this install to real RS485 hardware.";
+    setupNote.textContent = "Pick Hardware in Setup, choose a serial port, then apply the configuration.";
     return;
   }
 
   setupTitle.textContent = "JK Monitor is live in hardware mode";
-  setupCopy.textContent = "The app is using the configured serial device. If you need to change the port or database settings later, rerun the local configure command on the device.";
-  setupCommand.textContent = "~/jkmonitor/configure.sh";
+  setupCopy.textContent = "The app is using the configured serial device. You can change the port or storage settings below and apply them from the browser.";
+  setupNote.textContent = "Changes are saved locally on the device and applied after restart.";
+}
+
+function renderSetupState(state) {
+  setupStatus.textContent = `Current mode: ${state.currentStartupMode}`;
+  setupFeedback.textContent = state.applyMessage;
+
+  const selectedMode = setupForm.querySelector(`input[name="startupMode"][value="${state.currentStartupMode}"]`);
+  if (selectedMode) {
+    selectedMode.checked = true;
+  }
+
+  useDatabaseInput.checked = !!state.useDatabase;
+  connectionStringInput.value = state.connectionString ?? "";
+  serialPortInput.value = state.serialPort ?? "";
+
+  renderSerialPorts(state.serialPorts ?? [], state.serialPort ?? "");
+  updateSetupFieldVisibility();
+}
+
+function renderSerialPorts(serialPorts, selectedPort) {
+  const options = serialPorts.length === 0
+    ? '<option value="">No device ports detected yet</option>'
+    : ['<option value="">Select a detected port</option>', ...serialPorts.map((port) => `<option value="${escapeHtml(port)}">${escapeHtml(port)}</option>`)].join("");
+
+  serialPortSelect.innerHTML = options;
+  if (selectedPort) {
+    serialPortSelect.value = serialPorts.includes(selectedPort) ? selectedPort : "";
+  }
+
+  serialPortHint.textContent = serialPorts.length === 0
+    ? "No device-side serial ports were detected yet. You can still type one manually."
+    : "Pick a detected device port or type one manually if needed.";
+}
+
+function updateSetupFieldVisibility() {
+  const startupMode = getSelectedStartupMode();
+  const isHardware = startupMode === "Hardware";
+
+  serialGroup.classList.toggle("is-hidden", !isHardware);
+  connectionGroup.classList.toggle("is-hidden", !useDatabaseInput.checked);
+}
+
+function getSelectedStartupMode() {
+  return setupForm.querySelector('input[name="startupMode"]:checked')?.value ?? "Simulator";
+}
+
+async function applySetup(event) {
+  event.preventDefault();
+
+  const startupMode = getSelectedStartupMode();
+  const useDatabase = useDatabaseInput.checked;
+  const serialPort = serialPortInput.value.trim() || serialPortSelect.value.trim();
+  const connectionString = connectionStringInput.value.trim();
+
+  if (startupMode === "Hardware" && !serialPort) {
+    setupFeedback.textContent = "Choose or type a serial port before switching to hardware mode.";
+    return;
+  }
+
+  if (useDatabase && !connectionString) {
+    setupFeedback.textContent = "Enter a PostgreSQL connection string before enabling database storage.";
+    return;
+  }
+
+  applySetupButton.disabled = true;
+  refreshPortsButton.disabled = true;
+  setupStatus.textContent = "Saving configuration";
+  setupFeedback.textContent = "Applying your settings on the device.";
+
+  try {
+    const response = await fetch("/api/setup/apply", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json"
+      },
+      body: JSON.stringify({
+        startupMode,
+        useDatabase,
+        connectionString,
+        serialPort,
+        restartApplication: true
+      })
+    });
+
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.message ?? `Setup apply failed (${response.status})`);
+    }
+
+    setupStatus.textContent = payload.restartScheduled ? "Restarting JK Monitor" : "Configuration saved";
+    setupFeedback.textContent = payload.message;
+
+    if (payload.restartScheduled) {
+      await waitForRestart();
+      await Promise.all([loadSetupState(), refresh()]);
+      setupFeedback.textContent = `${payload.message} The app is back online.`;
+    } else {
+      await loadSetupState();
+    }
+  } catch (error) {
+    setupStatus.textContent = "Setup update failed";
+    setupFeedback.textContent = error.message;
+  } finally {
+    applySetupButton.disabled = false;
+    refreshPortsButton.disabled = false;
+  }
+}
+
+async function waitForRestart() {
+  await delay(1500);
+
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    try {
+      const response = await fetch("/api/health", { cache: "no-store" });
+      if (response.ok) {
+        return;
+      }
+    } catch {
+    }
+
+    await delay(1000);
+  }
+
+  throw new Error("The app did not come back online in time after restarting.");
+}
+
+function delay(milliseconds) {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
+}
+
+function escapeHtml(value) {
+  return value
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#39;");
 }
 
 function renderDevices(devices) {
@@ -151,5 +321,18 @@ function formatMetric(key, value) {
   return metricFormatters[key] ? metricFormatters[key](Number(value)) : String(value);
 }
 
+setupForm.addEventListener("submit", applySetup);
+setupForm.querySelectorAll('input[name="startupMode"]').forEach((input) => {
+  input.addEventListener("change", updateSetupFieldVisibility);
+});
+useDatabaseInput.addEventListener("change", updateSetupFieldVisibility);
+refreshPortsButton.addEventListener("click", loadSetupState);
+serialPortSelect.addEventListener("change", () => {
+  if (!serialPortInput.value.trim()) {
+    serialPortInput.value = serialPortSelect.value;
+  }
+});
+
+loadSetupState();
 refresh();
 setInterval(refresh, 5000);

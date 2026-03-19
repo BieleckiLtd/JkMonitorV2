@@ -166,6 +166,137 @@ h1 {
   font-size: 0.95rem;
 }
 
+.setup-note {
+  max-width: 18rem;
+  text-align: right;
+  color: rgba(255, 249, 241, 0.88);
+  font-size: 0.92rem;
+}
+
+.setup-form {
+  display: grid;
+  gap: 20px;
+}
+
+.mode-picker {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 14px;
+}
+
+.mode-option {
+  display: flex;
+  gap: 12px;
+  align-items: start;
+  padding: 16px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(84, 58, 27, 0.08);
+  cursor: pointer;
+}
+
+.mode-option input {
+  margin-top: 4px;
+}
+
+.mode-option strong,
+.field span {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.mode-option small,
+.field small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.setup-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 16px;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.field-wide {
+  grid-column: 1 / -1;
+}
+
+.field input,
+.field select {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: 14px;
+  border: 1px solid rgba(84, 58, 27, 0.14);
+  background: rgba(255, 255, 255, 0.84);
+  color: var(--ink);
+  font: inherit;
+}
+
+.field-row {
+  display: flex;
+  gap: 10px;
+}
+
+.checkbox-field {
+  align-content: start;
+}
+
+.toggle-row {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.58);
+  border: 1px solid rgba(84, 58, 27, 0.08);
+}
+
+.setup-footer {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: center;
+}
+
+.setup-feedback {
+  color: var(--muted);
+  max-width: 42rem;
+}
+
+.setup-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.primary-button,
+.secondary-button {
+  border: 0;
+  border-radius: 999px;
+  padding: 12px 18px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.primary-button {
+  background: var(--accent);
+  color: white;
+}
+
+.secondary-button {
+  background: rgba(157, 74, 34, 0.08);
+  color: var(--accent);
+  border: 1px solid rgba(157, 74, 34, 0.16);
+}
+
+.is-hidden {
+  display: none;
+}
+
 .panel-header {
   display: flex;
   justify-content: space-between;
@@ -325,6 +456,12 @@ h1 {
 
   .setup-actions {
     justify-items: start;
+  }
+
+  .setup-footer,
+  .field-row {
+    flex-direction: column;
+    align-items: stretch;
   }
 
   .hero,

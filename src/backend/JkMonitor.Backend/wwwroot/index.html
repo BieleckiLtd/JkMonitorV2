@@ -28,8 +28,70 @@
         </div>
         <div class="setup-actions">
           <span class="setup-chip" id="setup-mode-chip">Mode</span>
-          <code class="setup-command" id="setup-command">~/jkmonitor/configure.sh</code>
+          <span class="setup-note" id="setup-note">Use the setup panel below to switch modes.</span>
         </div>
+      </section>
+
+      <section class="panel panel-wide">
+        <div class="panel-header">
+          <h2>Setup</h2>
+          <span id="setup-status">Loading current configuration</span>
+        </div>
+
+        <form class="setup-form" id="setup-form">
+          <div class="mode-picker" role="radiogroup" aria-label="Startup mode">
+            <label class="mode-option">
+              <input type="radio" name="startupMode" value="Simulator" checked>
+              <span>
+                <strong>Simulator</strong>
+                <small>Start the UI with sample JK telemetry right away.</small>
+              </span>
+            </label>
+            <label class="mode-option">
+              <input type="radio" name="startupMode" value="Hardware">
+              <span>
+                <strong>Hardware</strong>
+                <small>Use a real RS485 serial connection to your JK BMS.</small>
+              </span>
+            </label>
+          </div>
+
+          <div class="setup-grid">
+            <label class="field" id="serial-group">
+              <span>Detected serial ports</span>
+              <div class="field-row">
+                <select id="serial-port-select">
+                  <option value="">Scanning device ports</option>
+                </select>
+                <button type="button" class="secondary-button" id="refresh-ports">Refresh ports</button>
+              </div>
+              <input id="serial-port-input" type="text" placeholder="Or type a port manually, for example /dev/ttyUSB0 or COM3">
+              <small id="serial-port-hint">The app detects ports on the device itself, not on your PC.</small>
+            </label>
+
+            <label class="field checkbox-field">
+              <span>Storage</span>
+              <label class="toggle-row">
+                <input id="use-database" type="checkbox">
+                <span>Enable PostgreSQL and TimescaleDB persistence</span>
+              </label>
+              <small>Leave this off for a quick preview-only install.</small>
+            </label>
+
+            <label class="field field-wide" id="connection-group">
+              <span>PostgreSQL connection string</span>
+              <input id="connection-string" type="text" placeholder="Host=localhost;Port=5432;Database=jkmonitor;Username=jkmonitor;Password=change-me">
+              <small>Only required when database storage is enabled.</small>
+            </label>
+          </div>
+
+          <div class="setup-footer">
+            <p class="setup-feedback" id="setup-feedback">The current device configuration will appear here.</p>
+            <div class="setup-buttons">
+              <button type="submit" class="primary-button" id="apply-setup">Apply configuration</button>
+            </div>
+          </div>
+        </form>
       </section>
 
       <section class="panel panel-wide">

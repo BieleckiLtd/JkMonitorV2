@@ -32,10 +32,10 @@ The first implementation phase establishes project scope, architecture, configur
 wget -qO- https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-release.sh | bash -s -- https://github.com/BieleckiLtd/JkMonitorV2 dev-latest
 ```
 
-- New install on Windows:
+- New install on Windows x64 from the published GitHub release:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -Command "& { $tmp = Join-Path $env:TEMP 'jkmonitor-install.ps1'; Invoke-WebRequest 'https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-github.ps1' -OutFile $tmp; & $tmp -Repository 'https://github.com/BieleckiLtd/JkMonitorV2' -Branch 'dev' }"
+powershell -ExecutionPolicy Bypass -Command "& { $tmp = Join-Path $env:TEMP 'jkmonitor-release-install.ps1'; Invoke-WebRequest 'https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-release.ps1' -OutFile $tmp; & powershell -ExecutionPolicy Bypass -File $tmp -Repository 'https://github.com/BieleckiLtd/JkMonitorV2' -ReleaseTag 'dev-latest' }"
 ```
 
 - Developer install from source on Linux or macOS:
@@ -46,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts
 
 - Already installed from source locally: use `./scripts/update.ps1` or `./scripts/update.sh` inside the installed folder to refresh from the default `dev` branch.
 
-The Raspberry Pi runtime path downloads a published `linux-arm64` build from GitHub Releases, installs only the ASP.NET Core runtime when needed, starts in simulator mode on the first run so the UI is available immediately, writes a local reconfiguration helper for later RS485 setup, installs and starts a `systemd` service by default on Linux devices, and binds the app for LAN access so the web UI can be opened from another PC on the network.
+The release installers download published builds from GitHub Releases, install only the ASP.NET Core runtime when needed, start in simulator mode on the first run so the UI is available immediately, let the user finish RS485 setup from the browser UI, and print LAN URLs that can be opened from another PC on the network.
 
 The source installer remains available for local development and debugging.
 

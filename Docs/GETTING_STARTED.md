@@ -17,10 +17,23 @@ This path:
 - Avoids compiling on the device.
 - Starts in simulator mode on the first run so the web UI is available immediately.
 - Writes local config overrides into the published app folder.
-- Creates a local `~/jkmonitor/configure.sh` helper for switching to real RS485 hardware later.
 - Creates a reusable launcher at `~/jkmonitor/start.sh`.
 - Installs and starts a `systemd` service by default when `systemd` is available, so the app starts after reboot.
 - Binds on the device LAN interface and prints the URL you can open from your PC.
+
+Windows x64 using a prebuilt runtime artifact:
+
+```powershell
+powershell -ExecutionPolicy Bypass -Command "& { $tmp = Join-Path $env:TEMP 'jkmonitor-release-install.ps1'; Invoke-WebRequest 'https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-release.ps1' -OutFile $tmp; & powershell -ExecutionPolicy Bypass -File $tmp -Repository 'https://github.com/BieleckiLtd/JkMonitorV2' -ReleaseTag 'dev-latest' }"
+```
+
+This path:
+
+- Downloads a `win-x64` published build from GitHub Releases.
+- Installs only the ASP.NET Core runtime when it is missing.
+- Starts in simulator mode on the first run so the web UI is available immediately.
+- Configures Windows auto-start using a scheduled task.
+- Starts the app in the background and prints local and LAN URLs you can Ctrl+Click from Windows Terminal.
 
 For headless SSH automation, the release installer also accepts environment variables instead of prompts:
 
@@ -33,12 +46,6 @@ wget -qO- https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/
 ```
 
 Supported variables are `JKMONITOR_INSTALL_RUNTIME`, `JKMONITOR_MODE`, `JKMONITOR_USE_DB`, `JKMONITOR_CONNECTION_STRING`, `JKMONITOR_SERIAL_PORT`, and `JKMONITOR_INSTALL_SERVICE`.
-
-Windows:
-
-```powershell
-powershell -ExecutionPolicy Bypass -Command "& { $tmp = Join-Path $env:TEMP 'jkmonitor-install.ps1'; Invoke-WebRequest 'https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-github.ps1' -OutFile $tmp; & $tmp -Repository 'https://github.com/BieleckiLtd/JkMonitorV2' -Branch 'dev' }"
-```
 
 Linux or macOS developer install from source:
 
@@ -70,7 +77,7 @@ Linux ARM64 runtime artifact example:
 
 Windows example:
 
-`powershell -ExecutionPolicy Bypass -File .\scripts\install-from-github.ps1 -Repository https://github.com/BieleckiLtd/JkMonitorV2 -Branch dev`
+`powershell -ExecutionPolicy Bypass -File .\scripts\install-from-release.ps1 -Repository https://github.com/BieleckiLtd/JkMonitorV2 -ReleaseTag dev-latest`
 
 Linux or macOS example:
 
@@ -104,12 +111,12 @@ The setup script does the following:
 - Detects whether a suitable .NET runtime or toolchain already exists.
 - Installs a local ASP.NET Core 10 runtime for published builds, or a local .NET 10 SDK for source builds, when needed.
 - Starts in simulator mode automatically on first run unless hardware mode is explicitly requested.
+- Exposes the setup flow directly in the browser so the user can switch from simulator to hardware without going back to the terminal.
 - On Windows hardware mode, auto-detects available COM ports and lets the user choose from a list.
 - Writes a local override file so the user does not have to edit JSON manually.
 - Optionally installs and starts a `systemd` service for headless Raspberry Pi deployments.
 - Waits for the backend to be reachable, then opens the app on `http://127.0.0.1:5074` on the device when running interactively.
 - Prints the device LAN URL so the same UI can be opened from another PC on the network.
-- Writes `~/jkmonitor/configure.sh` so the user can switch to hardware later without reinstalling.
 
 ## Uninstall A Release Install
 
@@ -132,7 +139,7 @@ The important point for the user is that they do not need to know this in advanc
 The script now favors a fast first run:
 
 1. Start the UI in simulator mode immediately.
-2. Switch to hardware later with `~/jkmonitor/configure.sh`.
+2. Switch to hardware later from the Setup panel inside the app.
 3. Optionally enable PostgreSQL and TimescaleDB during that later step.
 
 Simulator mode is the default first run because it validates the UI and polling flow without any JK hardware attached.
@@ -150,9 +157,10 @@ Those files are loaded automatically by the app and are intended for machine-spe
 
 If the simulator looks good, the next step is hardware mode:
 
-1. SSH into the device.
-2. Run `~/jkmonitor/configure.sh`.
-3. Enter the RS485 serial port.
+1. Open the Setup panel in the app.
+2. Choose Hardware mode.
+3. Select or enter the RS485 serial port.
 4. Decide whether to enable PostgreSQL and TimescaleDB.
+5. Apply the configuration and let the managed install restart.
 
 The app then uses the same UI and API, only with the real JK transport instead of the simulator.
