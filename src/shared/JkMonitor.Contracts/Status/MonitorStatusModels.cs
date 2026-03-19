@@ -33,6 +33,8 @@ public sealed record class MonitorRuntimeStatus
 
     public required string EnvironmentName { get; init; }
 
+    public required string StartupMode { get; init; }
+
     public required DateTimeOffset StartedAt { get; init; }
 
     public required DateTimeOffset ReportedAt { get; init; }

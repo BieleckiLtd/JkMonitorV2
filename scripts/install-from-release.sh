@@ -22,6 +22,7 @@ NONINTERACTIVE_CONNECTION_STRING="${JKMONITOR_CONNECTION_STRING:-}"
 NONINTERACTIVE_SERIAL_PORT="${JKMONITOR_SERIAL_PORT:-}"
 NONINTERACTIVE_INSTALL_RUNTIME="${JKMONITOR_INSTALL_RUNTIME:-}"
 NONINTERACTIVE_INSTALL_SERVICE="${JKMONITOR_INSTALL_SERVICE:-}"
+CONFIGURE_SCRIPT_PATH="$DESTINATION/configure.sh"
 
 section() {
   echo
@@ -190,6 +191,18 @@ get_access_url() {
   echo "$APP_LOCAL_URL"
 }
 
+has_existing_runtime_configuration() {
+  if [ -f "$APP_ROOT/appsettings.Production.Local.json" ]; then
+    return 0
+  fi
+
+  if [ -n "$NONINTERACTIVE_MODE" ] || [ -n "$NONINTERACTIVE_SERIAL_PORT" ] || [ -n "$NONINTERACTIVE_USE_DB" ] || [ -n "$NONINTERACTIVE_CONNECTION_STRING" ]; then
+    return 0
+  fi
+
+  return 1
+}
+
 read_choice() {
   local prompt="$1"
   local mode="$2"
@@ -239,6 +252,20 @@ read_validated_choice() {
   done
 }
 
+read_required_value() {
+  local prompt="$1"
+  local value=""
+
+  while [ -z "$value" ]; do
+    read -r -p "$prompt" value
+    if [ -z "$value" ]; then
+      echo 'A value is required to continue.'
+    fi
+  done
+
+  echo "$value"
+}
+
 get_configured_choice() {
   local configured_value="$1"
   local prompt="$2"
@@ -284,6 +311,131 @@ install_local_runtime() {
   mkdir -p "$LOCAL_DOTNET_ROOT"
   download_file 'https://dot.net/v1/dotnet-install.sh' "$INSTALL_SCRIPT"
   bash "$INSTALL_SCRIPT" --channel 10.0 --runtime aspnetcore --install-dir "$LOCAL_DOTNET_ROOT"
+}
+
+write_configure_script() {
+  cat > "$CONFIGURE_SCRIPT_PATH" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+APP_ROOT="$SCRIPT_ROOT/app"
+ENV_PATH="$SCRIPT_ROOT/jkmonitor.env"
+SERVICE_NAME='jkmonitor.service'
+APP_PORT='5074'
+
+get_primary_ip() {
+  if command -v hostname >/dev/null 2>&1; then
+    local host_ips
+    host_ips="$(hostname -I 2>/dev/null || true)"
+    if [ -n "$host_ips" ]; then
+      for ip in $host_ips; do
+        case "$ip" in
+          127.*|169.254.*)
+            ;;
+          *)
+            echo "$ip"
+            return
+            ;;
+        esac
+      done
+    fi
+  fi
+
+  if command -v ip >/dev/null 2>&1; then
+    ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}'
+    return
+  fi
+
+  echo ""
+}
+
+get_access_url() {
+  local primary_ip
+  primary_ip="$(get_primary_ip)"
+
+  if [ -n "$primary_ip" ]; then
+    echo "http://$primary_ip:$APP_PORT"
+    return
+  fi
+
+  echo "http://127.0.0.1:$APP_PORT"
+}
+
+writable_config="$APP_ROOT/appsettings.Production.Local.json"
+
+echo
+echo 'JK Monitor hardware configuration'
+echo 'This switches the install from simulator preview mode to your real RS485 setup.'
+
+read -r -p 'RS485 serial port (example: /dev/ttyUSB0): ' serial_port
+while [ -z "$serial_port" ]; do
+  echo 'A serial port is required.'
+  read -r -p 'RS485 serial port (example: /dev/ttyUSB0): ' serial_port
+done
+
+read -r -p 'Enable PostgreSQL and TimescaleDB persistence? [y/N] ' use_db
+use_db="${use_db:-n}"
+connection_string=''
+
+case "${use_db,,}" in
+  y|yes)
+    read -r -p 'PostgreSQL connection string: ' connection_string
+    storage_provider='TimescaleDb'
+    ;;
+  *)
+    storage_provider='None'
+    ;;
+esac
+
+cat > "$writable_config" <<JSON
+{
+  "Monitor": {
+    "SerialBus": {
+      "PortName": "$serial_port"
+    },
+    "Storage": {
+      "Provider": "$storage_provider",
+      "ConnectionString": "$connection_string"
+    },
+    "Devices": [
+      {
+        "DeviceId": "jk-master-01",
+        "DisplayName": "Main Battery Rack",
+        "Protocol": "jk-rs485",
+        "RegisterProfile": "jk-inverter-v15",
+        "Address": 1,
+        "IsMaster": true,
+        "PollIntervalMilliseconds": 1000,
+        "Enabled": true
+      }
+    ]
+  }
+}
+JSON
+
+cat > "$ENV_PATH" <<ENVVARS
+ASPNETCORE_ENVIRONMENT=Production
+ASPNETCORE_URLS=http://0.0.0.0:$APP_PORT
+ENVVARS
+
+if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files | grep -q '^$SERVICE_NAME'; then
+  if [ "$(id -u)" -eq 0 ]; then
+    systemctl restart "$SERVICE_NAME"
+  else
+    sudo systemctl restart "$SERVICE_NAME"
+  fi
+  echo
+  echo 'JK Monitor was reconfigured and the service was restarted.'
+else
+  echo
+  echo 'Configuration saved. Start JK Monitor again with ~/jkmonitor/start.sh.'
+fi
+
+echo "Open $(get_access_url) from your PC once the service is running."
+EOF
+
+  chmod +x "$CONFIGURE_SCRIPT_PATH"
 }
 
 write_start_script() {
@@ -424,6 +576,7 @@ mkdir -p "$DESTINATION"
 mv "$EXTRACT_PATH/linux-arm64" "$APP_ROOT"
 restore_preserved_state "$PRESERVE_PATH" "$DESTINATION"
 write_start_script
+write_configure_script
 
 section 'Checking ASP.NET Core runtime'
 DOTNET_CMD="$(get_dotnet)"
@@ -439,12 +592,23 @@ if [ -z "$DOTNET_CMD" ]; then
 fi
 
 section 'Configuring startup mode'
-MODE="$(get_configured_choice "$NONINTERACTIVE_MODE" 'Choose startup mode: 1 = simulator, 2 = hardware' 'startup' '1')"
+if has_existing_runtime_configuration; then
+  MODE="$(get_configured_choice "$NONINTERACTIVE_MODE" 'Choose startup mode: 1 = simulator, 2 = hardware' 'startup' '1')"
+else
+  MODE='1'
+  echo 'Starting in simulator mode for the first run so the web UI is available immediately.'
+  echo "When you are ready for RS485 hardware, run $CONFIGURE_SCRIPT_PATH on the device."
+fi
 ENVIRONMENT='Development'
 TARGET_CONFIG="$APP_ROOT/appsettings.Development.Local.json"
 
 if [ "$MODE" = '1' ]; then
-  USE_DB="$(get_configured_choice "$NONINTERACTIVE_USE_DB" 'Enable PostgreSQL and TimescaleDB persistence now?' 'yesno' 'n')"
+  if [ -n "$NONINTERACTIVE_USE_DB" ] || [ -n "$NONINTERACTIVE_CONNECTION_STRING" ]; then
+    USE_DB="$(get_configured_choice "$NONINTERACTIVE_USE_DB" 'Enable PostgreSQL and TimescaleDB persistence now?' 'yesno' 'n')"
+  else
+    USE_DB='n'
+  fi
+
   if [ "${USE_DB,,}" = 'y' ]; then
     if [ -n "$NONINTERACTIVE_CONNECTION_STRING" ]; then
       CONNECTION_STRING="$NONINTERACTIVE_CONNECTION_STRING"
@@ -479,10 +643,10 @@ else
   if [ -n "$NONINTERACTIVE_SERIAL_PORT" ]; then
     SERIAL_PORT="$NONINTERACTIVE_SERIAL_PORT"
   else
-    read -r -p 'RS485 serial port (example: /dev/ttyUSB0): ' SERIAL_PORT
+    SERIAL_PORT="$(read_required_value 'RS485 serial port (example: /dev/ttyUSB0): ')"
   fi
   if [ -z "$SERIAL_PORT" ]; then
-    echo 'A serial port is required for hardware mode.'
+    echo 'A serial port is required for hardware mode, so JK Monitor was not started and no access URL is available yet.' >&2
     exit 1
   fi
 

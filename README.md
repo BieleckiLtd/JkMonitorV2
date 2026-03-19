@@ -46,7 +46,7 @@ curl -fsSL https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts
 
 - Already installed from source locally: use `./scripts/update.ps1` or `./scripts/update.sh` inside the installed folder to refresh from the default `dev` branch.
 
-The Raspberry Pi runtime path downloads a published `linux-arm64` build from GitHub Releases, installs only the ASP.NET Core runtime when needed, writes a local config override, installs and starts a `systemd` service by default on Linux devices, and binds the app for LAN access so the web UI can be opened from another PC on the network.
+The Raspberry Pi runtime path downloads a published `linux-arm64` build from GitHub Releases, installs only the ASP.NET Core runtime when needed, starts in simulator mode on the first run so the UI is available immediately, writes a local reconfiguration helper for later RS485 setup, installs and starts a `systemd` service by default on Linux devices, and binds the app for LAN access so the web UI can be opened from another PC on the network.
 
 The source installer remains available for local development and debugging.
 

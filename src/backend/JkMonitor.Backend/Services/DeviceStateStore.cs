@@ -37,10 +37,15 @@ public sealed class DeviceStateStore
             .ThenBy(device => device.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
+        var startupMode = string.Equals(_configuration.SerialBus.PortName, "SIMULATED", StringComparison.OrdinalIgnoreCase)
+            ? "Simulator"
+            : "Hardware";
+
         return new MonitorRuntimeStatus
         {
             ServiceName = "JkMonitor.Backend",
             EnvironmentName = environmentName,
+            StartupMode = startupMode,
             StartedAt = _startedAt,
             ReportedAt = DateTimeOffset.UtcNow,
             ConfiguredDeviceCount = _configuration.Devices.Count,

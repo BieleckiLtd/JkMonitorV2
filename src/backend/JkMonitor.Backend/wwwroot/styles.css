@@ -109,6 +109,63 @@ h1 {
   animation: rise 620ms ease-out both;
 }
 
+.setup-banner {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  background:
+    linear-gradient(135deg, rgba(157, 74, 34, 0.92), rgba(214, 127, 53, 0.88)),
+    radial-gradient(circle at top right, rgba(255, 255, 255, 0.22), transparent 35%);
+  color: #fff9f1;
+  border-color: rgba(255, 255, 255, 0.18);
+}
+
+.setup-kicker {
+  font-size: 0.8rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  opacity: 0.82;
+  margin-bottom: 8px;
+}
+
+.setup-banner h2 {
+  margin-bottom: 8px;
+}
+
+.setup-banner p {
+  color: rgba(255, 249, 241, 0.9);
+}
+
+.setup-actions {
+  display: grid;
+  gap: 10px;
+  justify-items: end;
+}
+
+.setup-chip {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 12px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.16);
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  font-size: 0.82rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.setup-command {
+  display: inline-block;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(33, 18, 7, 0.32);
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  color: #fff9f1;
+  font-size: 0.95rem;
+}
+
 .panel-header {
   display: flex;
   justify-content: space-between;
@@ -256,6 +313,18 @@ h1 {
   .shell {
     width: min(100% - 20px, 1200px);
     padding-top: 20px;
+  }
+
+  .setup-banner,
+  .hero,
+  .panel-header,
+  .device-topline {
+    flex-direction: column;
+    align-items: start;
+  }
+
+  .setup-actions {
+    justify-items: start;
   }
 
   .hero,

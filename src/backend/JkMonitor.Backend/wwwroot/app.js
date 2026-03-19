@@ -4,6 +4,11 @@ const lastRefresh = document.querySelector("#last-refresh");
 const deviceCount = document.querySelector("#device-count");
 const serviceStatus = document.querySelector("#service-status");
 const deviceTemplate = document.querySelector("#device-template");
+const setupBanner = document.querySelector("#setup-banner");
+const setupTitle = document.querySelector("#setup-title");
+const setupCopy = document.querySelector("#setup-copy");
+const setupModeChip = document.querySelector("#setup-mode-chip");
+const setupCommand = document.querySelector("#setup-command");
 
 const metricFormatters = {
   totalVoltageVolts: (value) => `${value.toFixed(2)} V`,
@@ -41,8 +46,10 @@ function renderHealth(health) {
 
   serviceStatus.innerHTML = `<span class="pill">${health.serviceName} · ${health.environmentName}</span>`;
   lastRefresh.textContent = `Updated ${new Date(health.reportedAt).toLocaleTimeString()}`;
+  renderSetupBanner(health);
 
   const stats = [
+    ["Startup mode", health.startupMode],
     ["Configured devices", health.configuredDeviceCount],
     ["Enabled devices", health.enabledDeviceCount],
     ["Polling ok", onlineDevices],
@@ -56,6 +63,28 @@ function renderHealth(health) {
       <strong class="stat-value">${value}</strong>
     </article>
   `).join("");
+}
+
+function renderSetupBanner(health) {
+  if (!setupBanner) {
+    return;
+  }
+
+  const isSimulator = health.startupMode === "Simulator";
+
+  setupBanner.hidden = false;
+  setupModeChip.textContent = health.startupMode;
+
+  if (isSimulator) {
+    setupTitle.textContent = "JK Monitor is live in simulator mode";
+    setupCopy.textContent = "The UI is ready now. When you want real RS485 hardware, SSH into the device later and run the local configure command to switch modes without reinstalling.";
+    setupCommand.textContent = "~/jkmonitor/configure.sh";
+    return;
+  }
+
+  setupTitle.textContent = "JK Monitor is live in hardware mode";
+  setupCopy.textContent = "The app is using the configured serial device. If you need to change the port or database settings later, rerun the local configure command on the device.";
+  setupCommand.textContent = "~/jkmonitor/configure.sh";
 }
 
 function renderDevices(devices) {
