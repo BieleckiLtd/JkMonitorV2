@@ -158,20 +158,21 @@ function App() {
   })
 
   useEffect(() => {
-    void refreshDashboard()
+    void refreshHealth()
+    void refreshDevices()
     void loadSetupState()
 
     const healthTimer = window.setInterval(() => {
       void refreshHealth()
     }, healthRefreshIntervalMilliseconds)
 
-    const dashboardTimer = window.setInterval(() => {
-      void refreshDashboard({ silent: true })
+    const devicesTimer = window.setInterval(() => {
+      void refreshDevices({ silent: true })
     }, dashboardRefreshIntervalMilliseconds)
 
     return () => {
       window.clearInterval(healthTimer)
-      window.clearInterval(dashboardTimer)
+      window.clearInterval(devicesTimer)
     }
   }, [])
 
@@ -189,16 +190,15 @@ function App() {
     [devices],
   )
 
-  async function refreshDashboard(options?: { silent?: boolean }) {
+  async function refreshDevices(options?: { silent?: boolean }) {
     if (!options?.silent) {
       setIsDashboardLoading(true)
     }
 
     try {
-      const [nextHealth, nextDevices] = await Promise.all([fetchHealth(), fetchDevices()])
+      const nextDevices = await fetchDevices()
 
       startTransition(() => {
-        setHealth(nextHealth)
         setDevices(nextDevices)
         setDashboardError(null)
       })
@@ -336,7 +336,7 @@ function App() {
 
       if (successPayload.restartScheduled) {
         await waitForRestart()
-        await Promise.all([refreshDashboard(), loadSetupState()])
+        await Promise.all([refreshHealth(), refreshDevices(), loadSetupState()])
         setSetupFeedback(`${successPayload.message} The app is back online.`)
       } else {
         await loadSetupState()
