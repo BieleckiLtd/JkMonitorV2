@@ -15,5 +15,6 @@ dist/
 build/
 .env
 .env.*
+artifacts/
 appsettings.Local.json
 appsettings.*.Local.json
