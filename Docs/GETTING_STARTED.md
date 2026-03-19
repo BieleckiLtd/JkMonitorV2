@@ -17,7 +17,8 @@ This path:
 - Avoids compiling on the device.
 - Writes local config overrides into the published app folder.
 - Creates a reusable launcher at `~/jkmonitor/start.sh`.
-- Can install and start a `systemd` service for headless operation.
+- Installs and starts a `systemd` service by default when `systemd` is available, so the app starts after reboot.
+- Binds on the device LAN interface and prints the URL you can open from your PC.
 
 For headless SSH automation, the release installer also accepts environment variables instead of prompts:
 
@@ -104,7 +105,8 @@ The setup script does the following:
 - On Windows hardware mode, auto-detects available COM ports and lets the user choose from a list.
 - Writes a local override file so the user does not have to edit JSON manually.
 - Optionally installs and starts a `systemd` service for headless Raspberry Pi deployments.
-- Waits for the backend to be reachable, then opens the app on `http://localhost:5074` when running interactively.
+- Waits for the backend to be reachable, then opens the app on `http://127.0.0.1:5074` on the device when running interactively.
+- Prints the device LAN URL so the same UI can be opened from another PC on the network.
 
 ## Uninstall A Release Install
 

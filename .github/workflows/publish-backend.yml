@@ -11,11 +11,16 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: publish-backend-${{ github.ref }}
+  cancel-in-progress: true
+
 env:
   DOTNET_VERSION: 10.0.x
   PROJECT_PATH: src/backend/JkMonitor.Backend/JkMonitor.Backend.csproj
   PUBLISH_DIR: artifacts/linux-arm64
   ASSET_NAME: jkmonitor-backend-linux-arm64.tar.gz
+  CHECKSUM_NAME: jkmonitor-backend-linux-arm64.tar.gz.sha256
 
 jobs:
   publish-linux-arm64:
@@ -46,13 +51,17 @@ jobs:
         shell: bash
         run: |
           rm -f "${{ env.ASSET_NAME }}"
+          rm -f "${{ env.CHECKSUM_NAME }}"
           tar -C artifacts -czf "${{ env.ASSET_NAME }}" linux-arm64
+          sha256sum "${{ env.ASSET_NAME }}" > "${{ env.CHECKSUM_NAME }}"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: jkmonitor-backend-linux-arm64
-          path: ${{ env.ASSET_NAME }}
+          path: |
+            ${{ env.ASSET_NAME }}
+            ${{ env.CHECKSUM_NAME }}
 
       - name: Resolve release channel
         id: release
@@ -75,14 +84,26 @@ jobs:
         run: |
           tag="${{ steps.release.outputs.tag }}"
           title="${{ steps.release.outputs.title }}"
+          notes_file="release-notes.md"
+
+          printf '%s\n' \
+            'Install on a Linux ARM64 device directly from GitHub:' \
+            '' \
+            '```bash' \
+            "wget -qO- https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-release.sh | bash -s -- https://github.com/BieleckiLtd/JkMonitorV2 $tag" \
+            '```' \
+            '' \
+            'This installer downloads the published app artifact from GitHub Releases, installs the ASP.NET Core runtime when needed, installs and starts a systemd service, and prints the LAN URL for opening the web UI from another PC.' \
+            > "$notes_file"
 
           if gh release view "$tag" >/dev/null 2>&1; then
-            gh release upload "$tag" "${{ env.ASSET_NAME }}" --clobber
+            gh release upload "$tag" "${{ env.ASSET_NAME }}" "${{ env.CHECKSUM_NAME }}" --clobber
+            gh release edit "$tag" --title "$title" --notes-file "$notes_file"
             exit 0
           fi
 
           if [[ "${{ steps.release.outputs.prerelease }}" == "true" ]]; then
-            gh release create "$tag" "${{ env.ASSET_NAME }}" --title "$title" --notes "Latest development build for Raspberry Pi runtime installs." --prerelease
+            gh release create "$tag" "${{ env.ASSET_NAME }}" "${{ env.CHECKSUM_NAME }}" --title "$title" --notes-file "$notes_file" --prerelease
           else
-            gh release create "$tag" "${{ env.ASSET_NAME }}" --title "$title" --notes "Release build for Raspberry Pi runtime installs."
+            gh release create "$tag" "${{ env.ASSET_NAME }}" "${{ env.CHECKSUM_NAME }}" --title "$title" --notes-file "$notes_file"
           fi

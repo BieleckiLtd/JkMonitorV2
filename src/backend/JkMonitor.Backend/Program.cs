@@ -47,11 +47,6 @@ using (var scope = app.Services.CreateScope())
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
-if (!app.Environment.IsDevelopment())
-{
-    app.UseHttpsRedirection();
-}
-
 app.UseAuthorization();
 app.MapControllers();
 app.MapFallbackToFile("index.html");

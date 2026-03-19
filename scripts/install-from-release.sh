@@ -7,8 +7,10 @@ DESTINATION="${3:-$HOME/jkmonitor}"
 APP_ROOT="$DESTINATION/app"
 LOCAL_DOTNET_ROOT="$DESTINATION/.dotnet"
 LOCAL_DOTNET="$LOCAL_DOTNET_ROOT/dotnet"
-APP_URL='http://localhost:5074'
-HEALTH_URL="$APP_URL/api/health"
+APP_PORT='5074'
+APP_BIND_URL="http://0.0.0.0:$APP_PORT"
+APP_LOCAL_URL="http://127.0.0.1:$APP_PORT"
+HEALTH_URL="$APP_LOCAL_URL/api/health"
 ASSET_NAME='jkmonitor-backend-linux-arm64.tar.gz'
 INSTALL_SCRIPT="${TMPDIR:-/tmp}/dotnet-install-jkmonitor-runtime.sh"
 SERVICE_NAME='jkmonitor.service'
@@ -150,6 +152,44 @@ get_dotnet() {
   echo ""
 }
 
+get_primary_ip() {
+  if command -v hostname >/dev/null 2>&1; then
+    local host_ips
+    host_ips="$(hostname -I 2>/dev/null || true)"
+    if [ -n "$host_ips" ]; then
+      for ip in $host_ips; do
+        case "$ip" in
+          127.*|169.254.*)
+            ;;
+          *)
+            echo "$ip"
+            return
+            ;;
+        esac
+      done
+    fi
+  fi
+
+  if command -v ip >/dev/null 2>&1; then
+    ip -4 route get 1.1.1.1 2>/dev/null | awk '{for (i = 1; i <= NF; i++) if ($i == "src") { print $(i + 1); exit }}'
+    return
+  fi
+
+  echo ""
+}
+
+get_access_url() {
+  local primary_ip
+  primary_ip="$(get_primary_ip)"
+
+  if [ -n "$primary_ip" ]; then
+    echo "http://$primary_ip:$APP_PORT"
+    return
+  fi
+
+  echo "$APP_LOCAL_URL"
+}
+
 read_choice() {
   local prompt="$1"
   local mode="$2"
@@ -265,7 +305,7 @@ else
 fi
 
 export ASPNETCORE_ENVIRONMENT="${ASPNETCORE_ENVIRONMENT:-Development}"
-export ASPNETCORE_URLS="${ASPNETCORE_URLS:-http://localhost:5074}"
+export ASPNETCORE_URLS="${ASPNETCORE_URLS:-$APP_BIND_URL}"
 
 cd "$APP_ROOT"
 exec "$DOTNET_CMD" ./JkMonitor.Backend.dll
@@ -279,7 +319,7 @@ write_env_file() {
 
   cat > "$ENV_PATH" <<EOF
 ASPNETCORE_ENVIRONMENT=$environment_name
-ASPNETCORE_URLS=$APP_URL
+ASPNETCORE_URLS=$APP_BIND_URL
 EOF
 }
 
@@ -335,9 +375,9 @@ open_browser_when_ready() {
     for _ in $(seq 1 60); do
       if curl -fsS "$HEALTH_URL" >/dev/null 2>&1; then
         if command -v xdg-open >/dev/null 2>&1; then
-          xdg-open "$APP_URL" >/dev/null 2>&1 || true
+          xdg-open "$APP_LOCAL_URL" >/dev/null 2>&1 || true
         elif command -v open >/dev/null 2>&1; then
-          open "$APP_URL" >/dev/null 2>&1 || true
+          open "$APP_LOCAL_URL" >/dev/null 2>&1 || true
         fi
         exit 0
       fi
@@ -484,6 +524,7 @@ EOF
 fi
 
 write_env_file "$ENVIRONMENT"
+ACCESS_URL="$(get_access_url)"
 
 INSTALL_SERVICE='n'
 if command -v systemctl >/dev/null 2>&1; then
@@ -495,13 +536,15 @@ echo "Environment: $ENVIRONMENT"
 echo "Installed app root: $APP_ROOT"
 echo "Reusable launch command: $DESTINATION/start.sh"
 echo "Service file path: $SERVICE_PATH"
+echo "Local access URL: $APP_LOCAL_URL"
+echo "LAN access URL: $ACCESS_URL"
 
 if [ "${INSTALL_SERVICE,,}" = 'y' ]; then
   section 'Installing systemd service'
   install_systemd_service
 
   if wait_for_health; then
-    echo "JK Monitor is running under systemd at $APP_URL"
+    echo "JK Monitor is running under systemd. Open $ACCESS_URL from your PC."
   else
     echo 'The systemd service was installed, but the health endpoint did not become ready in time.' >&2
     echo "Inspect service logs with: sudo journalctl -u $SERVICE_NAME -n 200 --no-pager" >&2
@@ -511,11 +554,12 @@ if [ "${INSTALL_SERVICE,,}" = 'y' ]; then
   exit 0
 fi
 
-echo "Opening $APP_URL after the backend is ready."
+echo "Opening $APP_LOCAL_URL on the device after the backend is ready."
+echo "From your PC, browse to $ACCESS_URL once the device is reachable on your network."
 
 BROWSER_PID=''
 open_browser_when_ready
 
 cd "$APP_ROOT"
 trap 'if [ -n "${BROWSER_PID:-}" ]; then kill "$BROWSER_PID" >/dev/null 2>&1 || true; fi' EXIT
-ASPNETCORE_ENVIRONMENT="$ENVIRONMENT" ASPNETCORE_URLS="$APP_URL" "$DOTNET_CMD" ./JkMonitor.Backend.dll
+ASPNETCORE_ENVIRONMENT="$ENVIRONMENT" ASPNETCORE_URLS="$APP_BIND_URL" "$DOTNET_CMD" ./JkMonitor.Backend.dll
