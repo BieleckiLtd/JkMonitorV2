@@ -43,5 +43,18 @@ public sealed record class MonitorRuntimeStatus
 
     public int EnabledDeviceCount { get; init; }
 
+    public SystemRuntimeMetrics? SystemMetrics { get; init; }
+
     public required IReadOnlyList<DeviceRuntimeState> Devices { get; init; }
+}
+
+public sealed record class SystemRuntimeMetrics
+{
+    public double? CpuUtilizationPercent { get; init; }
+
+    public long? MemoryAvailableBytes { get; init; }
+
+    public long? MemoryTotalBytes { get; init; }
+
+    public double? SystemTemperatureCelsius { get; init; }
 }

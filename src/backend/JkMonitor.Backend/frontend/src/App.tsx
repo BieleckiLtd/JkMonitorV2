@@ -98,6 +98,12 @@ type MonitorRuntimeStatus = {
   reportedAt: string
   configuredDeviceCount: number
   enabledDeviceCount: number
+  systemMetrics?: {
+    cpuUtilizationPercent?: number | null
+    memoryAvailableBytes?: number | null
+    memoryTotalBytes?: number | null
+    systemTemperatureCelsius?: number | null
+  } | null
   devices: DeviceRuntimeState[]
 }
 
@@ -108,7 +114,8 @@ type SetupFormState = {
   serialPort: string
 }
 
-const refreshIntervalMilliseconds = 5000
+const dashboardRefreshIntervalMilliseconds = 5000
+const healthRefreshIntervalMilliseconds = 1000
 
 function getPortRefreshStatus(portCount: number) {
   return portCount === 1 ? "Detected 1 serial port" : `Detected ${portCount} serial ports`
@@ -154,12 +161,17 @@ function App() {
     void refreshDashboard()
     void loadSetupState()
 
-    const timer = window.setInterval(() => {
+    const healthTimer = window.setInterval(() => {
+      void refreshHealth()
+    }, healthRefreshIntervalMilliseconds)
+
+    const dashboardTimer = window.setInterval(() => {
       void refreshDashboard({ silent: true })
-    }, refreshIntervalMilliseconds)
+    }, dashboardRefreshIntervalMilliseconds)
 
     return () => {
-      window.clearInterval(timer)
+      window.clearInterval(healthTimer)
+      window.clearInterval(dashboardTimer)
     }
   }, [])
 
@@ -183,19 +195,7 @@ function App() {
     }
 
     try {
-      const [healthResponse, devicesResponse] = await Promise.all([
-        fetch("/api/health", { cache: "no-store" }),
-        fetch("/api/devices/current", { cache: "no-store" }),
-      ])
-
-      if (!healthResponse.ok || !devicesResponse.ok) {
-        throw new Error(`Live data request failed (${healthResponse.status}/${devicesResponse.status}).`)
-      }
-
-      const [nextHealth, nextDevices] = (await Promise.all([
-        healthResponse.json(),
-        devicesResponse.json(),
-      ])) as [MonitorRuntimeStatus, DeviceRuntimeState[]]
+      const [nextHealth, nextDevices] = await Promise.all([fetchHealth(), fetchDevices()])
 
       startTransition(() => {
         setHealth(nextHealth)
@@ -207,6 +207,37 @@ function App() {
     } finally {
       setIsDashboardLoading(false)
     }
+  }
+
+  async function refreshHealth() {
+    try {
+      const nextHealth = await fetchHealth()
+
+      startTransition(() => {
+        setHealth(nextHealth)
+      })
+    } catch {
+    }
+  }
+
+  async function fetchHealth() {
+    const response = await fetch("/api/health", { cache: "no-store" })
+
+    if (!response.ok) {
+      throw new Error(`Health request failed (${response.status}).`)
+    }
+
+    return (await response.json()) as MonitorRuntimeStatus
+  }
+
+  async function fetchDevices() {
+    const response = await fetch("/api/devices/current", { cache: "no-store" })
+
+    if (!response.ok) {
+      throw new Error(`Device request failed (${response.status}).`)
+    }
+
+    return (await response.json()) as DeviceRuntimeState[]
   }
 
   async function loadSetupState(options?: { isPortRefresh?: boolean }) {
@@ -607,6 +638,44 @@ function App() {
               </CardContent>
             </Card>
 
+            <Card className="border-stone-900/8 bg-[linear-gradient(180deg,rgba(255,252,247,0.98),rgba(247,239,228,0.96))] shadow-[0_20px_48px_rgba(84,54,25,0.12)]">
+              <CardHeader>
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <CardTitle className="text-xl text-stone-950">System Monitoring</CardTitle>
+                    <CardDescription className="text-sm leading-6 text-stone-600">
+                      Host CPU, memory, and thermal data from the machine running JK Monitor.
+                    </CardDescription>
+                  </div>
+                  <Badge variant="outline" className="border-stone-900/10 bg-stone-100/80 text-stone-700">
+                    1s refresh
+                  </Badge>
+                </div>
+              </CardHeader>
+              <CardContent className="grid gap-3 sm:grid-cols-2">
+                <StatTile
+                  icon={<Cpu className="size-4" />}
+                  label="CPU utilization"
+                  value={formatPercentValue(health?.systemMetrics?.cpuUtilizationPercent)}
+                />
+                <StatTile
+                  icon={<HardDrive className="size-4" />}
+                  label="Memory available"
+                  value={formatBytesValue(health?.systemMetrics?.memoryAvailableBytes)}
+                />
+                <StatTile
+                  icon={<Database className="size-4" />}
+                  label="Memory total"
+                  value={formatBytesValue(health?.systemMetrics?.memoryTotalBytes)}
+                />
+                <StatTile
+                  icon={<Thermometer className="size-4" />}
+                  label="System temp"
+                  value={formatCelsiusValue(health?.systemMetrics?.systemTemperatureCelsius)}
+                />
+              </CardContent>
+            </Card>
+
             <Card className="border-stone-900/8 bg-white/80 shadow-[0_20px_48px_rgba(84,54,25,0.12)]">
               <CardHeader>
                 <CardTitle className="text-xl text-stone-950">Port discovery</CardTitle>
@@ -850,6 +919,31 @@ function delay(milliseconds: number) {
 
 function formatDateTime(value: string) {
   return new Date(value).toLocaleString()
+}
+
+function formatPercentValue(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return "Sampling"
+  }
+
+  return `${value.toFixed(1)}%`
+}
+
+function formatBytesValue(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return "Unavailable"
+  }
+
+  const gibibytes = value / (1024 ** 3)
+  return `${gibibytes.toFixed(2)} GiB`
+}
+
+function formatCelsiusValue(value: number | null | undefined) {
+  if (value === null || value === undefined) {
+    return "Unavailable"
+  }
+
+  return `${value.toFixed(1)} C`
 }
 
 function formatMetricValue(

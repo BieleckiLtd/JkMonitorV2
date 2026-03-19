@@ -10,10 +10,12 @@ public sealed class DeviceStateStore
     private readonly ConcurrentDictionary<string, DeviceRuntimeState> _states = new(StringComparer.OrdinalIgnoreCase);
     private readonly MonitorConfiguration _configuration;
     private readonly DateTimeOffset _startedAt = DateTimeOffset.UtcNow;
+    private readonly HostSystemMonitoringService _hostSystemMonitoringService;
 
-    public DeviceStateStore(IOptions<MonitorConfiguration> configuration)
+    public DeviceStateStore(IOptions<MonitorConfiguration> configuration, HostSystemMonitoringService hostSystemMonitoringService)
     {
         _configuration = configuration.Value;
+        _hostSystemMonitoringService = hostSystemMonitoringService;
 
         foreach (var device in _configuration.Devices)
         {
@@ -50,6 +52,7 @@ public sealed class DeviceStateStore
             ReportedAt = DateTimeOffset.UtcNow,
             ConfiguredDeviceCount = _configuration.Devices.Count,
             EnabledDeviceCount = _configuration.Devices.Count(device => device.Enabled),
+            SystemMetrics = _hostSystemMonitoringService.GetMetrics(),
             Devices = devices
         };
     }
