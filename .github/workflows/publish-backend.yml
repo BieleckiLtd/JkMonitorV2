@@ -17,7 +17,9 @@ concurrency:
 
 env:
   DOTNET_VERSION: 10.0.x
+  NODE_VERSION: 24.x
   PROJECT_PATH: src/backend/JkMonitor.Backend/JkMonitor.Backend.csproj
+  FRONTEND_PATH: src/backend/JkMonitor.Backend/frontend
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -54,6 +56,21 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ${{ env.FRONTEND_PATH }}/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ${{ env.FRONTEND_PATH }}
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: ${{ env.FRONTEND_PATH }}
+        run: npm run build
 
       - name: Restore
         run: dotnet restore ${{ env.PROJECT_PATH }}
@@ -92,6 +109,21 @@ jobs:
         uses: actions/setup-dotnet@v5
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ${{ env.FRONTEND_PATH }}/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: ${{ env.FRONTEND_PATH }}
+        run: npm ci
+
+      - name: Build frontend
+        working-directory: ${{ env.FRONTEND_PATH }}
+        run: npm run build
 
       - name: Restore
         run: dotnet restore ${{ env.PROJECT_PATH }}

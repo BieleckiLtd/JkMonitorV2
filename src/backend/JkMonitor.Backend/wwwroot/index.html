@@ -1,132 +1,14 @@
 <!doctype html>
 <html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>JK Monitor</title>
-  <link rel="stylesheet" href="/styles.css">
-</head>
-<body>
-  <div class="shell">
-    <header class="hero">
-      <div>
-        <p class="eyebrow">Local JK BMS monitoring</p>
-        <h1>JK Monitor</h1>
-        <p class="subtitle">Live health and device telemetry from the current backend endpoints.</p>
-      </div>
-      <div class="hero-status" id="service-status">
-        <span class="pill">Connecting</span>
-      </div>
-    </header>
-
-    <main class="grid">
-      <section class="panel panel-wide setup-banner" id="setup-banner" hidden>
-        <div>
-          <p class="setup-kicker">First run</p>
-          <h2 id="setup-title">Starting JK Monitor</h2>
-          <p id="setup-copy">Preparing setup guidance.</p>
-        </div>
-        <div class="setup-actions">
-          <span class="setup-chip" id="setup-mode-chip">Mode</span>
-          <span class="setup-note" id="setup-note">Use the setup panel below to switch modes.</span>
-        </div>
-      </section>
-
-      <section class="panel panel-wide">
-        <div class="panel-header">
-          <h2>Setup</h2>
-          <span id="setup-status">Loading current configuration</span>
-        </div>
-
-        <form class="setup-form" id="setup-form">
-          <div class="mode-picker" role="radiogroup" aria-label="Startup mode">
-            <label class="mode-option">
-              <input type="radio" name="startupMode" value="Simulator" checked>
-              <span>
-                <strong>Simulator</strong>
-                <small>Start the UI with sample JK telemetry right away.</small>
-              </span>
-            </label>
-            <label class="mode-option">
-              <input type="radio" name="startupMode" value="Hardware">
-              <span>
-                <strong>Hardware</strong>
-                <small>Use a real RS485 serial connection to your JK BMS.</small>
-              </span>
-            </label>
-          </div>
-
-          <div class="setup-grid">
-            <label class="field" id="serial-group">
-              <span>Detected serial ports</span>
-              <div class="field-row">
-                <select id="serial-port-select">
-                  <option value="">Scanning device ports</option>
-                </select>
-                <button type="button" class="secondary-button" id="refresh-ports">Refresh ports</button>
-              </div>
-              <input id="serial-port-input" type="text" placeholder="Or type a port manually, for example /dev/ttyUSB0 or COM3">
-              <small id="serial-port-hint">The app detects ports on the device itself, not on your PC.</small>
-            </label>
-
-            <label class="field checkbox-field">
-              <span>Storage</span>
-              <label class="toggle-row">
-                <input id="use-database" type="checkbox">
-                <span>Enable PostgreSQL and TimescaleDB persistence</span>
-              </label>
-              <small>Leave this off for a quick preview-only install.</small>
-            </label>
-
-            <label class="field field-wide" id="connection-group">
-              <span>PostgreSQL connection string</span>
-              <input id="connection-string" type="text" placeholder="Host=localhost;Port=5432;Database=jkmonitor;Username=jkmonitor;Password=change-me">
-              <small>Only required when database storage is enabled.</small>
-            </label>
-          </div>
-
-          <div class="setup-footer">
-            <p class="setup-feedback" id="setup-feedback">The current device configuration will appear here.</p>
-            <div class="setup-buttons">
-              <button type="submit" class="primary-button" id="apply-setup">Apply configuration</button>
-            </div>
-          </div>
-        </form>
-      </section>
-
-      <section class="panel panel-wide">
-        <div class="panel-header">
-          <h2>Monitor Health</h2>
-          <span id="last-refresh">Waiting for first refresh</span>
-        </div>
-        <div class="stats" id="health-stats"></div>
-      </section>
-
-      <section class="panel panel-wide">
-        <div class="panel-header">
-          <h2>Devices</h2>
-          <span id="device-count">0 devices</span>
-        </div>
-        <div class="device-list" id="device-list"></div>
-      </section>
-    </main>
-  </div>
-
-  <template id="device-template">
-    <article class="device-card">
-      <div class="device-topline">
-        <div>
-          <h3 class="device-name"></h3>
-          <p class="device-meta"></p>
-        </div>
-        <span class="device-outcome"></span>
-      </div>
-      <div class="device-metrics"></div>
-      <div class="device-flags"></div>
-      <p class="device-error"></p>
-    </article>
-  </template>
-
-  <script src="/app.js" defer></script>
-</body>
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>frontend</title>
+    <script type="module" crossorigin src="/assets/index-C-CESWOW.js"></script>
+    <link rel="stylesheet" crossorigin href="/assets/index-BTmxnoMh.css">
+  </head>
+  <body>
+    <div id="root"></div>
+  </body>
 </html>

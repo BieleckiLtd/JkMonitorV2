@@ -1,8 +1,10 @@
 using System.IO.Ports;
+using System.Runtime.Versioning;
 using System.Text.Json;
 using JkMonitor.Backend.Models;
 using JkMonitor.Contracts.Configuration;
 using Microsoft.Extensions.Options;
+using Microsoft.Win32;
 
 namespace JkMonitor.Backend.Services;
 
@@ -141,6 +143,11 @@ public sealed class SetupConfigurationService(
         {
         }
 
+        if (OperatingSystem.IsWindows())
+        {
+            TryAddWindowsRegistryPorts(ports);
+        }
+
         if (OperatingSystem.IsLinux())
         {
             foreach (var pattern in new[] { "ttyUSB*", "ttyACM*", "ttyAMA*", "ttyS*" })
@@ -159,6 +166,32 @@ public sealed class SetupConfigurationService(
         }
 
         return ports.OrderBy(port => port, StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    [SupportedOSPlatform("windows")]
+    private void TryAddWindowsRegistryPorts(HashSet<string> ports)
+    {
+        try
+        {
+            using var registryKey = Registry.LocalMachine.OpenSubKey(@"HARDWARE\DEVICEMAP\SERIALCOMM");
+
+            if (registryKey is null)
+            {
+                return;
+            }
+
+            foreach (var valueName in registryKey.GetValueNames())
+            {
+                if (registryKey.GetValue(valueName) is string portName && !string.IsNullOrWhiteSpace(portName))
+                {
+                    ports.Add(portName.Trim());
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            logger.LogDebug(exception, "Windows registry serial port discovery failed.");
+        }
     }
 
     private static void TryAddPortsFromPattern(HashSet<string> ports, string directory, string pattern)
