@@ -52,18 +52,9 @@ The source installer remains available for local development and debugging.
 
 See `Docs/GETTING_STARTED.md` for a step-by-step first run and deployment path.
 
-## Publish skill
+## Skills
 
-Use the built-in publish skill for full end-to-end publish from source:
+Repo-local agent skills live under `skills/`.
 
-```bash
-./scripts/publish-skill.sh "chore: publish changes"
-```
-
-This script:
-- commits and pushes current working copy to `dev`
-- waits for `publish-backend` GitHub Actions workflow
-- SSHs to `pi@fm.local`
-- pulls `dev`, publishes backend ARM64, syncs frontend assets, and restarts `jkmonitor.service`
-- checks service endpoints (if `curl` is available locally)
+The `publish` skill is documented in `skills/publish.md` and uses `./scripts/publish.sh` as its executable implementation.
 
