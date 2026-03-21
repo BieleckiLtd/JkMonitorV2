@@ -51,3 +51,19 @@ The release installers download published builds from GitHub Releases, install o
 The source installer remains available for local development and debugging.
 
 See `Docs/GETTING_STARTED.md` for a step-by-step first run and deployment path.
+
+## Publish skill
+
+Use the built-in publish skill for full end-to-end publish from source:
+
+```bash
+./scripts/publish-skill.sh "chore: publish changes"
+```
+
+This script:
+- commits and pushes current working copy to `dev`
+- waits for `publish-backend` GitHub Actions workflow
+- SSHs to `pi@fm.local`
+- pulls `dev`, publishes backend ARM64, syncs frontend assets, and restarts `jkmonitor.service`
+- checks service endpoints (if `curl` is available locally)
+
