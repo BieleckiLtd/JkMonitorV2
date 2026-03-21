@@ -330,18 +330,40 @@ public sealed class HostSystemMonitoringService(ILogger<HostSystemMonitoringServ
     private static int? GetLinuxCpuMaxClockSpeedMegahertz()
     {
         const string cpuRoot = "/sys/devices/system/cpu";
+        const string cpuPolicyRoot = "/sys/devices/system/cpu/cpufreq";
 
-        if (!Directory.Exists(cpuRoot))
+        if (!Directory.Exists(cpuRoot) && !Directory.Exists(cpuPolicyRoot))
         {
             return null;
         }
 
         long maxKilohertz = 0;
 
+        if (Directory.Exists(cpuPolicyRoot))
+        {
+            foreach (var policyDirectory in Directory.GetDirectories(cpuPolicyRoot, "policy*"))
+            {
+                var kilohertz = ReadLinuxFrequencyKilohertz(Path.Combine(policyDirectory, "cpuinfo_max_freq"))
+                    ?? ReadLinuxFrequencyKilohertz(Path.Combine(policyDirectory, "scaling_max_freq"))
+                    ?? ReadLinuxFrequencyKilohertz(Path.Combine(policyDirectory, "base_frequency"));
+
+                if (kilohertz is > 0 && kilohertz.Value > maxKilohertz)
+                {
+                    maxKilohertz = kilohertz.Value;
+                }
+            }
+        }
+
+        if (!Directory.Exists(cpuRoot))
+        {
+            return maxKilohertz > 0 ? (int)Math.Round(maxKilohertz / 1000d) : null;
+        }
+
         foreach (var cpuDirectory in Directory.GetDirectories(cpuRoot, "cpu[0-9]*"))
         {
             var kilohertz = ReadLinuxFrequencyKilohertz(Path.Combine(cpuDirectory, "cpufreq", "cpuinfo_max_freq"))
-                ?? ReadLinuxFrequencyKilohertz(Path.Combine(cpuDirectory, "cpufreq", "scaling_max_freq"));
+                ?? ReadLinuxFrequencyKilohertz(Path.Combine(cpuDirectory, "cpufreq", "scaling_max_freq"))
+                ?? ReadLinuxFrequencyKilohertz(Path.Combine(cpuDirectory, "cpufreq", "base_frequency"));
 
             if (kilohertz is > 0 && kilohertz.Value > maxKilohertz)
             {
