@@ -1,135 +1,276 @@
-import { Share2, Settings2, Plus, Zap, Wifi, Usb, Cpu, Radio } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { Cable, LoaderCircle, Plus, Save, Trash2 } from 'lucide-react';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Switch } from '../components/ui/switch';
+
+type DeviceConfiguration = {
+  deviceId: string;
+  displayName: string;
+  protocol: string;
+  registerProfile: string;
+  address: number;
+  isMaster: boolean;
+  pollIntervalMilliseconds: number;
+  enabled: boolean;
+};
+
+type DeviceConfigurationResponse = {
+  configurationFile: string;
+  devices: DeviceConfiguration[];
+};
+
+const defaultDevice = (index: number): DeviceConfiguration => ({
+  deviceId: `device-${index}`,
+  displayName: `Battery ${index}`,
+  protocol: 'jk-rs485',
+  registerProfile: 'jk-inverter-v15',
+  address: index,
+  isMaster: index === 1,
+  pollIntervalMilliseconds: 1000,
+  enabled: true,
+});
 
 export function DevicesPage() {
+  const [devices, setDevices] = useState<DeviceConfiguration[]>([]);
+  const [configurationFile, setConfigurationFile] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadDevices = async () => {
+      try {
+        const response = await fetch('/api/devices/config');
+
+        if (!response.ok) {
+          throw new Error('Unable to load device configuration.');
+        }
+
+        const data = (await response.json()) as DeviceConfigurationResponse;
+
+        if (!isMounted) {
+          return;
+        }
+
+        setDevices(data.devices);
+        setConfigurationFile(data.configurationFile);
+        setLoadError(null);
+      } catch (error) {
+        if (!isMounted) {
+          return;
+        }
+
+        setLoadError(error instanceof Error ? error.message : 'Unable to load device configuration.');
+      } finally {
+        if (isMounted) {
+          setIsLoading(false);
+        }
+      }
+    };
+
+    void loadDevices();
+
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  const updateDevice = <K extends keyof DeviceConfiguration>(index: number, key: K, value: DeviceConfiguration[K]) => {
+    setDevices((currentDevices) => currentDevices.map((device, currentIndex) => {
+      if (currentIndex !== index) {
+        return device;
+      }
+
+      return {
+        ...device,
+        [key]: value,
+      };
+    }));
+  };
+
+  const addDevice = () => {
+    setDevices((currentDevices) => [...currentDevices, defaultDevice(currentDevices.length + 1)]);
+    setSaveMessage(null);
+  };
+
+  const removeDevice = (index: number) => {
+    setDevices((currentDevices) => currentDevices.filter((_, currentIndex) => currentIndex !== index));
+    setSaveMessage(null);
+  };
+
+  const saveDevices = async () => {
+    setIsSaving(true);
+    setSaveMessage(null);
+
+    try {
+      const response = await fetch('/api/devices/config', {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ devices }),
+      });
+
+      const payload = await response.json() as DeviceConfigurationResponse | { message?: string };
+
+      if (!response.ok) {
+        throw new Error('message' in payload && payload.message ? payload.message : 'Unable to save device configuration.');
+      }
+
+      const data = payload as DeviceConfigurationResponse;
+      setDevices(data.devices);
+      setConfigurationFile(data.configurationFile);
+      setSaveMessage(`Saved to ${data.configurationFile}. Restart the application to apply device topology changes.`);
+    } catch (error) {
+      setSaveMessage(error instanceof Error ? error.message : 'Unable to save device configuration.');
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col gap-1">
-        <h2 className="text-3xl font-bold tracking-tight text-foreground mb-2">Hardware Topology</h2>
-        <p className="text-sm text-muted-foreground">
-          Visual mapping of all physical buses, protocol bridges, and connected devices.
-        </p>
-      </div>
-
-      <div className="flex items-center justify-between mt-8">
-        <button className="flex items-center gap-2 px-4 py-2 bg-primary hover:opacity-90 rounded-lg text-sm text-primary-foreground font-medium shadow-sm transition-all focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background">
-          <Plus className="h-4 w-4" /> Add Virtual Interface
-        </button>
-        <div className="flex bg-muted border border-border rounded-lg p-1">
-          <button className="px-4 py-1.5 text-xs font-semibold text-foreground bg-muted-foreground/20 rounded-md shadow-sm">Topology</button>
-          <button className="px-4 py-1.5 text-xs font-semibold text-muted-foreground hover:text-foreground transition-colors">List View</button>
+    <div className='space-y-6 max-w-6xl mx-auto pb-12'>
+      <div className='flex flex-col gap-2 border-b border-border pb-4 md:flex-row md:items-end md:justify-between'>
+        <div>
+          <h2 className='text-3xl font-bold tracking-tight text-foreground'>Device Configuration</h2>
+          <p className='mt-2 text-sm text-muted-foreground'>
+            Add or remove any BMS definition and persist the complete device list back to the active JSON configuration file.
+          </p>
+        </div>
+        <div className='rounded-lg border border-border bg-card/70 px-4 py-3 text-sm text-muted-foreground'>
+          <div className='font-medium text-foreground'>Active config</div>
+          <div className='font-mono text-xs'>{configurationFile || 'Loading...'}</div>
         </div>
       </div>
 
-      <div className="bg-muted border border-border rounded-xl min-h-[600px] mt-6 relative overflow-hidden flex shadow-inner">
-        {/* Grid Background */}
-        <div className="absolute inset-0 z-0 opacity-[0.15]" 
-          style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, var(--border) 2px, transparent 0)', backgroundSize: '48px 48px', backgroundPosition: 'center' }} 
-        />
-        
-        {/* Canvas / Node area */}
-        <div className="relative z-10 w-full h-full p-8 flex flex-col md:flex-row gap-12 items-start justify-center pt-24">
-          
-          {/* Host Controller Node */}
-          <div className="absolute top-8 left-1/2 -translate-x-1/2 bg-card text-card-foreground/90 border border-border rounded-xl p-4 flex items-center gap-4 shadow-2xl backdrop-blur-md">
-            <div className="h-10 w-10 rounded-lg bg-muted border border-border flex items-center justify-center">
-              <Cpu className="h-5 w-5 text-primary" />
-            </div>
-            <div>
-              <h3 className="text-sm font-semibold text-foreground">JK Monitor Edge</h3>
-              <p className="text-xs text-muted-foreground/80 font-mono">10.0.0.89 • aarch64</p>
-            </div>
-            <div className="h-2 w-2 rounded-full bg-primary ml-4 animate-pulse shadow-[0_0_8px_var(--primary)]" />
+      <div className='flex flex-col gap-3 rounded-2xl border border-border bg-card/60 p-5 shadow-sm md:flex-row md:items-center md:justify-between'>
+        <div className='flex items-start gap-3'>
+          <div className='flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-primary/10 text-primary'>
+            <Cable className='h-5 w-5' />
           </div>
-
-          {/* Connection Lines (CSS visually mocked for layout) */}
-          <div className="hidden md:block absolute top-[88px] left-1/2 bottom-0 w-px bg-gradient-to-b from-muted-foreground/30 to-transparent -translate-x-1/2 z-0" />
-
-          {/* RS485 Bus Node */}
-          <div className="bg-card text-card-foreground/80 backdrop-blur-xl border border-border rounded-xl p-5 shadow-2xl w-80 relative group hover:border-border/80 transition-colors">
-            <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-muted border border-border px-3 py-1 rounded-full flex items-center gap-2">
-              <Usb className="h-3 w-3 text-amber-500" />
-              <span className="text-[10px] font-mono text-foreground/90">ttyUSB0</span>
+          <div>
+            <div className='text-sm font-semibold text-foreground'>JSON-backed device editor</div>
+            <div className='mt-1 text-sm text-muted-foreground'>
+              Changes are written to the environment-specific local appsettings file and take effect after restart.
             </div>
-            
-            <div className="flex items-center justify-between mb-4 mt-2">
-              <h3 className="font-semibold text-foreground flex items-center gap-2">
-                <Share2 className="h-4 w-4 text-amber-500" />
-                RS485 Bus
-              </h3>
-              <button className="text-muted-foreground/80 hover:text-foreground/90 transition-colors">
-                <Settings2 className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="space-y-3 relative before:absolute before:inset-y-0 before:left-3 before:w-px before:bg-muted-foreground/20">
-              <div className="relative pl-8">
-                <div className="absolute left-[11px] top-1/2 w-4 h-px bg-muted-foreground/20 -translate-y-1/2" />
-                <div className="bg-muted/50 border border-border/50 hover:border-border/80 hover:bg-muted p-3 rounded-lg flex items-center gap-3 transition-colors cursor-pointer">
-                  <span className="text-xs font-mono text-muted-foreground w-6">01</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">Main House Battery</p>
-                    <p className="text-[10px] text-muted-foreground/80 uppercase tracking-wider mt-0.5">JK BMS Modbus</p>
-                  </div>
-                  <div className="h-1.5 w-1.5 rounded-full bg-primary" />
-                </div>
-              </div>
-
-              <div className="relative pl-8">
-                <div className="absolute left-[11px] top-1/2 w-4 h-px bg-muted-foreground/20 -translate-y-1/2" />
-                <div className="bg-muted/50 border border-border/50 hover:border-border/80 hover:bg-muted p-3 rounded-lg flex items-center gap-3 transition-colors cursor-pointer">
-                  <span className="text-xs font-mono text-muted-foreground w-6">02</span>
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">Garage Battery</p>
-                    <p className="text-[10px] text-muted-foreground/80 uppercase tracking-wider mt-0.5">Daly BMS</p>
-                  </div>
-                  <div className="h-1.5 w-1.5 rounded-full bg-red-500" />
-                </div>
-              </div>
-            </div>
-
-            <button className="w-full mt-4 py-2 bg-muted hover:bg-muted-foreground/20 border border-dashed border-border/80 hover:border-muted-foreground text-muted-foreground hover:text-foreground rounded-lg text-xs transition-colors font-medium">
-              + Map Node to this Bus
-            </button>
           </div>
+        </div>
 
-          {/* BLE Network Node */}
-          <div className="bg-card text-card-foreground/80 backdrop-blur-xl border border-border rounded-xl p-5 shadow-2xl w-80 relative group hover:border-border/80 transition-colors">
-            <div className="absolute -top-3 left-1/2 -translate-x-1/2 bg-muted border border-border px-3 py-1 rounded-full flex items-center gap-2">
-              <Radio className="h-3 w-3 text-blue-500" />
-              <span className="text-[10px] font-mono text-foreground/90">hci0</span>
-            </div>
-            
-            <div className="flex items-center justify-between mb-4 mt-2">
-              <h3 className="font-semibold text-foreground flex items-center gap-2">
-                <Zap className="h-4 w-4 text-blue-500" />
-                Bluetooth LE
-              </h3>
-              <button className="text-muted-foreground/80 hover:text-foreground/90 transition-colors">
-                <Settings2 className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="space-y-3 relative before:absolute before:inset-y-0 before:left-3 before:w-px before:bg-muted-foreground/20/50 before:border-r before:border-dashed before:border-border">
-              <div className="relative pl-8">
-                <div className="absolute left-[11px] top-1/2 w-4 h-px border-t border-dashed border-border -translate-y-1/2" />
-                <div className="bg-muted/50 border border-border/50 hover:border-border/80 hover:bg-muted p-3 rounded-lg flex items-center gap-3 transition-colors cursor-pointer">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-sm font-medium text-foreground truncate">Portable Station</p>
-                    <p className="text-[10px] font-mono text-muted-foreground/80 mt-0.5">C4:A1:..:9B</p>
-                  </div>
-                  <div className="h-1.5 w-1.5 rounded-full bg-primary" />
-                </div>
-              </div>
-            </div>
-
-            <button className="w-full mt-4 flex justify-between items-center px-4 py-2 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 hover:border-blue-500/40 text-blue-400 hover:text-blue-300 rounded-lg text-xs transition-colors font-medium">
-              <span>Scan for devices</span>
-              <Wifi className="h-3 w-3" />
-            </button>
-          </div>
-
+        <div className='flex flex-wrap gap-3'>
+          <Button type='button' variant='outline' size='lg' onClick={addDevice}>
+            <Plus className='h-4 w-4' />
+            Add device
+          </Button>
+          <Button type='button' size='lg' onClick={saveDevices} disabled={isLoading || isSaving}>
+            {isSaving ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Save className='h-4 w-4' />}
+            Save devices
+          </Button>
         </div>
       </div>
+
+      {loadError ? (
+        <div className='rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive'>
+          {loadError}
+        </div>
+      ) : null}
+
+      {saveMessage ? (
+        <div className='rounded-xl border border-border bg-muted/60 px-4 py-3 text-sm text-foreground'>
+          {saveMessage}
+        </div>
+      ) : null}
+
+      {isLoading ? (
+        <div className='flex min-h-64 items-center justify-center rounded-2xl border border-border bg-card/50'>
+          <LoaderCircle className='h-6 w-6 animate-spin text-primary' />
+        </div>
+      ) : (
+        <div className='grid gap-4'>
+          {devices.map((device, index) => (
+            <section key={`${device.deviceId}-${index}`} className='rounded-2xl border border-border bg-card/70 p-5 shadow-sm'>
+              <div className='mb-5 flex flex-col gap-3 border-b border-border pb-4 md:flex-row md:items-center md:justify-between'>
+                <div>
+                  <h3 className='text-lg font-semibold text-foreground'>{device.displayName || `Device ${index + 1}`}</h3>
+                  <p className='mt-1 text-xs font-mono text-muted-foreground'>{device.deviceId || 'device-id-required'}</p>
+                </div>
+                <Button type='button' variant='destructive' onClick={() => removeDevice(index)}>
+                  <Trash2 className='h-4 w-4' />
+                  Remove
+                </Button>
+              </div>
+
+              <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-4'>
+                <label className='space-y-2 text-sm text-foreground'>
+                  <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device ID</span>
+                  <Input value={device.deviceId} onChange={(event) => updateDevice(index, 'deviceId', event.target.value)} />
+                </label>
+                <label className='space-y-2 text-sm text-foreground'>
+                  <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Display name</span>
+                  <Input value={device.displayName} onChange={(event) => updateDevice(index, 'displayName', event.target.value)} />
+                </label>
+                <label className='space-y-2 text-sm text-foreground'>
+                  <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Protocol</span>
+                  <Input value={device.protocol} onChange={(event) => updateDevice(index, 'protocol', event.target.value)} />
+                </label>
+                <label className='space-y-2 text-sm text-foreground'>
+                  <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Register profile</span>
+                  <Input value={device.registerProfile} onChange={(event) => updateDevice(index, 'registerProfile', event.target.value)} />
+                </label>
+                <label className='space-y-2 text-sm text-foreground'>
+                  <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Address</span>
+                  <Input
+                    type='number'
+                    min={0}
+                    max={255}
+                    value={device.address}
+                    onChange={(event) => updateDevice(index, 'address', Number(event.target.value))}
+                  />
+                </label>
+                <label className='space-y-2 text-sm text-foreground'>
+                  <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Poll interval ms</span>
+                  <Input
+                    type='number'
+                    min={1}
+                    value={device.pollIntervalMilliseconds}
+                    onChange={(event) => updateDevice(index, 'pollIntervalMilliseconds', Number(event.target.value))}
+                  />
+                </label>
+                <div className='rounded-xl border border-border bg-muted/40 px-4 py-3'>
+                  <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Master device</div>
+                  <div className='mt-3 flex items-center justify-between gap-3'>
+                    <span className='text-sm text-foreground'>Prioritize this device in status views</span>
+                    <Switch checked={device.isMaster} onCheckedChange={(checked) => updateDevice(index, 'isMaster', checked)} />
+                  </div>
+                </div>
+                <div className='rounded-xl border border-border bg-muted/40 px-4 py-3'>
+                  <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Enabled</div>
+                  <div className='mt-3 flex items-center justify-between gap-3'>
+                    <span className='text-sm text-foreground'>Include this device in polling</span>
+                    <Switch checked={device.enabled} onCheckedChange={(checked) => updateDevice(index, 'enabled', checked)} />
+                  </div>
+                </div>
+              </div>
+            </section>
+          ))}
+
+          {devices.length === 0 ? (
+            <div className='rounded-2xl border border-dashed border-border bg-card/40 px-6 py-12 text-center'>
+              <div className='text-lg font-semibold text-foreground'>No devices configured</div>
+              <p className='mt-2 text-sm text-muted-foreground'>Create the first device and save to write an empty or populated device list back to JSON.</p>
+              <div className='mt-6'>
+                <Button type='button' onClick={addDevice}>
+                  <Plus className='h-4 w-4' />
+                  Add first device
+                </Button>
+              </div>
+            </div>
+          ) : null}
+        </div>
+      )}
     </div>
   );
 }

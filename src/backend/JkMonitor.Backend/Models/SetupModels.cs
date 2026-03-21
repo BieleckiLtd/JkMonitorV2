@@ -1,3 +1,5 @@
+using JkMonitor.Contracts.Configuration;
+
 namespace JkMonitor.Backend.Models;
 
 public sealed record class SetupStateResponse
@@ -39,4 +41,16 @@ public sealed record class ApplySetupResponse
     public required bool RestartScheduled { get; init; }
 
     public required string Message { get; init; }
+}
+
+public sealed record class DeviceConfigurationStateResponse
+{
+    public required string ConfigurationFile { get; init; }
+
+    public required IReadOnlyList<BmsDeviceConfiguration> Devices { get; init; }
+}
+
+public sealed record class SaveDeviceConfigurationRequest
+{
+    public IReadOnlyList<BmsDeviceConfiguration> Devices { get; init; } = [];
 }

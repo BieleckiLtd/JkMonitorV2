@@ -1,16 +1,16 @@
 using System.IO.Ports;
 using System.Runtime.Versioning;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using JkMonitor.Backend.Models;
 using JkMonitor.Contracts.Configuration;
-using Microsoft.Extensions.Options;
 using Microsoft.Win32;
 
 namespace JkMonitor.Backend.Services;
 
 public sealed class SetupConfigurationService(
     IHostEnvironment environment,
-    IOptions<MonitorConfiguration> configuration,
+    IConfiguration appConfiguration,
     ManagedRestartService managedRestartService,
     ILogger<SetupConfigurationService> logger)
 {
@@ -20,23 +20,56 @@ public sealed class SetupConfigurationService(
     };
 
     private readonly string _contentRoot = environment.ContentRootPath;
-    private readonly MonitorConfiguration _configuration = configuration.Value;
 
     public SetupStateResponse GetState()
     {
-        var startupMode = GetStartupMode(_configuration.SerialBus.PortName);
-        var serialPort = startupMode == "Hardware" ? _configuration.SerialBus.PortName : null;
+        var configuration = GetMonitorConfiguration();
+        var startupMode = GetStartupMode(configuration.SerialBus.PortName);
+        var serialPort = startupMode == "Hardware" ? configuration.SerialBus.PortName : null;
 
         return new SetupStateResponse
         {
             CurrentStartupMode = startupMode,
             EnvironmentName = environment.EnvironmentName,
-            UseDatabase = string.Equals(_configuration.Storage.Provider, "TimescaleDb", StringComparison.OrdinalIgnoreCase),
-            ConnectionString = _configuration.Storage.ConnectionString,
+            UseDatabase = string.Equals(configuration.Storage.Provider, "TimescaleDb", StringComparison.OrdinalIgnoreCase),
+            ConnectionString = configuration.Storage.ConnectionString,
             SerialPort = serialPort,
             SerialPorts = GetSerialPorts(),
             CanAutoRestart = managedRestartService.CanAutoRestart,
             ApplyMessage = managedRestartService.GetApplyMessage()
+        };
+    }
+
+    public DeviceConfigurationStateResponse GetDeviceConfiguration()
+    {
+        var configuration = GetMonitorConfiguration();
+        var path = GetEnvironmentLocalSettingsPath(environment.EnvironmentName);
+
+        return new DeviceConfigurationStateResponse
+        {
+            ConfigurationFile = Path.GetFileName(path),
+            Devices = configuration.Devices.Select(CloneDevice).ToArray()
+        };
+    }
+
+    public DeviceConfigurationStateResponse SaveDevices(SaveDeviceConfigurationRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        var devices = NormalizeDevices(request.Devices);
+        var path = GetEnvironmentLocalSettingsPath(environment.EnvironmentName);
+
+        UpdateJson(path, monitor =>
+        {
+            monitor["Devices"] = JsonSerializer.SerializeToNode(devices, JsonOptions) ?? new JsonArray();
+        });
+
+        logger.LogInformation("Saved {DeviceCount} device definitions to {ConfigurationFile}.", devices.Count, Path.GetFileName(path));
+
+        return new DeviceConfigurationStateResponse
+        {
+            ConfigurationFile = Path.GetFileName(path),
+            Devices = devices
         };
     }
 
@@ -58,50 +91,31 @@ public sealed class SetupConfigurationService(
 
         if (startupMode == "Simulator")
         {
-            WriteJson(Path.Combine(_contentRoot, "appsettings.Development.Local.json"), new
+            UpdateJson(GetEnvironmentLocalSettingsPath("Development"), monitor =>
             {
-                Monitor = new
+                UpsertObject(monitor, "Storage", storage =>
                 {
-                    Storage = new
-                    {
-                        Provider = useDatabase ? "TimescaleDb" : "None",
-                        ConnectionString = connectionString
-                    }
-                }
+                    storage["Provider"] = useDatabase ? "TimescaleDb" : "None";
+                    storage["ConnectionString"] = connectionString;
+                });
             });
 
             UpdateManagedEnvironmentFile("Development");
         }
         else
         {
-            WriteJson(Path.Combine(_contentRoot, "appsettings.Production.Local.json"), new
+            UpdateJson(GetEnvironmentLocalSettingsPath("Production"), monitor =>
             {
-                Monitor = new
+                UpsertObject(monitor, "SerialBus", serialBus =>
                 {
-                    SerialBus = new
-                    {
-                        PortName = request.SerialPort!.Trim()
-                    },
-                    Storage = new
-                    {
-                        Provider = useDatabase ? "TimescaleDb" : "None",
-                        ConnectionString = connectionString
-                    },
-                    Devices = new[]
-                    {
-                        new
-                        {
-                            DeviceId = "jk-master-01",
-                            DisplayName = "Main Battery Rack",
-                            Protocol = "jk-rs485",
-                            RegisterProfile = "jk-inverter-v15",
-                            Address = 1,
-                            IsMaster = true,
-                            PollIntervalMilliseconds = 1000,
-                            Enabled = true
-                        }
-                    }
-                }
+                    serialBus["PortName"] = request.SerialPort!.Trim();
+                });
+
+                UpsertObject(monitor, "Storage", storage =>
+                {
+                    storage["Provider"] = useDatabase ? "TimescaleDb" : "None";
+                    storage["ConnectionString"] = connectionString;
+                });
             });
 
             UpdateManagedEnvironmentFile("Production");
@@ -241,9 +255,140 @@ public sealed class SetupConfigurationService(
         };
     }
 
-    private static void WriteJson(string path, object value)
+    private MonitorConfiguration GetMonitorConfiguration()
     {
-        var json = JsonSerializer.Serialize(value, JsonOptions);
+        return appConfiguration.GetSection("Monitor").Get<MonitorConfiguration>()
+            ?? throw new InvalidOperationException("Monitor configuration is missing or invalid.");
+    }
+
+    private string GetEnvironmentLocalSettingsPath(string environmentName)
+    {
+        return Path.Combine(_contentRoot, $"appsettings.{environmentName}.Local.json");
+    }
+
+    private void UpdateJson(string path, Action<JsonObject> updateMonitor)
+    {
+        var root = LoadJsonObject(path);
+        var monitor = GetOrCreateObject(root, "Monitor");
+
+        updateMonitor(monitor);
+
+        WriteJson(path, root);
+    }
+
+    private static JsonObject LoadJsonObject(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return new JsonObject();
+        }
+
+        var json = File.ReadAllText(path);
+
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return new JsonObject();
+        }
+
+        return JsonNode.Parse(json) as JsonObject
+            ?? throw new InvalidOperationException($"Configuration file '{Path.GetFileName(path)}' must contain a JSON object.");
+    }
+
+    private static JsonObject GetOrCreateObject(JsonObject parent, string propertyName)
+    {
+        if (parent[propertyName] is JsonObject existing)
+        {
+            return existing;
+        }
+
+        if (parent[propertyName] is not null)
+        {
+            throw new InvalidOperationException($"Configuration section '{propertyName}' must be a JSON object.");
+        }
+
+        var created = new JsonObject();
+        parent[propertyName] = created;
+        return created;
+    }
+
+    private static void UpsertObject(JsonObject parent, string propertyName, Action<JsonObject> updateChild)
+    {
+        var child = GetOrCreateObject(parent, propertyName);
+        updateChild(child);
+    }
+
+    private static IReadOnlyList<BmsDeviceConfiguration> NormalizeDevices(IReadOnlyList<BmsDeviceConfiguration> devices)
+    {
+        ArgumentNullException.ThrowIfNull(devices);
+
+        var normalized = new List<BmsDeviceConfiguration>(devices.Count);
+        var deviceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        for (var index = 0; index < devices.Count; index++)
+        {
+            var device = devices[index] ?? throw new InvalidOperationException($"Device at index {index} is missing.");
+            var normalizedDevice = new BmsDeviceConfiguration
+            {
+                DeviceId = RequireValue(device.DeviceId, nameof(BmsDeviceConfiguration.DeviceId), index),
+                DisplayName = RequireValue(device.DisplayName, nameof(BmsDeviceConfiguration.DisplayName), index),
+                Protocol = RequireValue(device.Protocol, nameof(BmsDeviceConfiguration.Protocol), index),
+                RegisterProfile = RequireValue(device.RegisterProfile, nameof(BmsDeviceConfiguration.RegisterProfile), index),
+                Address = device.Address,
+                IsMaster = device.IsMaster,
+                PollIntervalMilliseconds = device.PollIntervalMilliseconds,
+                Enabled = device.Enabled
+            };
+
+            if (normalizedDevice.PollIntervalMilliseconds <= 0)
+            {
+                throw new InvalidOperationException($"Device '{normalizedDevice.DeviceId}' must use a positive poll interval.");
+            }
+
+            if (!deviceIds.Add(normalizedDevice.DeviceId))
+            {
+                throw new InvalidOperationException($"Device id '{normalizedDevice.DeviceId}' is duplicated.");
+            }
+
+            normalized.Add(normalizedDevice);
+        }
+
+        return normalized;
+    }
+
+    private static string RequireValue(string? value, string propertyName, int index)
+    {
+        var trimmed = value?.Trim();
+
+        return string.IsNullOrWhiteSpace(trimmed)
+            ? throw new InvalidOperationException($"Device at index {index} is missing {propertyName}.")
+            : trimmed;
+    }
+
+    private static BmsDeviceConfiguration CloneDevice(BmsDeviceConfiguration device)
+    {
+        return new BmsDeviceConfiguration
+        {
+            DeviceId = device.DeviceId,
+            DisplayName = device.DisplayName,
+            Protocol = device.Protocol,
+            RegisterProfile = device.RegisterProfile,
+            Address = device.Address,
+            IsMaster = device.IsMaster,
+            PollIntervalMilliseconds = device.PollIntervalMilliseconds,
+            Enabled = device.Enabled
+        };
+    }
+
+    private static void WriteJson(string path, JsonNode value)
+    {
+        var directory = Path.GetDirectoryName(path);
+
+        if (!string.IsNullOrWhiteSpace(directory))
+        {
+            Directory.CreateDirectory(directory);
+        }
+
+        var json = value.ToJsonString(JsonOptions);
         File.WriteAllText(path, json + Environment.NewLine);
     }
 }
