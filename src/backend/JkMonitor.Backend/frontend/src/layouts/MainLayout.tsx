@@ -27,7 +27,7 @@ export function Sidebar() {
       )}
     >
       <div className="h-14 flex items-center justify-center border-b border-border">
-        <Activity className="h-6 w-6 text-emerald-500 shrink-0" />
+        <Activity className="h-6 w-6 text-primary shrink-0" />
         {isSidebarOpen && (
           <span className="ml-3 font-semibold text-foreground tracking-tight whitespace-nowrap overflow-hidden text-ellipsis">
             JK Monitor <span className="text-muted-foreground/70 font-light">V2</span>
@@ -44,7 +44,7 @@ export function Sidebar() {
               cn(
                 "flex items-center px-2 py-2.5 rounded-md transition-colors group relative",
                 isActive 
-                  ? "bg-emerald-500/10 text-emerald-400" 
+                  ? "bg-primary/10 text-primary" 
                   : "text-muted-foreground hover:bg-muted hover:text-foreground"
               )
             }
@@ -86,9 +86,9 @@ export function Header() {
       
       <div className="flex items-center gap-3">
         {/* Status Indicators */}
-        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-emerald-500/10 border border-emerald-500/20">
-          <div className="h-2 w-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-xs font-medium text-emerald-400">System Healthy</span>
+        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/20">
+          <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
+          <span className="text-xs font-medium text-primary">System Healthy</span>
         </div>
       </div>
     </header>
@@ -96,14 +96,9 @@ export function Header() {
 }
 
 export function MainLayout({ children }: { children: ReactNode }) {
-  const activeThemeId = useAppStore((state) => state.activeThemeId);
-  const theme = useAppStore((state) => state.themes.find(t => t.id === activeThemeId)?.mode || 'dark');
 
   return (
-    <div className={cn(
-      "h-screen w-full flex overflow-hidden font-sans text-foreground/90 bg-background",
-      theme
-    )}>
+    <div className="h-screen w-full flex overflow-hidden font-sans text-foreground bg-background">
       <Sidebar />
       <div className="flex flex-col flex-1 min-w-0 h-full">
         <Header />

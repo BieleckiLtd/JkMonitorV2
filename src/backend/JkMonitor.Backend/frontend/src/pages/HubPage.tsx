@@ -13,14 +13,14 @@ export function HubPage() {
           <input
             type="text"
             placeholder="Search integrations (e.g., Victron, Deye, USB-TTL)..."
-            className="w-full bg-muted border border-border text-sm text-foreground rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all placeholder:text-zinc-600"
+            className="w-full bg-muted border border-border text-sm text-foreground rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all placeholder:text-muted-foreground"
           />
         </div>
         <div className="flex gap-2">
-          <button className="px-4 py-2 bg-muted-foreground/20 hover:bg-zinc-700 text-sm font-medium rounded-lg text-foreground transition-colors">
+          <button className="px-4 py-2 bg-muted-foreground/20 hover:bg-muted-foreground text-sm font-medium rounded-lg text-foreground transition-colors">
             Updates (2)
           </button>
-          <button className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-sm font-medium rounded-lg text-foreground transition-colors shadow-sm shadow-emerald-900/50">
+          <button className="px-4 py-2 bg-primary hover:opacity-90 text-sm font-medium rounded-lg text-primary-foreground transition-colors shadow-sm shadow-primary/50">
             Publish New Plugin
           </button>
         </div>
@@ -43,7 +43,7 @@ export function HubPage() {
                   {plugin.type}
                 </span>
               </div>
-              <p className="text-xs text-emerald-500 mb-3">by {plugin.author}</p>
+              <p className="text-xs text-primary mb-3">by {plugin.author}</p>
               <p className="text-sm text-muted-foreground line-clamp-3 leading-relaxed">
                 {plugin.desc}
               </p>
@@ -54,7 +54,7 @@ export function HubPage() {
               {plugin.installs === "Pre-installed" ? (
                 <span className="text-sm text-muted-foreground font-medium">Installed</span>
               ) : (
-                <button className="text-sm font-medium text-emerald-400 hover:text-emerald-300 opacity-0 group-hover:opacity-100 transition-opacity">
+                <button className="text-sm font-medium text-primary hover:opacity-80 opacity-0 group-hover:opacity-100 transition-opacity">
                   Install Plugin
                 </button>
               )}

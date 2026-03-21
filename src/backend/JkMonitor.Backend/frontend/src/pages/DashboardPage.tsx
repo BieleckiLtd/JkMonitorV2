@@ -11,7 +11,7 @@ export function DashboardPage() {
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
         {[
           { title: "Total Devices", value: "24", sub: "+3 recently", color: "text-blue-500" },
-          { title: "Active BMS", value: "18", sub: "All Nominal", color: "text-emerald-500" },
+          { title: "Active BMS", value: "18", sub: "All Nominal", color: "text-primary" },
           { title: "Data Ingress", value: "1.2k req/s", sub: "Peak 1.5k", color: "text-amber-500" },
           { title: "Errors (24h)", value: "0", sub: "System Stable", color: "text-red-500" },
         ].map((stat, i) => (
@@ -31,14 +31,14 @@ export function DashboardPage() {
           <h3 className="font-semibold text-foreground mb-4">Recent Events</h3>
           <ul className="space-y-4">
             <li className="flex items-start gap-3">
-              <span className="h-2 w-2 rounded-full bg-emerald-500 mt-1.5 shrink-0" />
+              <span className="h-2 w-2 rounded-full bg-primary mt-1.5 shrink-0" />
               <div>
                 <p className="text-sm text-foreground">Device Added: JK-BMS-01</p>
                 <p className="text-xs text-muted-foreground font-mono">2 mins ago via RS485-1</p>
               </div>
             </li>
             <li className="flex items-start gap-3">
-              <span className="h-2 w-2 rounded-full bg-emerald-500 mt-1.5 shrink-0" />
+              <span className="h-2 w-2 rounded-full bg-primary mt-1.5 shrink-0" />
               <div>
                 <p className="text-sm text-foreground">Community Plugin Updated</p>
                 <p className="text-xs text-muted-foreground font-mono">1 hr ago: Victron Inverter Modbus</p>

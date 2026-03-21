@@ -67,6 +67,8 @@ If the repo is already on disk, or the software was already installed previously
 - Windows: `./scripts/setup.ps1` or `./scripts/update.ps1`
 - Linux or macOS: `./scripts/setup.sh` or `./scripts/update.sh`
 
+For local development in VS Code on Windows, open the repository root and use the `Run JkMonitor locally` launch profile. Press `F5` or use Run and Debug. The prelaunch task installs frontend packages when needed, builds the frontend into `wwwroot`, builds the backend, starts the app in Development mode, and opens the browser at `http://localhost:5074`.
+
 ## Install Directly From GitHub
 
 If you need a customizable GitHub install command instead of the default repo and branch, use these forms.

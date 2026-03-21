@@ -11,7 +11,7 @@ export function DevicesPage() {
       </div>
 
       <div className="flex items-center justify-between mt-8">
-        <button className="flex items-center gap-2 px-4 py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm text-foreground font-medium shadow-sm transition-all focus:ring-2 focus:ring-emerald-500 focus:ring-offset-2 focus:ring-offset-zinc-950">
+        <button className="flex items-center gap-2 px-4 py-2 bg-primary hover:opacity-90 rounded-lg text-sm text-primary-foreground font-medium shadow-sm transition-all focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background">
           <Plus className="h-4 w-4" /> Add Virtual Interface
         </button>
         <div className="flex bg-muted border border-border rounded-lg p-1">
@@ -20,7 +20,7 @@ export function DevicesPage() {
         </div>
       </div>
 
-      <div className="bg-[#09090b] border border-border rounded-xl min-h-[600px] mt-6 relative overflow-hidden flex shadow-inner">
+      <div className="bg-muted border border-border rounded-xl min-h-[600px] mt-6 relative overflow-hidden flex shadow-inner">
         {/* Grid Background */}
         <div className="absolute inset-0 z-0 opacity-[0.15]" 
           style={{ backgroundImage: 'radial-gradient(circle at 2px 2px, var(--border) 2px, transparent 0)', backgroundSize: '48px 48px', backgroundPosition: 'center' }} 
@@ -32,17 +32,17 @@ export function DevicesPage() {
           {/* Host Controller Node */}
           <div className="absolute top-8 left-1/2 -translate-x-1/2 bg-card text-card-foreground/90 border border-border rounded-xl p-4 flex items-center gap-4 shadow-2xl backdrop-blur-md">
             <div className="h-10 w-10 rounded-lg bg-muted border border-border flex items-center justify-center">
-              <Cpu className="h-5 w-5 text-emerald-500" />
+              <Cpu className="h-5 w-5 text-primary" />
             </div>
             <div>
               <h3 className="text-sm font-semibold text-foreground">JK Monitor Edge</h3>
               <p className="text-xs text-muted-foreground/80 font-mono">10.0.0.89 • aarch64</p>
             </div>
-            <div className="h-2 w-2 rounded-full bg-emerald-500 ml-4 animate-pulse shadow-[0_0_8px_rgba(16,185,129,0.8)]" />
+            <div className="h-2 w-2 rounded-full bg-primary ml-4 animate-pulse shadow-[0_0_8px_var(--primary)]" />
           </div>
 
           {/* Connection Lines (CSS visually mocked for layout) */}
-          <div className="hidden md:block absolute top-[88px] left-1/2 bottom-0 w-px bg-gradient-to-b from-zinc-700/50 to-transparent -translate-x-1/2 z-0" />
+          <div className="hidden md:block absolute top-[88px] left-1/2 bottom-0 w-px bg-gradient-to-b from-muted-foreground/30 to-transparent -translate-x-1/2 z-0" />
 
           {/* RS485 Bus Node */}
           <div className="bg-card text-card-foreground/80 backdrop-blur-xl border border-border rounded-xl p-5 shadow-2xl w-80 relative group hover:border-border/80 transition-colors">
@@ -65,19 +65,19 @@ export function DevicesPage() {
               <div className="relative pl-8">
                 <div className="absolute left-[11px] top-1/2 w-4 h-px bg-muted-foreground/20 -translate-y-1/2" />
                 <div className="bg-muted/50 border border-border/50 hover:border-border/80 hover:bg-muted p-3 rounded-lg flex items-center gap-3 transition-colors cursor-pointer">
-                  <span className="text-xs font-mono text-zinc-600 w-6">01</span>
+                  <span className="text-xs font-mono text-muted-foreground w-6">01</span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-foreground truncate">Main House Battery</p>
                     <p className="text-[10px] text-muted-foreground/80 uppercase tracking-wider mt-0.5">JK BMS Modbus</p>
                   </div>
-                  <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  <div className="h-1.5 w-1.5 rounded-full bg-primary" />
                 </div>
               </div>
 
               <div className="relative pl-8">
                 <div className="absolute left-[11px] top-1/2 w-4 h-px bg-muted-foreground/20 -translate-y-1/2" />
                 <div className="bg-muted/50 border border-border/50 hover:border-border/80 hover:bg-muted p-3 rounded-lg flex items-center gap-3 transition-colors cursor-pointer">
-                  <span className="text-xs font-mono text-zinc-600 w-6">02</span>
+                  <span className="text-xs font-mono text-muted-foreground w-6">02</span>
                   <div className="flex-1 min-w-0">
                     <p className="text-sm font-medium text-foreground truncate">Garage Battery</p>
                     <p className="text-[10px] text-muted-foreground/80 uppercase tracking-wider mt-0.5">Daly BMS</p>
@@ -87,7 +87,7 @@ export function DevicesPage() {
               </div>
             </div>
 
-            <button className="w-full mt-4 py-2 bg-muted hover:bg-muted-foreground/20 border border-dashed border-border/80 hover:border-zinc-600 text-muted-foreground hover:text-foreground rounded-lg text-xs transition-colors font-medium">
+            <button className="w-full mt-4 py-2 bg-muted hover:bg-muted-foreground/20 border border-dashed border-border/80 hover:border-muted-foreground text-muted-foreground hover:text-foreground rounded-lg text-xs transition-colors font-medium">
               + Map Node to this Bus
             </button>
           </div>
@@ -117,7 +117,7 @@ export function DevicesPage() {
                     <p className="text-sm font-medium text-foreground truncate">Portable Station</p>
                     <p className="text-[10px] font-mono text-muted-foreground/80 mt-0.5">C4:A1:..:9B</p>
                   </div>
-                  <div className="h-1.5 w-1.5 rounded-full bg-emerald-500" />
+                  <div className="h-1.5 w-1.5 rounded-full bg-primary" />
                 </div>
               </div>
             </div>
