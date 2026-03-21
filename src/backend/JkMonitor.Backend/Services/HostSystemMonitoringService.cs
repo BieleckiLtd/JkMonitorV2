@@ -30,6 +30,7 @@ public sealed class HostSystemMonitoringService(ILogger<HostSystemMonitoringServ
             MemoryTotalBytes = memoryInfo.totalBytes,
             StorageUsedBytes = storageInfo.usedBytes,
             StorageTotalBytes = storageInfo.totalBytes,
+            MainFanSpeedRpm = GetMainFanSpeedRpm(),
             SystemTemperatureCelsius = GetSystemTemperatureCelsius()
         };
     }
@@ -441,6 +442,44 @@ public sealed class HostSystemMonitoringService(ILogger<HostSystemMonitoringServ
         return null;
     }
 
+    private int? GetMainFanSpeedRpm()
+    {
+        try
+        {
+            if (!OperatingSystem.IsLinux())
+            {
+                return null;
+            }
+
+            FanSpeedReading? bestReading = null;
+
+            foreach (var sensor in GetLinuxFanSensors())
+            {
+                var rpm = ReadLinuxFanSpeedRpm(sensor.InputPath);
+
+                if (rpm is null)
+                {
+                    continue;
+                }
+
+                if (bestReading is null
+                    || sensor.Priority > bestReading.Value.Priority
+                    || (sensor.Priority == bestReading.Value.Priority && rpm.Value > bestReading.Value.SpeedRpm))
+                {
+                    bestReading = new FanSpeedReading(rpm.Value, sensor.Priority);
+                }
+            }
+
+            return bestReading?.SpeedRpm;
+        }
+        catch (Exception exception)
+        {
+            logger.LogDebug(exception, "Failed to read main fan speed.");
+        }
+
+        return null;
+    }
+
     private static IEnumerable<string> GetLinuxTemperatureSensorPaths()
     {
         const string thermalRoot = "/sys/class/thermal";
@@ -468,7 +507,120 @@ public sealed class HostSystemMonitoringService(ILogger<HostSystemMonitoringServ
         }
     }
 
+    private static IEnumerable<FanSensor> GetLinuxFanSensors()
+    {
+        const string hwmonRoot = "/sys/class/hwmon";
+
+        if (!Directory.Exists(hwmonRoot))
+        {
+            yield break;
+        }
+
+        foreach (var hwmonDirectory in Directory.GetDirectories(hwmonRoot, "hwmon*"))
+        {
+            foreach (var inputPath in Directory.GetFiles(hwmonDirectory, "fan*_input"))
+            {
+                yield return new FanSensor(inputPath, GetLinuxFanSensorPriority(hwmonDirectory, inputPath));
+            }
+        }
+    }
+
+    private static int GetLinuxFanSensorPriority(string hwmonDirectory, string inputPath)
+    {
+        var score = 0;
+        var inputFileName = Path.GetFileName(inputPath);
+
+        if (string.Equals(inputFileName, "fan1_input", StringComparison.OrdinalIgnoreCase))
+        {
+            score += 10;
+        }
+
+        var labelPath = inputPath.Replace("_input", "_label", StringComparison.OrdinalIgnoreCase);
+        var label = ReadLinuxSensorText(labelPath);
+
+        if (!string.IsNullOrWhiteSpace(label))
+        {
+            score += GetLinuxFanLabelPriority(label);
+        }
+
+        var deviceName = ReadLinuxSensorText(Path.Combine(hwmonDirectory, "name"));
+
+        if (!string.IsNullOrWhiteSpace(deviceName))
+        {
+            var normalizedDeviceName = deviceName.Trim().ToLowerInvariant();
+
+            if (normalizedDeviceName.Contains("fan", StringComparison.Ordinal))
+            {
+                score += 5;
+            }
+
+            if (normalizedDeviceName.Contains("emc", StringComparison.Ordinal))
+            {
+                score += 5;
+            }
+        }
+
+        return score;
+    }
+
+    private static int GetLinuxFanLabelPriority(string label)
+    {
+        var normalizedLabel = label.Trim().ToLowerInvariant();
+        var score = 0;
+
+        if (normalizedLabel.Contains("main", StringComparison.Ordinal))
+        {
+            score += 100;
+        }
+
+        if (normalizedLabel.Contains("cpu", StringComparison.Ordinal))
+        {
+            score += 90;
+        }
+
+        if (normalizedLabel.Contains("system", StringComparison.Ordinal)
+            || normalizedLabel.Contains("chassis", StringComparison.Ordinal)
+            || normalizedLabel.Contains("case", StringComparison.Ordinal))
+        {
+            score += 80;
+        }
+
+        return score;
+    }
+
+    private static string? ReadLinuxSensorText(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        var value = File.ReadAllText(path).Trim();
+        return value.Length > 0 ? value : null;
+    }
+
+    private static int? ReadLinuxFanSpeedRpm(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        var rawValue = File.ReadAllText(path).Trim();
+
+        if (!int.TryParse(rawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var rpm) || rpm < 0)
+        {
+            return null;
+        }
+
+        return rpm;
+    }
+
     private readonly record struct CpuSnapshot(ulong IdleTime, ulong TotalTime);
+
+    private readonly record struct FanSensor(string InputPath, int Priority);
+
+    private readonly record struct FanSpeedReading(int SpeedRpm, int Priority);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct FileTime

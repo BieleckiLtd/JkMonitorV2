@@ -70,5 +70,7 @@ public sealed record class SystemRuntimeMetrics
 
     public long? StorageTotalBytes { get; init; }
 
+    public int? MainFanSpeedRpm { get; init; }
+
     public double? SystemTemperatureCelsius { get; init; }
 }

@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Activity, CircleAlert, Cpu, Gauge, HardDrive, LoaderCircle, MemoryStick, Thermometer } from 'lucide-react';
+import { Activity, CircleAlert, Cpu, Gauge, HardDrive, LoaderCircle, MemoryStick } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { cn } from '../lib/utils';
 
@@ -35,6 +35,7 @@ type SystemRuntimeMetrics = {
   memoryTotalBytes?: number | null;
   storageUsedBytes?: number | null;
   storageTotalBytes?: number | null;
+  mainFanSpeedRpm?: number | null;
   systemTemperatureCelsius?: number | null;
 };
 
@@ -51,6 +52,7 @@ type MonitorRuntimeStatus = {
 };
 
 const refreshIntervalMs = 5000;
+const noDataLabel = 'N/D';
 
 export function DashboardPage() {
   const [status, setStatus] = useState<MonitorRuntimeStatus | null>(null);
@@ -118,7 +120,7 @@ export function DashboardPage() {
   const storageTotal = metrics?.storageTotalBytes ?? null;
   const memoryUsagePercent = getUsagePercent(memoryUsed, memoryTotal);
   const storageUsagePercent = getUsagePercent(storageUsed, storageTotal);
-  const applicationUptime = status ? formatDuration(status.startedAt, status.reportedAt) : 'Unavailable';
+  const applicationUptime = status ? formatDuration(status.startedAt, status.reportedAt) : noDataLabel;
   const deviceCount = status?.devices.length ?? 0;
   const healthyDevices = status?.devices.filter((device) => device.lastOutcome === 'Succeeded').length ?? 0;
   const failingDevices = status?.devices.filter((device) => device.lastOutcome === 'Failed' || device.lastOutcome === 'PersistFailed').length ?? 0;
@@ -169,6 +171,8 @@ export function DashboardPage() {
           detailLines={[
             `${formatWholeNumber(metrics?.cpuCoreCount)} cores`,
             `${formatWholeNumber(metrics?.processCount)} processes`,
+            `System temperature ${formatDecimalValue(metrics?.systemTemperatureCelsius, '°C')}`,
+            `Fan speed ${formatRpm(metrics?.mainFanSpeedRpm)}`,
             `Host uptime ${formatElapsedDuration(metrics?.systemUptimeSeconds)}`,
             `App uptime ${applicationUptime}`,
           ]}
@@ -221,13 +225,13 @@ export function DashboardPage() {
                   label='Memory'
                   percent={memoryUsagePercent}
                   summary={formatUsage(memoryUsed, memoryTotal)}
-                  secondary={metrics?.memoryAvailableBytes != null ? `${formatBytes(metrics.memoryAvailableBytes)} free` : 'Free memory unavailable'}
+                  secondary={metrics?.memoryAvailableBytes != null ? `${formatBytes(metrics.memoryAvailableBytes)} free` : noDataLabel}
                 />
                 <UsagePanel
                   label='Storage'
                   percent={storageUsagePercent}
                   summary={formatUsage(storageUsed, storageTotal)}
-                  secondary={storageTotal != null && storageUsed != null ? `${formatBytes(Math.max(storageTotal - storageUsed, 0))} free` : 'Free storage unavailable'}
+                  secondary={storageTotal != null && storageUsed != null ? `${formatBytes(Math.max(storageTotal - storageUsed, 0))} free` : noDataLabel}
                 />
               </CardContent>
             </Card>
@@ -311,17 +315,6 @@ export function DashboardPage() {
               </CardContent>
             </Card>
 
-            <Card className='border border-border/80 bg-card/85 shadow-sm'>
-              <CardHeader className='border-b border-border/60 pb-4'>
-                <CardTitle>Thermals and headroom</CardTitle>
-                <CardDescription>Readings that matter most on small hosts such as Raspberry Pi deployments.</CardDescription>
-              </CardHeader>
-              <CardContent className='grid gap-4 pt-5'>
-                <MetricStrip icon={Thermometer} label='System temperature' value={formatDecimalValue(metrics?.systemTemperatureCelsius, '°C')} />
-                <MetricStrip icon={MemoryStick} label='Memory free' value={metrics?.memoryAvailableBytes != null ? formatBytes(metrics.memoryAvailableBytes) : 'Unavailable'} />
-                <MetricStrip icon={HardDrive} label='Storage free' value={storageTotal != null && storageUsed != null ? formatBytes(Math.max(storageTotal - storageUsed, 0)) : 'Unavailable'} />
-              </CardContent>
-            </Card>
           </div>
         </div>
       ) : null}
@@ -396,22 +389,6 @@ function DetailTile({ label, value }: { label: string; value: string }) {
   );
 }
 
-function MetricStrip({ icon: Icon, label, value }: { icon: typeof Cpu; label: string; value: string }) {
-  return (
-    <div className='flex items-center justify-between gap-3 rounded-2xl border border-border/70 bg-background/50 px-4 py-3'>
-      <div className='flex items-center gap-3'>
-        <div className='rounded-xl border border-border/70 bg-card/80 p-2 text-muted-foreground'>
-          <Icon className='h-4 w-4' />
-        </div>
-        <div>
-          <div className='text-sm font-medium text-foreground'>{label}</div>
-        </div>
-      </div>
-      <div className='text-sm font-semibold text-foreground'>{value}</div>
-    </div>
-  );
-}
-
 function StatusChip({ label, value }: { label: string; value: string }) {
   return (
     <div className='rounded-2xl border border-border/70 bg-background/70 px-4 py-3'>
@@ -423,7 +400,7 @@ function StatusChip({ label, value }: { label: string; value: string }) {
 
 function formatBytes(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) {
-    return 'Unavailable';
+    return noDataLabel;
   }
 
   const units = ['B', 'KB', 'MB', 'GB', 'TB'];
@@ -441,7 +418,7 @@ function formatBytes(value: number | null | undefined) {
 
 function formatUsage(usedBytes: number | null, totalBytes: number | null) {
   if (usedBytes == null || totalBytes == null) {
-    return 'Unavailable';
+    return noDataLabel;
   }
 
   return `${formatBytes(usedBytes)} of ${formatBytes(totalBytes)}`;
@@ -449,7 +426,7 @@ function formatUsage(usedBytes: number | null, totalBytes: number | null) {
 
 function formatPercent(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) {
-    return 'Unavailable';
+    return noDataLabel;
   }
 
   return `${value.toFixed(value >= 10 ? 0 : 1)}%`;
@@ -457,7 +434,7 @@ function formatPercent(value: number | null | undefined) {
 
 function formatWholeNumber(value: number | null | undefined) {
   if (value == null || !Number.isFinite(value)) {
-    return 'Unavailable';
+    return noDataLabel;
   }
 
   return Math.round(value).toLocaleString();
@@ -465,7 +442,7 @@ function formatWholeNumber(value: number | null | undefined) {
 
 function formatFrequency(megahertz: number | null | undefined) {
   if (megahertz == null || !Number.isFinite(megahertz)) {
-    return 'Unavailable';
+    return noDataLabel;
   }
 
   if (megahertz >= 1000) {
@@ -477,15 +454,23 @@ function formatFrequency(megahertz: number | null | undefined) {
 
 function formatDecimalValue(value: number | null | undefined, unit: string) {
   if (value == null || !Number.isFinite(value)) {
-    return 'Unavailable';
+    return noDataLabel;
   }
 
   return `${value.toFixed(Math.abs(value) >= 100 ? 0 : 1)} ${unit}`;
 }
 
+function formatRpm(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) {
+    return noDataLabel;
+  }
+
+  return `${Math.round(value).toLocaleString()} RPM`;
+}
+
 function formatTimestamp(value: string | null | undefined) {
   if (!value) {
-    return 'Unavailable';
+    return noDataLabel;
   }
 
   return new Date(value).toLocaleString([], {
@@ -499,6 +484,10 @@ function formatTimestamp(value: string | null | undefined) {
 }
 
 function formatDuration(startedAt: string, reportedAt: string) {
+  if (!startedAt || !reportedAt) {
+    return noDataLabel;
+  }
+
   const elapsedMilliseconds = Math.max(new Date(reportedAt).getTime() - new Date(startedAt).getTime(), 0);
   const totalSeconds = Math.floor(elapsedMilliseconds / 1000);
 
@@ -507,7 +496,7 @@ function formatDuration(startedAt: string, reportedAt: string) {
 
 function formatElapsedDuration(totalSeconds: number | null | undefined) {
   if (totalSeconds == null || !Number.isFinite(totalSeconds)) {
-    return 'Unavailable';
+    return noDataLabel;
   }
 
   const wholeSeconds = Math.max(Math.floor(totalSeconds), 0);
