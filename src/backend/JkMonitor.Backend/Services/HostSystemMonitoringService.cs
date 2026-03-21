@@ -1,23 +1,40 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
+using System.Runtime.Versioning;
 using JkMonitor.Contracts.Status;
+using Microsoft.Win32;
 
 namespace JkMonitor.Backend.Services;
 
-public sealed class HostSystemMonitoringService(ILogger<HostSystemMonitoringService> logger)
+public sealed class HostSystemMonitoringService(ILogger<HostSystemMonitoringService> logger, IHostEnvironment environment)
 {
     private readonly object _sync = new();
+    private readonly string _contentRootPath = environment.ContentRootPath;
     private CpuSnapshot? _previousCpuSnapshot = CaptureCpuSnapshot(logger);
 
     public SystemRuntimeMetrics GetMetrics()
     {
+        var memoryInfo = GetMemoryInfo();
+        var storageInfo = GetStorageInfo();
+
         return new SystemRuntimeMetrics
         {
             CpuUtilizationPercent = GetCpuUtilizationPercent(),
-            MemoryAvailableBytes = GetMemoryInfo().availableBytes,
-            MemoryTotalBytes = GetMemoryInfo().totalBytes,
+            CpuCoreCount = GetCpuCoreCount(),
+            CpuMaxClockSpeedMegahertz = GetCpuMaxClockSpeedMegahertz(),
+            MemoryAvailableBytes = memoryInfo.availableBytes,
+            MemoryUsedBytes = CalculateUsedBytes(memoryInfo.totalBytes, memoryInfo.availableBytes),
+            MemoryTotalBytes = memoryInfo.totalBytes,
+            StorageUsedBytes = storageInfo.usedBytes,
+            StorageTotalBytes = storageInfo.totalBytes,
             SystemTemperatureCelsius = GetSystemTemperatureCelsius()
         };
+    }
+
+    private static int? GetCpuCoreCount()
+    {
+        var processorCount = Environment.ProcessorCount;
+        return processorCount > 0 ? processorCount : null;
     }
 
     private double? GetCpuUtilizationPercent()
@@ -152,6 +169,52 @@ public sealed class HostSystemMonitoringService(ILogger<HostSystemMonitoringServ
         return (null, null);
     }
 
+    private (long? usedBytes, long? totalBytes) GetStorageInfo()
+    {
+        try
+        {
+            var drive = ResolveDriveForPath(_contentRootPath);
+
+            if (drive is null)
+            {
+                return (null, null);
+            }
+
+            var totalBytes = drive.TotalSize;
+            var usedBytes = totalBytes - drive.AvailableFreeSpace;
+
+            return (Math.Max(usedBytes, 0L), totalBytes);
+        }
+        catch (Exception exception)
+        {
+            logger.LogDebug(exception, "Failed to collect storage info.");
+        }
+
+        return (null, null);
+    }
+
+    private int? GetCpuMaxClockSpeedMegahertz()
+    {
+        try
+        {
+            if (OperatingSystem.IsLinux())
+            {
+                return GetLinuxCpuMaxClockSpeedMegahertz();
+            }
+
+            if (OperatingSystem.IsWindows())
+            {
+                return GetWindowsCpuMaxClockSpeedMegahertz();
+            }
+        }
+        catch (Exception exception)
+        {
+            logger.LogDebug(exception, "Failed to collect CPU max clock speed.");
+        }
+
+        return null;
+    }
+
     private static (long? availableBytes, long? totalBytes) GetLinuxMemoryInfo()
     {
         const string memInfoPath = "/proc/meminfo";
@@ -207,6 +270,90 @@ public sealed class HostSystemMonitoringService(ILogger<HostSystemMonitoringServ
         }
 
         return ((long)memoryStatus.ullAvailPhys, (long)memoryStatus.ullTotalPhys);
+    }
+
+    private static DriveInfo? ResolveDriveForPath(string path)
+    {
+        var fullPath = Path.GetFullPath(path);
+        var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+
+        return DriveInfo.GetDrives()
+            .Where(drive => drive.IsReady)
+            .OrderByDescending(drive => drive.RootDirectory.FullName.Length)
+            .FirstOrDefault(drive => fullPath.StartsWith(drive.RootDirectory.FullName, comparison));
+    }
+
+    private static long? CalculateUsedBytes(long? totalBytes, long? availableBytes)
+    {
+        if (!totalBytes.HasValue || !availableBytes.HasValue)
+        {
+            return null;
+        }
+
+        return Math.Max(totalBytes.Value - availableBytes.Value, 0L);
+    }
+
+    private static int? GetLinuxCpuMaxClockSpeedMegahertz()
+    {
+        const string cpuRoot = "/sys/devices/system/cpu";
+
+        if (!Directory.Exists(cpuRoot))
+        {
+            return null;
+        }
+
+        long maxKilohertz = 0;
+
+        foreach (var cpuDirectory in Directory.GetDirectories(cpuRoot, "cpu[0-9]*"))
+        {
+            var kilohertz = ReadLinuxFrequencyKilohertz(Path.Combine(cpuDirectory, "cpufreq", "cpuinfo_max_freq"))
+                ?? ReadLinuxFrequencyKilohertz(Path.Combine(cpuDirectory, "cpufreq", "scaling_max_freq"));
+
+            if (kilohertz is > 0 && kilohertz.Value > maxKilohertz)
+            {
+                maxKilohertz = kilohertz.Value;
+            }
+        }
+
+        return maxKilohertz > 0 ? (int)Math.Round(maxKilohertz / 1000d) : null;
+    }
+
+    private static long? ReadLinuxFrequencyKilohertz(string path)
+    {
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        var rawValue = File.ReadAllText(path).Trim();
+
+        if (!long.TryParse(rawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var kilohertz))
+        {
+            return null;
+        }
+
+        return kilohertz > 0 ? kilohertz : null;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static int? GetWindowsCpuMaxClockSpeedMegahertz()
+    {
+        const string cpuRegistryPath = @"HARDWARE\DESCRIPTION\System\CentralProcessor\0";
+
+        using var cpuKey = Registry.LocalMachine.OpenSubKey(cpuRegistryPath);
+
+        return ParseWindowsCpuSpeed(cpuKey?.GetValue("~MHz"));
+    }
+
+    private static int? ParseWindowsCpuSpeed(object? rawValue)
+    {
+        return rawValue switch
+        {
+            int value when value > 0 => value,
+            long value when value > 0 && value <= int.MaxValue => (int)value,
+            string value when int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedValue) && parsedValue > 0 => parsedValue,
+            _ => null
+        };
     }
 
     private double? GetSystemTemperatureCelsius()

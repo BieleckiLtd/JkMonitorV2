@@ -52,9 +52,19 @@ public sealed record class SystemRuntimeMetrics
 {
     public double? CpuUtilizationPercent { get; init; }
 
+    public int? CpuCoreCount { get; init; }
+
+    public int? CpuMaxClockSpeedMegahertz { get; init; }
+
     public long? MemoryAvailableBytes { get; init; }
 
+    public long? MemoryUsedBytes { get; init; }
+
     public long? MemoryTotalBytes { get; init; }
+
+    public long? StorageUsedBytes { get; init; }
+
+    public long? StorageTotalBytes { get; init; }
 
     public double? SystemTemperatureCelsius { get; init; }
 }
