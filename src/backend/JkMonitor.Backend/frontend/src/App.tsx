@@ -1,4 +1,6 @@
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { useEffect } from 'react';
+import { useAppStore } from './store/useAppStore';
 import { MainLayout } from './layouts/MainLayout';
 import { DashboardPage } from './pages/DashboardPage';
 import { DevicesPage } from './pages/DevicesPage';
@@ -6,6 +8,13 @@ import { HubPage } from './pages/HubPage';
 import { SettingsPage } from './pages/SettingsPage';
 
 function App() {
+  const loadThemeConfig = useAppStore((state) => state.loadThemeConfig);
+
+  useEffect(() => {
+    // Load external JSON theme on mount
+    void loadThemeConfig();
+  }, [loadThemeConfig]);
+
   return (
     <Router>
       <MainLayout>
