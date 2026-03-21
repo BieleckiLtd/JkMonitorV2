@@ -1,54 +1,76 @@
 import { create } from 'zustand';
-
-interface ThemeConfig {
-  themeName: string;
-  mode: 'light' | 'dark' | 'system';
-  radius: string;
-  colors: Record<string, string>;
-}
+import { type ThemeConfig, builtInThemes } from '../lib/themes';
 
 interface AppState {
   isSidebarOpen: boolean;
   toggleSidebar: () => void;
-  theme: 'light' | 'dark' | 'system';
-  setTheme: (theme: 'light' | 'dark' | 'system') => void;
-  loadThemeConfig: () => Promise<void>;
-  themeConfig: ThemeConfig | null;
+  themes: ThemeConfig[];
+  activeThemeId: string;
+  setActiveThemeId: (id: string) => void;
+  loadExternalTheme: () => Promise<void>;
+  applyTheme: (theme: ThemeConfig) => void;
 }
 
-export const useAppStore = create<AppState>((set) => ({
+export const useAppStore = create<AppState>((set, get) => ({
   isSidebarOpen: true,
   toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
-  theme: 'dark', // Default fallback
-  setTheme: (theme) => set({ theme }),
-  themeConfig: null,
-  loadThemeConfig: async () => {
+  
+  themes: builtInThemes,
+  activeThemeId: 'emerald-dark',
+
+  setActiveThemeId: (id) => {
+    const theme = get().themes.find(t => t.id === id);
+    if (theme) {
+      set({ activeThemeId: id });
+      get().applyTheme(theme);
+    }
+  },
+
+  applyTheme: (theme) => {
+    const root = document.documentElement;
+    if (theme.mode === 'dark') {
+      root.classList.add('dark');
+      root.classList.remove('light');
+    } else {
+      root.classList.add('light');
+      root.classList.remove('dark');
+    }
+
+    if (theme.radius) {
+      root.style.setProperty('--radius', theme.radius);
+    }
+    
+    if (theme.colors) {
+      Object.entries(theme.colors).forEach(([key, value]) => {
+        root.style.setProperty(key, value);
+      });
+    }
+  },
+
+  loadExternalTheme: async () => {
     try {
       const response = await fetch('/theme.json?nocache=' + new Date().getTime());
       if (response.ok) {
         const config: ThemeConfig = await response.json();
+        config.id = 'custom-json';
         
-        set({ theme: config.mode, themeConfig: config });
-        
-        const root = document.documentElement;
-        if (config.mode === 'dark') {
-          root.classList.add('dark');
-        } else if (config.mode === 'light') {
-          root.classList.remove('dark');
-        }
+        set((state) => {
+          const existingThemes = state.themes.filter(t => t.id !== 'custom-json');
+          return { themes: [config, ...existingThemes] };
+        });
 
-        if (config.radius) {
-          root.style.setProperty('--radius', config.radius);
-        }
-        
-        if (config.colors) {
-          Object.entries(config.colors).forEach(([key, value]) => {
-            root.style.setProperty(key, value);
-          });
+        // Ensure the active theme gets applied at least once, or fallback to the loaded one
+        const active = get().themes.find(t => t.id === get().activeThemeId);
+        if (active) {
+          get().applyTheme(active);
         }
       }
     } catch (error) {
-      console.error('Failed to load theme.json:', error);
+      console.error('Failed to load external theme.json:', error);
+      // Still apply default
+      const active = get().themes.find(t => t.id === get().activeThemeId);
+      if (active) get().applyTheme(active);
     }
   }
 }));
+

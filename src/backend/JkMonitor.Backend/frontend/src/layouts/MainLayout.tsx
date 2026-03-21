@@ -96,11 +96,12 @@ export function Header() {
 }
 
 export function MainLayout({ children }: { children: ReactNode }) {
-  const theme = useAppStore((state) => state.theme);
+  const activeThemeId = useAppStore((state) => state.activeThemeId);
+  const theme = useAppStore((state) => state.themes.find(t => t.id === activeThemeId)?.mode || 'dark');
 
   return (
     <div className={cn(
-      "h-screen w-full flex overflow-hidden font-sans text-zinc-300 bg-zinc-950",
+      "h-screen w-full flex overflow-hidden font-sans text-zinc-300 bg-background",
       theme
     )}>
       <Sidebar />

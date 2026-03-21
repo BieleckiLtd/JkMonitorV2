@@ -8,12 +8,12 @@ import { HubPage } from './pages/HubPage';
 import { SettingsPage } from './pages/SettingsPage';
 
 function App() {
-  const loadThemeConfig = useAppStore((state) => state.loadThemeConfig);
+  const loadExternalTheme = useAppStore((state) => state.loadExternalTheme);
 
   useEffect(() => {
-    // Load external JSON theme on mount
-    void loadThemeConfig();
-  }, [loadThemeConfig]);
+    // Load external JSON theme on mount and apply defaults
+    void loadExternalTheme();
+  }, [loadExternalTheme]);
 
   return (
     <Router>
