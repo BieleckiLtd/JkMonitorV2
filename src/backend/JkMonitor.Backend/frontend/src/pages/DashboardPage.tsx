@@ -118,6 +118,7 @@ export function DashboardPage() {
   const storageTotal = metrics?.storageTotalBytes ?? null;
   const memoryUsagePercent = getUsagePercent(memoryUsed, memoryTotal);
   const storageUsagePercent = getUsagePercent(storageUsed, storageTotal);
+  const applicationUptime = status ? formatDuration(status.startedAt, status.reportedAt) : 'Unavailable';
   const deviceCount = status?.devices.length ?? 0;
   const healthyDevices = status?.devices.filter((device) => device.lastOutcome === 'Succeeded').length ?? 0;
   const failingDevices = status?.devices.filter((device) => device.lastOutcome === 'Failed' || device.lastOutcome === 'PersistFailed').length ?? 0;
@@ -168,7 +169,8 @@ export function DashboardPage() {
           detailLines={[
             `${formatWholeNumber(metrics?.cpuCoreCount)} cores`,
             `${formatWholeNumber(metrics?.processCount)} processes`,
-            `Uptime ${formatElapsedDuration(metrics?.systemUptimeSeconds)}`,
+            `Host uptime ${formatElapsedDuration(metrics?.systemUptimeSeconds)}`,
+            `App uptime ${applicationUptime}`,
           ]}
         />
         <MetricCard
