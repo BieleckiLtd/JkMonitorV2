@@ -56,6 +56,10 @@ public sealed record class SystemRuntimeMetrics
 
     public int? CpuMaxClockSpeedMegahertz { get; init; }
 
+    public int? ProcessCount { get; init; }
+
+    public long? SystemUptimeSeconds { get; init; }
+
     public long? MemoryAvailableBytes { get; init; }
 
     public long? MemoryUsedBytes { get; init; }

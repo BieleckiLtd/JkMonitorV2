@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Globalization;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
@@ -22,6 +23,8 @@ public sealed class HostSystemMonitoringService(ILogger<HostSystemMonitoringServ
             CpuUtilizationPercent = GetCpuUtilizationPercent(),
             CpuCoreCount = GetCpuCoreCount(),
             CpuMaxClockSpeedMegahertz = GetCpuMaxClockSpeedMegahertz(),
+            ProcessCount = GetProcessCount(),
+            SystemUptimeSeconds = GetSystemUptimeSeconds(),
             MemoryAvailableBytes = memoryInfo.availableBytes,
             MemoryUsedBytes = CalculateUsedBytes(memoryInfo.totalBytes, memoryInfo.availableBytes),
             MemoryTotalBytes = memoryInfo.totalBytes,
@@ -213,6 +216,37 @@ public sealed class HostSystemMonitoringService(ILogger<HostSystemMonitoringServ
         }
 
         return null;
+    }
+
+    private int? GetProcessCount()
+    {
+        Process[]? processes = null;
+
+        try
+        {
+            processes = Process.GetProcesses();
+            return processes.Length;
+        }
+        catch (Exception exception)
+        {
+            logger.LogDebug(exception, "Failed to collect process count.");
+            return null;
+        }
+        finally
+        {
+            if (processes != null)
+            {
+                foreach (var process in processes)
+                {
+                    process.Dispose();
+                }
+            }
+        }
+    }
+
+    private static long GetSystemUptimeSeconds()
+    {
+        return Environment.TickCount64 / 1000;
     }
 
     private static (long? availableBytes, long? totalBytes) GetLinuxMemoryInfo()

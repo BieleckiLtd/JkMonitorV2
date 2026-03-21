@@ -28,6 +28,8 @@ type SystemRuntimeMetrics = {
   cpuUtilizationPercent?: number | null;
   cpuCoreCount?: number | null;
   cpuMaxClockSpeedMegahertz?: number | null;
+  processCount?: number | null;
+  systemUptimeSeconds?: number | null;
   memoryAvailableBytes?: number | null;
   memoryUsedBytes?: number | null;
   memoryTotalBytes?: number | null;
@@ -162,7 +164,12 @@ export function DashboardPage() {
           title='CPU Utilisation'
           value={formatPercent(cpuUsage)}
           accentClass='text-sky-400'
-          detail={`${formatWholeNumber(metrics?.cpuCoreCount)} cores • ${formatFrequency(metrics?.cpuMaxClockSpeedMegahertz)}`}
+          detail={`Base speed ${formatFrequency(metrics?.cpuMaxClockSpeedMegahertz)}`}
+          detailLines={[
+            `${formatWholeNumber(metrics?.cpuCoreCount)} cores`,
+            `${formatWholeNumber(metrics?.processCount)} processes`,
+            `Uptime ${formatElapsedDuration(metrics?.systemUptimeSeconds)}`,
+          ]}
         />
         <MetricCard
           icon={MemoryStick}
@@ -199,9 +206,15 @@ export function DashboardPage() {
             <Card className='border border-border/80 bg-card/85 shadow-sm'>
               <CardHeader className='border-b border-border/60 pb-4'>
                 <CardTitle>Resource usage</CardTitle>
-                <CardDescription>Memory and storage capacity on the host running the monitor service.</CardDescription>
+                <CardDescription>CPU, memory, and storage capacity on the host running the monitor service.</CardDescription>
               </CardHeader>
               <CardContent className='grid gap-5 pt-5'>
+                <UsagePanel
+                  label='CPU'
+                  percent={cpuUsage}
+                  summary={`Base speed ${formatFrequency(metrics?.cpuMaxClockSpeedMegahertz)}`}
+                  secondary={`${formatWholeNumber(metrics?.cpuCoreCount)} cores`}
+                />
                 <UsagePanel
                   label='Memory'
                   percent={memoryUsagePercent}
@@ -276,7 +289,7 @@ export function DashboardPage() {
                 <DetailTile label='Service' value={status.serviceName} />
                 <DetailTile label='Environment' value={status.environmentName} />
                 <DetailTile label='Startup mode' value={status.startupMode} />
-                <DetailTile label='Uptime' value={formatDuration(status.startedAt, status.reportedAt)} />
+                <DetailTile label='Service uptime' value={formatDuration(status.startedAt, status.reportedAt)} />
                 <DetailTile label='CPU max speed' value={formatFrequency(metrics?.cpuMaxClockSpeedMegahertz)} />
                 <DetailTile label='CPU cores' value={formatWholeNumber(metrics?.cpuCoreCount)} />
                 <DetailTile label='Temperature' value={formatDecimalValue(metrics?.systemTemperatureCelsius, '°C')} />
@@ -319,12 +332,14 @@ function MetricCard({
   title,
   value,
   detail,
+  detailLines,
   accentClass,
 }: {
   icon: typeof Cpu;
   title: string;
   value: string;
   detail: string;
+  detailLines?: string[];
   accentClass: string;
 }) {
   return (
@@ -335,6 +350,13 @@ function MetricCard({
             <div className='text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground'>{title}</div>
             <div className={cn('mt-3 text-4xl font-bold tracking-tight', accentClass)}>{value}</div>
             <div className='mt-2 text-sm text-muted-foreground'>{detail}</div>
+            {detailLines?.length ? (
+              <div className='mt-3 space-y-1 text-sm text-muted-foreground'>
+                {detailLines.map((line) => (
+                  <div key={line}>{line}</div>
+                ))}
+              </div>
+            ) : null}
           </div>
           <div className='rounded-2xl border border-border/70 bg-background/60 p-3 text-muted-foreground'>
             <Icon className='h-5 w-5' />
@@ -477,9 +499,19 @@ function formatTimestamp(value: string | null | undefined) {
 function formatDuration(startedAt: string, reportedAt: string) {
   const elapsedMilliseconds = Math.max(new Date(reportedAt).getTime() - new Date(startedAt).getTime(), 0);
   const totalSeconds = Math.floor(elapsedMilliseconds / 1000);
-  const days = Math.floor(totalSeconds / 86400);
-  const hours = Math.floor((totalSeconds % 86400) / 3600);
-  const minutes = Math.floor((totalSeconds % 3600) / 60);
+
+  return formatElapsedDuration(totalSeconds);
+}
+
+function formatElapsedDuration(totalSeconds: number | null | undefined) {
+  if (totalSeconds == null || !Number.isFinite(totalSeconds)) {
+    return 'Unavailable';
+  }
+
+  const wholeSeconds = Math.max(Math.floor(totalSeconds), 0);
+  const days = Math.floor(wholeSeconds / 86400);
+  const hours = Math.floor((wholeSeconds % 86400) / 3600);
+  const minutes = Math.floor((wholeSeconds % 3600) / 60);
 
   if (days > 0) {
     return `${days}d ${hours}h ${minutes}m`;
@@ -489,7 +521,11 @@ function formatDuration(startedAt: string, reportedAt: string) {
     return `${hours}h ${minutes}m`;
   }
 
-  return `${minutes}m`;
+  if (minutes > 0) {
+    return `${minutes}m`;
+  }
+
+  return '<1m';
 }
 
 function getUsagePercent(usedBytes: number | null, totalBytes: number | null) {
