@@ -21,7 +21,7 @@ export function SettingsPage() {
             Select a visual aesthetic. These are kept in app memory for fast switching.
           </p>
           
-          <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4'>
+          <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 md:grid-cols-3 gap-4'>
             {themes.map((t) => {
               const bg = t.colors['--background'] || '#000';
               const fg = t.colors['--foreground'] || '#fff';
@@ -54,7 +54,7 @@ export function SettingsPage() {
                     />
                   </div>
 
-                  <span className='text-[10px] text-muted-foreground uppercase tracking-wider font-semibold'>
+                  <span className='text-[10px] text-muted-foreground text-xs uppercase tracking-wider font-semibold'>
                     {t.mode}
                   </span>
                 </button>

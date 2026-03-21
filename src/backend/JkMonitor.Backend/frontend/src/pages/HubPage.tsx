@@ -2,8 +2,8 @@ export function HubPage() {
   return (
     <div className="space-y-6">
       <div className="flex flex-col gap-1">
-        <h2 className="text-3xl font-bold tracking-tight text-white mb-2">Community Hub</h2>
-        <p className="text-sm text-zinc-400">
+        <h2 className="text-3xl font-bold tracking-tight text-foreground mb-2">Community Hub</h2>
+        <p className="text-sm text-muted-foreground">
           Install and manage ready-made third-party device integrations and UI plugins.
         </p>
       </div>
@@ -13,14 +13,14 @@ export function HubPage() {
           <input
             type="text"
             placeholder="Search integrations (e.g., Victron, Deye, USB-TTL)..."
-            className="w-full bg-zinc-900 border border-zinc-800 text-sm text-white rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all placeholder:text-zinc-600"
+            className="w-full bg-muted border border-border text-sm text-foreground rounded-lg px-4 py-2.5 outline-none focus:ring-2 focus:ring-emerald-500/50 focus:border-emerald-500 transition-all placeholder:text-zinc-600"
           />
         </div>
         <div className="flex gap-2">
-          <button className="px-4 py-2 bg-zinc-800 hover:bg-zinc-700 text-sm font-medium rounded-lg text-white transition-colors">
+          <button className="px-4 py-2 bg-muted-foreground/20 hover:bg-zinc-700 text-sm font-medium rounded-lg text-foreground transition-colors">
             Updates (2)
           </button>
-          <button className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-sm font-medium rounded-lg text-white transition-colors shadow-sm shadow-emerald-900/50">
+          <button className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-sm font-medium rounded-lg text-foreground transition-colors shadow-sm shadow-emerald-900/50">
             Publish New Plugin
           </button>
         </div>
@@ -35,24 +35,24 @@ export function HubPage() {
           { name: "DLP Battery Node", author: "Community", type: "Device", desc: "Support for generic DIY 16S battery nodes over CAN bus.", installs: "1.1k" },
           { name: "Custom Serial Parser", author: "advanced_user", type: "Parser", desc: "Write regex or JS scripts to parse any generic TTL stream.", installs: "950" },
         ].map((plugin, i) => (
-          <div key={i} className="group flex flex-col justify-between bg-zinc-900/40 hover:bg-zinc-900/80 border border-zinc-800 hover:border-zinc-700 rounded-xl p-5 transition-all cursor-pointer h-[200px]">
+          <div key={i} className="group flex flex-col justify-between bg-card text-card-foreground shadow-sm hover:hover:bg-muted/50 border border-border hover:border-border/80 rounded-xl p-5 transition-all cursor-pointer h-[200px]">
             <div>
               <div className="flex justify-between items-start mb-2">
-                <h3 className="font-semibold text-zinc-100 truncate">{plugin.name}</h3>
-                <span className="text-[10px] uppercase tracking-wider bg-zinc-800 px-2 py-0.5 rounded text-zinc-400 border border-zinc-700">
+                <h3 className="font-semibold text-foreground truncate">{plugin.name}</h3>
+                <span className="text-[10px] uppercase tracking-wider bg-muted-foreground/20 px-2 py-0.5 rounded text-muted-foreground border border-border/80">
                   {plugin.type}
                 </span>
               </div>
               <p className="text-xs text-emerald-500 mb-3">by {plugin.author}</p>
-              <p className="text-sm text-zinc-400 line-clamp-3 leading-relaxed">
+              <p className="text-sm text-muted-foreground line-clamp-3 leading-relaxed">
                 {plugin.desc}
               </p>
             </div>
             
-            <div className="flex items-center justify-between mt-4 pt-4 border-t border-zinc-800/50">
-              <span className="text-xs text-zinc-500 font-mono">↙ {plugin.installs}</span>
+            <div className="flex items-center justify-between mt-4 pt-4 border-t border-border/50">
+              <span className="text-xs text-muted-foreground/80 font-mono">↙ {plugin.installs}</span>
               {plugin.installs === "Pre-installed" ? (
-                <span className="text-sm text-zinc-400 font-medium">Installed</span>
+                <span className="text-sm text-muted-foreground font-medium">Installed</span>
               ) : (
                 <button className="text-sm font-medium text-emerald-400 hover:text-emerald-300 opacity-0 group-hover:opacity-100 transition-opacity">
                   Install Plugin
