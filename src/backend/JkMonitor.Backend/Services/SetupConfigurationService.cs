@@ -240,16 +240,13 @@ public sealed class SetupConfigurationService(
 
     private static string GetStartupMode(string portName)
     {
-        return string.Equals(portName, "SIMULATED", StringComparison.OrdinalIgnoreCase)
-            ? "Simulator"
-            : "Hardware";
+        return "Hardware";
     }
 
     private static string NormalizeStartupMode(string startupMode)
     {
         return startupMode.Trim().ToLowerInvariant() switch
         {
-            "simulator" or "sim" or "development" => "Simulator",
             "hardware" or "production" or "hw" => "Hardware",
             _ => throw new InvalidOperationException($"Unsupported startup mode '{startupMode}'.")
         };
@@ -317,22 +314,21 @@ public sealed class SetupConfigurationService(
         updateChild(child);
     }
 
-    private static IReadOnlyList<BmsDeviceConfiguration> NormalizeDevices(IReadOnlyList<BmsDeviceConfiguration> devices)
+    private static IReadOnlyList<DeviceConfiguration> NormalizeDevices(IReadOnlyList<DeviceConfiguration> devices)
     {
         ArgumentNullException.ThrowIfNull(devices);
 
-        var normalized = new List<BmsDeviceConfiguration>(devices.Count);
+        var normalized = new List<DeviceConfiguration>(devices.Count);
         var deviceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         for (var index = 0; index < devices.Count; index++)
         {
             var device = devices[index] ?? throw new InvalidOperationException($"Device at index {index} is missing.");
-            var normalizedDevice = new BmsDeviceConfiguration
+            var normalizedDevice = new DeviceConfiguration
             {
-                DeviceId = RequireValue(device.DeviceId, nameof(BmsDeviceConfiguration.DeviceId), index),
-                DisplayName = RequireValue(device.DisplayName, nameof(BmsDeviceConfiguration.DisplayName), index),
-                Protocol = RequireValue(device.Protocol, nameof(BmsDeviceConfiguration.Protocol), index),
-                RegisterProfile = RequireValue(device.RegisterProfile, nameof(BmsDeviceConfiguration.RegisterProfile), index),
+                DeviceId = RequireValue(device.DeviceId, nameof(DeviceConfiguration.DeviceId), index),
+                DisplayName = RequireValue(device.DisplayName, nameof(DeviceConfiguration.DisplayName), index),
+                ProfileId = RequireValue(device.ProfileId, nameof(DeviceConfiguration.ProfileId), index),
                 Address = device.Address,
                 IsMaster = device.IsMaster,
                 PollIntervalMilliseconds = device.PollIntervalMilliseconds,
@@ -364,14 +360,13 @@ public sealed class SetupConfigurationService(
             : trimmed;
     }
 
-    private static BmsDeviceConfiguration CloneDevice(BmsDeviceConfiguration device)
+    private static DeviceConfiguration CloneDevice(DeviceConfiguration device)
     {
-        return new BmsDeviceConfiguration
+        return new DeviceConfiguration
         {
             DeviceId = device.DeviceId,
             DisplayName = device.DisplayName,
-            Protocol = device.Protocol,
-            RegisterProfile = device.RegisterProfile,
+            ProfileId = device.ProfileId,
             Address = device.Address,
             IsMaster = device.IsMaster,
             PollIntervalMilliseconds = device.PollIntervalMilliseconds,

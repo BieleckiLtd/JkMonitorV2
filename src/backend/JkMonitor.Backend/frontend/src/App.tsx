@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { useAppStore } from './store/useAppStore';
 import { MainLayout } from './layouts/MainLayout';
 import { SystemPage } from './pages/SystemPage';
+import { MonitorPage } from './pages/MonitorPage';
 import { DevicesPage } from './pages/DevicesPage';
 import { HubPage } from './pages/HubPage';
 import { SettingsPage } from './pages/SettingsPage';
@@ -20,6 +21,7 @@ function App() {
       <MainLayout>
         <Routes>
           <Route path='/' element={<SystemPage />} />
+          <Route path='/monitor' element={<MonitorPage />} />
           <Route path='/devices' element={<DevicesPage />} />
           <Route path='/hub' element={<HubPage />} />
           <Route path='/settings' element={<SettingsPage />} />

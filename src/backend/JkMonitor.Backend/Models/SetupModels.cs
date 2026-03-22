@@ -47,10 +47,10 @@ public sealed record class DeviceConfigurationStateResponse
 {
     public required string ConfigurationFile { get; init; }
 
-    public required IReadOnlyList<BmsDeviceConfiguration> Devices { get; init; }
+    public required IReadOnlyList<DeviceConfiguration> Devices { get; init; }
 }
 
 public sealed record class SaveDeviceConfigurationRequest
 {
-    public IReadOnlyList<BmsDeviceConfiguration> Devices { get; init; } = [];
+    public IReadOnlyList<DeviceConfiguration> Devices { get; init; } = [];
 }

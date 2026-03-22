@@ -1,37 +1,34 @@
 using System.IO.Ports;
 using System.Runtime.InteropServices;
+using JkMonitor.Backend.Models;
 using JkMonitor.Backend.Protocol;
 using JkMonitor.Contracts.Configuration;
 using Microsoft.Extensions.Options;
 
 namespace JkMonitor.Backend.Services;
 
-public interface IJkPollingClient
+public interface IDevicePollingClient
 {
-    Task<JkParsedSample> PollAsync(BmsDeviceConfiguration device, CancellationToken cancellationToken);
+    Task<DevicePollResult> PollAsync(DeviceConfiguration device, CancellationToken cancellationToken);
 }
 
 public sealed class JkRs485PollingClient(
     IOptions<MonitorConfiguration> configuration,
-    ILogger<JkRs485PollingClient> logger) : IJkPollingClient, IDisposable
+    ILogger<JkRs485PollingClient> logger) : IDisposable
 {
     private readonly MonitorConfiguration _configuration = configuration.Value;
     private readonly SemaphoreSlim _busLock = new(1, 1);
     private SerialPort? _serialPort;
     private bool _disposed;
 
-    public async Task<JkParsedSample> PollAsync(BmsDeviceConfiguration device, CancellationToken cancellationToken)
+    public async Task<DevicePollResult> PollAsync(DeviceConfiguration device, DeviceProfileConfiguration profile, CancellationToken cancellationToken)
     {
-        if (!string.Equals(device.Protocol, "jk-rs485", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException($"Unsupported protocol '{device.Protocol}'.");
-        }
-
         await _busLock.WaitAsync(cancellationToken);
 
         try
         {
-            var serialPort = EnsurePort();
+            var transport = profile.Transport;
+            var serialPort = EnsurePort(transport);
             serialPort.DiscardInBuffer();
             serialPort.DiscardOutBuffer();
 
@@ -41,8 +38,10 @@ public sealed class JkRs485PollingClient(
             await serialPort.BaseStream.WriteAsync(request, cancellationToken);
             await serialPort.BaseStream.FlushAsync(cancellationToken);
 
-            var response = await ReadFrameAsync(serialPort.BaseStream, cancellationToken);
-            return JkRs485Protocol.ParseReadAllResponse(response, DateTimeOffset.UtcNow);
+            var readTimeout = transport?.ReadTimeoutMs ?? _configuration.SerialBus.ReadTimeoutMilliseconds;
+            var response = await ReadFrameAsync(serialPort.BaseStream, readTimeout, cancellationToken);
+            var registerDefs = profile.Registers;
+            return JkRs485Protocol.ParseReadAllResponse(response, DateTimeOffset.UtcNow, registerDefs);
         }
         finally
         {
@@ -62,24 +61,32 @@ public sealed class JkRs485PollingClient(
         _busLock.Dispose();
     }
 
-    private SerialPort EnsurePort()
+    private SerialPort EnsurePort(TransportConfiguration? transport)
     {
-        if (_serialPort is { IsOpen: true })
+        var portName = transport?.PortName ?? _configuration.SerialBus.PortName;
+
+        if (_serialPort is { IsOpen: true } && _serialPort.PortName == portName)
         {
             return _serialPort;
         }
 
         _serialPort?.Dispose();
 
-        var serialBus = _configuration.SerialBus;
-        _serialPort = new SerialPort(serialBus.PortName)
+        var baudRate = transport?.BaudRate ?? _configuration.SerialBus.BaudRate;
+        var dataBits = transport?.DataBits ?? _configuration.SerialBus.DataBits;
+        var parity = transport?.Parity ?? _configuration.SerialBus.Parity;
+        var stopBits = transport?.StopBits ?? _configuration.SerialBus.StopBits;
+        var readTimeout = transport?.ReadTimeoutMs ?? _configuration.SerialBus.ReadTimeoutMilliseconds;
+        var writeTimeout = transport?.WriteTimeoutMs ?? _configuration.SerialBus.WriteTimeoutMilliseconds;
+
+        _serialPort = new SerialPort(portName)
         {
-            BaudRate = serialBus.BaudRate,
-            DataBits = serialBus.DataBits,
-            Parity = ParseParity(serialBus.Parity),
-            StopBits = ParseStopBits(serialBus.StopBits),
-            ReadTimeout = serialBus.ReadTimeoutMilliseconds,
-            WriteTimeout = serialBus.WriteTimeoutMilliseconds,
+            BaudRate = baudRate,
+            DataBits = dataBits,
+            Parity = ParseParity(parity),
+            StopBits = ParseStopBits(stopBits),
+            ReadTimeout = readTimeout,
+            WriteTimeout = writeTimeout,
             Handshake = Handshake.None
         };
 
@@ -87,12 +94,12 @@ public sealed class JkRs485PollingClient(
         return _serialPort;
     }
 
-    private async Task<byte[]> ReadFrameAsync(Stream stream, CancellationToken cancellationToken)
+    private static async Task<byte[]> ReadFrameAsync(Stream stream, int readTimeoutMs, CancellationToken cancellationToken)
     {
         var buffer = new List<byte>(384);
         var oneByte = new byte[1];
         var startedAt = DateTime.UtcNow;
-        var timeout = TimeSpan.FromMilliseconds(_configuration.SerialBus.ReadTimeoutMilliseconds);
+        var timeout = TimeSpan.FromMilliseconds(readTimeoutMs);
 
         while (!cancellationToken.IsCancellationRequested)
         {

@@ -13,7 +13,8 @@ type DeviceTelemetrySnapshot = {
 type DeviceRuntimeState = {
   deviceId: string;
   displayName: string;
-  protocol: string;
+  profileId: string;
+  protocolHandler?: string | null;
   enabled: boolean;
   isMaster: boolean;
   pollIntervalMilliseconds: number;
@@ -275,7 +276,7 @@ export function SystemPage() {
                           {device.isMaster ? <span className='rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary'>Master</span> : null}
                           {!device.enabled ? <span className='rounded-full border border-border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>Disabled</span> : null}
                         </div>
-                        <div className='mt-1 text-xs font-mono text-muted-foreground'>{device.deviceId} • {device.protocol}</div>
+                        <div className='mt-1 text-xs font-mono text-muted-foreground'>{device.deviceId} • {device.protocolHandler ?? device.profileId}</div>
                       </div>
                       <div className={cn('inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em]', getOutcomeClassName(device.lastOutcome))}>
                         {device.lastOutcome}

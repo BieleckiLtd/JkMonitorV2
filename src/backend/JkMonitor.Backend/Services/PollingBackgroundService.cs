@@ -5,7 +5,7 @@ namespace JkMonitor.Backend.Services;
 
 public sealed class PollingBackgroundService(
     IOptions<MonitorConfiguration> configuration,
-    IJkPollingClient pollingClient,
+    IDevicePollingClient pollingClient,
     ITelemetryRepository telemetryRepository,
     DeviceStateStore stateStore,
     ILogger<PollingBackgroundService> logger) : BackgroundService
@@ -24,7 +24,7 @@ public sealed class PollingBackgroundService(
         await Task.WhenAll(tasks);
     }
 
-    private async Task RunDeviceLoopAsync(BmsDeviceConfiguration device, CancellationToken cancellationToken)
+    private async Task RunDeviceLoopAsync(DeviceConfiguration device, CancellationToken cancellationToken)
     {
         using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(device.PollIntervalMilliseconds));
 
@@ -35,7 +35,7 @@ public sealed class PollingBackgroundService(
 
             try
             {
-                logger.LogDebug("Polling device {DeviceId} using protocol {Protocol}.", device.DeviceId, device.Protocol);
+                logger.LogDebug("Polling device {DeviceId} using profile {ProfileId}.", device.DeviceId, device.ProfileId);
 
                 var sample = await pollingClient.PollAsync(device, cancellationToken);
                 DateTimeOffset? persistedAt = null;

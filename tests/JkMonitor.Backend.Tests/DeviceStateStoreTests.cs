@@ -34,7 +34,7 @@ public class DeviceStateStoreTests
     }
 
     [Fact]
-    public void GetStatus_UsesSimulatorMode_WhenConfiguredPortIsSimulated()
+    public void GetStatus_ReportsHardwareMode()
     {
         var store = CreateStore(
             new BuildRuntimeInfo(),
@@ -42,7 +42,7 @@ public class DeviceStateStoreTests
             {
                 SerialBus = new SerialBusConfiguration
                 {
-                    PortName = "SIMULATED"
+                    PortName = "/dev/ttyUSB0"
                 },
                 Storage = new StorageConfiguration
                 {
@@ -57,19 +57,18 @@ public class DeviceStateStoreTests
                 },
                 Devices =
                 [
-                    new BmsDeviceConfiguration
+                    new DeviceConfiguration
                     {
                         DeviceId = "device-01",
                         DisplayName = "Device 01",
-                        Protocol = "jk-rs485",
-                        RegisterProfile = "jk-inverter-v15"
+                        ProfileId = "jk-inverter-bms"
                     }
                 ]
             });
 
-        var status = store.GetStatus("Development");
+        var status = store.GetStatus("Production");
 
-        Assert.Equal("Simulator", status.StartupMode);
+        Assert.Equal("Hardware", status.StartupMode);
     }
 
     private static DeviceStateStore CreateStore(BuildRuntimeInfo buildInfo, MonitorConfiguration? configuration = null)
@@ -105,12 +104,11 @@ public class DeviceStateStoreTests
             },
             Devices =
             [
-                new BmsDeviceConfiguration
+                new DeviceConfiguration
                 {
                     DeviceId = "device-01",
                     DisplayName = "Device 01",
-                    Protocol = "jk-rs485",
-                    RegisterProfile = "jk-inverter-v15"
+                    ProfileId = "jk-inverter-bms"
                 }
             ]
         };

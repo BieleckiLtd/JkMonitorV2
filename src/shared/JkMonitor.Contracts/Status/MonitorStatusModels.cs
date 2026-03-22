@@ -6,7 +6,9 @@ public sealed record class DeviceRuntimeState
 
     public required string DisplayName { get; init; }
 
-    public required string Protocol { get; init; }
+    public required string ProfileId { get; init; }
+
+    public string? ProtocolHandler { get; init; }
 
     public bool Enabled { get; init; }
 

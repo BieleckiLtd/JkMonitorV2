@@ -25,8 +25,7 @@ builder.Services.AddSingleton<JkMonitor.Backend.Services.IBuildMetadataProvider,
 builder.Services.AddSingleton<JkMonitor.Backend.Services.DeviceStateStore>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.ManagedRestartService>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.JkRs485PollingClient>();
-builder.Services.AddSingleton<JkMonitor.Backend.Services.SimulatedJkPollingClient>();
-builder.Services.AddSingleton<JkMonitor.Backend.Services.IJkPollingClient, JkMonitor.Backend.Services.ConfiguredPollingClient>();
+builder.Services.AddSingleton<JkMonitor.Backend.Services.IDevicePollingClient, JkMonitor.Backend.Services.ConfiguredPollingClient>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.SetupConfigurationService>();
 
 if (string.Equals(storageProvider, "TimescaleDb", StringComparison.OrdinalIgnoreCase))

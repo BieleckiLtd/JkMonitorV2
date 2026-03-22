@@ -1,5 +1,5 @@
 using System.Text.Json;
-using JkMonitor.Backend.Protocol;
+using JkMonitor.Backend.Models;
 using JkMonitor.Contracts.Configuration;
 using Microsoft.Extensions.Options;
 using Npgsql;
@@ -10,14 +10,14 @@ public interface ITelemetryRepository
 {
     Task InitializeAsync(CancellationToken cancellationToken);
 
-    Task PersistAsync(BmsDeviceConfiguration device, JkParsedSample sample, CancellationToken cancellationToken);
+    Task PersistAsync(DeviceConfiguration device, DevicePollResult sample, CancellationToken cancellationToken);
 }
 
 public sealed class NoOpTelemetryRepository : ITelemetryRepository
 {
     public Task InitializeAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
-    public Task PersistAsync(BmsDeviceConfiguration device, JkParsedSample sample, CancellationToken cancellationToken) => Task.CompletedTask;
+    public Task PersistAsync(DeviceConfiguration device, DevicePollResult sample, CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
 public sealed class TimescaleTelemetryRepository(
@@ -121,7 +121,7 @@ SELECT create_hypertable('jk_rollup_5m', by_range('bucket_start'), if_not_exists
         }
     }
 
-    public async Task PersistAsync(BmsDeviceConfiguration device, JkParsedSample sample, CancellationToken cancellationToken)
+    public async Task PersistAsync(DeviceConfiguration device, DevicePollResult sample, CancellationToken cancellationToken)
     {
         await InitializeAsync(cancellationToken);
 
@@ -189,7 +189,7 @@ VALUES (
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         string tableName,
-        JkParsedSample sample,
+        DevicePollResult sample,
         string deviceId,
         TimeSpan bucketSize,
         CancellationToken cancellationToken)
@@ -277,13 +277,13 @@ DO UPDATE SET
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
-    private static void AddSnapshotParameters(NpgsqlCommand command, BmsDeviceConfiguration device, JkParsedSample sample)
+    private static void AddSnapshotParameters(NpgsqlCommand command, DeviceConfiguration device, DevicePollResult sample)
     {
         command.Parameters.AddWithValue("sampled_at", sample.Snapshot.CollectedAt);
         command.Parameters.AddWithValue("device_id", device.DeviceId);
         command.Parameters.AddWithValue("display_name", device.DisplayName);
-        command.Parameters.AddWithValue("protocol", device.Protocol);
-        command.Parameters.AddWithValue("register_profile", device.RegisterProfile);
+        command.Parameters.AddWithValue("protocol", device.ProfileId);
+            command.Parameters.AddWithValue("register_profile", device.ProfileId);
         command.Parameters.AddWithValue("raw_frame_hex", sample.RawFrameHex);
         command.Parameters.AddWithValue("snapshot", JsonSerializer.Serialize(sample.Snapshot));
         command.Parameters.AddWithValue("raw_registers", JsonSerializer.Serialize(sample.RawRegisters));

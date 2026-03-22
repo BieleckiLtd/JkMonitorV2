@@ -6,13 +6,13 @@ public sealed class MonitorConfiguration
 
     public required StorageConfiguration Storage { get; init; }
 
-    public SimulationConfiguration Simulation { get; init; } = new();
-
     public required AlertingConfiguration Alerting { get; init; }
 
     public required ApiSecurityConfiguration ApiSecurity { get; init; }
 
-    public required IReadOnlyList<BmsDeviceConfiguration> Devices { get; init; }
+    public required IReadOnlyList<DeviceConfiguration> Devices { get; init; }
+
+    public IReadOnlyList<DeviceProfileConfiguration> DeviceProfiles { get; init; } = [];
 }
 
 public sealed class SerialBusConfiguration
@@ -39,27 +39,6 @@ public sealed class StorageConfiguration
     public required string ConnectionString { get; init; }
 
     public required RetentionConfiguration Retention { get; init; }
-}
-
-public sealed class SimulationConfiguration
-{
-    public int CellCount { get; init; } = 16;
-
-    public int BaseCellMillivolts { get; init; } = 3310;
-
-    public int CellSwingMillivolts { get; init; } = 18;
-
-    public int BaseStateOfChargePercent { get; init; } = 72;
-
-    public int StateOfChargeSwingPercent { get; init; } = 8;
-
-    public decimal MaxCurrentAmps { get; init; } = 42m;
-
-    public decimal BaseMosTemperatureCelsius { get; init; } = 29m;
-
-    public decimal BaseAmbientTemperatureCelsius { get; init; } = 24m;
-
-    public decimal BaseBatteryTemperatureCelsius { get; init; } = 27m;
 }
 
 public sealed class RetentionConfiguration
@@ -94,15 +73,13 @@ public sealed class ApiSecurityConfiguration
     public required string TunnelProvider { get; init; }
 }
 
-public sealed class BmsDeviceConfiguration
+public sealed class DeviceConfiguration
 {
     public required string DeviceId { get; init; }
 
     public required string DisplayName { get; init; }
 
-    public required string Protocol { get; init; }
-
-    public required string RegisterProfile { get; init; }
+    public required string ProfileId { get; init; }
 
     public byte Address { get; init; }
 

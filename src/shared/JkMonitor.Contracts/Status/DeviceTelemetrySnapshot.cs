@@ -58,4 +58,6 @@ public sealed record class DeviceTelemetrySnapshot
     public required IReadOnlyList<CellVoltageSnapshot> Cells { get; init; }
 
     public required IReadOnlyList<string> ActiveWarnings { get; init; }
+
+    public IReadOnlyList<DeviceParameter> Parameters { get; init; } = [];
 }

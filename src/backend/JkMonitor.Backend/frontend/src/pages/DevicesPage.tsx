@@ -7,8 +7,7 @@ import { Switch } from '../components/ui/switch';
 type DeviceConfiguration = {
   deviceId: string;
   displayName: string;
-  protocol: string;
-  registerProfile: string;
+  profileId: string;
   address: number;
   isMaster: boolean;
   pollIntervalMilliseconds: number;
@@ -23,8 +22,7 @@ type DeviceConfigurationResponse = {
 const defaultDevice = (index: number): DeviceConfiguration => ({
   deviceId: `device-${index}`,
   displayName: `Battery ${index}`,
-  protocol: 'jk-rs485',
-  registerProfile: 'jk-inverter-v15',
+  profileId: 'jk-inverter-bms',
   address: index,
   isMaster: index === 1,
   pollIntervalMilliseconds: 1000,
@@ -213,12 +211,8 @@ export function DevicesPage() {
                   <Input value={device.displayName} onChange={(event) => updateDevice(index, 'displayName', event.target.value)} />
                 </label>
                 <label className='space-y-2 text-sm text-foreground'>
-                  <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Protocol</span>
-                  <Input value={device.protocol} onChange={(event) => updateDevice(index, 'protocol', event.target.value)} />
-                </label>
-                <label className='space-y-2 text-sm text-foreground'>
-                  <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Register profile</span>
-                  <Input value={device.registerProfile} onChange={(event) => updateDevice(index, 'registerProfile', event.target.value)} />
+                  <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device Profile</span>
+                  <Input value={device.profileId} onChange={(event) => updateDevice(index, 'profileId', event.target.value)} />
                 </label>
                 <label className='space-y-2 text-sm text-foreground'>
                   <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Address</span>

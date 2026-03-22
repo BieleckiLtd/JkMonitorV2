@@ -22,13 +22,18 @@ public sealed class DeviceStateStore
         _hostSystemMonitoringService = hostSystemMonitoringService;
         _buildMetadataProvider = buildMetadataProvider;
 
+        var profileLookup = _configuration.DeviceProfiles.ToDictionary(p => p.ProfileId, StringComparer.OrdinalIgnoreCase);
+
         foreach (var device in _configuration.Devices)
         {
+            profileLookup.TryGetValue(device.ProfileId, out var profile);
+
             _states[device.DeviceId] = new DeviceRuntimeState
             {
                 DeviceId = device.DeviceId,
                 DisplayName = device.DisplayName,
-                Protocol = device.Protocol,
+                ProfileId = device.ProfileId,
+                ProtocolHandler = profile?.ProtocolHandler,
                 Enabled = device.Enabled,
                 IsMaster = device.IsMaster,
                 PollIntervalMilliseconds = device.PollIntervalMilliseconds,
@@ -44,15 +49,11 @@ public sealed class DeviceStateStore
             .ThenBy(device => device.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-        var startupMode = string.Equals(_configuration.SerialBus.PortName, "SIMULATED", StringComparison.OrdinalIgnoreCase)
-            ? "Simulator"
-            : "Hardware";
-
         return new MonitorRuntimeStatus
         {
             ServiceName = "JkMonitor.Backend",
             EnvironmentName = environmentName,
-            StartupMode = startupMode,
+            StartupMode = "Hardware",
             StartedAt = _startedAt,
             ReportedAt = DateTimeOffset.UtcNow,
             ConfiguredDeviceCount = _configuration.Devices.Count,
@@ -63,7 +64,7 @@ public sealed class DeviceStateStore
         };
     }
 
-    public void MarkPollStarted(BmsDeviceConfiguration device, DateTimeOffset timestamp)
+    public void MarkPollStarted(DeviceConfiguration device, DateTimeOffset timestamp)
     {
         _states.AddOrUpdate(
             device.DeviceId,
@@ -77,7 +78,7 @@ public sealed class DeviceStateStore
     }
 
     public void MarkPollCompleted(
-        BmsDeviceConfiguration device,
+        DeviceConfiguration device,
         DateTimeOffset startedAt,
         DateTimeOffset completedAt,
         DeviceTelemetrySnapshot? latestTelemetry,
@@ -99,7 +100,7 @@ public sealed class DeviceStateStore
             });
     }
 
-    public void MarkPollFailed(BmsDeviceConfiguration device, DateTimeOffset startedAt, Exception exception)
+    public void MarkPollFailed(DeviceConfiguration device, DateTimeOffset startedAt, Exception exception)
     {
         _states.AddOrUpdate(
             device.DeviceId,
@@ -114,7 +115,7 @@ public sealed class DeviceStateStore
     }
 
     private static DeviceRuntimeState CreateState(
-        BmsDeviceConfiguration device,
+        DeviceConfiguration device,
         DateTimeOffset startedAt,
         DateTimeOffset? completedAt,
         string outcome,
@@ -126,7 +127,7 @@ public sealed class DeviceStateStore
         {
             DeviceId = device.DeviceId,
             DisplayName = device.DisplayName,
-            Protocol = device.Protocol,
+            ProfileId = device.ProfileId,
             Enabled = device.Enabled,
             IsMaster = device.IsMaster,
             PollIntervalMilliseconds = device.PollIntervalMilliseconds,
