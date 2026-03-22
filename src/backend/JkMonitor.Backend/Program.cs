@@ -15,6 +15,11 @@ builder.Services
 
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
+
+var logStore = new JkMonitor.Backend.Services.InMemoryLogStore();
+builder.Services.AddSingleton(logStore);
+builder.Logging.AddProvider(new JkMonitor.Backend.Services.InMemoryLoggerProvider(logStore));
+
 builder.Services.AddSingleton<JkMonitor.Backend.Services.HostSystemMonitoringService>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.IBuildMetadataProvider, JkMonitor.Backend.Services.AssemblyBuildMetadataProvider>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.DeviceStateStore>();

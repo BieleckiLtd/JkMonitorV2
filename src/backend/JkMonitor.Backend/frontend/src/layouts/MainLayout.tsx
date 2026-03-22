@@ -1,7 +1,7 @@
 import type { ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAppStore } from '../store/useAppStore';
-import { LayoutDashboard, Cable, Settings, Puzzle, Menu, Activity } from 'lucide-react';
+import { Cable, Settings, Puzzle, Menu, Activity, Monitor } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -13,7 +13,7 @@ export function Sidebar() {
   const isSidebarOpen = useAppStore((state) => state.isSidebarOpen);
 
   const navItems = [
-    { name: 'Dashboard', path: '/', icon: LayoutDashboard },
+    { name: 'System', path: '/', icon: Monitor },
     { name: 'Devices Structure', path: '/devices', icon: Cable },
     { name: 'Community Hub', path: '/hub', icon: Puzzle },
     { name: 'Settings', path: '/settings', icon: Settings },
