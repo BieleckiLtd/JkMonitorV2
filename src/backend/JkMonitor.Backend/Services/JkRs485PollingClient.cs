@@ -1,5 +1,4 @@
 using System.IO.Ports;
-using System.Runtime.InteropServices;
 using JkMonitor.Backend.Models;
 using JkMonitor.Backend.Protocol;
 using JkMonitor.Contracts.Configuration;
@@ -39,15 +38,17 @@ public sealed class JkRs485PollingClient(
             serialPort.DiscardInBuffer();
             serialPort.DiscardOutBuffer();
 
-            var request = JkRs485Protocol.BuildReadAllRequest(device.Address);
-            logger.LogDebug("Polling JK device {DeviceId} on {PortName} with address {Address}.", device.DeviceId, serialPort.PortName, device.Address);
+            const ushort registerCount = 134;
+            var request = JkModbusProtocol.BuildReadLiveDataRequest(device.Address);
+            logger.LogDebug("Polling JK device {DeviceId} (Modbus RTU) on {PortName} with address {Address}.", device.DeviceId, serialPort.PortName, device.Address);
 
             await serialPort.BaseStream.WriteAsync(request, pollToken);
             await serialPort.BaseStream.FlushAsync(pollToken);
 
-            var response = await ReadFrameAsync(serialPort.BaseStream, readTimeout, cancellationToken);
+            var expectedLen = JkModbusProtocol.ExpectedResponseLength(registerCount);
+            var response = await ReadModbusResponseAsync(serialPort.BaseStream, expectedLen, readTimeout, cancellationToken);
             var registerDefs = profile.Registers;
-            return JkRs485Protocol.ParseReadAllResponse(response, DateTimeOffset.UtcNow, registerDefs);
+            return JkModbusProtocol.ParseLiveDataResponse(response, device.Address, DateTimeOffset.UtcNow, registerDefs);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -117,59 +118,43 @@ public sealed class JkRs485PollingClient(
         return _serialPort;
     }
 
-    private static async Task<byte[]> ReadFrameAsync(Stream stream, int readTimeoutMs, CancellationToken cancellationToken)
+    private static async Task<byte[]> ReadModbusResponseAsync(Stream stream, int expectedLength, int readTimeoutMs, CancellationToken cancellationToken)
     {
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         timeoutCts.CancelAfter(readTimeoutMs);
         var linkedToken = timeoutCts.Token;
 
-        var buffer = new List<byte>(384);
-        var oneByte = new byte[1];
+        var buffer = new byte[expectedLength];
+        var totalRead = 0;
 
         try
         {
-            while (true)
+            while (totalRead < expectedLength)
             {
                 linkedToken.ThrowIfCancellationRequested();
 
-                var bytesRead = await stream.ReadAsync(oneByte.AsMemory(0, 1), linkedToken);
+                var bytesRead = await stream.ReadAsync(buffer.AsMemory(totalRead, expectedLength - totalRead), linkedToken);
                 if (bytesRead == 0)
                 {
+                    await Task.Delay(1, linkedToken);
                     continue;
                 }
 
-                buffer.Add(oneByte[0]);
+                totalRead += bytesRead;
 
-                if (buffer.Count == 1 && buffer[0] != 0x4E)
+                // After reading at least 3 bytes, check for Modbus exception (shorter response)
+                if (totalRead >= 5 && (buffer[1] & 0x80) != 0)
                 {
-                    buffer.Clear();
-                    continue;
-                }
-
-                if (buffer.Count == 2 && (buffer[0] != 0x4E || buffer[1] != 0x57))
-                {
-                    buffer.Clear();
-                    continue;
-                }
-
-                if (buffer.Count >= 4)
-                {
-                    var expectedLength = JkRs485Protocol.GetExpectedFrameLength(CollectionsMarshal.AsSpan(buffer));
-                    if (expectedLength < 17 || expectedLength > 1024)
-                    {
-                        throw new InvalidDataException($"JK response frame declared an invalid length of {expectedLength} bytes.");
-                    }
-
-                    if (buffer.Count == expectedLength)
-                    {
-                        return buffer.ToArray();
-                    }
+                    // Exception response is always 5 bytes: [addr][func|0x80][exception_code][crc_lo][crc_hi]
+                    return buffer[..5];
                 }
             }
+
+            return buffer;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
-            throw new TimeoutException($"Timed out after {readTimeoutMs}ms waiting for a JK RS485 response frame (received {buffer.Count} bytes).");
+            throw new TimeoutException($"Timed out after {readTimeoutMs}ms waiting for Modbus RTU response (received {totalRead} of {expectedLength} bytes).");
         }
     }
 
