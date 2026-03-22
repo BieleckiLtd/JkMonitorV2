@@ -28,6 +28,7 @@ type SystemRuntimeMetrics = {
   cpuUtilizationPercent?: number | null;
   cpuCoreCount?: number | null;
   cpuMaxClockSpeedMegahertz?: number | null;
+  cpuCurrentClockSpeedMegahertz?: number | null;
   processCount?: number | null;
   systemUptimeSeconds?: number | null;
   memoryAvailableBytes?: number | null;
@@ -167,8 +168,9 @@ export function DashboardPage() {
           title='CPU Utilisation'
           value={formatPercent(cpuUsage)}
           accentClass='text-sky-400'
-          detail={`Base speed ${formatFrequency(metrics?.cpuMaxClockSpeedMegahertz)}`}
+          detail={`Current speed ${formatFrequency(metrics?.cpuCurrentClockSpeedMegahertz)}`}
           detailLines={[
+            `Base speed ${formatFrequency(metrics?.cpuMaxClockSpeedMegahertz)}`,
             `${formatWholeNumber(metrics?.cpuCoreCount)} cores`,
             `${formatWholeNumber(metrics?.processCount)} processes`,
             `System temperature ${formatDecimalValue(metrics?.systemTemperatureCelsius, '°C')}`,
@@ -218,8 +220,8 @@ export function DashboardPage() {
                 <UsagePanel
                   label='CPU'
                   percent={cpuUsage}
-                  summary={`Base speed ${formatFrequency(metrics?.cpuMaxClockSpeedMegahertz)}`}
-                  secondary={`${formatWholeNumber(metrics?.cpuCoreCount)} cores`}
+                  summary={`Current ${formatFrequency(metrics?.cpuCurrentClockSpeedMegahertz)}`}
+                  secondary={`Base ${formatFrequency(metrics?.cpuMaxClockSpeedMegahertz)} • ${formatWholeNumber(metrics?.cpuCoreCount)} cores`}
                 />
                 <UsagePanel
                   label='Memory'
@@ -296,8 +298,10 @@ export function DashboardPage() {
                 <DetailTile label='Environment' value={status.environmentName} />
                 <DetailTile label='Startup mode' value={status.startupMode} />
                 <DetailTile label='Service uptime' value={formatDuration(status.startedAt, status.reportedAt)} />
+                <DetailTile label='CPU current speed' value={formatFrequency(metrics?.cpuCurrentClockSpeedMegahertz)} />
                 <DetailTile label='CPU max speed' value={formatFrequency(metrics?.cpuMaxClockSpeedMegahertz)} />
                 <DetailTile label='CPU cores' value={formatWholeNumber(metrics?.cpuCoreCount)} />
+                <DetailTile label='Fan speed' value={formatRpm(metrics?.mainFanSpeedRpm)} />
                 <DetailTile label='Temperature' value={formatDecimalValue(metrics?.systemTemperatureCelsius, '°C')} />
               </CardContent>
             </Card>
