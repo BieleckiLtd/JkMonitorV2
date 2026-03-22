@@ -11,7 +11,7 @@ Complete the publish flow end-to-end without handing work back to the user:
 1. Check `git status`.
 2. If there are local changes, stage them, generate a sensible commit message when the user did not provide one, commit, and push to `origin/dev`.
 3. If there are no local changes, skip commit creation and continue with the current remote state.
-4. After a push, wait 120 seconds.
+4. After a push, start polling GitHub Releases immediately and re-check every 30 seconds until the updated artifact appears.
 5. Confirm that the `dev-latest` Linux release artifact is available from GitHub Releases and capture its published checksum.
 6. SSH to `pi@jk.local`, confirm GitHub still serves that exact checksum for the release tag, and run the GitHub release installer with the expected checksum pinned.
 7. Verify the installer recorded the same checksum on the device, and verify the deployed service is healthy and reports the expected release tag and source revision in `api/health`.

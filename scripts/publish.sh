@@ -7,9 +7,9 @@ BRANCH=${BRANCH:-dev}
 RELEASE_TAG=${RELEASE_TAG:-dev-latest}
 PI_HOST=${PI_HOST:-pi@jk.local}
 REPOSITORY=${REPOSITORY:-}
-WAIT_SECONDS=${WAIT_SECONDS:-120}
+WAIT_SECONDS=${WAIT_SECONDS:-0}
 ARTIFACT_TIMEOUT_SECONDS=${ARTIFACT_TIMEOUT_SECONDS:-600}
-POLL_SECONDS=${POLL_SECONDS:-15}
+POLL_SECONDS=${POLL_SECONDS:-30}
 REPO_DIR=$(cd "$(dirname "$0")/.." && pwd)
 LINUX_ASSET_NAME='jkmonitor-backend-linux-arm64.tar.gz'
 
@@ -165,14 +165,60 @@ PY
   parse_sha256_payload "$payload"
 }
 
+release_asset_fingerprint() {
+  local json="$1"
+  local asset_name="$2"
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo 'python3 is required to parse the GitHub release metadata.' >&2
+    exit 1
+  fi
+
+  JSON_PAYLOAD="$json" python3 - "$asset_name" <<'PY'
+import json
+import os
+import sys
+
+payload = os.environ.get("JSON_PAYLOAD", "")
+if not payload:
+    raise SystemExit(1)
+
+asset_name = sys.argv[1]
+data = json.loads(payload)
+
+for asset in data.get("assets", []):
+    if asset.get("name") != asset_name:
+        continue
+
+    digest = asset.get("digest") or ""
+    updated_at = asset.get("updated_at") or ""
+    print(f"{asset.get('id')}|{digest}|{updated_at}")
+    raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+}
+
+try_get_release_asset_fingerprint() {
+  local repository_slug="$1"
+  local tag="$2"
+  local asset_name="$3"
+  local json
+
+  if ! json="$(fetch_release_json "$repository_slug" "$tag" 2>/dev/null)"; then
+    return 1
+  fi
+
+  release_asset_fingerprint "$json" "$asset_name" 2>/dev/null
+}
+
 release_asset_ready() {
   local json="$1"
   local asset_name="$2"
-  local updated_after="$3"
+  local previous_fingerprint="$3"
 
   if command -v python3 >/dev/null 2>&1; then
-    JSON_PAYLOAD="$json" python3 - "$asset_name" "$updated_after" <<'PY'
-import datetime
+    JSON_PAYLOAD="$json" python3 - "$asset_name" "$previous_fingerprint" <<'PY'
 import json
 import os
 import sys
@@ -183,18 +229,16 @@ if not payload:
 
 data = json.loads(payload)
 asset_name = sys.argv[1]
-updated_after = datetime.datetime.fromisoformat(sys.argv[2].replace('Z', '+00:00'))
+previous_fingerprint = sys.argv[2]
 
 for asset in data.get('assets', []):
     if asset.get('name') != asset_name:
         continue
 
-    updated_at = asset.get('updated_at')
-    if not updated_at:
-        continue
-
-    updated_at_value = datetime.datetime.fromisoformat(updated_at.replace('Z', '+00:00'))
-    if updated_at_value >= updated_after:
+    digest = asset.get('digest') or ''
+    updated_at = asset.get('updated_at') or ''
+    current_fingerprint = f"{asset.get('id')}|{digest}|{updated_at}"
+    if not previous_fingerprint or current_fingerprint != previous_fingerprint:
         sys.exit(0)
 
 sys.exit(1)
@@ -245,7 +289,7 @@ wait_for_release_checksum() {
 wait_for_release_asset() {
   local repository_slug="$1"
   local tag="$2"
-  local updated_after="$3"
+  local previous_fingerprint="$3"
   local started_at
   local json
 
@@ -253,9 +297,18 @@ wait_for_release_asset() {
 
   while true; do
     if json="$(fetch_release_json "$repository_slug" "$tag" 2>/dev/null)"; then
-      if release_asset_ready "$json" 'jkmonitor-backend-linux-arm64.tar.gz' "$updated_after"; then
+      if release_asset_ready "$json" 'jkmonitor-backend-linux-arm64.tar.gz' "$previous_fingerprint"; then
+        log "Release asset '$LINUX_ASSET_NAME' is ready."
         return
       fi
+
+      if fingerprint="$(release_asset_fingerprint "$json" "$LINUX_ASSET_NAME" 2>/dev/null)"; then
+        log "Release asset '$LINUX_ASSET_NAME' is unchanged ($fingerprint). Retrying in $POLL_SECONDS seconds."
+      else
+        log "Release asset '$LINUX_ASSET_NAME' is not ready yet. Retrying in $POLL_SECONDS seconds."
+      fi
+    else
+      log "GitHub release metadata is not ready yet. Retrying in $POLL_SECONDS seconds."
     fi
 
     if (( $(date +%s) - started_at >= ARTIFACT_TIMEOUT_SECONDS )); then
@@ -273,6 +326,7 @@ REPOSITORY_SLUG="$(normalize_repository "$REPOSITORY")"
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
 CURRENT_COMMIT="$(git rev-parse HEAD)"
 EXPECTED_RELEASE_SHA256=''
+PREVIOUS_RELEASE_ASSET_FINGERPRINT="$(try_get_release_asset_fingerprint "$REPOSITORY_SLUG" "$RELEASE_TAG" "$LINUX_ASSET_NAME" || true)"
 
 if [[ "$CURRENT_BRANCH" != "$BRANCH" ]]; then
   echo "Publish expects branch '$BRANCH'. Current branch is '$CURRENT_BRANCH'." >&2
@@ -310,10 +364,13 @@ else
 fi
 
 if (( PUSHED_CHANGES == 1 )); then
-  log "Waiting $WAIT_SECONDS seconds before artifact check"
-  sleep "$WAIT_SECONDS"
-  log 'Waiting for updated GitHub release artifact'
-  wait_for_release_asset "$REPOSITORY_SLUG" "$RELEASE_TAG" "$PUSH_STARTED_AT"
+  if (( WAIT_SECONDS > 0 )); then
+    log "Waiting $WAIT_SECONDS seconds before artifact polling"
+    sleep "$WAIT_SECONDS"
+  fi
+
+  log "Waiting for updated GitHub release artifact (polling every $POLL_SECONDS seconds)"
+  wait_for_release_asset "$REPOSITORY_SLUG" "$RELEASE_TAG" "$PREVIOUS_RELEASE_ASSET_FINGERPRINT"
 else
   log 'Checking current GitHub release artifact'
   assert_release_asset_exists "$REPOSITORY_SLUG" "$RELEASE_TAG"

@@ -12,11 +12,11 @@ param(
 
     [string]$Repository,
 
-    [int]$WaitSeconds = 120,
+    [int]$WaitSeconds = 0,
 
     [int]$ArtifactTimeoutSeconds = 600,
 
-    [int]$PollSeconds = 15,
+    [int]$PollSeconds = 30,
 
     [switch]$SkipArtifactWait,
 
@@ -139,6 +139,29 @@ function Get-ReleaseAsset([string]$RepositorySlug, [string]$Tag, [string]$AssetN
     return $asset
 }
 
+function Get-ReleaseAssetFingerprint([object]$Asset) {
+    if (-not $Asset) {
+        return $null
+    }
+
+    $digest = ''
+    if ($null -ne $Asset.digest) {
+        $digest = [string]$Asset.digest
+    }
+
+    return "$($Asset.id)|$digest|$($Asset.updated_at)"
+}
+
+function Try-Get-ReleaseAssetFingerprint([string]$RepositorySlug, [string]$Tag, [string]$AssetName) {
+    try {
+        $asset = Get-ReleaseAsset -RepositorySlug $RepositorySlug -Tag $Tag -AssetName $AssetName
+        return Get-ReleaseAssetFingerprint -Asset $asset
+    }
+    catch {
+        return $null
+    }
+}
+
 function Get-ReleaseChecksum([string]$RepositorySlug, [string]$Tag, [string]$AssetName) {
     $headers = @{
         Accept = 'application/octet-stream'
@@ -160,7 +183,7 @@ function Wait-ForReleaseAsset(
     [string]$RepositorySlug,
     [string]$Tag,
     [string]$AssetName,
-    [DateTimeOffset]$UpdatedAfter,
+    [string]$PreviousFingerprint,
     [int]$TimeoutSeconds,
     [int]$PollIntervalSeconds
 ) {
@@ -168,18 +191,18 @@ function Wait-ForReleaseAsset(
 
     while ([DateTimeOffset]::UtcNow -lt $deadline) {
         try {
-            $release = Invoke-GitHubApi -RepositorySlug $RepositorySlug -Path "/releases/tags/$Tag"
-            $asset = @($release.assets) | Where-Object { $_.name -eq $AssetName } | Select-Object -First 1
+            $asset = Get-ReleaseAsset -RepositorySlug $RepositorySlug -Tag $Tag -AssetName $AssetName
 
-            if ($asset) {
-                $assetUpdatedAt = [DateTimeOffset]::Parse($asset.updated_at)
-                if ($assetUpdatedAt -ge $UpdatedAfter) {
-                    Write-Info "Release asset '$AssetName' updated at $assetUpdatedAt."
-                    return
-                }
+            $currentFingerprint = Get-ReleaseAssetFingerprint -Asset $asset
+            if ([string]::IsNullOrWhiteSpace($PreviousFingerprint) -or $currentFingerprint -ne $PreviousFingerprint) {
+                Write-Info "Release asset '$AssetName' is ready (updated at $($asset.updated_at))."
+                return
             }
+
+            Write-Info "Release asset '$AssetName' is unchanged (last updated $($asset.updated_at)). Retrying in $PollIntervalSeconds seconds."
         }
         catch {
+            Write-Info "Release asset '$AssetName' is not ready yet. Retrying in $PollIntervalSeconds seconds."
         }
 
         Start-Sleep -Seconds $PollIntervalSeconds
@@ -220,6 +243,7 @@ $repositorySlug = Get-NormalizedRepository -RepositoryInput $Repository -Remote 
 $currentBranch = (Invoke-GitCapture @('branch', '--show-current') | Select-Object -First 1).Trim()
 $currentCommit = (Invoke-GitCapture @('rev-parse', 'HEAD') | Select-Object -First 1).Trim()
 $expectedReleaseSha256 = $null
+$previousReleaseAssetFingerprint = Try-Get-ReleaseAssetFingerprint -RepositorySlug $repositorySlug -Tag $ReleaseTag -AssetName $linuxAssetName
 
 if ($currentBranch -ne $Branch) {
     throw "Publish expects branch '$Branch'. Current branch is '$currentBranch'."
@@ -265,16 +289,18 @@ else {
 }
 
 if ($pushedChanges) {
-    Write-Step "Waiting $WaitSeconds seconds before artifact check"
-    Start-Sleep -Seconds $WaitSeconds
-
     if (-not $SkipArtifactWait) {
-        Write-Step 'Waiting for updated GitHub release artifact'
+        if ($WaitSeconds -gt 0) {
+            Write-Step "Waiting $WaitSeconds seconds before artifact polling"
+            Start-Sleep -Seconds $WaitSeconds
+        }
+
+        Write-Step "Waiting for updated GitHub release artifact (polling every $PollSeconds seconds)"
         Wait-ForReleaseAsset `
             -RepositorySlug $repositorySlug `
             -Tag $ReleaseTag `
             -AssetName 'jkmonitor-backend-linux-arm64.tar.gz' `
-            -UpdatedAfter $pushStartedAt.AddSeconds(-5) `
+            -PreviousFingerprint $previousReleaseAssetFingerprint `
             -TimeoutSeconds $ArtifactTimeoutSeconds `
             -PollIntervalSeconds $PollSeconds
     }
