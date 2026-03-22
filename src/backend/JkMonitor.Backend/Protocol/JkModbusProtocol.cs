@@ -1,5 +1,6 @@
 using System.Buffers.Binary;
 using System.Globalization;
+using System.Text;
 using JkMonitor.Backend.Models;
 using JkMonitor.Contracts.Configuration;
 using JkMonitor.Contracts.Status;
@@ -8,25 +9,82 @@ namespace JkMonitor.Backend.Protocol;
 
 /// <summary>
 /// JK Inverter BMS RS485 Modbus RTU protocol (V1.1).
-/// Register base addresses: 0x1000 (config), 0x1200 (live data), 0x1400 (device info).
+/// Register base addresses: 0x1000 (config R/W), 0x1200 (live data R), 0x1400 (device info R).
 /// </summary>
 internal static class JkModbusProtocol
 {
     private const ushort LiveDataBase = 0x1200;
+    private const ushort ConfigBase = 0x1000;
+    private const ushort DeviceInfoBase = 0x1400;
     private const int MaxCells = 32;
 
-    /// <summary>
-    /// Build a Modbus RTU "Read Holding Registers" (function code 0x03) request.
-    /// Reads 115 registers starting at 0x1200, which covers cell voltages
-    /// through the end of the live-data region (up to offset 0x00E4).
-    /// The BMS supports a maximum of ~115 registers per read.
-    /// </summary>
-    public static byte[] BuildReadLiveDataRequest(byte slaveAddress)
-    {
-        return BuildReadHoldingRegistersRequest(slaveAddress, LiveDataBase, LiveDataRegisterCount);
-    }
-
     public const ushort LiveDataRegisterCount = 115;
+    public const ushort ConfigRegisterCount = 115;
+    public const ushort DeviceInfoRegisterCount = 123;
+
+    #region Config register definitions
+
+    internal record ConfigRegisterDef(
+        int ByteOffset,
+        string Key,
+        string DisplayName,
+        string? Unit,
+        decimal DisplayScale,
+        string Category);
+
+    internal static readonly ConfigRegisterDef[] ConfigRegisters =
+    [
+        new(0x00, "smartSleepVoltage", "Smart Sleep Voltage", "V", 0.001m, "Cell Protection"),
+        new(0x04, "cellUvp", "Cell UVP", "V", 0.001m, "Cell Protection"),
+        new(0x08, "cellUvpRecovery", "Cell UVP Recovery", "V", 0.001m, "Cell Protection"),
+        new(0x0C, "cellOvp", "Cell OVP", "V", 0.001m, "Cell Protection"),
+        new(0x10, "cellOvpRecovery", "Cell OVP Recovery", "V", 0.001m, "Cell Protection"),
+        new(0x14, "balanceTriggerVoltage", "Balance Trigger Voltage", "mV", 1m, "Balance Settings"),
+        new(0x18, "soc100Voltage", "SOC 100% Voltage", "V", 0.001m, "SOC Settings"),
+        new(0x1C, "soc0Voltage", "SOC 0% Voltage", "V", 0.001m, "SOC Settings"),
+        new(0x20, "cellChargeRequestVoltage", "Cell Charge Request Voltage", "V", 0.001m, "Charging"),
+        new(0x24, "cellFloatVoltage", "Cell Float Voltage", "V", 0.001m, "Charging"),
+        new(0x28, "powerOffVoltage", "Power Off Voltage", "V", 0.001m, "Cell Protection"),
+        new(0x2C, "maxChargeCurrent", "Max Charge Current", "A", 0.001m, "Charging"),
+        new(0x30, "chargeOcpDelay", "Charge OCP Delay", "s", 1m, "Current Protection"),
+        new(0x34, "chargeOcpRecoveryDelay", "Charge OCP Recovery Delay", "s", 1m, "Current Protection"),
+        new(0x38, "maxDischargeCurrent", "Max Discharge Current", "A", 0.001m, "Discharging"),
+        new(0x3C, "dischargeOcpDelay", "Discharge OCP Delay", "s", 1m, "Current Protection"),
+        new(0x40, "dischargeOcpRecoveryDelay", "Discharge OCP Recovery Delay", "s", 1m, "Current Protection"),
+        new(0x44, "scpRecoveryTime", "SCP Recovery Time", "s", 1m, "Current Protection"),
+        new(0x48, "maxBalanceCurrent", "Max Balance Current", "mA", 1m, "Balance Settings"),
+        new(0x4C, "chargeOtp", "Charge OTP", "°C", 0.1m, "Thermal Protection"),
+        new(0x50, "chargeOtpRecovery", "Charge OTP Recovery", "°C", 0.1m, "Thermal Protection"),
+        new(0x54, "dischargeOtp", "Discharge OTP", "°C", 0.1m, "Thermal Protection"),
+        new(0x58, "dischargeOtpRecovery", "Discharge OTP Recovery", "°C", 0.1m, "Thermal Protection"),
+        new(0x5C, "chargeUtp", "Charge UTP", "°C", 0.1m, "Thermal Protection"),
+        new(0x60, "chargeUtpRecovery", "Charge UTP Recovery", "°C", 0.1m, "Thermal Protection"),
+        new(0x64, "mosOtp", "MOS OTP", "°C", 0.1m, "Thermal Protection"),
+        new(0x68, "mosOtpRecovery", "MOS OTP Recovery", "°C", 0.1m, "Thermal Protection"),
+        new(0x6C, "cellCount", "Cell Count", null, 1m, "System"),
+        new(0x70, "chargeSwitch", "Charge Switch", null, 1m, "System"),
+        new(0x74, "dischargeSwitch", "Discharge Switch", null, 1m, "System"),
+        new(0x78, "balancerSwitch", "Balancer Switch", null, 1m, "System"),
+        new(0x7C, "nominalBatteryCapacity", "Nominal Battery Capacity", "Ah", 0.001m, "System"),
+        new(0x80, "scpDelay", "SCP Delay", "μs", 1m, "Current Protection"),
+        new(0x84, "startBalanceVoltage", "Start Balance Voltage", "V", 0.001m, "Balance Settings"),
+    ];
+
+    private static readonly Dictionary<string, ConfigRegisterDef> ConfigRegistersByKey =
+        ConfigRegisters.ToDictionary(r => r.Key, StringComparer.OrdinalIgnoreCase);
+
+    #endregion
+
+    #region Request builders
+
+    public static byte[] BuildReadLiveDataRequest(byte slaveAddress)
+        => BuildReadHoldingRegistersRequest(slaveAddress, LiveDataBase, LiveDataRegisterCount);
+
+    public static byte[] BuildReadConfigRequest(byte slaveAddress)
+        => BuildReadHoldingRegistersRequest(slaveAddress, ConfigBase, ConfigRegisterCount);
+
+    public static byte[] BuildReadDeviceInfoRequest(byte slaveAddress)
+        => BuildReadHoldingRegistersRequest(slaveAddress, DeviceInfoBase, DeviceInfoRegisterCount);
 
     public static byte[] BuildReadHoldingRegistersRequest(byte slaveAddress, ushort startRegister, ushort registerCount)
     {
@@ -44,6 +102,48 @@ internal static class JkModbusProtocol
     }
 
     /// <summary>
+    /// Build a Modbus RTU "Write Multiple Registers" (function code 0x10) request.
+    /// Writes a UINT32 value (2 registers) at the specified config register address.
+    /// </summary>
+    public static byte[] BuildWriteConfigRegisterRequest(byte slaveAddress, ushort startRegister, uint value)
+    {
+        // Function 0x10: [addr][0x10][startHi][startLo][countHi][countLo][byteCount][data...][crcLo][crcHi]
+        var request = new byte[13]; // 1+1+2+2+1+4+2
+        request[0] = slaveAddress;
+        request[1] = 0x10; // Write Multiple Registers
+        request[2] = (byte)(startRegister >> 8);
+        request[3] = (byte)(startRegister & 0xFF);
+        request[4] = 0x00; // register count high
+        request[5] = 0x02; // register count low (2 registers = 1 UINT32)
+        request[6] = 0x04; // byte count (4 bytes)
+        request[7] = (byte)(value >> 24);
+        request[8] = (byte)(value >> 16);
+        request[9] = (byte)(value >> 8);
+        request[10] = (byte)(value & 0xFF);
+        var crc = ComputeCrc16(request.AsSpan(0, 11));
+        request[11] = (byte)(crc & 0xFF);
+        request[12] = (byte)((crc >> 8) & 0xFF);
+        return request;
+    }
+
+    /// <summary>
+    /// Expected response length for a function 0x10 write response (always 8 bytes).
+    /// </summary>
+    public const int WriteResponseLength = 8;
+
+    /// <summary>
+    /// Validate a Modbus function 0x10 write response.
+    /// Returns the number of registers written.
+    /// </summary>
+    public static ushort ValidateWriteResponse(byte[] frame, byte expectedSlaveAddress)
+    {
+        ValidateModbusResponse(frame, expectedSlaveAddress, 0x10);
+        return BinaryPrimitives.ReadUInt16BigEndian(frame.AsSpan(4, 2));
+    }
+
+    #endregion
+
+    /// <summary>
     /// Expected response length for a Modbus RTU read response.
     /// </summary>
     public static int ExpectedResponseLength(ushort registerCount)
@@ -53,13 +153,138 @@ internal static class JkModbusProtocol
     }
 
     /// <summary>
+    /// Parse a Modbus RTU read response for the config region (0x1000).
+    /// Returns config parameters as writable DeviceParameters.
+    /// </summary>
+    public static IReadOnlyList<DeviceParameter> ParseConfigResponse(byte[] frame, byte expectedSlaveAddress, int sortOrderStart)
+    {
+        ValidateModbusResponse(frame, expectedSlaveAddress, 0x03);
+        var data = frame.AsSpan(3, frame[2]);
+        var parameters = new List<DeviceParameter>();
+        var sortOrder = sortOrderStart;
+
+        foreach (var reg in ConfigRegisters)
+        {
+            if (reg.ByteOffset + 4 > data.Length) break;
+            var rawValue = BinaryPrimitives.ReadUInt32BigEndian(data.Slice(reg.ByteOffset, 4));
+            var displayValue = decimal.Round(rawValue * reg.DisplayScale, 3);
+
+            if (reg.Key is "chargeSwitch" or "dischargeSwitch" or "balancerSwitch")
+            {
+                parameters.Add(new DeviceParameter
+                {
+                    Key = reg.Key,
+                    DisplayName = reg.DisplayName,
+                    BooleanValue = rawValue != 0,
+                    Category = reg.Category,
+                    SortOrder = sortOrder++,
+                    IsWritable = true,
+                    RawValue = rawValue,
+                    Unit = null
+                });
+            }
+            else
+            {
+                parameters.Add(new DeviceParameter
+                {
+                    Key = reg.Key,
+                    DisplayName = reg.DisplayName,
+                    NumericValue = displayValue,
+                    Unit = reg.Unit,
+                    Category = reg.Category,
+                    SortOrder = sortOrder++,
+                    IsWritable = true,
+                    RawValue = rawValue
+                });
+            }
+        }
+
+        return parameters;
+    }
+
+    /// <summary>
+    /// Parse a Modbus RTU read response for the device info region (0x1400).
+    /// </summary>
+    public static (IReadOnlyList<DeviceParameter> Parameters, string? ManufacturerId, string? SoftwareVersion) ParseDeviceInfoResponse(
+        byte[] frame, byte expectedSlaveAddress, int sortOrderStart)
+    {
+        ValidateModbusResponse(frame, expectedSlaveAddress, 0x03);
+        var byteCount = frame[2];
+        var dataArray = new byte[byteCount];
+        Array.Copy(frame, 3, dataArray, 0, byteCount);
+        var parameters = new List<DeviceParameter>();
+        var sortOrder = sortOrderStart;
+
+        string? ExtractAscii(int offset, int length)
+        {
+            if (offset + length > dataArray.Length) return null;
+            var sb = new StringBuilder(length);
+            for (var i = offset; i < offset + length; i++)
+            {
+                var b = dataArray[i];
+                if (b >= 0x20 && b < 0x7F) sb.Append((char)b);
+            }
+            var result = sb.ToString().Trim();
+            return result.Length > 0 ? result : null;
+        }
+
+        void AddInfo(string key, string displayName, string? value)
+        {
+            if (value is null) return;
+            parameters.Add(new DeviceParameter
+            {
+                Key = key,
+                DisplayName = displayName,
+                StringValue = value,
+                Category = "Device Info",
+                SortOrder = sortOrder++,
+                IsWritable = false
+            });
+        }
+
+        var deviceId = ExtractAscii(0, 16);        // regs 0x1400-0x1407
+        var hwVersion = ExtractAscii(16, 8);        // regs 0x1408-0x140B
+        var swVersion = ExtractAscii(24, 8);        // regs 0x140C-0x140F
+        var serialNumber = ExtractAscii(40, 16);    // regs 0x1414-0x141B
+        var mfgDate = ExtractAscii(72, 8);          // regs 0x1424-0x1427
+        var deviceName = ExtractAscii(96, 16);      // regs 0x1430-0x1437
+        var vendorId = ExtractAscii(128, 16);       // regs 0x1440-0x1447
+
+        AddInfo("manufacturerDeviceId", "Device Model", deviceId);
+        AddInfo("hardwareVersion", "Hardware Version", hwVersion);
+        AddInfo("softwareVersion", "Software Version", swVersion);
+        AddInfo("serialNumber", "Serial Number", serialNumber);
+        AddInfo("manufacturingDate", "Manufacturing Date", mfgDate);
+        AddInfo("deviceName", "Device Name", deviceName);
+        AddInfo("vendorId", "Vendor", vendorId);
+
+        return (parameters, deviceId, swVersion);
+    }
+
+    /// <summary>
+    /// Look up a config register definition by parameter key.
+    /// </summary>
+    public static ConfigRegisterDef? FindConfigRegister(string key)
+        => ConfigRegistersByKey.GetValueOrDefault(key);
+
+    /// <summary>
+    /// Get the Modbus register address for a config register.
+    /// </summary>
+    public static ushort ConfigByteOffsetToRegisterAddress(int byteOffset)
+        => (ushort)(ConfigBase + byteOffset / 2);
+
+    /// <summary>
     /// Parse a Modbus RTU read response for the live data region.
     /// </summary>
     public static DevicePollResult ParseLiveDataResponse(
         byte[] frame,
         byte expectedSlaveAddress,
         DateTimeOffset collectedAt,
-        IReadOnlyList<RegisterDefinition>? registerDefs = null)
+        IReadOnlyList<RegisterDefinition>? registerDefs = null,
+        IReadOnlyList<DeviceParameter>? configParameters = null,
+        IReadOnlyList<DeviceParameter>? deviceInfoParameters = null,
+        string? manufacturerId = null,
+        string? softwareVersion = null)
     {
         ValidateModbusResponse(frame, expectedSlaveAddress, 0x03);
 
@@ -234,20 +459,21 @@ internal static class JkModbusProtocol
             WarningFlags = alarmFlags,
             StatusFlags = null,
             ProtocolVersion = null,
-            SoftwareVersion = null,
-            ManufacturerId = null,
+            SoftwareVersion = softwareVersion,
+            ManufacturerId = manufacturerId,
             ChargingEnabled = chargingEnabled,
             DischargingEnabled = dischargingEnabled,
             BalancingEnabled = balancingEnabled,
             BatteryOnline = true,
             Cells = orderedCells,
             ActiveWarnings = activeWarnings,
-            Parameters = BuildParameters(collectedAt, orderedCells, rawRegisters, registerDefs,
+            Parameters = BuildAllParameters(
+                collectedAt, orderedCells, rawRegisters, registerDefs,
                 totalVoltageVolts, currentAmps, powerWatts, stateOfChargePercent,
                 minCellVoltage, maxCellVoltage, avgCellVoltage, deltaCellVoltage,
                 mosTemp, batteryTemp1, batteryTemp2,
                 cycleCount, alarmFlags, chargingEnabled, dischargingEnabled, balancingEnabled,
-                activeWarnings)
+                activeWarnings, configParameters, deviceInfoParameters)
         };
 
         return new DevicePollResult(snapshot, rawRegisters, Convert.ToHexString(frame));
@@ -271,15 +497,27 @@ internal static class JkModbusProtocol
         if (frame[1] != expectedFunctionCode)
             throw new InvalidDataException($"Modbus response function code mismatch. Expected 0x{expectedFunctionCode:X2}, got 0x{frame[1]:X2}.");
 
+        // Function 0x10 write response is a fixed 8-byte frame (no byteCount field)
+        if (expectedFunctionCode == 0x10)
+        {
+            if (frame.Length < 8)
+                throw new InvalidDataException($"Modbus write response too short ({frame.Length} bytes, expected 8).");
+            var crc = ComputeCrc16(frame.AsSpan(0, 6));
+            var receivedCrc = (ushort)(frame[6] | (frame[7] << 8));
+            if (crc != receivedCrc)
+                throw new InvalidDataException($"Modbus CRC mismatch. Computed 0x{crc:X4}, received 0x{receivedCrc:X4}.");
+            return;
+        }
+
         var byteCount = frame[2];
         var expectedLength = 3 + byteCount + 2; // header + data + CRC
         if (frame.Length < expectedLength)
             throw new InvalidDataException($"Modbus response length mismatch. Expected {expectedLength}, got {frame.Length}.");
 
-        var crc = ComputeCrc16(frame.AsSpan(0, frame.Length - 2));
-        var receivedCrc = (ushort)(frame[^2] | (frame[^1] << 8));
-        if (crc != receivedCrc)
-            throw new InvalidDataException($"Modbus CRC mismatch. Computed 0x{crc:X4}, received 0x{receivedCrc:X4}.");
+        var readCrc = ComputeCrc16(frame.AsSpan(0, frame.Length - 2));
+        var readReceivedCrc = (ushort)(frame[^2] | (frame[^1] << 8));
+        if (readCrc != readReceivedCrc)
+            throw new InvalidDataException($"Modbus CRC mismatch. Computed 0x{readCrc:X4}, received 0x{readReceivedCrc:X4}.");
     }
 
     public static ushort ComputeCrc16(ReadOnlySpan<byte> data)
@@ -343,7 +581,7 @@ internal static class JkModbusProtocol
         return warnings.ToArray();
     }
 
-    private static IReadOnlyList<DeviceParameter> BuildParameters(
+    private static IReadOnlyList<DeviceParameter> BuildAllParameters(
         DateTimeOffset collectedAt,
         IReadOnlyList<CellVoltageSnapshot> cells,
         IReadOnlyDictionary<string, string> rawRegisters,
@@ -364,7 +602,9 @@ internal static class JkModbusProtocol
         bool? chargingEnabled,
         bool? dischargingEnabled,
         bool? balancingEnabled,
-        IReadOnlyList<string> activeWarnings)
+        IReadOnlyList<string> activeWarnings,
+        IReadOnlyList<DeviceParameter>? configParameters,
+        IReadOnlyList<DeviceParameter>? deviceInfoParameters)
     {
         var parameters = new List<DeviceParameter>();
         var sortOrder = 0;
@@ -436,6 +676,18 @@ internal static class JkModbusProtocol
         if (activeWarnings.Count > 0)
         {
             AddString("activeWarnings", "Active Warnings", string.Join(", ", activeWarnings), "Status");
+        }
+
+        // Append config parameters (R/W)
+        if (configParameters is not null)
+        {
+            parameters.AddRange(configParameters);
+        }
+
+        // Append device info parameters (R/O)
+        if (deviceInfoParameters is not null)
+        {
+            parameters.AddRange(deviceInfoParameters);
         }
 
         return parameters;

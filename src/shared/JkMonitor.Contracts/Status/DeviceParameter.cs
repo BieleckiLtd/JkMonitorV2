@@ -17,4 +17,8 @@ public sealed record DeviceParameter
     public string? Unit { get; init; }
 
     public int SortOrder { get; init; }
+
+    public bool IsWritable { get; init; }
+
+    public long? RawValue { get; init; }
 }

@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Activity, AlertTriangle, Battery, BatteryCharging, LoaderCircle, Thermometer, Zap } from 'lucide-react';
+import { useCallback, useEffect, useState } from 'react';
+import { Activity, AlertTriangle, Battery, BatteryCharging, Check, Edit2, LoaderCircle, Shield, Thermometer, X, Zap } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { cn } from '../lib/utils';
 
@@ -12,6 +12,8 @@ type DeviceParameter = {
   booleanValue?: boolean | null;
   unit?: string | null;
   sortOrder: number;
+  isWritable?: boolean;
+  rawValue?: number | null;
 };
 
 type CellVoltageSnapshot = {
@@ -165,7 +167,10 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
   }
 
   // Category rendering order
-  const categoryOrder = ['Pack Status', 'Cell Summary', 'Cell Voltages', 'Temperatures', 'Status', 'Protection Settings', 'Balance Settings', 'Settings', 'Calibration', 'Device Info'];
+  const categoryOrder = ['Pack Status', 'Cell Summary', 'Cell Voltages', 'Temperatures', 'Status',
+    'Cell Protection', 'Current Protection', 'Thermal Protection', 'Charging', 'Discharging',
+    'Balance Settings', 'SOC Settings', 'System', 'Device Info',
+    'Protection Settings', 'Balance Settings', 'Settings', 'Calibration'];
   const sortedCategories = [...grouped.keys()].sort((a, b) => {
     const aIdx = categoryOrder.indexOf(a);
     const bIdx = categoryOrder.indexOf(b);
@@ -281,7 +286,7 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
                   <CardContent className='pt-3'>
                     <div className='grid gap-2'>
                       {params.map((param) => (
-                        <ParameterRow key={param.key} param={param} />
+                        <ParameterRow key={param.key} param={param} deviceId={device.deviceId} />
                       ))}
                     </div>
                   </CardContent>
@@ -368,16 +373,109 @@ function CellVoltageChart({ cells, minV, maxV, avgV }: { cells: CellVoltageSnaps
   );
 }
 
-function ParameterRow({ param }: { param: DeviceParameter }) {
+function ParameterRow({ param, deviceId }: { param: DeviceParameter; deviceId: string }) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [writeResult, setWriteResult] = useState<{ success: boolean; message: string } | null>(null);
   const value = formatParamValue(param);
 
+  const startEdit = useCallback(() => {
+    if (!param.isWritable) return;
+    setEditValue(param.rawValue?.toString() ?? '');
+    setIsEditing(true);
+    setWriteResult(null);
+  }, [param]);
+
+  const cancelEdit = useCallback(() => {
+    setIsEditing(false);
+    setWriteResult(null);
+  }, []);
+
+  const saveValue = useCallback(async () => {
+    const rawValue = parseInt(editValue, 10);
+    if (isNaN(rawValue) || rawValue < 0) {
+      setWriteResult({ success: false, message: 'Invalid value' });
+      return;
+    }
+
+    setIsSaving(true);
+    setWriteResult(null);
+
+    try {
+      const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/parameters/${encodeURIComponent(param.key)}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rawValue }),
+      });
+
+      const data = await response.json() as { success?: boolean; writtenValue?: number; readBackValue?: number; error?: string; message?: string };
+
+      if (!response.ok) {
+        setWriteResult({ success: false, message: data.message ?? 'Write failed' });
+        return;
+      }
+
+      if (data.success) {
+        setWriteResult({ success: true, message: `Confirmed: ${data.readBackValue}` });
+        setIsEditing(false);
+      } else {
+        setWriteResult({ success: false, message: data.error ?? 'Verification failed' });
+      }
+    } catch {
+      setWriteResult({ success: false, message: 'Network error' });
+    } finally {
+      setIsSaving(false);
+    }
+  }, [editValue, deviceId, param.key]);
+
   return (
-    <div className='flex items-center justify-between rounded-lg border border-border/50 bg-background/40 px-3 py-2'>
-      <span className='text-xs text-muted-foreground'>{param.displayName}</span>
-      <span className='text-sm font-semibold text-foreground'>
-        {value}
-        {param.unit && <span className='ml-1 text-xs font-normal text-muted-foreground'>{param.unit}</span>}
-      </span>
+    <div className='rounded-lg border border-border/50 bg-background/40 px-3 py-2'>
+      <div className='flex items-center justify-between'>
+        <span className='text-xs text-muted-foreground'>{param.displayName}</span>
+        <div className='flex items-center gap-2'>
+          {isEditing ? (
+            <div className='flex items-center gap-1'>
+              <span className='text-[10px] text-muted-foreground/60'>raw:</span>
+              <input
+                type='number'
+                className='w-24 rounded border border-border bg-background px-2 py-0.5 text-sm font-semibold text-foreground outline-none focus:border-primary'
+                value={editValue}
+                onChange={e => setEditValue(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') void saveValue(); if (e.key === 'Escape') cancelEdit(); }}
+                disabled={isSaving}
+                autoFocus
+              />
+              <button onClick={() => void saveValue()} disabled={isSaving}
+                className='rounded p-1 text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50'>
+                {isSaving ? <LoaderCircle className='h-3.5 w-3.5 animate-spin' /> : <Check className='h-3.5 w-3.5' />}
+              </button>
+              <button onClick={cancelEdit} disabled={isSaving}
+                className='rounded p-1 text-muted-foreground hover:bg-muted/50 disabled:opacity-50'>
+                <X className='h-3.5 w-3.5' />
+              </button>
+            </div>
+          ) : (
+            <>
+              <span className='text-sm font-semibold text-foreground'>
+                {value}
+                {param.unit && <span className='ml-1 text-xs font-normal text-muted-foreground'>{param.unit}</span>}
+              </span>
+              {param.isWritable && (
+                <button onClick={startEdit} className='rounded p-1 text-muted-foreground/60 hover:text-primary hover:bg-primary/10 transition-colors'
+                  title='Edit parameter'>
+                  <Edit2 className='h-3 w-3' />
+                </button>
+              )}
+            </>
+          )}
+        </div>
+      </div>
+      {writeResult && (
+        <div className={cn('mt-1 text-[10px]', writeResult.success ? 'text-emerald-400' : 'text-rose-400')}>
+          {writeResult.success ? '✓ ' : '✗ '}{writeResult.message}
+        </div>
+      )}
     </div>
   );
 }
@@ -393,6 +491,19 @@ function CategoryIcon({ category }: { category: string }) {
       return <Thermometer className='h-4 w-4 text-amber-400' />;
     case 'Status':
       return <Activity className='h-4 w-4 text-primary' />;
+    case 'Cell Protection':
+    case 'Current Protection':
+    case 'Thermal Protection':
+      return <Shield className='h-4 w-4 text-rose-400' />;
+    case 'Balance Settings':
+    case 'SOC Settings':
+    case 'System':
+      return <Activity className='h-4 w-4 text-violet-400' />;
+    case 'Charging':
+    case 'Discharging':
+      return <BatteryCharging className='h-4 w-4 text-sky-400' />;
+    case 'Device Info':
+      return <Activity className='h-4 w-4 text-teal-400' />;
     default:
       return <Activity className='h-4 w-4 text-muted-foreground' />;
   }

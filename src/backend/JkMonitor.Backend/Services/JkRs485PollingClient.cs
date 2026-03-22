@@ -2,6 +2,7 @@ using System.IO.Ports;
 using JkMonitor.Backend.Models;
 using JkMonitor.Backend.Protocol;
 using JkMonitor.Contracts.Configuration;
+using JkMonitor.Contracts.Status;
 using Microsoft.Extensions.Options;
 
 namespace JkMonitor.Backend.Services;
@@ -24,7 +25,7 @@ public sealed class JkRs485PollingClient(
     {
         var transport = profile.Transport;
         var readTimeout = transport?.ReadTimeoutMs ?? _configuration.SerialBus.ReadTimeoutMilliseconds;
-        var overallTimeoutMs = readTimeout * 3;
+        var overallTimeoutMs = readTimeout * 5;
 
         using var pollCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         pollCts.CancelAfter(overallTimeoutMs);
@@ -38,17 +39,45 @@ public sealed class JkRs485PollingClient(
             serialPort.DiscardInBuffer();
             serialPort.DiscardOutBuffer();
 
-            const ushort registerCount = JkModbusProtocol.LiveDataRegisterCount;
-            var request = JkModbusProtocol.BuildReadLiveDataRequest(device.Address);
-            logger.LogDebug("Polling JK device {DeviceId} (Modbus RTU) on {PortName} with address {Address}.", device.DeviceId, serialPort.PortName, device.Address);
-
-            await serialPort.BaseStream.WriteAsync(request, pollToken);
-            await serialPort.BaseStream.FlushAsync(pollToken);
-
-            var expectedLen = JkModbusProtocol.ExpectedResponseLength(registerCount);
-            var response = await ReadModbusResponseAsync(serialPort.BaseStream, expectedLen, readTimeout, cancellationToken);
             var registerDefs = profile.Registers;
-            return JkModbusProtocol.ParseLiveDataResponse(response, device.Address, DateTimeOffset.UtcNow, registerDefs);
+
+            // 1. Read live data (0x1200)
+            logger.LogDebug("Polling JK device {DeviceId} (Modbus RTU) on {PortName} with address {Address}.", device.DeviceId, serialPort.PortName, device.Address);
+            var liveResponse = await SendAndReceiveAsync(serialPort, JkModbusProtocol.BuildReadLiveDataRequest(device.Address),
+                JkModbusProtocol.ExpectedResponseLength(JkModbusProtocol.LiveDataRegisterCount), readTimeout, cancellationToken);
+
+            // 2. Read config (0x1000)
+            IReadOnlyList<DeviceParameter>? configParams = null;
+            try
+            {
+                await Task.Delay(20, pollToken); // small gap between requests
+                var configResponse = await SendAndReceiveAsync(serialPort, JkModbusProtocol.BuildReadConfigRequest(device.Address),
+                    JkModbusProtocol.ExpectedResponseLength(JkModbusProtocol.ConfigRegisterCount), readTimeout, cancellationToken);
+                configParams = JkModbusProtocol.ParseConfigResponse(configResponse, device.Address, 100);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "Failed to read config registers for device {DeviceId}.", device.DeviceId);
+            }
+
+            // 3. Read device info (0x1400)
+            IReadOnlyList<DeviceParameter>? deviceInfoParams = null;
+            string? manufacturerId = null;
+            string? softwareVersion = null;
+            try
+            {
+                await Task.Delay(20, pollToken);
+                var deviceInfoResponse = await SendAndReceiveAsync(serialPort, JkModbusProtocol.BuildReadDeviceInfoRequest(device.Address),
+                    JkModbusProtocol.ExpectedResponseLength(JkModbusProtocol.DeviceInfoRegisterCount), readTimeout, cancellationToken);
+                (deviceInfoParams, manufacturerId, softwareVersion) = JkModbusProtocol.ParseDeviceInfoResponse(deviceInfoResponse, device.Address, 200);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger.LogWarning(ex, "Failed to read device info registers for device {DeviceId}.", device.DeviceId);
+            }
+
+            return JkModbusProtocol.ParseLiveDataResponse(liveResponse, device.Address, DateTimeOffset.UtcNow, registerDefs,
+                configParams, deviceInfoParams, manufacturerId, softwareVersion);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -64,6 +93,86 @@ public sealed class JkRs485PollingClient(
         {
             _busLock.Release();
         }
+    }
+
+    /// <summary>
+    /// Write a config register value through the Modbus bus with read-back verification.
+    /// </summary>
+    public async Task<WriteRegisterResult> WriteConfigRegisterAsync(
+        DeviceConfiguration device, DeviceProfileConfiguration profile,
+        string parameterKey, uint rawValue, CancellationToken cancellationToken)
+    {
+        var regDef = JkModbusProtocol.FindConfigRegister(parameterKey)
+            ?? throw new ArgumentException($"Unknown config parameter key '{parameterKey}'.");
+
+        var registerAddress = JkModbusProtocol.ConfigByteOffsetToRegisterAddress(regDef.ByteOffset);
+        var transport = profile.Transport;
+        var readTimeout = transport?.ReadTimeoutMs ?? _configuration.SerialBus.ReadTimeoutMilliseconds;
+
+        using var writeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        writeCts.CancelAfter(readTimeout * 5);
+        var writeToken = writeCts.Token;
+
+        await _busLock.WaitAsync(writeToken);
+        try
+        {
+            var serialPort = EnsurePort(transport);
+            serialPort.DiscardInBuffer();
+            serialPort.DiscardOutBuffer();
+
+            // Write
+            var writeRequest = JkModbusProtocol.BuildWriteConfigRegisterRequest(device.Address, registerAddress, rawValue);
+            logger.LogInformation("Writing config register {Key} (0x{Register:X4}) = {Value} for device {DeviceId}.",
+                parameterKey, registerAddress, rawValue, device.DeviceId);
+
+            var writeResponse = await SendAndReceiveAsync(serialPort, writeRequest,
+                JkModbusProtocol.WriteResponseLength, readTimeout, cancellationToken);
+            JkModbusProtocol.ValidateWriteResponse(writeResponse, device.Address);
+
+            // Read back to verify
+            await Task.Delay(50, writeToken);
+            serialPort.DiscardInBuffer();
+
+            var readRequest = JkModbusProtocol.BuildReadHoldingRegistersRequest(device.Address, registerAddress, 2);
+            var readResponse = await SendAndReceiveAsync(serialPort, readRequest,
+                JkModbusProtocol.ExpectedResponseLength(2), readTimeout, cancellationToken);
+
+            // Parse read-back value
+            var frame = readResponse;
+            if (frame.Length >= 9 && frame[1] == 0x03 && frame[2] == 4)
+            {
+                var readBack = (uint)((frame[3] << 24) | (frame[4] << 16) | (frame[5] << 8) | frame[6]);
+                var success = readBack == rawValue;
+                logger.LogInformation("Write verification for {Key}: written={Written}, readBack={ReadBack}, success={Success}.",
+                    parameterKey, rawValue, readBack, success);
+
+                return new WriteRegisterResult(success, rawValue, readBack,
+                    success ? null : $"Read-back mismatch: expected {rawValue}, got {readBack}");
+            }
+
+            return new WriteRegisterResult(false, rawValue, null, "Unable to read back register value after write.");
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            ClosePort();
+            throw new TimeoutException($"Write timeout exceeded for parameter {parameterKey}.");
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            ClosePort();
+            throw;
+        }
+        finally
+        {
+            _busLock.Release();
+        }
+    }
+
+    private async Task<byte[]> SendAndReceiveAsync(SerialPort serialPort, byte[] request, int expectedLen, int readTimeout, CancellationToken cancellationToken)
+    {
+        await serialPort.BaseStream.WriteAsync(request, cancellationToken);
+        await serialPort.BaseStream.FlushAsync(cancellationToken);
+        return await ReadModbusResponseAsync(serialPort.BaseStream, expectedLen, readTimeout, cancellationToken);
     }
 
     private void ClosePort()
