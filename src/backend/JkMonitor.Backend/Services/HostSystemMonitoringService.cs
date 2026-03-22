@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Globalization;
+using System.Management;
 using System.Runtime.InteropServices;
 using System.Runtime.Versioning;
 using JkMonitor.Contracts.Status;
@@ -23,6 +24,7 @@ public sealed class HostSystemMonitoringService(ILogger<HostSystemMonitoringServ
             CpuUtilizationPercent = GetCpuUtilizationPercent(),
             CpuCoreCount = GetCpuCoreCount(),
             CpuMaxClockSpeedMegahertz = GetCpuMaxClockSpeedMegahertz(),
+            CpuCurrentClockSpeedMegahertz = GetCpuCurrentClockSpeedMegahertz(),
             ProcessCount = GetProcessCount(),
             SystemUptimeSeconds = GetSystemUptimeSeconds(),
             MemoryAvailableBytes = memoryInfo.availableBytes,
@@ -214,6 +216,28 @@ public sealed class HostSystemMonitoringService(ILogger<HostSystemMonitoringServ
         catch (Exception exception)
         {
             logger.LogDebug(exception, "Failed to collect CPU max clock speed.");
+        }
+
+        return null;
+    }
+
+    private int? GetCpuCurrentClockSpeedMegahertz()
+    {
+        try
+        {
+            if (OperatingSystem.IsLinux())
+            {
+                return GetLinuxCpuCurrentClockSpeedMegahertz();
+            }
+
+            if (OperatingSystem.IsWindows())
+            {
+                return GetWindowsCpuCurrentClockSpeedMegahertz();
+            }
+        }
+        catch (Exception exception)
+        {
+            logger.LogDebug(exception, "Failed to collect current CPU clock speed.");
         }
 
         return null;
@@ -413,6 +437,86 @@ public sealed class HostSystemMonitoringService(ILogger<HostSystemMonitoringServ
         };
     }
 
+    [SupportedOSPlatform("windows")]
+    private static int? GetWindowsCpuCurrentClockSpeedMegahertz()
+    {
+        var processorCount = Environment.ProcessorCount;
+
+        if (processorCount <= 0)
+        {
+            return null;
+        }
+
+        var structSize = Marshal.SizeOf<ProcessorPowerInformation>();
+        var bufferSize = structSize * processorCount;
+        var buffer = Marshal.AllocHGlobal(bufferSize);
+
+        try
+        {
+            const int processorInformation = 11;
+            var status = CallNtPowerInformation(processorInformation, IntPtr.Zero, 0, buffer, (uint)bufferSize);
+
+            if (status != 0)
+            {
+                return null;
+            }
+
+            uint maxCurrentMhz = 0;
+
+            for (var i = 0; i < processorCount; i++)
+            {
+                var info = Marshal.PtrToStructure<ProcessorPowerInformation>(buffer + i * structSize);
+
+                if (info.CurrentMhz > maxCurrentMhz)
+                {
+                    maxCurrentMhz = info.CurrentMhz;
+                }
+            }
+
+            return maxCurrentMhz > 0 ? (int)maxCurrentMhz : null;
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    private static int? GetLinuxCpuCurrentClockSpeedMegahertz()
+    {
+        const string cpuRoot = "/sys/devices/system/cpu";
+        const string cpuPolicyRoot = "/sys/devices/system/cpu/cpufreq";
+
+        long maxKilohertz = 0;
+
+        if (Directory.Exists(cpuPolicyRoot))
+        {
+            foreach (var policyDirectory in Directory.GetDirectories(cpuPolicyRoot, "policy*"))
+            {
+                var kilohertz = ReadLinuxFrequencyKilohertz(Path.Combine(policyDirectory, "scaling_cur_freq"));
+
+                if (kilohertz is > 0 && kilohertz.Value > maxKilohertz)
+                {
+                    maxKilohertz = kilohertz.Value;
+                }
+            }
+        }
+
+        if (Directory.Exists(cpuRoot))
+        {
+            foreach (var cpuDirectory in Directory.GetDirectories(cpuRoot, "cpu[0-9]*"))
+            {
+                var kilohertz = ReadLinuxFrequencyKilohertz(Path.Combine(cpuDirectory, "cpufreq", "scaling_cur_freq"));
+
+                if (kilohertz is > 0 && kilohertz.Value > maxKilohertz)
+                {
+                    maxKilohertz = kilohertz.Value;
+                }
+            }
+        }
+
+        return maxKilohertz > 0 ? (int)Math.Round(maxKilohertz / 1000d) : null;
+    }
+
     private double? GetSystemTemperatureCelsius()
     {
         try
@@ -446,35 +550,59 @@ public sealed class HostSystemMonitoringService(ILogger<HostSystemMonitoringServ
     {
         try
         {
-            if (!OperatingSystem.IsLinux())
+            if (OperatingSystem.IsLinux())
             {
-                return null;
+                return GetLinuxMainFanSpeedRpm();
             }
 
-            FanSpeedReading? bestReading = null;
-
-            foreach (var sensor in GetLinuxFanSensors())
+            if (OperatingSystem.IsWindows())
             {
-                var rpm = ReadLinuxFanSpeedRpm(sensor.InputPath);
-
-                if (rpm is null)
-                {
-                    continue;
-                }
-
-                if (bestReading is null
-                    || sensor.Priority > bestReading.Value.Priority
-                    || (sensor.Priority == bestReading.Value.Priority && rpm.Value > bestReading.Value.SpeedRpm))
-                {
-                    bestReading = new FanSpeedReading(rpm.Value, sensor.Priority);
-                }
+                return GetWindowsMainFanSpeedRpm();
             }
-
-            return bestReading?.SpeedRpm;
         }
         catch (Exception exception)
         {
             logger.LogDebug(exception, "Failed to read main fan speed.");
+        }
+
+        return null;
+    }
+
+    private static int? GetLinuxMainFanSpeedRpm()
+    {
+        FanSpeedReading? bestReading = null;
+
+        foreach (var sensor in GetLinuxFanSensors())
+        {
+            var rpm = ReadLinuxFanSpeedRpm(sensor.InputPath);
+
+            if (rpm is null)
+            {
+                continue;
+            }
+
+            if (bestReading is null
+                || sensor.Priority > bestReading.Value.Priority
+                || (sensor.Priority == bestReading.Value.Priority && rpm.Value > bestReading.Value.SpeedRpm))
+            {
+                bestReading = new FanSpeedReading(rpm.Value, sensor.Priority);
+            }
+        }
+
+        return bestReading?.SpeedRpm;
+    }
+
+    [SupportedOSPlatform("windows")]
+    private static int? GetWindowsMainFanSpeedRpm()
+    {
+        using var searcher = new ManagementObjectSearcher("SELECT DesiredSpeed FROM Win32_Fan");
+
+        foreach (ManagementBaseObject obj in searcher.Get())
+        {
+            if (obj["DesiredSpeed"] is ulong speed and > 0)
+            {
+                return speed <= int.MaxValue ? (int)speed : int.MaxValue;
+            }
         }
 
         return null;
@@ -648,9 +776,28 @@ public sealed class HostSystemMonitoringService(ILogger<HostSystemMonitoringServ
         public ulong ullAvailExtendedVirtual;
     }
 
+    [StructLayout(LayoutKind.Sequential)]
+    private struct ProcessorPowerInformation
+    {
+        public uint Number;
+        public uint MaxMhz;
+        public uint CurrentMhz;
+        public uint MhzLimit;
+        public uint MaxIdleState;
+        public uint CurrentIdleState;
+    }
+
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool GetSystemTimes(out FileTime idleTime, out FileTime kernelTime, out FileTime userTime);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Auto, SetLastError = true)]
     private static extern bool GlobalMemoryStatusEx(ref MemoryStatusEx memoryStatus);
+
+    [DllImport("powrprof.dll")]
+    private static extern uint CallNtPowerInformation(
+        int informationLevel,
+        IntPtr inputBuffer,
+        uint inputBufferLength,
+        IntPtr outputBuffer,
+        uint outputBufferLength);
 }

@@ -6,4 +6,7 @@
   <Folder Name="/src/shared/">
     <Project Path="src/shared/JkMonitor.Contracts/JkMonitor.Contracts.csproj" />
   </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/JkMonitor.Backend.Tests/JkMonitor.Backend.Tests.csproj" />
+  </Folder>
 </Solution>
