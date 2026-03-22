@@ -38,7 +38,7 @@ public sealed class JkRs485PollingClient(
             serialPort.DiscardInBuffer();
             serialPort.DiscardOutBuffer();
 
-            const ushort registerCount = 134;
+            const ushort registerCount = JkModbusProtocol.LiveDataRegisterCount;
             var request = JkModbusProtocol.BuildReadLiveDataRequest(device.Address);
             logger.LogDebug("Polling JK device {DeviceId} (Modbus RTU) on {PortName} with address {Address}.", device.DeviceId, serialPort.PortName, device.Address);
 

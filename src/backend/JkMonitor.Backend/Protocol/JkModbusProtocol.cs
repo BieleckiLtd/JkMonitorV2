@@ -17,15 +17,16 @@ internal static class JkModbusProtocol
 
     /// <summary>
     /// Build a Modbus RTU "Read Holding Registers" (function code 0x03) request.
-    /// Reads 134 registers starting at 0x1200+0x0000, which covers cell voltages
-    /// through the end of the live-data region (0x00D2 = 268 bytes = 134 registers).
+    /// Reads 115 registers starting at 0x1200, which covers cell voltages
+    /// through the end of the live-data region (up to offset 0x00E4).
+    /// The BMS supports a maximum of ~115 registers per read.
     /// </summary>
     public static byte[] BuildReadLiveDataRequest(byte slaveAddress)
     {
-        // Read 134 registers starting at absolute address 0x1200.
-        // 134 registers * 2 bytes = 268 bytes covers up to offset 0x010C.
-        return BuildReadHoldingRegistersRequest(slaveAddress, LiveDataBase, 134);
+        return BuildReadHoldingRegistersRequest(slaveAddress, LiveDataBase, LiveDataRegisterCount);
     }
+
+    public const ushort LiveDataRegisterCount = 115;
 
     public static byte[] BuildReadHoldingRegistersRequest(byte slaveAddress, ushort startRegister, ushort registerCount)
     {
