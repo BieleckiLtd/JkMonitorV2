@@ -43,9 +43,24 @@ public sealed record class MonitorRuntimeStatus
 
     public int EnabledDeviceCount { get; init; }
 
+    public BuildRuntimeInfo? Build { get; init; }
+
     public SystemRuntimeMetrics? SystemMetrics { get; init; }
 
     public required IReadOnlyList<DeviceRuntimeState> Devices { get; init; }
+}
+
+public sealed record class BuildRuntimeInfo
+{
+    public string? ReleaseTag { get; init; }
+
+    public string? SourceRevisionId { get; init; }
+
+    public string? InformationalVersion { get; init; }
+
+    public string? WorkflowRunNumber { get; init; }
+
+    public string? WorkflowRunAttempt { get; init; }
 }
 
 public sealed record class SystemRuntimeMetrics

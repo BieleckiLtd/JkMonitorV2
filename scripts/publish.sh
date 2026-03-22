@@ -11,6 +11,7 @@ WAIT_SECONDS=${WAIT_SECONDS:-120}
 ARTIFACT_TIMEOUT_SECONDS=${ARTIFACT_TIMEOUT_SECONDS:-600}
 POLL_SECONDS=${POLL_SECONDS:-15}
 REPO_DIR=$(cd "$(dirname "$0")/.." && pwd)
+LINUX_ASSET_NAME='jkmonitor-backend-linux-arm64.tar.gz'
 
 cd "$REPO_DIR"
 
@@ -108,6 +109,48 @@ fetch_release_json() {
   exit 1
 }
 
+release_download_url() {
+  local repository_slug="$1"
+  local tag="$2"
+  local asset_name="$3"
+
+  printf 'https://github.com/%s/releases/download/%s/%s\n' "$repository_slug" "$tag" "$asset_name"
+}
+
+parse_sha256_payload() {
+  local payload="$1"
+  local checksum
+
+  checksum="$(printf '%s\n' "$payload" | awk 'NR == 1 { print $1 }')"
+
+  if [[ ! "$checksum" =~ ^[0-9A-Fa-f]{64}$ ]]; then
+    return 1
+  fi
+
+  printf '%s\n' "${checksum,,}"
+}
+
+fetch_release_checksum() {
+  local repository_slug="$1"
+  local tag="$2"
+  local asset_name="$3"
+  local checksum_url
+  local payload
+
+  checksum_url="$(release_download_url "$repository_slug" "$tag" "$asset_name.sha256")"
+
+  if command -v curl >/dev/null 2>&1; then
+    payload="$(curl -fsSL "$checksum_url")"
+  elif command -v wget >/dev/null 2>&1; then
+    payload="$(wget -qO- "$checksum_url")"
+  else
+    echo 'curl or wget is required to download the published checksum file.' >&2
+    exit 1
+  fi
+
+  parse_sha256_payload "$payload"
+}
+
 release_asset_ready() {
   local json="$1"
   local asset_name="$2"
@@ -161,6 +204,30 @@ assert_release_asset_exists() {
   fi
 }
 
+wait_for_release_checksum() {
+  local repository_slug="$1"
+  local tag="$2"
+  local asset_name="$3"
+  local started_at
+  local checksum
+
+  started_at=$(date +%s)
+
+  while true; do
+    if checksum="$(fetch_release_checksum "$repository_slug" "$tag" "$asset_name" 2>/dev/null)"; then
+      printf '%s\n' "$checksum"
+      return
+    fi
+
+    if (( $(date +%s) - started_at >= ARTIFACT_TIMEOUT_SECONDS )); then
+      echo "Timed out waiting for release checksum '$asset_name.sha256' on tag '$tag'." >&2
+      exit 1
+    fi
+
+    sleep "$POLL_SECONDS"
+  done
+}
+
 wait_for_release_asset() {
   local repository_slug="$1"
   local tag="$2"
@@ -190,6 +257,8 @@ require_cmd git
 
 REPOSITORY_SLUG="$(normalize_repository "$REPOSITORY")"
 CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+CURRENT_COMMIT="$(git rev-parse HEAD)"
+EXPECTED_RELEASE_SHA256=''
 
 if [[ "$CURRENT_BRANCH" != "$BRANCH" ]]; then
   echo "Publish expects branch '$BRANCH'. Current branch is '$CURRENT_BRANCH'." >&2
@@ -236,15 +305,103 @@ else
   assert_release_asset_exists "$REPOSITORY_SLUG" "$RELEASE_TAG"
 fi
 
+log 'Resolving published release checksum'
+EXPECTED_RELEASE_SHA256="$(wait_for_release_checksum "$REPOSITORY_SLUG" "$RELEASE_TAG" "$LINUX_ASSET_NAME")"
+log "Expected Linux release checksum: $EXPECTED_RELEASE_SHA256"
+
 require_cmd ssh
 
 log "Deploying to $PI_HOST"
 ssh -o StrictHostKeyChecking=no "$PI_HOST" bash -s <<EOF
 set -euo pipefail
-wget -qO- https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-release.sh | bash -s -- https://github.com/BieleckiLtd/JkMonitorV2 "$RELEASE_TAG"
+expected_sha256='$EXPECTED_RELEASE_SHA256'
+repository_slug='$REPOSITORY_SLUG'
+release_tag='$RELEASE_TAG'
+asset_name='$LINUX_ASSET_NAME'
+expected_source_revision_id='$CURRENT_COMMIT'
+
+fetch_release_checksum() {
+  local checksum_url="https://github.com/\$repository_slug/releases/download/\$release_tag/\$asset_name.sha256"
+  local payload
+
+  if command -v curl >/dev/null 2>&1; then
+    payload="\$(curl -fsSL "\$checksum_url")"
+  elif command -v wget >/dev/null 2>&1; then
+    payload="\$(wget -qO- "\$checksum_url")"
+  else
+    echo 'curl or wget is required on the device to verify the published checksum.' >&2
+    exit 1
+  fi
+
+  local checksum
+  checksum="\$(printf '%s\n' "\$payload" | awk 'NR == 1 { print \$1 }')"
+  if [[ ! "\$checksum" =~ ^[0-9A-Fa-f]{64}$ ]]; then
+    echo 'The published checksum file did not contain a valid SHA-256 value.' >&2
+    exit 1
+  fi
+
+  printf '%s\n' "\${checksum,,}"
+}
+
+current_release_sha256="\$(fetch_release_checksum)"
+if [[ "\$current_release_sha256" != "\$expected_sha256" ]]; then
+  echo "Release checksum mismatch on device. Expected \$expected_sha256 but GitHub currently serves \$current_release_sha256 for \$asset_name on \$release_tag." >&2
+  exit 1
+fi
+
+export JKMONITOR_EXPECTED_RELEASE_SHA256="\$expected_sha256"
+wget -qO- https://raw.githubusercontent.com/$REPOSITORY_SLUG/dev/scripts/install-from-release.sh | bash -s -- https://github.com/$REPOSITORY_SLUG "\$release_tag"
+if [ ! -f "\$HOME/jkmonitor/release-info.env" ]; then
+  echo 'The installer did not persist release-info.env.' >&2
+  exit 1
+fi
+
+set -a
+. "\$HOME/jkmonitor/release-info.env"
+set +a
+
+if [[ "\${JKMONITOR_RELEASE_SHA256,,}" != "\$expected_sha256" ]]; then
+  echo "Installed checksum mismatch on device. Expected \$expected_sha256 but installer recorded \${JKMONITOR_RELEASE_SHA256:-missing}." >&2
+  exit 1
+fi
 sleep 5
 sudo systemctl is-active jkmonitor.service
-curl -fsS http://127.0.0.1:5074/api/health
+health_json="\$(curl -fsS http://127.0.0.1:5074/api/health)"
+
+if command -v python3 >/dev/null 2>&1; then
+  HEALTH_JSON="\$health_json" python3 - "\$release_tag" "\$expected_source_revision_id" <<'PY'
+import json
+import os
+import sys
+
+payload = json.loads(os.environ["HEALTH_JSON"])
+build = payload.get("build") or {}
+release_tag = build.get("releaseTag")
+source_revision_id = build.get("sourceRevisionId")
+expected_tag = sys.argv[1]
+expected_source_revision_id = sys.argv[2]
+
+if release_tag != expected_tag:
+    raise SystemExit(
+        f"Runtime release tag mismatch. Expected {expected_tag} but app reported {release_tag!r}."
+    )
+
+if source_revision_id != expected_source_revision_id:
+    raise SystemExit(
+        f"Runtime source revision mismatch. Expected {expected_source_revision_id} but app reported {source_revision_id!r}."
+    )
+PY
+else
+  printf '%s\n' "\$health_json" | grep -F "\"releaseTag\":\"\$release_tag\"" >/dev/null 2>&1 || {
+    echo "Runtime release tag mismatch. Expected \$release_tag." >&2
+    exit 1
+  }
+
+  printf '%s\n' "\$health_json" | grep -F "\"sourceRevisionId\":\"\$expected_source_revision_id\"" >/dev/null 2>&1 || {
+    echo "Runtime source revision mismatch. Expected \$expected_source_revision_id." >&2
+    exit 1
+  }
+fi
 EOF
 
 log 'Publish workflow completed'

@@ -12,9 +12,9 @@ Complete the publish flow end-to-end without handing work back to the user:
 2. If there are local changes, stage them, generate a sensible commit message when the user did not provide one, commit, and push to `origin/dev`.
 3. If there are no local changes, skip commit creation and continue with the current remote state.
 4. After a push, wait 120 seconds.
-5. Confirm that the `dev-latest` Linux release artifact is available from GitHub Releases.
-6. SSH to `pi@jk.local` and run the GitHub release installer.
-7. Verify the deployed service is healthy.
+5. Confirm that the `dev-latest` Linux release artifact is available from GitHub Releases and capture its published checksum.
+6. SSH to `pi@jk.local`, confirm GitHub still serves that exact checksum for the release tag, and run the GitHub release installer with the expected checksum pinned.
+7. Verify the installer recorded the same checksum on the device, and verify the deployed service is healthy and reports the expected release tag and source revision in `api/health`.
 
 ## Source Of Truth
 
@@ -41,6 +41,9 @@ Run on the Raspberry Pi:
 sudo systemctl is-active jkmonitor.service
 curl -fsS http://127.0.0.1:5074/api/health
 ```
+
+The publish flow should also confirm that `~/jkmonitor/release-info.env` contains the same SHA-256 checksum as the GitHub release artifact that was observed after the push.
+The runtime health payload should expose build metadata so publish can confirm the restarted app is serving the expected release tag and source revision.
 
 ## Notes
 

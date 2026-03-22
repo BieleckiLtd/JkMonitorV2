@@ -4,7 +4,38 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <SourceRevisionId Condition="'$(JkMonitorSourceRevisionId)' != ''">$(JkMonitorSourceRevisionId)</SourceRevisionId>
+    <InformationalVersion Condition="'$(JkMonitorReleaseTag)' != '' and '$(JkMonitorSourceRevisionId)' != ''">$(JkMonitorReleaseTag)+$(JkMonitorSourceRevisionId)</InformationalVersion>
+    <InformationalVersion Condition="'$(JkMonitorReleaseTag)' != '' and '$(JkMonitorSourceRevisionId)' == ''">$(JkMonitorReleaseTag)</InformationalVersion>
   </PropertyGroup>
+
+  <ItemGroup Condition="'$(JkMonitorReleaseTag)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>JkMonitorReleaseTag</_Parameter1>
+      <_Parameter2>$(JkMonitorReleaseTag)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(JkMonitorSourceRevisionId)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>JkMonitorSourceRevisionId</_Parameter1>
+      <_Parameter2>$(JkMonitorSourceRevisionId)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(JkMonitorWorkflowRunNumber)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>JkMonitorWorkflowRunNumber</_Parameter1>
+      <_Parameter2>$(JkMonitorWorkflowRunNumber)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(JkMonitorWorkflowRunAttempt)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>JkMonitorWorkflowRunAttempt</_Parameter1>
+      <_Parameter2>$(JkMonitorWorkflowRunAttempt)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.4" />

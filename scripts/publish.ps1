@@ -27,6 +27,7 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
+$linuxAssetName = 'jkmonitor-backend-linux-arm64.tar.gz'
 
 function Write-Step([string]$Text) {
     Write-Host ''
@@ -127,6 +128,27 @@ function Invoke-GitHubApi([string]$RepositorySlug, [string]$Path) {
     return Invoke-RestMethod -Uri "https://api.github.com/repos/$RepositorySlug$Path" -Headers $headers
 }
 
+function Get-ReleaseDownloadUrl([string]$RepositorySlug, [string]$Tag, [string]$AssetName) {
+    return "https://github.com/$RepositorySlug/releases/download/$Tag/$AssetName"
+}
+
+function Get-ReleaseChecksum([string]$RepositorySlug, [string]$Tag, [string]$AssetName) {
+    $headers = @{
+        Accept = 'application/octet-stream'
+        'User-Agent' = 'JkMonitorV2-publish-script'
+    }
+
+    $checksumUrl = Get-ReleaseDownloadUrl -RepositorySlug $RepositorySlug -Tag $Tag -AssetName "$AssetName.sha256"
+    $payload = (Invoke-WebRequest -Uri $checksumUrl -Headers $headers -UseBasicParsing).Content
+    $checksum = ($payload -split '\s+')[0].Trim().ToLowerInvariant()
+
+    if ($checksum -notmatch '^[0-9a-f]{64}$') {
+        throw "Release checksum file for '$AssetName' did not contain a valid SHA-256 value."
+    }
+
+    return $checksum
+}
+
 function Wait-ForReleaseAsset(
     [string]$RepositorySlug,
     [string]$Tag,
@@ -168,10 +190,34 @@ function Assert-ReleaseAssetExists([string]$RepositorySlug, [string]$Tag, [strin
     }
 }
 
+function Wait-ForReleaseChecksum(
+    [string]$RepositorySlug,
+    [string]$Tag,
+    [string]$AssetName,
+    [int]$TimeoutSeconds,
+    [int]$PollIntervalSeconds
+) {
+    $deadline = [DateTimeOffset]::UtcNow.AddSeconds($TimeoutSeconds)
+
+    while ([DateTimeOffset]::UtcNow -lt $deadline) {
+        try {
+            return Get-ReleaseChecksum -RepositorySlug $RepositorySlug -Tag $Tag -AssetName $AssetName
+        }
+        catch {
+        }
+
+        Start-Sleep -Seconds $PollIntervalSeconds
+    }
+
+    throw "Timed out waiting for release checksum '$AssetName.sha256' on tag '$Tag'."
+}
+
 Require-Command git
 
 $repositorySlug = Get-NormalizedRepository -RepositoryInput $Repository -Remote $RemoteName
 $currentBranch = (Invoke-GitCapture @('branch', '--show-current') | Select-Object -First 1).Trim()
+$currentCommit = (Invoke-GitCapture @('rev-parse', 'HEAD') | Select-Object -First 1).Trim()
+$expectedReleaseSha256 = $null
 
 if ($currentBranch -ne $Branch) {
     throw "Publish expects branch '$Branch'. Current branch is '$currentBranch'."
@@ -233,8 +279,17 @@ if ($pushedChanges) {
 }
 elseif (-not $SkipArtifactWait) {
     Write-Step 'Checking current GitHub release artifact'
-    Assert-ReleaseAssetExists -RepositorySlug $repositorySlug -Tag $ReleaseTag -AssetName 'jkmonitor-backend-linux-arm64.tar.gz'
+    Assert-ReleaseAssetExists -RepositorySlug $repositorySlug -Tag $ReleaseTag -AssetName $linuxAssetName
 }
+
+Write-Step 'Resolving published release checksum'
+$expectedReleaseSha256 = Wait-ForReleaseChecksum `
+    -RepositorySlug $repositorySlug `
+    -Tag $ReleaseTag `
+    -AssetName $linuxAssetName `
+    -TimeoutSeconds $ArtifactTimeoutSeconds `
+    -PollIntervalSeconds $PollSeconds
+Write-Info "Expected Linux release checksum: $expectedReleaseSha256"
 
 if ($SkipDeploy) {
     Write-Info 'Skipping SSH deploy because -SkipDeploy was specified.'
@@ -245,10 +300,94 @@ Require-Command ssh
 
 $remoteScript = @"
 set -euo pipefail
-wget -qO- https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-release.sh | bash -s -- https://github.com/BieleckiLtd/JkMonitorV2 $ReleaseTag
+expected_sha256='$expectedReleaseSha256'
+repository_slug='$repositorySlug'
+release_tag='$ReleaseTag'
+asset_name='$linuxAssetName'
+expected_source_revision_id='$currentCommit'
+
+fetch_release_checksum() {
+  local checksum_url="https://github.com/\$repository_slug/releases/download/\$release_tag/\$asset_name.sha256"
+  local payload
+
+  if command -v curl >/dev/null 2>&1; then
+    payload="\$(curl -fsSL "\$checksum_url")"
+  elif command -v wget >/dev/null 2>&1; then
+    payload="\$(wget -qO- "\$checksum_url")"
+  else
+    echo 'curl or wget is required on the device to verify the published checksum.' >&2
+    exit 1
+  fi
+
+  local checksum
+  checksum="\$(printf '%s\n' "\$payload" | awk 'NR == 1 { print \$1 }')"
+  if [[ ! "\$checksum" =~ ^[0-9A-Fa-f]{64}$ ]]; then
+    echo 'The published checksum file did not contain a valid SHA-256 value.' >&2
+    exit 1
+  fi
+
+  printf '%s\n' "\${checksum,,}"
+}
+
+current_release_sha256="\$(fetch_release_checksum)"
+if [[ "\$current_release_sha256" != "\$expected_sha256" ]]; then
+  echo "Release checksum mismatch on device. Expected \$expected_sha256 but GitHub currently serves \$current_release_sha256 for \$asset_name on \$release_tag." >&2
+  exit 1
+fi
+
+export JKMONITOR_EXPECTED_RELEASE_SHA256="\$expected_sha256"
+wget -qO- https://raw.githubusercontent.com/$repositorySlug/dev/scripts/install-from-release.sh | bash -s -- https://github.com/$repositorySlug \$release_tag
+if [ ! -f "\$HOME/jkmonitor/release-info.env" ]; then
+  echo 'The installer did not persist release-info.env.' >&2
+  exit 1
+fi
+
+set -a
+. "\$HOME/jkmonitor/release-info.env"
+set +a
+
+if [[ "\${JKMONITOR_RELEASE_SHA256,,}" != "\$expected_sha256" ]]; then
+  echo "Installed checksum mismatch on device. Expected \$expected_sha256 but installer recorded \${JKMONITOR_RELEASE_SHA256:-missing}." >&2
+  exit 1
+fi
 sleep 5
 sudo systemctl is-active jkmonitor.service
-curl -fsS http://127.0.0.1:5074/api/health
+health_json="\$(curl -fsS http://127.0.0.1:5074/api/health)"
+
+if command -v python3 >/dev/null 2>&1; then
+  HEALTH_JSON="\$health_json" python3 - "\$release_tag" "\$expected_source_revision_id" <<'PY'
+import json
+import os
+import sys
+
+payload = json.loads(os.environ["HEALTH_JSON"])
+build = payload.get("build") or {}
+release_tag = build.get("releaseTag")
+source_revision_id = build.get("sourceRevisionId")
+expected_tag = sys.argv[1]
+expected_source_revision_id = sys.argv[2]
+
+if release_tag != expected_tag:
+    raise SystemExit(
+        f"Runtime release tag mismatch. Expected {expected_tag} but app reported {release_tag!r}."
+    )
+
+if source_revision_id != expected_source_revision_id:
+    raise SystemExit(
+        f"Runtime source revision mismatch. Expected {expected_source_revision_id} but app reported {source_revision_id!r}."
+    )
+PY
+else
+  printf '%s\n' "\$health_json" | grep -F "\"releaseTag\":\"\$release_tag\"" >/dev/null 2>&1 || {
+    echo "Runtime release tag mismatch. Expected \$release_tag." >&2
+    exit 1
+  }
+
+  printf '%s\n' "\$health_json" | grep -F "\"sourceRevisionId\":\"\$expected_source_revision_id\"" >/dev/null 2>&1 || {
+    echo "Runtime source revision mismatch. Expected \$expected_source_revision_id." >&2
+    exit 1
+  }
+fi
 "@
 
 Write-Step "Deploying to $DeviceHost"

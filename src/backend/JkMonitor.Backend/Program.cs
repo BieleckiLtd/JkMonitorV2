@@ -16,6 +16,7 @@ builder.Services
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.HostSystemMonitoringService>();
+builder.Services.AddSingleton<JkMonitor.Backend.Services.IBuildMetadataProvider, JkMonitor.Backend.Services.AssemblyBuildMetadataProvider>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.DeviceStateStore>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.ManagedRestartService>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.JkRs485PollingClient>();

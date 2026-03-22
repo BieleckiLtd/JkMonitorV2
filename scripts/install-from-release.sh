@@ -12,16 +12,19 @@ APP_BIND_URL="http://0.0.0.0:$APP_PORT"
 APP_LOCAL_URL="http://127.0.0.1:$APP_PORT"
 HEALTH_URL="$APP_LOCAL_URL/api/health"
 ASSET_NAME='jkmonitor-backend-linux-arm64.tar.gz'
+CHECKSUM_ASSET_NAME="$ASSET_NAME.sha256"
 INSTALL_SCRIPT="${TMPDIR:-/tmp}/dotnet-install-jkmonitor-runtime.sh"
 SERVICE_NAME='jkmonitor.service'
 SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
 ENV_PATH="$DESTINATION/jkmonitor.env"
+RELEASE_INFO_PATH="$DESTINATION/release-info.env"
 NONINTERACTIVE_MODE="${JKMONITOR_MODE:-}"
 NONINTERACTIVE_USE_DB="${JKMONITOR_USE_DB:-}"
 NONINTERACTIVE_CONNECTION_STRING="${JKMONITOR_CONNECTION_STRING:-}"
 NONINTERACTIVE_SERIAL_PORT="${JKMONITOR_SERIAL_PORT:-}"
 NONINTERACTIVE_INSTALL_RUNTIME="${JKMONITOR_INSTALL_RUNTIME:-}"
 NONINTERACTIVE_INSTALL_SERVICE="${JKMONITOR_INSTALL_SERVICE:-}"
+EXPECTED_RELEASE_SHA256="${JKMONITOR_EXPECTED_RELEASE_SHA256:-}"
 CONFIGURE_SCRIPT_PATH="$DESTINATION/configure.sh"
 
 if [ -t 1 ]; then
@@ -117,6 +120,64 @@ PY
 
   echo 'No supported download tool was found. Install curl, wget, or python3.' >&2
   exit 1
+}
+
+parse_sha256_file() {
+  local checksum_file="$1"
+  local checksum
+
+  checksum="$(awk 'NR == 1 { print $1 }' "$checksum_file")"
+  if [[ ! "$checksum" =~ ^[0-9A-Fa-f]{64}$ ]]; then
+    echo "The checksum file '$checksum_file' did not contain a valid SHA-256 value." >&2
+    exit 1
+  fi
+
+  printf '%s\n' "${checksum,,}"
+}
+
+compute_sha256() {
+  local file_path="$1"
+
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$file_path" | awk '{ print tolower($1) }'
+    return
+  fi
+
+  if command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 "$file_path" | awk '{ print tolower($1) }'
+    return
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$file_path" <<'PY'
+import hashlib
+import pathlib
+import sys
+
+path = pathlib.Path(sys.argv[1])
+hasher = hashlib.sha256()
+with path.open('rb') as handle:
+    for chunk in iter(lambda: handle.read(1024 * 1024), b''):
+        hasher.update(chunk)
+
+print(hasher.hexdigest())
+PY
+    return
+  fi
+
+  echo 'No supported SHA-256 tool was found. Install sha256sum, shasum, or python3.' >&2
+  exit 1
+}
+
+write_release_info() {
+  local checksum="$1"
+
+  cat > "$RELEASE_INFO_PATH" <<EOF
+JKMONITOR_RELEASE_REPOSITORY=$NORMALIZED_REPOSITORY
+JKMONITOR_RELEASE_TAG=$RELEASE_TAG
+JKMONITOR_RELEASE_ASSET_NAME=$ASSET_NAME
+JKMONITOR_RELEASE_SHA256=$checksum
+EOF
 }
 
 copy_if_exists() {
@@ -585,8 +646,10 @@ open_browser_when_ready() {
 
 NORMALIZED_REPOSITORY="$(normalize_repository "$REPOSITORY")"
 ASSET_URL="https://github.com/$NORMALIZED_REPOSITORY/releases/download/$RELEASE_TAG/$ASSET_NAME"
+CHECKSUM_URL="https://github.com/$NORMALIZED_REPOSITORY/releases/download/$RELEASE_TAG/$CHECKSUM_ASSET_NAME"
 TEMP_ROOT="${TMPDIR:-/tmp}/jkmonitor-release-install-$(date +%s)-$$"
 ARCHIVE_PATH="$TEMP_ROOT/$ASSET_NAME"
+CHECKSUM_PATH="$TEMP_ROOT/$CHECKSUM_ASSET_NAME"
 EXTRACT_PATH="$TEMP_ROOT/extract"
 PRESERVE_PATH="$TEMP_ROOT/preserve"
 
@@ -607,6 +670,22 @@ section 'Downloading release artifact'
 info 'Fetching the published build from GitHub Releases.'
 download_file "$ASSET_URL" "$ARCHIVE_PATH"
 
+section 'Verifying release artifact'
+info 'Checking the published checksum before install.'
+download_file "$CHECKSUM_URL" "$CHECKSUM_PATH"
+PUBLISHED_RELEASE_SHA256="$(parse_sha256_file "$CHECKSUM_PATH")"
+DOWNLOADED_RELEASE_SHA256="$(compute_sha256 "$ARCHIVE_PATH")"
+
+if [ "$DOWNLOADED_RELEASE_SHA256" != "$PUBLISHED_RELEASE_SHA256" ]; then
+  echo "Downloaded artifact checksum mismatch. Expected $PUBLISHED_RELEASE_SHA256 but got $DOWNLOADED_RELEASE_SHA256." >&2
+  exit 1
+fi
+
+if [ -n "$EXPECTED_RELEASE_SHA256" ] && [ "${DOWNLOADED_RELEASE_SHA256,,}" != "${EXPECTED_RELEASE_SHA256,,}" ]; then
+  echo "Downloaded artifact does not match the expected published checksum $EXPECTED_RELEASE_SHA256." >&2
+  exit 1
+fi
+
 section 'Extracting release artifact'
 info 'Unpacking the application files.'
 tar -xzf "$ARCHIVE_PATH" -C "$EXTRACT_PATH"
@@ -621,6 +700,7 @@ fi
 mkdir -p "$DESTINATION"
 mv "$EXTRACT_PATH/linux-arm64" "$APP_ROOT"
 restore_preserved_state "$PRESERVE_PATH" "$DESTINATION"
+write_release_info "$DOWNLOADED_RELEASE_SHA256"
 write_start_script
 write_configure_script
 

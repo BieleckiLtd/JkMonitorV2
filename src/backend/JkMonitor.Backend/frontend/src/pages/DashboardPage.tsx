@@ -40,6 +40,14 @@ type SystemRuntimeMetrics = {
   systemTemperatureCelsius?: number | null;
 };
 
+type BuildRuntimeInfo = {
+  releaseTag?: string | null;
+  sourceRevisionId?: string | null;
+  informationalVersion?: string | null;
+  workflowRunNumber?: string | null;
+  workflowRunAttempt?: string | null;
+};
+
 type MonitorRuntimeStatus = {
   serviceName: string;
   environmentName: string;
@@ -48,6 +56,7 @@ type MonitorRuntimeStatus = {
   reportedAt: string;
   configuredDeviceCount: number;
   enabledDeviceCount: number;
+  build?: BuildRuntimeInfo | null;
   systemMetrics?: SystemRuntimeMetrics | null;
   devices: DeviceRuntimeState[];
 };
@@ -126,6 +135,9 @@ export function DashboardPage() {
   const healthyDevices = status?.devices.filter((device) => device.lastOutcome === 'Succeeded').length ?? 0;
   const failingDevices = status?.devices.filter((device) => device.lastOutcome === 'Failed' || device.lastOutcome === 'PersistFailed').length ?? 0;
   const latestReport = status?.reportedAt ? formatTimestamp(status.reportedAt) : 'Waiting for first sample';
+  const releaseTag = status?.build?.releaseTag ?? status?.build?.informationalVersion ?? noDataLabel;
+  const sourceRevisionId = status?.build?.sourceRevisionId ?? noDataLabel;
+  const workflowRun = formatWorkflowRun(status?.build?.workflowRunNumber, status?.build?.workflowRunAttempt);
 
   return (
     <div className='space-y-6 pb-8'>
@@ -147,7 +159,7 @@ export function DashboardPage() {
           <div className='grid gap-3 sm:grid-cols-3'>
             <StatusChip label='Environment' value={status?.environmentName ?? 'Loading'} />
             <StatusChip label='Mode' value={status?.startupMode ?? 'Loading'} />
-            <StatusChip label='Updated' value={latestReport} />
+            <StatusChip label='Release' value={releaseTag} />
           </div>
         </div>
       </section>
@@ -297,6 +309,10 @@ export function DashboardPage() {
                 <DetailTile label='Service' value={status.serviceName} />
                 <DetailTile label='Environment' value={status.environmentName} />
                 <DetailTile label='Startup mode' value={status.startupMode} />
+                <DetailTile label='Release tag' value={releaseTag} />
+                <DetailTile label='Commit' value={formatCommit(sourceRevisionId)} />
+                <DetailTile label='Workflow run' value={workflowRun} />
+                <DetailTile label='Last report' value={latestReport} />
                 <DetailTile label='Service uptime' value={formatDuration(status.startedAt, status.reportedAt)} />
                 <DetailTile label='CPU current speed' value={formatFrequency(metrics?.cpuCurrentClockSpeedMegahertz)} />
                 <DetailTile label='CPU max speed' value={formatFrequency(metrics?.cpuMaxClockSpeedMegahertz)} />
@@ -485,6 +501,26 @@ function formatTimestamp(value: string | null | undefined) {
     minute: '2-digit',
     second: '2-digit',
   });
+}
+
+function formatCommit(value: string | null | undefined) {
+  if (!value) {
+    return noDataLabel;
+  }
+
+  return value.slice(0, 12);
+}
+
+function formatWorkflowRun(runNumber: string | null | undefined, runAttempt: string | null | undefined) {
+  if (!runNumber) {
+    return noDataLabel;
+  }
+
+  if (!runAttempt) {
+    return `#${runNumber}`;
+  }
+
+  return `#${runNumber} · attempt ${runAttempt}`;
 }
 
 function formatDuration(startedAt: string, reportedAt: string) {

@@ -11,11 +11,16 @@ public sealed class DeviceStateStore
     private readonly MonitorConfiguration _configuration;
     private readonly DateTimeOffset _startedAt = DateTimeOffset.UtcNow;
     private readonly HostSystemMonitoringService _hostSystemMonitoringService;
+    private readonly IBuildMetadataProvider _buildMetadataProvider;
 
-    public DeviceStateStore(IOptions<MonitorConfiguration> configuration, HostSystemMonitoringService hostSystemMonitoringService)
+    public DeviceStateStore(
+        IOptions<MonitorConfiguration> configuration,
+        HostSystemMonitoringService hostSystemMonitoringService,
+        IBuildMetadataProvider buildMetadataProvider)
     {
         _configuration = configuration.Value;
         _hostSystemMonitoringService = hostSystemMonitoringService;
+        _buildMetadataProvider = buildMetadataProvider;
 
         foreach (var device in _configuration.Devices)
         {
@@ -52,6 +57,7 @@ public sealed class DeviceStateStore
             ReportedAt = DateTimeOffset.UtcNow,
             ConfiguredDeviceCount = _configuration.Devices.Count,
             EnabledDeviceCount = _configuration.Devices.Count(device => device.Enabled),
+            Build = _buildMetadataProvider.GetBuildInfo(),
             SystemMetrics = _hostSystemMonitoringService.GetMetrics(),
             Devices = devices
         };
