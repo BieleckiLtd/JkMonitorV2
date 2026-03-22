@@ -109,14 +109,6 @@ fetch_release_json() {
   exit 1
 }
 
-release_download_url() {
-  local repository_slug="$1"
-  local tag="$2"
-  local asset_name="$3"
-
-  printf 'https://github.com/%s/releases/download/%s/%s\n' "$repository_slug" "$tag" "$asset_name"
-}
-
 parse_sha256_payload() {
   local payload="$1"
   local checksum
@@ -134,15 +126,37 @@ fetch_release_checksum() {
   local repository_slug="$1"
   local tag="$2"
   local asset_name="$3"
-  local checksum_url
+  local release_json
+  local checksum_asset_url
   local payload
 
-  checksum_url="$(release_download_url "$repository_slug" "$tag" "$asset_name.sha256")"
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo 'python3 is required to parse the GitHub release metadata.' >&2
+    exit 1
+  fi
+
+  release_json="$(fetch_release_json "$repository_slug" "$tag")"
+  checksum_asset_url="$(RELEASE_JSON="$release_json" python3 - "$asset_name.sha256" <<'PY'
+import json
+import os
+import sys
+
+asset_name = sys.argv[1]
+payload = json.loads(os.environ["RELEASE_JSON"])
+
+for asset in payload.get("assets", []):
+    if asset.get("name") == asset_name and asset.get("url"):
+        print(asset["url"])
+        raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+)"
 
   if command -v curl >/dev/null 2>&1; then
-    payload="$(curl -fsSL "$checksum_url")"
+    payload="$(curl -fsSL -H 'Accept: application/octet-stream' -H 'User-Agent: JkMonitorV2-publish-script' "$checksum_asset_url")"
   elif command -v wget >/dev/null 2>&1; then
-    payload="$(wget -qO- "$checksum_url")"
+    payload="$(wget -qO- --header='Accept: application/octet-stream' --header='User-Agent: JkMonitorV2-publish-script' "$checksum_asset_url")"
   else
     echo 'curl or wget is required to download the published checksum file.' >&2
     exit 1
@@ -312,7 +326,7 @@ log "Expected Linux release checksum: $EXPECTED_RELEASE_SHA256"
 require_cmd ssh
 
 log "Deploying to $PI_HOST"
-ssh -o StrictHostKeyChecking=no "$PI_HOST" bash -s <<EOF
+ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=4 -o StrictHostKeyChecking=no "$PI_HOST" bash -s <<EOF
 set -euo pipefail
 expected_sha256='$EXPECTED_RELEASE_SHA256'
 repository_slug='$REPOSITORY_SLUG'
@@ -320,36 +334,10 @@ release_tag='$RELEASE_TAG'
 asset_name='$LINUX_ASSET_NAME'
 expected_source_revision_id='$CURRENT_COMMIT'
 
-fetch_release_checksum() {
-  local checksum_url="https://github.com/\$repository_slug/releases/download/\$release_tag/\$asset_name.sha256"
-  local payload
-
-  if command -v curl >/dev/null 2>&1; then
-    payload="\$(curl -fsSL "\$checksum_url")"
-  elif command -v wget >/dev/null 2>&1; then
-    payload="\$(wget -qO- "\$checksum_url")"
-  else
-    echo 'curl or wget is required on the device to verify the published checksum.' >&2
-    exit 1
-  fi
-
-  local checksum
-  checksum="\$(printf '%s\n' "\$payload" | awk 'NR == 1 { print \$1 }')"
-  if [[ ! "\$checksum" =~ ^[0-9A-Fa-f]{64}$ ]]; then
-    echo 'The published checksum file did not contain a valid SHA-256 value.' >&2
-    exit 1
-  fi
-
-  printf '%s\n' "\${checksum,,}"
-}
-
-current_release_sha256="\$(fetch_release_checksum)"
-if [[ "\$current_release_sha256" != "\$expected_sha256" ]]; then
-  echo "Release checksum mismatch on device. Expected \$expected_sha256 but GitHub currently serves \$current_release_sha256 for \$asset_name on \$release_tag." >&2
-  exit 1
-fi
-
 export JKMONITOR_EXPECTED_RELEASE_SHA256="\$expected_sha256"
+export JKMONITOR_INSTALL_RUNTIME='y'
+export JKMONITOR_INSTALL_SERVICE='y'
+export JKMONITOR_REUSE_EXISTING_CONFIGURATION='1'
 wget -qO- https://raw.githubusercontent.com/$REPOSITORY_SLUG/dev/scripts/install-from-release.sh | bash -s -- https://github.com/$REPOSITORY_SLUG "\$release_tag"
 if [ ! -f "\$HOME/jkmonitor/release-info.env" ]; then
   echo 'The installer did not persist release-info.env.' >&2

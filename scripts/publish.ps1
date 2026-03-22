@@ -128,8 +128,15 @@ function Invoke-GitHubApi([string]$RepositorySlug, [string]$Path) {
     return Invoke-RestMethod -Uri "https://api.github.com/repos/$RepositorySlug$Path" -Headers $headers
 }
 
-function Get-ReleaseDownloadUrl([string]$RepositorySlug, [string]$Tag, [string]$AssetName) {
-    return "https://github.com/$RepositorySlug/releases/download/$Tag/$AssetName"
+function Get-ReleaseAsset([string]$RepositorySlug, [string]$Tag, [string]$AssetName) {
+    $release = Invoke-GitHubApi -RepositorySlug $RepositorySlug -Path "/releases/tags/$Tag"
+    $asset = @($release.assets) | Where-Object { $_.name -eq $AssetName } | Select-Object -First 1
+
+    if (-not $asset) {
+        throw "Release tag '$Tag' does not contain asset '$AssetName'."
+    }
+
+    return $asset
 }
 
 function Get-ReleaseChecksum([string]$RepositorySlug, [string]$Tag, [string]$AssetName) {
@@ -138,8 +145,8 @@ function Get-ReleaseChecksum([string]$RepositorySlug, [string]$Tag, [string]$Ass
         'User-Agent' = 'JkMonitorV2-publish-script'
     }
 
-    $checksumUrl = Get-ReleaseDownloadUrl -RepositorySlug $RepositorySlug -Tag $Tag -AssetName "$AssetName.sha256"
-    $payload = (Invoke-WebRequest -Uri $checksumUrl -Headers $headers -UseBasicParsing).Content
+    $checksumAsset = Get-ReleaseAsset -RepositorySlug $RepositorySlug -Tag $Tag -AssetName "$AssetName.sha256"
+    $payload = (Invoke-WebRequest -Uri $checksumAsset.url -Headers $headers -UseBasicParsing).Content
     $checksum = ($payload -split '\s+')[0].Trim().ToLowerInvariant()
 
     if ($checksum -notmatch '^[0-9a-f]{64}$') {
@@ -182,12 +189,7 @@ function Wait-ForReleaseAsset(
 }
 
 function Assert-ReleaseAssetExists([string]$RepositorySlug, [string]$Tag, [string]$AssetName) {
-    $release = Invoke-GitHubApi -RepositorySlug $RepositorySlug -Path "/releases/tags/$Tag"
-    $asset = @($release.assets) | Where-Object { $_.name -eq $AssetName } | Select-Object -First 1
-
-    if (-not $asset) {
-        throw "Release tag '$Tag' does not contain asset '$AssetName'."
-    }
+    [void](Get-ReleaseAsset -RepositorySlug $RepositorySlug -Tag $Tag -AssetName $AssetName)
 }
 
 function Wait-ForReleaseChecksum(
@@ -306,36 +308,10 @@ release_tag='$ReleaseTag'
 asset_name='$linuxAssetName'
 expected_source_revision_id='$currentCommit'
 
-fetch_release_checksum() {
-  local checksum_url="https://github.com/\$repository_slug/releases/download/\$release_tag/\$asset_name.sha256"
-  local payload
-
-  if command -v curl >/dev/null 2>&1; then
-    payload="\$(curl -fsSL "\$checksum_url")"
-  elif command -v wget >/dev/null 2>&1; then
-    payload="\$(wget -qO- "\$checksum_url")"
-  else
-    echo 'curl or wget is required on the device to verify the published checksum.' >&2
-    exit 1
-  fi
-
-  local checksum
-  checksum="\$(printf '%s\n' "\$payload" | awk 'NR == 1 { print \$1 }')"
-  if [[ ! "\$checksum" =~ ^[0-9A-Fa-f]{64}$ ]]; then
-    echo 'The published checksum file did not contain a valid SHA-256 value.' >&2
-    exit 1
-  fi
-
-  printf '%s\n' "\${checksum,,}"
-}
-
-current_release_sha256="\$(fetch_release_checksum)"
-if [[ "\$current_release_sha256" != "\$expected_sha256" ]]; then
-  echo "Release checksum mismatch on device. Expected \$expected_sha256 but GitHub currently serves \$current_release_sha256 for \$asset_name on \$release_tag." >&2
-  exit 1
-fi
-
 export JKMONITOR_EXPECTED_RELEASE_SHA256="\$expected_sha256"
+export JKMONITOR_INSTALL_RUNTIME='y'
+export JKMONITOR_INSTALL_SERVICE='y'
+export JKMONITOR_REUSE_EXISTING_CONFIGURATION='1'
 wget -qO- https://raw.githubusercontent.com/$repositorySlug/dev/scripts/install-from-release.sh | bash -s -- https://github.com/$repositorySlug \$release_tag
 if [ ! -f "\$HOME/jkmonitor/release-info.env" ]; then
   echo 'The installer did not persist release-info.env.' >&2
@@ -391,7 +367,7 @@ fi
 "@
 
 Write-Step "Deploying to $DeviceHost"
-$remoteScript | & ssh -o StrictHostKeyChecking=no $DeviceHost 'bash -s'
+$remoteScript | & ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=4 -o StrictHostKeyChecking=no $DeviceHost 'bash -s'
 if ($LASTEXITCODE -ne 0) {
     throw "SSH deploy failed with exit code $LASTEXITCODE."
 }

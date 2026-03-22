@@ -24,6 +24,7 @@ NONINTERACTIVE_CONNECTION_STRING="${JKMONITOR_CONNECTION_STRING:-}"
 NONINTERACTIVE_SERIAL_PORT="${JKMONITOR_SERIAL_PORT:-}"
 NONINTERACTIVE_INSTALL_RUNTIME="${JKMONITOR_INSTALL_RUNTIME:-}"
 NONINTERACTIVE_INSTALL_SERVICE="${JKMONITOR_INSTALL_SERVICE:-}"
+NONINTERACTIVE_REUSE_EXISTING_CONFIGURATION="${JKMONITOR_REUSE_EXISTING_CONFIGURATION:-}"
 EXPECTED_RELEASE_SHA256="${JKMONITOR_EXPECTED_RELEASE_SHA256:-}"
 CONFIGURE_SCRIPT_PATH="$DESTINATION/configure.sh"
 
@@ -91,6 +92,19 @@ normalize_repository() {
 
   echo "Unsupported repository value '$input'. Use 'owner/repo' or a GitHub URL." >&2
   exit 1
+}
+
+is_truthy() {
+  local value="${1:-}"
+
+  case "${value,,}" in
+    1|y|yes|true|on)
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
 }
 
 download_file() {
@@ -197,6 +211,7 @@ preserve_existing_state() {
   local preserve_root="$2"
 
   copy_if_exists "$source_root/.dotnet" "$preserve_root/.dotnet"
+  copy_if_exists "$source_root/jkmonitor.env" "$preserve_root/jkmonitor.env"
 
   for file_name in \
     appsettings.Local.json \
@@ -218,6 +233,10 @@ restore_preserved_state() {
   if [ -d "$preserve_root/.dotnet" ]; then
     rm -rf "$destination_root/.dotnet"
     cp -R "$preserve_root/.dotnet" "$destination_root/.dotnet"
+  fi
+
+  if [ -f "$preserve_root/jkmonitor.env" ]; then
+    cp "$preserve_root/jkmonitor.env" "$destination_root/jkmonitor.env"
   fi
 
   for file_name in \
@@ -293,11 +312,42 @@ has_existing_runtime_configuration() {
     return 0
   fi
 
+  if [ -f "$APP_ROOT/appsettings.Development.Local.json" ] || [ -f "$APP_ROOT/appsettings.Local.json" ]; then
+    return 0
+  fi
+
+  if [ -f "$ENV_PATH" ]; then
+    return 0
+  fi
+
   if [ -n "$NONINTERACTIVE_MODE" ] || [ -n "$NONINTERACTIVE_SERIAL_PORT" ] || [ -n "$NONINTERACTIVE_USE_DB" ] || [ -n "$NONINTERACTIVE_CONNECTION_STRING" ]; then
     return 0
   fi
 
   return 1
+}
+
+get_existing_environment_name() {
+  if [ -f "$ENV_PATH" ]; then
+    local configured_environment
+    configured_environment="$(grep -E '^ASPNETCORE_ENVIRONMENT=' "$ENV_PATH" | tail -n 1 | cut -d= -f2- || true)"
+    if [ -n "$configured_environment" ]; then
+      printf '%s\n' "$configured_environment"
+      return
+    fi
+  fi
+
+  if [ -f "$APP_ROOT/appsettings.Production.Local.json" ]; then
+    printf '%s\n' 'Production'
+    return
+  fi
+
+  if [ -f "$APP_ROOT/appsettings.Development.Local.json" ]; then
+    printf '%s\n' 'Development'
+    return
+  fi
+
+  printf '%s\n' ''
 }
 
 read_choice() {
@@ -645,8 +695,6 @@ open_browser_when_ready() {
 }
 
 NORMALIZED_REPOSITORY="$(normalize_repository "$REPOSITORY")"
-ASSET_URL="https://github.com/$NORMALIZED_REPOSITORY/releases/download/$RELEASE_TAG/$ASSET_NAME"
-CHECKSUM_URL="https://github.com/$NORMALIZED_REPOSITORY/releases/download/$RELEASE_TAG/$CHECKSUM_ASSET_NAME"
 TEMP_ROOT="${TMPDIR:-/tmp}/jkmonitor-release-install-$(date +%s)-$$"
 ARCHIVE_PATH="$TEMP_ROOT/$ASSET_NAME"
 CHECKSUM_PATH="$TEMP_ROOT/$CHECKSUM_ASSET_NAME"
@@ -666,13 +714,120 @@ muted "Repository: $NORMALIZED_REPOSITORY"
 muted "Release tag: $RELEASE_TAG"
 muted "Destination: $DESTINATION"
 
+fetch_release_json() {
+  local url="https://api.github.com/repos/$NORMALIZED_REPOSITORY/releases/tags/$RELEASE_TAG"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: JkMonitorV2-install-script' "$url"
+    return
+  fi
+
+  if command -v wget >/dev/null 2>&1; then
+    wget -qO- --header='Accept: application/vnd.github+json' --header='User-Agent: JkMonitorV2-install-script' "$url"
+    return
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$url" <<'PY'
+import sys
+import urllib.request
+
+request = urllib.request.Request(
+    sys.argv[1],
+    headers={
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "JkMonitorV2-install-script",
+    },
+)
+with urllib.request.urlopen(request) as response:
+    sys.stdout.write(response.read().decode("utf-8"))
+PY
+    return
+  fi
+
+  echo 'No supported HTTP client was found. Install curl, wget, or python3.' >&2
+  exit 1
+}
+
+get_release_asset_api_url() {
+  local asset_name="$1"
+  local release_json
+  release_json="$(fetch_release_json)"
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    echo 'python3 is required to parse the GitHub release metadata.' >&2
+    exit 1
+  fi
+
+  RELEASE_JSON="$release_json" python3 - "$asset_name" <<'PY'
+import json
+import os
+import sys
+
+asset_name = sys.argv[1]
+payload = json.loads(os.environ["RELEASE_JSON"])
+
+for asset in payload.get("assets", []):
+    if asset.get("name") == asset_name and asset.get("url"):
+        print(asset["url"])
+        raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+}
+
+download_release_asset() {
+  local asset_name="$1"
+  local target="$2"
+  local asset_api_url
+  asset_api_url="$(get_release_asset_api_url "$asset_name")"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL \
+      -H 'Accept: application/octet-stream' \
+      -H 'User-Agent: JkMonitorV2-install-script' \
+      "$asset_api_url" \
+      -o "$target"
+    return
+  fi
+
+  if command -v wget >/dev/null 2>&1; then
+    wget -qO "$target" \
+      --header='Accept: application/octet-stream' \
+      --header='User-Agent: JkMonitorV2-install-script' \
+      "$asset_api_url"
+    return
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$asset_api_url" "$target" <<'PY'
+import sys
+import urllib.request
+
+request = urllib.request.Request(
+    sys.argv[1],
+    headers={
+        "Accept": "application/octet-stream",
+        "User-Agent": "JkMonitorV2-install-script",
+    },
+)
+with urllib.request.urlopen(request) as response, open(sys.argv[2], "wb") as output:
+    output.write(response.read())
+PY
+    return
+  fi
+
+  echo 'No supported HTTP client was found. Install curl, wget, or python3.' >&2
+  exit 1
+}
+
 section 'Downloading release artifact'
 info 'Fetching the published build from GitHub Releases.'
-download_file "$ASSET_URL" "$ARCHIVE_PATH"
+download_release_asset "$ASSET_NAME" "$ARCHIVE_PATH"
 
 section 'Verifying release artifact'
 info 'Checking the published checksum before install.'
-download_file "$CHECKSUM_URL" "$CHECKSUM_PATH"
+download_release_asset "$CHECKSUM_ASSET_NAME" "$CHECKSUM_PATH"
 PUBLISHED_RELEASE_SHA256="$(parse_sha256_file "$CHECKSUM_PATH")"
 DOWNLOADED_RELEASE_SHA256="$(compute_sha256 "$ARCHIVE_PATH")"
 
@@ -718,17 +873,26 @@ if [ -z "$DOTNET_CMD" ]; then
 fi
 
 section 'Configuring startup mode'
-if has_existing_runtime_configuration; then
+reused_existing_configuration='false'
+
+if has_existing_runtime_configuration && is_truthy "$NONINTERACTIVE_REUSE_EXISTING_CONFIGURATION"; then
+  reused_existing_configuration='true'
+  ENVIRONMENT="$(get_existing_environment_name)"
+  if [ -z "$ENVIRONMENT" ]; then
+    ENVIRONMENT='Development'
+  fi
+  info "Reusing the existing runtime configuration for $ENVIRONMENT."
+elif has_existing_runtime_configuration; then
   MODE="$(get_configured_choice "$NONINTERACTIVE_MODE" 'Choose startup mode: 1 = simulator, 2 = hardware' 'startup' '1')"
 else
   MODE='1'
   info 'Starting in simulator mode for the first run so the web UI is available immediately.'
   muted 'You can switch to real hardware later from the Setup panel in the app.'
 fi
-ENVIRONMENT='Development'
+ENVIRONMENT="${ENVIRONMENT:-Development}"
 TARGET_CONFIG="$APP_ROOT/appsettings.Development.Local.json"
 
-if [ "$MODE" = '1' ]; then
+if [ "$reused_existing_configuration" = 'false' ] && [ "$MODE" = '1' ]; then
   if [ -n "$NONINTERACTIVE_USE_DB" ] || [ -n "$NONINTERACTIVE_CONNECTION_STRING" ]; then
     USE_DB="$(get_configured_choice "$NONINTERACTIVE_USE_DB" 'Enable PostgreSQL and TimescaleDB persistence now?' 'yesno' 'n')"
   else
@@ -763,7 +927,7 @@ EOF
 }
 EOF
   fi
-else
+elif [ "$reused_existing_configuration" = 'false' ]; then
   ENVIRONMENT='Production'
   TARGET_CONFIG="$APP_ROOT/appsettings.Production.Local.json"
   if [ -n "$NONINTERACTIVE_SERIAL_PORT" ]; then
@@ -813,7 +977,9 @@ else
 EOF
 fi
 
-write_env_file "$ENVIRONMENT"
+if [ "$reused_existing_configuration" = 'false' ] || [ ! -f "$ENV_PATH" ]; then
+  write_env_file "$ENVIRONMENT"
+fi
 ACCESS_URL="$(get_access_url)"
 
 INSTALL_SERVICE='n'

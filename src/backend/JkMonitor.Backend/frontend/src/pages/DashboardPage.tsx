@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Activity, CircleAlert, Cpu, Gauge, HardDrive, LoaderCircle, MemoryStick } from 'lucide-react';
+import { Activity, CircleAlert, Cpu, Gauge, HardDrive, Leaf, LoaderCircle, MemoryStick } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { cn } from '../lib/utils';
 
@@ -124,6 +124,14 @@ export function DashboardPage() {
 
   const metrics = status?.systemMetrics ?? null;
   const cpuUsage = metrics?.cpuUtilizationPercent ?? null;
+  const cpuBaseClockSpeed = metrics?.cpuMaxClockSpeedMegahertz ?? null;
+  const cpuCurrentClockSpeed = metrics?.cpuCurrentClockSpeedMegahertz ?? null;
+  const isCpuBelowBaseSpeed =
+    cpuBaseClockSpeed != null &&
+    cpuCurrentClockSpeed != null &&
+    Number.isFinite(cpuBaseClockSpeed) &&
+    Number.isFinite(cpuCurrentClockSpeed) &&
+    cpuCurrentClockSpeed < cpuBaseClockSpeed;
   const memoryUsed = metrics?.memoryUsedBytes ?? getDerivedUsedBytes(metrics?.memoryTotalBytes, metrics?.memoryAvailableBytes);
   const memoryTotal = metrics?.memoryTotalBytes ?? null;
   const storageUsed = metrics?.storageUsedBytes ?? null;
@@ -135,7 +143,7 @@ export function DashboardPage() {
   const healthyDevices = status?.devices.filter((device) => device.lastOutcome === 'Succeeded').length ?? 0;
   const failingDevices = status?.devices.filter((device) => device.lastOutcome === 'Failed' || device.lastOutcome === 'PersistFailed').length ?? 0;
   const latestReport = status?.reportedAt ? formatTimestamp(status.reportedAt) : 'Waiting for first sample';
-  const releaseTag = status?.build?.releaseTag ?? status?.build?.informationalVersion ?? noDataLabel;
+  const releaseTag = formatReleaseDisplay(status?.build);
   const sourceRevisionId = status?.build?.sourceRevisionId ?? noDataLabel;
   const workflowRun = formatWorkflowRun(status?.build?.workflowRunNumber, status?.build?.workflowRunAttempt);
 
@@ -176,13 +184,14 @@ export function DashboardPage() {
 
       <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-4'>
         <MetricCard
-          icon={Cpu}
+          icon={isCpuBelowBaseSpeed ? Leaf : Cpu}
           title='CPU Utilisation'
           value={formatPercent(cpuUsage)}
-          accentClass='text-sky-400'
-          detail={`Current speed ${formatFrequency(metrics?.cpuCurrentClockSpeedMegahertz)}`}
+          accentClass={isCpuBelowBaseSpeed ? 'text-emerald-400' : 'text-sky-400'}
+          iconClassName={isCpuBelowBaseSpeed ? 'text-emerald-400' : 'text-muted-foreground'}
+          detail={`Current speed ${formatFrequency(cpuCurrentClockSpeed)}`}
           detailLines={[
-            `Base speed ${formatFrequency(metrics?.cpuMaxClockSpeedMegahertz)}`,
+            `Base speed ${formatFrequency(cpuBaseClockSpeed)}`,
             `${formatWholeNumber(metrics?.cpuCoreCount)} cores`,
             `${formatWholeNumber(metrics?.processCount)} processes`,
             `System temperature ${formatDecimalValue(metrics?.systemTemperatureCelsius, '°C')}`,
@@ -349,6 +358,7 @@ function MetricCard({
   detail,
   detailLines,
   accentClass,
+  iconClassName,
 }: {
   icon: typeof Cpu;
   title: string;
@@ -356,6 +366,7 @@ function MetricCard({
   detail: string;
   detailLines?: string[];
   accentClass: string;
+  iconClassName?: string;
 }) {
   return (
     <Card className='border border-border/80 bg-card/85 shadow-sm'>
@@ -373,7 +384,7 @@ function MetricCard({
               </div>
             ) : null}
           </div>
-          <div className='rounded-2xl border border-border/70 bg-background/60 p-3 text-muted-foreground'>
+          <div className={cn('rounded-2xl border border-border/70 bg-background/60 p-3', iconClassName ?? 'text-muted-foreground')}>
             <Icon className='h-5 w-5' />
           </div>
         </div>
@@ -416,6 +427,26 @@ function StatusChip({ label, value }: { label: string; value: string }) {
       <div className='mt-1 text-sm font-semibold text-foreground'>{value}</div>
     </div>
   );
+}
+
+function formatReleaseDisplay(build?: BuildRuntimeInfo | null) {
+  const releaseTag = build?.releaseTag?.trim();
+  if (releaseTag) {
+    return releaseTag;
+  }
+
+  const informationalVersion = build?.informationalVersion?.trim();
+  if (!informationalVersion) {
+    return noDataLabel;
+  }
+
+  const revisionMatch = /^(.*)\+([0-9a-f]{12,40})$/i.exec(informationalVersion);
+  if (!revisionMatch) {
+    return informationalVersion;
+  }
+
+  const [, versionLabel, revision] = revisionMatch;
+  return `${versionLabel}+${revision.slice(0, 7)}`;
 }
 
 function formatBytes(value: number | null | undefined) {
