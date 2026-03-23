@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area, ReferenceLine, ReferenceDot,
   XAxis, YAxis, Tooltip, CartesianGrid, Legend,
@@ -89,9 +89,9 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
   const [multiCellData, setMultiCellData] = useState<Record<string, unknown>[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<'default' | 'today'>('default');
-  // Shared hover/selection state across all chart sections
-  const [sharedHoveredIndex, setSharedHoveredIndex] = useState<number | null>(null);
-  const [sharedSelectedIndex, setSharedSelectedIndex] = useState<number | null>(null);
+  // Shared hover/selection state across all chart sections (synchronised by timestamp)
+  const [sharedHoveredTime, setSharedHoveredTime] = useState<string | null>(null);
+  const [sharedSelectedTime, setSharedSelectedTime] = useState<string | null>(null);
 
   const effectiveResolution: Resolution = resolution ?? '5m';
 
@@ -265,43 +265,43 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
                 data={multiCellData}
                 precision={precision}
                 onDismiss={onClearCellSelection}
-                hoveredPointIndex={sharedHoveredIndex}
-                selectedPointIndex={sharedSelectedIndex}
-                onHover={setSharedHoveredIndex}
-                onSelect={setSharedSelectedIndex}
+                hoveredTime={sharedHoveredTime}
+                selectedTime={sharedSelectedTime}
+                onHover={setSharedHoveredTime}
+                onSelect={setSharedSelectedTime}
               />
             ) : (
               <ChartSection title='Voltage' unit='V' data={chartData} precision={precision}
                 lines={[{ key: 'totalVoltageVolts', color: '#38bdf8', name: 'Pack Voltage' }]}
-                hoveredPointIndex={sharedHoveredIndex} selectedPointIndex={sharedSelectedIndex}
-                onHover={setSharedHoveredIndex} onSelect={setSharedSelectedIndex}
+                hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
+                onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
                 todayXTicks={todayXTicks} />
             )}
             <EnergyChartSection data={chartData} resolution={effectiveResolution}
-              hoveredPointIndex={sharedHoveredIndex} selectedPointIndex={sharedSelectedIndex}
-              onHover={setSharedHoveredIndex} onSelect={setSharedSelectedIndex}
+              hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
+              onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
               todayXTicks={todayXTicks} />
             <ChartSection title='State of Charge' unit='%' data={chartData} precision={precision}
               lines={[{ key: 'stateOfChargePercent', color: '#fbbf24', name: 'SOC' }]}
               domain={[0, 100]}
-              hoveredPointIndex={sharedHoveredIndex} selectedPointIndex={sharedSelectedIndex}
-              onHover={setSharedHoveredIndex} onSelect={setSharedSelectedIndex}
+              hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
+              onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
               todayXTicks={todayXTicks} />
             <ChartSection title='Cell Voltage Spread' unit='V' data={chartData} precision={precision}
               lines={[
                 { key: 'minCellVoltageVolts', color: '#f87171', name: 'Min Cell' },
                 { key: 'maxCellVoltageVolts', color: '#34d399', name: 'Max Cell' },
               ]}
-              hoveredPointIndex={sharedHoveredIndex} selectedPointIndex={sharedSelectedIndex}
-              onHover={setSharedHoveredIndex} onSelect={setSharedSelectedIndex}
+              hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
+              onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
               todayXTicks={todayXTicks} />
             <ChartSection title='Temperature' unit='°C' data={chartData} precision={precision}
               lines={[
                 { key: 'mosTemperatureCelsius', color: '#fb923c', name: 'MOS' },
                 { key: 'batteryTemperatureCelsius', color: '#38bdf8', name: 'Battery' },
               ]}
-              hoveredPointIndex={sharedHoveredIndex} selectedPointIndex={sharedSelectedIndex}
-              onHover={setSharedHoveredIndex} onSelect={setSharedSelectedIndex}
+              hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
+              onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
               todayXTicks={todayXTicks} />
           </>
         )}
@@ -317,97 +317,19 @@ type ChartInteractionState = {
 };
 
 /** Shared theme-aware style constants for Recharts */
-const xTickStyle = { fontSize: 10, fill: 'hsl(var(--muted-foreground))' };
-const yTickStyle = { fontSize: 9, fill: 'hsl(var(--muted-foreground))' };
-const tooltipContentStyle = { backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '0.5rem', fontSize: 12, color: 'hsl(var(--foreground))' };
-const tooltipLabelStyle = { color: 'hsl(var(--muted-foreground))' };
-const legendStyle = { fontSize: 11, paddingTop: 4, color: 'hsl(var(--muted-foreground))' };
+const xTickStyle = { fontSize: 10, fill: 'var(--muted-foreground)' };
+const yTickStyle = { fontSize: 9, fill: 'var(--muted-foreground)' };
+const tooltipContentStyle = { backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '0.5rem', fontSize: 12, color: 'var(--foreground)' };
+const tooltipLabelStyle = { color: 'var(--muted-foreground)' };
+const legendStyle = { fontSize: 11, paddingTop: 4, color: 'var(--muted-foreground)' };
 
-/** Hook: translate touch events on a container into Recharts-compatible onMouseMove / onClick. */
-function useChartTouchHandlers(
-  onHover: (idx: number | null) => void,
-  onSelect: (idx: number | null) => void,
-) {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const touchActiveRef = useRef(false);
-
-  useEffect(() => {
-    const el = containerRef.current;
-    if (!el) return;
-
-    const findRechartsIndex = (clientX: number): number | null => {
-      // Find all recharts-cartesian-grid-bg rects or the chart wrapper to compute index from X.
-      const svg = el.querySelector('.recharts-wrapper svg') ?? el.querySelector('.recharts-wrapper');
-      if (!svg) return null;
-      const dots = el.querySelectorAll('.recharts-xAxis .recharts-cartesian-axis-tick');
-      if (dots.length === 0) return null;
-      // Map each tick to its center X
-      const positions = Array.from(dots).map((tick) => {
-        const rect = tick.getBoundingClientRect();
-        return rect.left + rect.width / 2;
-      });
-      // Find the closest tick
-      let closest = 0;
-      let minDist = Math.abs(clientX - positions[0]);
-      for (let i = 1; i < positions.length; i++) {
-        const dist = Math.abs(clientX - positions[i]);
-        if (dist < minDist) { minDist = dist; closest = i; }
-      }
-      return closest;
-    };
-
-    const onTouchStart = (e: TouchEvent) => {
-      if (e.touches.length !== 1) return;
-      touchActiveRef.current = false; // will become true on move
-    };
-
-    const onTouchMove = (e: TouchEvent) => {
-      if (e.touches.length !== 1) return;
-      // Prevent page scroll while dragging on the chart
-      e.preventDefault();
-      touchActiveRef.current = true;
-      const idx = findRechartsIndex(e.touches[0].clientX);
-      onHover(idx);
-    };
-
-    const onTouchEnd = (e: TouchEvent) => {
-      if (touchActiveRef.current) {
-        // Dragged – pin the last hovered index
-        if (e.changedTouches.length > 0) {
-          const idx = findRechartsIndex(e.changedTouches[0].clientX);
-          onSelect(idx);
-        }
-      } else if (e.changedTouches.length > 0) {
-        // Simple tap
-        const idx = findRechartsIndex(e.changedTouches[0].clientX);
-        onSelect(idx);
-      }
-      onHover(null);
-      touchActiveRef.current = false;
-    };
-
-    el.addEventListener('touchstart', onTouchStart, { passive: true });
-    el.addEventListener('touchmove', onTouchMove, { passive: false });
-    el.addEventListener('touchend', onTouchEnd, { passive: true });
-    return () => {
-      el.removeEventListener('touchstart', onTouchStart);
-      el.removeEventListener('touchmove', onTouchMove);
-      el.removeEventListener('touchend', onTouchEnd);
-    };
-  }, [onHover, onSelect]);
-
-  return containerRef;
-}
-
-function ChartSection({ title, data, lines, domain, precision, hoveredPointIndex, selectedPointIndex, onHover, onSelect, todayXTicks }: {
+function ChartSection({ title, data, lines, domain, precision, hoveredTime, selectedTime, onHover, onSelect, todayXTicks }: {
   title: string; unit: string; data: Record<string, unknown>[]; lines: LineSpec[];
   domain?: [number, number]; precision: DisplayPrecision;
-  hoveredPointIndex: number | null; selectedPointIndex: number | null;
-  onHover: (idx: number | null) => void; onSelect: (idx: number | null) => void;
+  hoveredTime: string | null; selectedTime: string | null;
+  onHover: (time: string | null) => void; onSelect: (time: string | null) => void;
   todayXTicks?: string[];
 }) {
-  const touchRef = useChartTouchHandlers(onHover, onSelect);
-
   // Build a formatter that rounds tooltip values based on precision config.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tooltipFormatter: any = useCallback((value: unknown, name: string, props: { dataKey?: string | number }) => {
@@ -420,31 +342,38 @@ function ChartSection({ title, data, lines, domain, precision, hoveredPointIndex
     return [`${num.toFixed(decimals)}${suffix}`, name];
   }, [precision]);
 
-  const activePoint = getActivePoint(data, hoveredPointIndex, selectedPointIndex);
+  const activePoint = getActivePoint(data, hoveredTime, selectedTime);
   const activeTime = activePoint != null ? formatSummaryTime(activePoint.timestamp) : null;
-  const isPinned = hoveredPointIndex == null && selectedPointIndex != null;
 
   const handleChartMove = useCallback((state: unknown) => {
-    const activeIndex = extractActiveIndex(state);
-    onHover(activeIndex);
-  }, [onHover]);
+    const idx = extractActiveIndex(state);
+    if (idx != null && data[idx]) {
+      onHover(String(data[idx].timestamp ?? ''));
+    } else {
+      onHover(null);
+    }
+  }, [data, onHover]);
 
   const handleChartLeave = useCallback(() => {
     onHover(null);
   }, [onHover]);
 
   const handleChartClick = useCallback((state: unknown) => {
-    onSelect(extractActiveIndex(state));
-  }, [onSelect]);
+    const idx = extractActiveIndex(state);
+    if (idx != null && data[idx]) {
+      onSelect(String(data[idx].timestamp ?? ''));
+    } else {
+      onSelect(null);
+    }
+  }, [data, onSelect]);
 
   return (
-    <div ref={touchRef} style={{ touchAction: 'pan-y', userSelect: 'none', WebkitUserSelect: 'none' }}>
+    <div>
       <div className='mb-2 flex items-start justify-between gap-3 px-2 sm:px-0'>
         <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{title}</div>
         <div className='max-w-[60%] text-right'>
           <div className='text-[11px] font-medium text-foreground'>
             {activeTime ?? 'No data'}
-            {isPinned && <span className='ml-2 rounded-full border border-border/70 bg-background/70 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-muted-foreground'>Pinned</span>}
           </div>
           <div className='mt-1 flex flex-wrap justify-end gap-1.5'>
             {lines.map((line) => {
@@ -462,7 +391,7 @@ function ChartSection({ title, data, lines, domain, precision, hoveredPointIndex
               );
             })}
           </div>
-          {selectedPointIndex != null && (
+          {selectedTime != null && (
             <button
               onClick={() => onSelect(null)}
               className='mt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground'
@@ -480,15 +409,14 @@ function ChartSection({ title, data, lines, domain, precision, hoveredPointIndex
           onMouseLeave={handleChartLeave}
           onClick={handleChartClick}
         >
-          <CartesianGrid strokeDasharray='3 3' stroke='hsl(var(--border))' opacity={0.4} />
+          <CartesianGrid strokeDasharray='3 3' stroke='var(--border)' opacity={0.4} />
           <XAxis dataKey='time' tick={xTickStyle} tickLine={false} axisLine={false} {...(todayXTicks ? { ticks: todayXTicks } : {})} />
           <YAxis orientation='right' width={32} tick={yTickStyle} tickLine={false} axisLine={false} domain={domain ?? ['auto', 'auto']} />
           <Tooltip
             contentStyle={tooltipContentStyle}
             labelStyle={tooltipLabelStyle}
-            itemStyle={{ color: 'hsl(var(--foreground))' }}
+            itemStyle={{ color: 'var(--foreground)' }}
             formatter={tooltipFormatter}
-            trigger='click'
           />
           <Legend wrapperStyle={legendStyle} />
           {lines.map((l) => (
@@ -510,14 +438,12 @@ function ChartSection({ title, data, lines, domain, precision, hoveredPointIndex
   );
 }
 
-export function EnergyChartSection({ data, resolution, hoveredPointIndex, selectedPointIndex, onHover, onSelect, todayXTicks }: {
+export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime, onHover, onSelect, todayXTicks }: {
   data: Record<string, unknown>[]; resolution: Resolution;
-  hoveredPointIndex: number | null; selectedPointIndex: number | null;
-  onHover: (idx: number | null) => void; onSelect: (idx: number | null) => void;
+  hoveredTime: string | null; selectedTime: string | null;
+  onHover: (time: string | null) => void; onSelect: (time: string | null) => void;
   todayXTicks?: string[];
 }) {
-  const touchRef = useChartTouchHandlers(onHover, onSelect);
-
   const { energyData, dischargedKwh, chargedKwh, yDomain, zeroOffset } = useMemo(
     () => computeEnergyData(data, resolution),
     [data, resolution],
@@ -538,15 +464,28 @@ export function EnergyChartSection({ data, resolution, hoveredPointIndex, select
     return result;
   }, [energyData]);
 
-  const activePoint = getActivePoint(energyData, hoveredPointIndex, selectedPointIndex);
+  const activePoint = getActivePoint(energyData, hoveredTime, selectedTime);
   const activeTime = activePoint != null ? formatSummaryTime(activePoint.timestamp) : null;
-  const isPinned = hoveredPointIndex == null && selectedPointIndex != null;
   const activeKw = typeof activePoint?.displayPowerKw === 'number' ? activePoint.displayPowerKw : null;
   const activeFmt = formatEnergyValue(activeKw);
 
-  const handleChartMove = useCallback((state: unknown) => { onHover(extractActiveIndex(state)); }, [onHover]);
+  const handleChartMove = useCallback((state: unknown) => {
+    const idx = extractActiveIndex(state);
+    if (idx != null && energyData[idx]) {
+      onHover(String(energyData[idx].timestamp ?? ''));
+    } else {
+      onHover(null);
+    }
+  }, [energyData, onHover]);
   const handleChartLeave = useCallback(() => { onHover(null); }, [onHover]);
-  const handleChartClick = useCallback((state: unknown) => { onSelect(extractActiveIndex(state)); }, [onSelect]);
+  const handleChartClick = useCallback((state: unknown) => {
+    const idx = extractActiveIndex(state);
+    if (idx != null && energyData[idx]) {
+      onSelect(String(energyData[idx].timestamp ?? ''));
+    } else {
+      onSelect(null);
+    }
+  }, [energyData, onSelect]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tooltipFormatter: any = useCallback((value: unknown) => {
@@ -560,7 +499,7 @@ export function EnergyChartSection({ data, resolution, hoveredPointIndex, select
   const yTickFormatter = useCallback((v: number) => `${Math.abs(v).toFixed(1)}`, []);
 
   return (
-    <div ref={touchRef} style={{ touchAction: 'pan-y', userSelect: 'none', WebkitUserSelect: 'none' }}>
+    <div>
       <div className='mb-2 flex items-start justify-between gap-3 px-2 sm:px-0'>
         <div>
           <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Energy</div>
@@ -576,18 +515,17 @@ export function EnergyChartSection({ data, resolution, hoveredPointIndex, select
         <div className='max-w-[50%] text-right'>
           <div className='text-[11px] font-medium text-foreground'>
             {activeTime ?? 'No data'}
-            {isPinned && <span className='ml-2 rounded-full border border-border/70 bg-background/70 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-muted-foreground'>Pinned</span>}
           </div>
           <div className='mt-1'>
             <span className={cn(
               'whitespace-nowrap rounded-full border border-border/70 bg-background/70 px-2 py-1 text-[10px] font-medium',
               activeFmt.isZero ? 'text-muted-foreground' : 'text-foreground'
             )}>
-              <span className='mr-1 inline-block h-2 w-2 rounded-full align-middle' style={{ backgroundColor: activeFmt.isZero ? 'hsl(var(--muted-foreground))' : '#34d399' }} />
+              <span className='mr-1 inline-block h-2 w-2 rounded-full align-middle' style={{ backgroundColor: activeFmt.isZero ? 'var(--muted-foreground)' : '#34d399' }} />
               {activeFmt.text}{activeFmt.label ? ` ${activeFmt.label}` : ''}
             </span>
           </div>
-          {selectedPointIndex != null && (
+          {selectedTime != null && (
             <button
               onClick={() => onSelect(null)}
               className='mt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground'
@@ -613,15 +551,14 @@ export function EnergyChartSection({ data, resolution, hoveredPointIndex, select
               <stop offset='100%' stopColor='#34d399' stopOpacity={0.5} />
             </linearGradient>
           </defs>
-          <CartesianGrid strokeDasharray='3 3' stroke='hsl(var(--border))' opacity={0.4} />
+          <CartesianGrid strokeDasharray='3 3' stroke='var(--border)' opacity={0.4} />
           <XAxis dataKey='time' tick={xTickStyle} tickLine={false} axisLine={false} {...(todayXTicks ? { ticks: todayXTicks } : {})} />
           <YAxis orientation='right' width={32} tick={yTickStyle} tickLine={false} axisLine={false} domain={yDomain} tickFormatter={yTickFormatter} />
           <Tooltip
             contentStyle={tooltipContentStyle}
             labelStyle={tooltipLabelStyle}
-            itemStyle={{ color: 'hsl(var(--foreground))' }}
+            itemStyle={{ color: 'var(--foreground)' }}
             formatter={tooltipFormatter}
-            trigger='click'
           />
           <ReferenceLine y={0} stroke='rgba(255,255,255,0.2)' strokeDasharray='2 10' strokeWidth={1.5} />
           {hourBoundaries.map(({ time, is6h }, i) => (
@@ -634,13 +571,11 @@ export function EnergyChartSection({ data, resolution, hoveredPointIndex, select
   );
 }
 
-function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hoveredPointIndex, selectedPointIndex, onHover, onSelect }: {
+function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hoveredTime, selectedTime, onHover, onSelect }: {
   selectedCells: number[]; data: Record<string, unknown>[]; precision: DisplayPrecision; onDismiss?: () => void;
-  hoveredPointIndex: number | null; selectedPointIndex: number | null;
-  onHover: (idx: number | null) => void; onSelect: (idx: number | null) => void;
+  hoveredTime: string | null; selectedTime: string | null;
+  onHover: (time: string | null) => void; onSelect: (time: string | null) => void;
 }) {
-  const touchRef = useChartTouchHandlers(onHover, onSelect);
-
   const cellLines = selectedCells.map((idx, i) => ({
     key: `cell_${idx}`,
     color: cellColorPalette[i % cellColorPalette.length],
@@ -654,16 +589,29 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hove
     return [`${num.toFixed(precision.cellVoltage)}V`, name];
   }, [precision.cellVoltage]);
 
-  const activePoint = getActivePoint(data, hoveredPointIndex, selectedPointIndex);
+  const activePoint = getActivePoint(data, hoveredTime, selectedTime);
   const activeTime = activePoint != null ? formatSummaryTime(activePoint.timestamp) : null;
-  const isPinned = hoveredPointIndex == null && selectedPointIndex != null;
 
-  const handleChartMove = useCallback((state: unknown) => { onHover(extractActiveIndex(state)); }, [onHover]);
+  const handleChartMove = useCallback((state: unknown) => {
+    const idx = extractActiveIndex(state);
+    if (idx != null && data[idx]) {
+      onHover(String(data[idx].timestamp ?? ''));
+    } else {
+      onHover(null);
+    }
+  }, [data, onHover]);
   const handleChartLeave = useCallback(() => { onHover(null); }, [onHover]);
-  const handleChartClick = useCallback((state: unknown) => { onSelect(extractActiveIndex(state)); }, [onSelect]);
+  const handleChartClick = useCallback((state: unknown) => {
+    const idx = extractActiveIndex(state);
+    if (idx != null && data[idx]) {
+      onSelect(String(data[idx].timestamp ?? ''));
+    } else {
+      onSelect(null);
+    }
+  }, [data, onSelect]);
 
   return (
-    <div ref={touchRef} style={{ touchAction: 'pan-y', userSelect: 'none', WebkitUserSelect: 'none' }}>
+    <div>
       <div className='mb-2 flex items-start justify-between gap-3 px-2 sm:px-0'>
         <div className='flex items-center gap-2'>
           <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>
@@ -681,7 +629,6 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hove
         <div className='max-w-[60%] text-right'>
           <div className='text-[11px] font-medium text-foreground'>
             {activeTime ?? 'No data'}
-            {isPinned && <span className='ml-2 rounded-full border border-border/70 bg-background/70 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-muted-foreground'>Pinned</span>}
           </div>
           <div className='mt-1 flex flex-wrap justify-end gap-1.5'>
             {cellLines.map((line) => {
@@ -696,7 +643,7 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hove
               );
             })}
           </div>
-          {selectedPointIndex != null && (
+          {selectedTime != null && (
             <button
               onClick={() => onSelect(null)}
               className='mt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground'
@@ -714,15 +661,14 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hove
           onMouseLeave={handleChartLeave}
           onClick={handleChartClick}
         >
-          <CartesianGrid strokeDasharray='3 3' stroke='hsl(var(--border))' opacity={0.4} />
+          <CartesianGrid strokeDasharray='3 3' stroke='var(--border)' opacity={0.4} />
           <XAxis dataKey='time' tick={xTickStyle} tickLine={false} axisLine={false} />
           <YAxis orientation='right' width={32} tick={yTickStyle} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
           <Tooltip
             contentStyle={tooltipContentStyle}
             labelStyle={tooltipLabelStyle}
-            itemStyle={{ color: 'hsl(var(--foreground))' }}
+            itemStyle={{ color: 'var(--foreground)' }}
             formatter={tooltipFormatter}
-            trigger='click'
           />
           <Legend wrapperStyle={legendStyle} />
           {cellLines.map((l) => (
@@ -755,13 +701,10 @@ function extractActiveIndex(state: unknown): number | null {
   return typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : null;
 }
 
-function getActivePoint(data: Record<string, unknown>[], hoveredPointIndex: number | null, selectedPointIndex: number | null) {
-  if (hoveredPointIndex != null) {
-    return data[hoveredPointIndex] ?? null;
-  }
-
-  if (selectedPointIndex != null) {
-    return data[selectedPointIndex] ?? null;
+function getActivePoint(data: Record<string, unknown>[], hoveredTime: string | null, selectedTime: string | null) {
+  const ts = hoveredTime ?? selectedTime;
+  if (ts != null) {
+    return data.find(p => p.timestamp === ts) ?? data.at(-1) ?? null;
   }
 
   return data.at(-1) ?? null;
