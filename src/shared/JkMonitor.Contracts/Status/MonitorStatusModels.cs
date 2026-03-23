@@ -1,5 +1,7 @@
 namespace JkMonitor.Contracts.Status;
 
+using JkMonitor.Contracts.Configuration;
+
 public sealed record class DeviceRuntimeState
 {
     public required string DeviceId { get; init; }
@@ -25,6 +27,8 @@ public sealed record class DeviceRuntimeState
     public string? LastError { get; init; }
 
     public DateTimeOffset? LastPersistedAt { get; init; }
+
+    public DisplayPrecisionConfiguration DisplayPrecision { get; init; } = new();
 
     public DeviceTelemetrySnapshot? LatestTelemetry { get; init; }
 }

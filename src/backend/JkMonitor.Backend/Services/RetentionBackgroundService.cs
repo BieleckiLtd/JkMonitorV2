@@ -22,6 +22,10 @@ public sealed class RetentionBackgroundService(
                 {
                     await sqlite.ApplyRetentionAsync(stoppingToken);
                 }
+                else if (repository is TimescaleTelemetryRepository timescale)
+                {
+                    await timescale.ApplyRetentionAsync(stoppingToken);
+                }
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

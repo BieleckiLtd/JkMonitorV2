@@ -30,6 +30,16 @@ type HistoryResponse = {
 
 type Resolution = '1s' | '1m' | '5m' | '1h';
 
+type DisplayPrecision = {
+  voltage: number;
+  cellVoltage: number;
+  current: number;
+  power: number;
+  temperature: number;
+  soc: number;
+  deltaVoltage: number;
+};
+
 const resolutions: { value: Resolution; label: string; hint: string }[] = [
   { value: '1s', label: '1s', hint: 'Last 10 min' },
   { value: '1m', label: '1m', hint: 'Last hour' },
@@ -37,7 +47,20 @@ const resolutions: { value: Resolution; label: string; hint: string }[] = [
   { value: '1h', label: '1h', hint: 'Last 7d' },
 ];
 
-export function HistoryCharts({ deviceId }: { deviceId: string }) {
+// Map data keys to the precision field that governs their formatting.
+const keyPrecisionMap: Record<string, keyof DisplayPrecision> = {
+  totalVoltageVolts: 'voltage',
+  currentAmps: 'current',
+  powerWatts: 'power',
+  stateOfChargePercent: 'soc',
+  minCellVoltageVolts: 'cellVoltage',
+  maxCellVoltageVolts: 'cellVoltage',
+  deltaCellVoltageVolts: 'deltaVoltage',
+  mosTemperatureCelsius: 'temperature',
+  batteryTemperatureCelsius: 'temperature',
+};
+
+export function HistoryCharts({ deviceId, precision }: { deviceId: string; precision: DisplayPrecision }) {
   const [resolution, setResolution] = useState<Resolution>('1m');
   const [data, setData] = useState<HistoryPoint[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -99,22 +122,22 @@ export function HistoryCharts({ deviceId }: { deviceId: string }) {
           <div className='flex items-center justify-center py-12 text-sm text-muted-foreground'>No history data yet. Samples will appear once the data store collects readings.</div>
         ) : (
           <>
-            <ChartSection title='Voltage' unit='V' data={formatted}
+            <ChartSection title='Voltage' unit='V' data={formatted} precision={precision}
               lines={[{ key: 'totalVoltageVolts', color: '#38bdf8', name: 'Pack Voltage' }]} />
-            <ChartSection title='Current & Power' unit='' data={formatted}
+            <ChartSection title='Current & Power' unit='' data={formatted} precision={precision}
               lines={[
                 { key: 'currentAmps', color: '#34d399', name: 'Current (A)' },
                 { key: 'powerWatts', color: '#a78bfa', name: 'Power (W)' },
               ]} />
-            <ChartSection title='State of Charge' unit='%' data={formatted}
+            <ChartSection title='State of Charge' unit='%' data={formatted} precision={precision}
               lines={[{ key: 'stateOfChargePercent', color: '#fbbf24', name: 'SOC' }]}
               domain={[0, 100]} />
-            <ChartSection title='Cell Voltage Spread' unit='V' data={formatted}
+            <ChartSection title='Cell Voltage Spread' unit='V' data={formatted} precision={precision}
               lines={[
                 { key: 'minCellVoltageVolts', color: '#f87171', name: 'Min Cell' },
                 { key: 'maxCellVoltageVolts', color: '#34d399', name: 'Max Cell' },
               ]} />
-            <ChartSection title='Temperature' unit='°C' data={formatted}
+            <ChartSection title='Temperature' unit='°C' data={formatted} precision={precision}
               lines={[
                 { key: 'mosTemperatureCelsius', color: '#fb923c', name: 'MOS' },
                 { key: 'batteryTemperatureCelsius', color: '#38bdf8', name: 'Battery' },
@@ -128,10 +151,21 @@ export function HistoryCharts({ deviceId }: { deviceId: string }) {
 
 type LineSpec = { key: string; color: string; name: string };
 
-function ChartSection({ title, data, lines, domain }: {
+function ChartSection({ title, data, lines, domain, precision }: {
   title: string; unit: string; data: Record<string, unknown>[]; lines: LineSpec[];
-  domain?: [number, number];
+  domain?: [number, number]; precision: DisplayPrecision;
 }) {
+  // Build a formatter that rounds tooltip values based on precision config.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tooltipFormatter: any = useCallback((value: unknown, name: string, props: { dataKey?: string | number }) => {
+    const num = typeof value === 'number' ? value : Number(value);
+    if (Number.isNaN(num)) return [String(value), name];
+    const key = String(props.dataKey ?? '');
+    const precKey = keyPrecisionMap[key];
+    const decimals = precKey != null ? precision[precKey] : 2;
+    return [num.toFixed(decimals), name];
+  }, [precision]);
+
   return (
     <div>
       <div className='mb-2 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{title}</div>
@@ -143,6 +177,7 @@ function ChartSection({ title, data, lines, domain }: {
           <Tooltip
             contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '0.5rem', fontSize: 12 }}
             labelStyle={{ color: 'hsl(var(--muted-foreground))' }}
+            formatter={tooltipFormatter}
           />
           <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
           {lines.map((l) => (

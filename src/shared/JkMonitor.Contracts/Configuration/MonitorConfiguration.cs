@@ -90,4 +90,23 @@ public sealed class DeviceConfiguration
     public int PollIntervalMilliseconds { get; init; } = 1000;
 
     public bool Enabled { get; init; } = true;
+
+    public DisplayPrecisionConfiguration DisplayPrecision { get; init; } = new();
+}
+
+public sealed class DisplayPrecisionConfiguration
+{
+    public int Voltage { get; init; } = 2;
+
+    public int CellVoltage { get; init; } = 3;
+
+    public int Current { get; init; } = 1;
+
+    public int Power { get; init; } = 0;
+
+    public int Temperature { get; init; } = 1;
+
+    public int Soc { get; init; } = 0;
+
+    public int DeltaVoltage { get; init; } = 3;
 }

@@ -51,6 +51,18 @@ type DeviceTelemetrySnapshot = {
   parameters: DeviceParameter[];
 };
 
+type DisplayPrecision = {
+  voltage: number;
+  cellVoltage: number;
+  current: number;
+  power: number;
+  temperature: number;
+  soc: number;
+  deltaVoltage: number;
+};
+
+const defaultPrecision: DisplayPrecision = { voltage: 2, cellVoltage: 3, current: 1, power: 0, temperature: 1, soc: 0, deltaVoltage: 3 };
+
 type DeviceRuntimeState = {
   deviceId: string;
   displayName: string;
@@ -64,6 +76,7 @@ type DeviceRuntimeState = {
   lastOutcome: string;
   lastError?: string | null;
   lastPersistedAt?: string | null;
+  displayPrecision?: DisplayPrecision | null;
   latestTelemetry?: DeviceTelemetrySnapshot | null;
 };
 
@@ -158,6 +171,7 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
   const warnings = telemetry?.activeWarnings ?? [];
   const isHealthy = device.lastOutcome === 'Succeeded';
   const isFailing = device.lastOutcome === 'Failed';
+  const dp = device.displayPrecision ?? defaultPrecision;
 
   // Group parameters by category
   const grouped = new Map<string, DeviceParameter[]>();
@@ -240,28 +254,28 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
             <HeroMetric
               icon={Zap}
               label='Voltage'
-              value={fmt(telemetry.totalVoltageVolts)}
+              value={fmt(telemetry.totalVoltageVolts, dp.voltage)}
               unit='V'
               accent='text-sky-400'
             />
             <HeroMetric
               icon={Activity}
               label='Current'
-              value={fmt(telemetry.currentAmps)}
+              value={fmt(telemetry.currentAmps, dp.current)}
               unit='A'
               accent={telemetry.currentAmps != null && telemetry.currentAmps > 0 ? 'text-emerald-400' : telemetry.currentAmps != null && telemetry.currentAmps < 0 ? 'text-amber-400' : 'text-muted-foreground'}
             />
             <HeroMetric
               icon={Zap}
               label='Power'
-              value={fmt(telemetry.powerWatts)}
+              value={fmt(telemetry.powerWatts, dp.power)}
               unit='W'
               accent='text-purple-400'
             />
             <HeroMetric
               icon={BatteryCharging}
               label='SoC'
-              value={fmt(telemetry.stateOfChargePercent, 0)}
+              value={fmt(telemetry.stateOfChargePercent, dp.soc)}
               unit='%'
               accent={telemetry.stateOfChargePercent != null && telemetry.stateOfChargePercent > 50 ? 'text-emerald-400' : telemetry.stateOfChargePercent != null && telemetry.stateOfChargePercent > 20 ? 'text-amber-400' : 'text-rose-400'}
             />
@@ -273,7 +287,7 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
           )}
 
           {/* Time-series history charts */}
-          <HistoryCharts deviceId={device.deviceId} />
+          <HistoryCharts deviceId={device.deviceId} precision={dp} />
 
           {/* All parameter categories */}
           <div className='grid gap-4 lg:grid-cols-2'>

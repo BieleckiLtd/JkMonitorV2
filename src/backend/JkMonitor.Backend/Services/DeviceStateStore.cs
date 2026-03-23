@@ -37,6 +37,7 @@ public sealed class DeviceStateStore
                 Enabled = device.Enabled,
                 IsMaster = device.IsMaster,
                 PollIntervalMilliseconds = device.PollIntervalMilliseconds,
+                DisplayPrecision = device.DisplayPrecision,
                 LastOutcome = "NotStarted"
             };
         }
@@ -131,6 +132,7 @@ public sealed class DeviceStateStore
             Enabled = device.Enabled,
             IsMaster = device.IsMaster,
             PollIntervalMilliseconds = device.PollIntervalMilliseconds,
+            DisplayPrecision = device.DisplayPrecision,
             LastPollStartedAt = startedAt,
             LastPollCompletedAt = completedAt,
             LastOutcome = outcome,

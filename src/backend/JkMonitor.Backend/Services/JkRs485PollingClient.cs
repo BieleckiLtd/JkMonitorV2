@@ -21,11 +21,20 @@ public sealed class JkRs485PollingClient(
     private SerialPort? _serialPort;
     private bool _disposed;
 
+    // Slow-changing registers are refreshed at this interval instead of every poll.
+    private static readonly TimeSpan SlowRegisterInterval = TimeSpan.FromSeconds(30);
+    private DateTimeOffset _lastConfigRead = DateTimeOffset.MinValue;
+    private DateTimeOffset _lastDeviceInfoRead = DateTimeOffset.MinValue;
+    private IReadOnlyList<DeviceParameter>? _cachedConfigParams;
+    private IReadOnlyList<DeviceParameter>? _cachedDeviceInfoParams;
+    private string? _cachedManufacturerId;
+    private string? _cachedSoftwareVersion;
+
     public async Task<DevicePollResult> PollAsync(DeviceConfiguration device, DeviceProfileConfiguration profile, CancellationToken cancellationToken)
     {
         var transport = profile.Transport;
         var readTimeout = transport?.ReadTimeoutMs ?? _configuration.SerialBus.ReadTimeoutMilliseconds;
-        var overallTimeoutMs = readTimeout * 5;
+        var overallTimeoutMs = readTimeout * 8; // Allow time for config/device-info reads on slow-register cycles.
 
         using var pollCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         pollCts.CancelAfter(overallTimeoutMs);
@@ -46,34 +55,49 @@ public sealed class JkRs485PollingClient(
             var liveResponse = await SendAndReceiveAsync(serialPort, JkModbusProtocol.BuildReadLiveDataRequest(device.Address),
                 JkModbusProtocol.ExpectedResponseLength(JkModbusProtocol.LiveDataRegisterCount), readTimeout, cancellationToken);
 
-            // 2. Read config (0x1000)
-            IReadOnlyList<DeviceParameter>? configParams = null;
-            try
+            // 2. Read config (0x1000) — only every SlowRegisterInterval
+            var now = DateTimeOffset.UtcNow;
+            IReadOnlyList<DeviceParameter>? configParams = _cachedConfigParams;
+            if (now - _lastConfigRead >= SlowRegisterInterval)
             {
-                await Task.Delay(20, pollToken); // small gap between requests
-                var configResponse = await SendAndReceiveAsync(serialPort, JkModbusProtocol.BuildReadConfigRequest(device.Address),
-                    JkModbusProtocol.ExpectedResponseLength(JkModbusProtocol.ConfigRegisterCount), readTimeout, cancellationToken);
-                configParams = JkModbusProtocol.ParseConfigResponse(configResponse, device.Address, 100);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                logger.LogWarning(ex, "Failed to read config registers for device {DeviceId}.", device.DeviceId);
+                try
+                {
+                    await Task.Delay(100, pollToken);
+                    serialPort.DiscardInBuffer();
+                    var configResponse = await SendAndReceiveAsync(serialPort, JkModbusProtocol.BuildReadConfigRequest(device.Address),
+                        JkModbusProtocol.ExpectedResponseLength(JkModbusProtocol.ConfigRegisterCount), readTimeout * 2, cancellationToken);
+                    configParams = JkModbusProtocol.ParseConfigResponse(configResponse, device.Address, 100);
+                    _cachedConfigParams = configParams;
+                    _lastConfigRead = now;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    logger.LogWarning(ex, "Failed to read config registers for device {DeviceId}.", device.DeviceId);
+                }
             }
 
-            // 3. Read device info (0x1400)
-            IReadOnlyList<DeviceParameter>? deviceInfoParams = null;
-            string? manufacturerId = null;
-            string? softwareVersion = null;
-            try
+            // 3. Read device info (0x1400) — only every SlowRegisterInterval
+            IReadOnlyList<DeviceParameter>? deviceInfoParams = _cachedDeviceInfoParams;
+            string? manufacturerId = _cachedManufacturerId;
+            string? softwareVersion = _cachedSoftwareVersion;
+            if (now - _lastDeviceInfoRead >= SlowRegisterInterval)
             {
-                await Task.Delay(20, pollToken);
-                var deviceInfoResponse = await SendAndReceiveAsync(serialPort, JkModbusProtocol.BuildReadDeviceInfoRequest(device.Address),
-                    JkModbusProtocol.ExpectedResponseLength(JkModbusProtocol.DeviceInfoRegisterCount), readTimeout, cancellationToken);
-                (deviceInfoParams, manufacturerId, softwareVersion) = JkModbusProtocol.ParseDeviceInfoResponse(deviceInfoResponse, device.Address, 200);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                logger.LogWarning(ex, "Failed to read device info registers for device {DeviceId}.", device.DeviceId);
+                try
+                {
+                    await Task.Delay(100, pollToken);
+                    serialPort.DiscardInBuffer();
+                    var deviceInfoResponse = await SendAndReceiveAsync(serialPort, JkModbusProtocol.BuildReadDeviceInfoRequest(device.Address),
+                        JkModbusProtocol.ExpectedResponseLength(JkModbusProtocol.DeviceInfoRegisterCount), readTimeout * 2, cancellationToken);
+                    (deviceInfoParams, manufacturerId, softwareVersion) = JkModbusProtocol.ParseDeviceInfoResponse(deviceInfoResponse, device.Address, 200);
+                    _cachedDeviceInfoParams = deviceInfoParams;
+                    _cachedManufacturerId = manufacturerId;
+                    _cachedSoftwareVersion = softwareVersion;
+                    _lastDeviceInfoRead = now;
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    logger.LogWarning(ex, "Failed to read device info registers for device {DeviceId}.", device.DeviceId);
+                }
             }
 
             return JkModbusProtocol.ParseLiveDataResponse(liveResponse, device.Address, DateTimeOffset.UtcNow, registerDefs,
