@@ -13,6 +13,7 @@ public sealed class DevicesController(
     DeviceStateStore stateStore,
     SetupConfigurationService setupConfigurationService,
     JkRs485PollingClient rs485PollingClient,
+    ITelemetryRepository telemetryRepository,
     IOptions<MonitorConfiguration> configuration) : ControllerBase
 {
     private readonly MonitorConfiguration _configuration = configuration.Value;
@@ -41,6 +42,32 @@ public sealed class DevicesController(
         {
             return BadRequest(new { message = exception.Message });
         }
+    }
+
+    [HttpGet("{deviceId}/history")]
+    public async Task<IActionResult> GetHistory(
+        string deviceId,
+        [FromQuery] string resolution = "1m",
+        [FromQuery] DateTimeOffset? from = null,
+        [FromQuery] DateTimeOffset? to = null,
+        CancellationToken cancellationToken = default)
+    {
+        var allowed = new HashSet<string>(StringComparer.Ordinal) { "1s", "1m", "5m", "1h" };
+        if (!allowed.Contains(resolution))
+            return BadRequest(new { message = $"Invalid resolution '{resolution}'. Use: 1s, 1m, 5m, 1h." });
+
+        var toValue = to ?? DateTimeOffset.UtcNow;
+        var fromValue = from ?? resolution switch
+        {
+            "1s" => toValue.AddMinutes(-10),
+            "1m" => toValue.AddHours(-1),
+            "5m" => toValue.AddDays(-1),
+            "1h" => toValue.AddDays(-7),
+            _ => toValue.AddHours(-1),
+        };
+
+        var points = await telemetryRepository.QueryHistoryAsync(deviceId, resolution, fromValue, toValue, cancellationToken);
+        return Ok(new { deviceId, resolution, from = fromValue, to = toValue, points });
     }
 
     [HttpPost("{deviceId}/parameters/{parameterKey}")]

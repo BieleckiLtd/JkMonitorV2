@@ -11,13 +11,30 @@ public interface ITelemetryRepository
     Task InitializeAsync(CancellationToken cancellationToken);
 
     Task PersistAsync(DeviceConfiguration device, DevicePollResult sample, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<HistoryDataPoint>> QueryHistoryAsync(string deviceId, string resolution, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken);
 }
+
+public sealed record HistoryDataPoint(
+    DateTimeOffset Timestamp,
+    decimal? TotalVoltageVolts,
+    decimal? CurrentAmps,
+    decimal? PowerWatts,
+    decimal? StateOfChargePercent,
+    decimal? MinCellVoltageVolts,
+    decimal? MaxCellVoltageVolts,
+    decimal? DeltaCellVoltageVolts,
+    decimal? MosTemperatureCelsius,
+    decimal? BatteryTemperatureCelsius);
 
 public sealed class NoOpTelemetryRepository : ITelemetryRepository
 {
     public Task InitializeAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     public Task PersistAsync(DeviceConfiguration device, DevicePollResult sample, CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task<IReadOnlyList<HistoryDataPoint>> QueryHistoryAsync(string deviceId, string resolution, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyList<HistoryDataPoint>>([]);
 }
 
 public sealed class TimescaleTelemetryRepository(
@@ -298,6 +315,53 @@ DO UPDATE SET
         command.Parameters.AddWithValue("discharging_enabled", (object?)sample.Snapshot.DischargingEnabled ?? DBNull.Value);
         command.Parameters.AddWithValue("balancing_enabled", (object?)sample.Snapshot.BalancingEnabled ?? DBNull.Value);
         command.Parameters.AddWithValue("battery_online", (object?)sample.Snapshot.BatteryOnline ?? DBNull.Value);
+    }
+
+    public async Task<IReadOnlyList<HistoryDataPoint>> QueryHistoryAsync(string deviceId, string resolution, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken);
+
+        var (table, tsCol, voltCol, curCol, pwrCol, socCol, minCol, maxCol, deltaCol) = resolution switch
+        {
+            "1s" => ("jk_raw_samples", "sampled_at", "total_voltage_volts", "current_amps", "power_watts", "state_of_charge_percent", "min_cell_voltage_volts", "max_cell_voltage_volts", "delta_cell_voltage_volts"),
+            "1m" => ("jk_rollup_1m", "bucket_start", "avg_total_voltage_volts", "avg_current_amps", "avg_power_watts", "avg_state_of_charge_percent", "min_cell_voltage_volts", "max_cell_voltage_volts", "avg_delta_cell_voltage_volts"),
+            "5m" => ("jk_rollup_5m", "bucket_start", "avg_total_voltage_volts", "avg_current_amps", "avg_power_watts", "avg_state_of_charge_percent", "min_cell_voltage_volts", "max_cell_voltage_volts", "avg_delta_cell_voltage_volts"),
+            _ => ("jk_rollup_5m", "bucket_start", "avg_total_voltage_volts", "avg_current_amps", "avg_power_watts", "avg_state_of_charge_percent", "min_cell_voltage_volts", "max_cell_voltage_volts", "avg_delta_cell_voltage_volts"),
+        };
+
+        await using var connection = new NpgsqlConnection(_storage.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $@"
+SELECT {tsCol}, {voltCol}, {curCol}, {pwrCol}, {socCol}, {minCol}, {maxCol}, {deltaCol}
+FROM {table}
+WHERE device_id = @device_id AND {tsCol} >= @from AND {tsCol} <= @to
+ORDER BY {tsCol}
+LIMIT 2000;
+";
+        command.Parameters.AddWithValue("device_id", deviceId);
+        command.Parameters.AddWithValue("from", from);
+        command.Parameters.AddWithValue("to", to);
+
+        var points = new List<HistoryDataPoint>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            points.Add(new HistoryDataPoint(
+                reader.GetDateTime(0),
+                reader.IsDBNull(1) ? null : reader.GetDecimal(1),
+                reader.IsDBNull(2) ? null : reader.GetDecimal(2),
+                reader.IsDBNull(3) ? null : reader.GetDecimal(3),
+                reader.IsDBNull(4) ? null : reader.GetDecimal(4),
+                reader.IsDBNull(5) ? null : reader.GetDecimal(5),
+                reader.IsDBNull(6) ? null : reader.GetDecimal(6),
+                reader.IsDBNull(7) ? null : reader.GetDecimal(7),
+                null, null));
+        }
+
+        return points;
     }
 
     private static DateTimeOffset AlignBucket(DateTimeOffset value, TimeSpan bucketSize)

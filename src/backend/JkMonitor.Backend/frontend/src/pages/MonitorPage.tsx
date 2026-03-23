@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Activity, AlertTriangle, Battery, BatteryCharging, Check, Edit2, LoaderCircle, Shield, Thermometer, X, Zap } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { HistoryCharts } from '../components/HistoryCharts';
 import { cn } from '../lib/utils';
 
 type DeviceParameter = {
@@ -270,6 +271,9 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
           {cells.length > 0 && (
             <CellVoltageChart cells={cells} minV={telemetry.minCellVoltageVolts} maxV={telemetry.maxCellVoltageVolts} avgV={telemetry.averageCellVoltageVolts} />
           )}
+
+          {/* Time-series history charts */}
+          <HistoryCharts deviceId={device.deviceId} />
 
           {/* All parameter categories */}
           <div className='grid gap-4 lg:grid-cols-2'>

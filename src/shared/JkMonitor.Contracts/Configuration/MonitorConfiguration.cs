@@ -48,6 +48,8 @@ public sealed class RetentionConfiguration
     public int OneMinuteWindowHours { get; init; } = 1;
 
     public int FiveMinuteWindowDays { get; init; } = 365;
+
+    public int OneHourWindowDays { get; init; } = 365;
 }
 
 public sealed class AlertingConfiguration
