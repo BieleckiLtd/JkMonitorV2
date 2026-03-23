@@ -40,14 +40,15 @@ export function computeEnergyData(
   const processed = data.map((p) => {
     const power = typeof p.powerWatts === 'number' ? p.powerWatts : null;
     const current = typeof p.currentAmps === 'number' ? p.currentAmps : null;
-    if (power == null || current == null) return { ...p, signedPowerKw: null };
+    if (power == null || current == null) return { ...p, signedPowerKw: null, displayPowerKw: null };
 
     const signedKw = current >= 0 ? -power / 1000 : power / 1000;
-    if (signedKw > dMax) dMax = signedKw;
-    if (signedKw < dMin) dMin = signedKw;
+    const normalKw = signedKw || 0; // normalise -0 to 0
+    if (normalKw > dMax) dMax = normalKw;
+    if (normalKw < dMin) dMin = normalKw;
     if (current < 0) discharged += power * intervalHours;
     else charged += power * intervalHours;
-    return { ...p, signedPowerKw: signedKw };
+    return { ...p, signedPowerKw: normalKw === 0 ? null : normalKw, displayPowerKw: normalKw };
   });
 
   // Ensure at least ±0.5 kW margin around the zero baseline
@@ -68,10 +69,10 @@ export function computeEnergyData(
  * Format a signed-power value for display. Always shows absolute magnitude
  * with a "Charged" / "Discharged" label so users never see confusing negatives.
  */
-export function formatEnergyValue(kw: number | null): { text: string; label: string } {
-  if (kw == null) return { text: 'N/D', label: '' };
+export function formatEnergyValue(kw: number | null): { text: string; label: string; isZero: boolean } {
+  if (kw == null) return { text: 'N/D', label: '', isZero: false };
   const abs = Math.abs(kw);
-  if (kw > 0) return { text: `${abs.toFixed(1)} kW`, label: 'Discharged' };
-  if (kw < 0) return { text: `${abs.toFixed(1)} kW`, label: 'Charged' };
-  return { text: '0.0 kW', label: '' };
+  if (kw > 0) return { text: `${abs.toFixed(1)} kW`, label: 'Discharged', isZero: false };
+  if (kw < 0) return { text: `${abs.toFixed(1)} kW`, label: 'Charged', isZero: false };
+  return { text: '0.0 kW', label: 'Discharged', isZero: true };
 }

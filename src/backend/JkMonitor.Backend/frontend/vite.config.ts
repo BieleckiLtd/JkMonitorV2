@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import path from 'node:path'
 
 import tailwindcss from '@tailwindcss/vite'
@@ -22,5 +23,9 @@ export default defineConfig({
     proxy: {
       '/api': backendUrl,
     },
+  },
+  test: {
+    environment: 'jsdom',
+    setupFiles: ['./src/test-setup.ts'],
   },
 })

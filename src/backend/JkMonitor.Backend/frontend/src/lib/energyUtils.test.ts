@@ -31,7 +31,7 @@ describe('computeEnergyData sign convention', () => {
     expect(result.energyData[0].signedPowerKw).toBe(1.0);
   });
 
-  it('null power or current results in null signedPowerKw', () => {
+  it('null power or current results in null signedPowerKw and displayPowerKw', () => {
     const data = [
       { powerWatts: null, currentAmps: 2, time: '12:00' },
       { powerWatts: 500, currentAmps: null, time: '12:01' },
@@ -39,7 +39,25 @@ describe('computeEnergyData sign convention', () => {
     const result = computeEnergyData(data, '1m');
 
     expect(result.energyData[0].signedPowerKw).toBeNull();
+    expect(result.energyData[0].displayPowerKw).toBeNull();
     expect(result.energyData[1].signedPowerKw).toBeNull();
+    expect(result.energyData[1].displayPowerKw).toBeNull();
+  });
+
+  it('zero power sets signedPowerKw to null but preserves displayPowerKw as 0', () => {
+    const data = [{ powerWatts: 0, currentAmps: 0, time: '12:00' }];
+    const result = computeEnergyData(data, '1m');
+
+    expect(result.energyData[0].signedPowerKw).toBeNull();
+    expect(result.energyData[0].displayPowerKw).toBe(0);
+  });
+
+  it('non-zero values have matching signedPowerKw and displayPowerKw', () => {
+    const data = [{ powerWatts: 500, currentAmps: 2, time: '12:00' }];
+    const result = computeEnergyData(data, '1m');
+
+    expect(result.energyData[0].signedPowerKw).toBe(-0.5);
+    expect(result.energyData[0].displayPowerKw).toBe(-0.5);
   });
 });
 
@@ -134,22 +152,31 @@ describe('computeEnergyData zeroOffset', () => {
 // formatEnergyValue — absolute values with labels
 // ---------------------------------------------------------------------------
 describe('formatEnergyValue', () => {
-  it('shows "Discharged" for positive values', () => {
+  it('shows "Discharged" for positive values with isZero false', () => {
     const result = formatEnergyValue(2.3);
     expect(result.text).toBe('2.3 kW');
     expect(result.label).toBe('Discharged');
+    expect(result.isZero).toBe(false);
   });
 
   it('shows "Charged" for negative values with absolute magnitude', () => {
     const result = formatEnergyValue(-4.7);
     expect(result.text).toBe('4.7 kW');
     expect(result.label).toBe('Charged');
+    expect(result.isZero).toBe(false);
   });
 
-  it('shows no label for exactly zero', () => {
+  it('shows "Discharged" label for exactly zero and marks isZero', () => {
     const result = formatEnergyValue(0);
     expect(result.text).toBe('0.0 kW');
-    expect(result.label).toBe('');
+    expect(result.label).toBe('Discharged');
+    expect(result.isZero).toBe(true);
+  });
+
+  it('isZero is false for non-zero values', () => {
+    expect(formatEnergyValue(1.0).isZero).toBe(false);
+    expect(formatEnergyValue(-1.0).isZero).toBe(false);
+    expect(formatEnergyValue(null).isZero).toBe(false);
   });
 
   it('shows N/D for null', () => {

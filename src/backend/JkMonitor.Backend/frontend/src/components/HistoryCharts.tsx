@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ResponsiveContainer, LineChart, Line, AreaChart, Area, ReferenceLine,
+  ResponsiveContainer, LineChart, Line, AreaChart, Area, ReferenceLine, ReferenceDot,
   XAxis, YAxis, Tooltip, CartesianGrid, Legend,
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -199,7 +199,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
           </div>
         </CardTitle>
       </CardHeader>
-      <CardContent className='px-0 pt-4 space-y-6 sm:px-4'>
+      <CardContent className='px-0 pt-4 space-y-6'>
         {isLoading && data.length === 0 ? (
           <div className='flex items-center justify-center py-12 text-sm text-muted-foreground'>Loading history…</div>
         ) : data.length === 0 ? (
@@ -324,7 +324,7 @@ function ChartSection({ title, data, lines, domain, precision }: {
         >
           <CartesianGrid strokeDasharray='3 3' stroke='hsl(var(--border))' opacity={0.4} />
           <XAxis dataKey='time' tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} />
-          <YAxis width={30} tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} domain={domain ?? ['auto', 'auto']} />
+          <YAxis orientation='right' width={32} tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.55)' }} tickLine={false} axisLine={false} domain={domain ?? ['auto', 'auto']} />
           <Tooltip
             contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '0.5rem', fontSize: 12 }}
             labelStyle={{ color: 'hsl(var(--muted-foreground))' }}
@@ -350,7 +350,7 @@ function ChartSection({ title, data, lines, domain, precision }: {
   );
 }
 
-function EnergyChartSection({ data, resolution }: {
+export function EnergyChartSection({ data, resolution }: {
   data: Record<string, unknown>[]; resolution: Resolution;
 }) {
   const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
@@ -361,10 +361,25 @@ function EnergyChartSection({ data, resolution }: {
     [data, resolution],
   );
 
+  const hourBoundaries = useMemo(() => {
+    const result: { time: string; is6h: boolean }[] = [];
+    let lastHour = -1;
+    for (const p of energyData) {
+      const ts = typeof p.timestamp === 'string' ? new Date(p.timestamp as string) : null;
+      if (!ts || isNaN(ts.getTime())) continue;
+      const hour = ts.getHours();
+      if (hour !== lastHour) {
+        result.push({ time: String(p.time), is6h: hour % 6 === 0 });
+        lastHour = hour;
+      }
+    }
+    return result;
+  }, [energyData]);
+
   const activePoint = getActivePoint(energyData, hoveredPointIndex, selectedPointIndex);
   const activeTime = activePoint != null ? formatSummaryTime(activePoint.timestamp) : null;
   const isPinned = hoveredPointIndex == null && selectedPointIndex != null;
-  const activeKw = typeof activePoint?.signedPowerKw === 'number' ? activePoint.signedPowerKw : null;
+  const activeKw = typeof activePoint?.displayPowerKw === 'number' ? activePoint.displayPowerKw : null;
   const activeFmt = formatEnergyValue(activeKw);
 
   const handleChartMove = useCallback((state: unknown) => { setHoveredPointIndex(extractActiveIndex(state)); }, []);
@@ -396,14 +411,17 @@ function EnergyChartSection({ data, resolution }: {
             </span>
           </div>
         </div>
-        <div className='max-w-[40%] text-right'>
+        <div className='max-w-[50%] text-right'>
           <div className='text-[11px] font-medium text-foreground'>
             {activeTime ?? 'No data'}
             {isPinned && <span className='ml-2 rounded-full border border-border/70 bg-background/70 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-muted-foreground'>Pinned</span>}
           </div>
           <div className='mt-1'>
-            <span className='rounded-full border border-border/70 bg-background/70 px-2 py-1 text-[10px] font-medium text-foreground'>
-              <span className='mr-1 inline-block h-2 w-2 rounded-full align-middle' style={{ backgroundColor: '#34d399' }} />
+            <span className={cn(
+              'whitespace-nowrap rounded-full border border-border/70 bg-background/70 px-2 py-1 text-[10px] font-medium',
+              activeFmt.isZero ? 'text-muted-foreground' : 'text-foreground'
+            )}>
+              <span className='mr-1 inline-block h-2 w-2 rounded-full align-middle' style={{ backgroundColor: activeFmt.isZero ? 'hsl(var(--muted-foreground))' : '#34d399' }} />
               {activeFmt.text}{activeFmt.label ? ` ${activeFmt.label}` : ''}
             </span>
           </div>
@@ -428,21 +446,24 @@ function EnergyChartSection({ data, resolution }: {
           <defs>
             <linearGradient id='energyGradient' x1='0' y1='0' x2='0' y2='1'>
               <stop offset='0%' stopColor='#34d399' stopOpacity={0.5} />
-              <stop offset={`${zeroOffset * 100}%`} stopColor='#34d399' stopOpacity={0.03} />
-              <stop offset={`${zeroOffset * 100}%`} stopColor='#34d399' stopOpacity={0.03} />
+              <stop offset={`${zeroOffset * 100}%`} stopColor='#34d399' stopOpacity={0} />
+              <stop offset={`${zeroOffset * 100}%`} stopColor='#34d399' stopOpacity={0} />
               <stop offset='100%' stopColor='#34d399' stopOpacity={0.5} />
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray='3 3' stroke='hsl(var(--border))' opacity={0.4} />
           <XAxis dataKey='time' tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} />
-          <YAxis width={30} tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} domain={yDomain} tickFormatter={yTickFormatter} />
+          <YAxis orientation='right' width={32} tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.55)' }} tickLine={false} axisLine={false} domain={yDomain} tickFormatter={yTickFormatter} />
           <Tooltip
             contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '0.5rem', fontSize: 12 }}
             labelStyle={{ color: 'hsl(var(--muted-foreground))' }}
             formatter={tooltipFormatter}
           />
-          <ReferenceLine y={0} stroke='hsl(var(--muted-foreground))' strokeOpacity={0.7} strokeDasharray='4 6' />
-          <Area type='monotone' dataKey='signedPowerKw' stroke='#34d399' fill='url(#energyGradient)' strokeWidth={1.5} dot={false} connectNulls isAnimationActive={false} baseValue={0} />
+          <ReferenceLine y={0} stroke='rgba(255,255,255,0.2)' strokeDasharray='2 10' strokeWidth={1.5} />
+          {hourBoundaries.map(({ time, is6h }, i) => (
+            <ReferenceDot key={`hb-${i}`} x={time} y={0} r={is6h ? 3 : 1.5} fill={is6h ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.2)'} stroke='none' />
+          ))}
+          <Area type='monotone' dataKey='signedPowerKw' stroke='#34d399' fill='url(#energyGradient)' strokeWidth={1.5} dot={false} isAnimationActive={false} baseValue={0} />
         </AreaChart>
       </ResponsiveContainer>
     </div>
@@ -530,7 +551,7 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss }: {
         >
           <CartesianGrid strokeDasharray='3 3' stroke='hsl(var(--border))' opacity={0.4} />
           <XAxis dataKey='time' tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} />
-          <YAxis width={30} tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
+          <YAxis orientation='right' width={32} tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.55)' }} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
           <Tooltip
             contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '0.5rem', fontSize: 12 }}
             labelStyle={{ color: 'hsl(var(--muted-foreground))' }}
