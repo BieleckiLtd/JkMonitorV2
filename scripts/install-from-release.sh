@@ -875,7 +875,7 @@ fi
 section 'Configuring startup mode'
 reused_existing_configuration='false'
 
-if has_existing_runtime_configuration && is_truthy "$NONINTERACTIVE_REUSE_EXISTING_CONFIGURATION"; then
+if has_existing_runtime_configuration && { is_truthy "$NONINTERACTIVE_REUSE_EXISTING_CONFIGURATION" || ! [ -t 0 ]; }; then
   reused_existing_configuration='true'
   ENVIRONMENT="$(get_existing_environment_name)"
   if [ -z "$ENVIRONMENT" ]; then
@@ -980,11 +980,16 @@ fi
 if [ "$reused_existing_configuration" = 'false' ] || [ ! -f "$ENV_PATH" ]; then
   write_env_file "$ENVIRONMENT"
 fi
-ACCESS_URL="$(get_access_url)" || ACCESS_URL="$APP_LOCAL_URL"
+ACCESS_URL="$(get_access_url 2>/dev/null)" || ACCESS_URL="$APP_LOCAL_URL"
+ACCESS_URL="${ACCESS_URL:-$APP_LOCAL_URL}"
 
 INSTALL_SERVICE='n'
 if command -v systemctl >/dev/null 2>&1; then
-  INSTALL_SERVICE="$(get_configured_choice "$NONINTERACTIVE_INSTALL_SERVICE" 'Install and start a systemd service for headless operation?' 'yesno' 'y')"
+  if ! [ -t 0 ] && [ -z "$NONINTERACTIVE_INSTALL_SERVICE" ]; then
+    INSTALL_SERVICE='y'
+  else
+    INSTALL_SERVICE="$(get_configured_choice "$NONINTERACTIVE_INSTALL_SERVICE" 'Install and start a systemd service for headless operation?' 'yesno' 'y')"
+  fi
 fi
 
 section 'Starting JK Monitor'
