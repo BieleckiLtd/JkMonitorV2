@@ -383,17 +383,20 @@ function CellVoltageChart({ cells, minV, maxV, avgV }: { cells: CellVoltageSnaps
           <span>{mode === 'delta' ? 'Zoomed scale for balancing differences' : 'Absolute scale from 0V to cell voltage'}</span>
           <span className='font-medium text-foreground/90'>{scaleLabel}</span>
         </div>
-        <div className='overflow-x-auto pb-2'>
-          <div className='flex min-w-full items-end gap-2 pt-6' style={{ height: '164px' }}>
+        <div className='pb-2'>
+          <div
+            className='grid items-end gap-1 pt-5 sm:gap-2 sm:pt-6'
+            style={{ height: '164px', gridTemplateColumns: `repeat(${sorted.length}, minmax(0, 1fr))` }}
+          >
           {sorted.map((cell) => {
             const pct = Math.max(((cell.voltageVolts - rangeMin) / (rangeMax - rangeMin)) * 100, mode === 'delta' ? 8 : 4);
             const isMin = cell.voltageVolts === absMin && absMin !== absMax;
             const isMax = cell.voltageVolts === absMax && absMin !== absMax;
 
             return (
-              <div key={cell.index} className='relative flex h-full min-w-12 flex-1 flex-col items-center justify-end'>
-                <div className='absolute -top-5 left-1/2 -translate-x-1/2 rounded border border-border bg-popover px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap text-foreground shadow'>
-                  {cell.voltageVolts.toFixed(3)}V
+              <div key={cell.index} className='relative flex h-full min-w-0 flex-col items-center justify-end'>
+                <div className='absolute -top-4 left-1/2 -translate-x-1/2 rounded border border-border bg-popover px-1 py-0.5 text-[8px] font-semibold tabular-nums whitespace-nowrap text-foreground shadow sm:-top-5 sm:px-1.5 sm:text-[10px]'>
+                  {cell.voltageVolts.toFixed(3)}
                 </div>
                 <div
                   className={cn(
@@ -402,7 +405,7 @@ function CellVoltageChart({ cells, minV, maxV, avgV }: { cells: CellVoltageSnaps
                   )}
                   style={{ height: `${pct}%`, minHeight: '4px' }}
                 />
-                <div className='mt-1 text-[9px] text-muted-foreground leading-none'>{cell.index}</div>
+                <div className='mt-1 text-[8px] text-muted-foreground leading-none sm:text-[9px]'>{cell.index}</div>
               </div>
             );
           })}
