@@ -120,8 +120,8 @@ export function MonitorPage() {
   }, []);
 
   return (
-    <div className='space-y-6 pb-8'>
-      <section className='rounded-3xl border border-border bg-card/80 p-6 shadow-sm backdrop-blur md:p-8'>
+    <div className='space-y-3 pb-4 sm:space-y-6 sm:pb-8'>
+      <section className='rounded-3xl border border-border bg-card/80 p-4 shadow-sm backdrop-blur sm:p-6 md:p-8'>
         <div className='space-y-3'>
           <div className='inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.24em] text-primary'>
             <Activity className='h-3.5 w-3.5' />
@@ -195,9 +195,9 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
   });
 
   return (
-    <div className='space-y-4'>
+    <div className='space-y-3 sm:space-y-4'>
       {/* Device Header */}
-      <div className='flex flex-col gap-3 rounded-2xl border border-border bg-card/70 p-5 shadow-sm sm:flex-row sm:items-center sm:justify-between'>
+      <div className='flex flex-col gap-2 rounded-2xl border border-border bg-card/70 p-4 shadow-sm sm:gap-3 sm:p-5 sm:flex-row sm:items-center sm:justify-between'>
         <div className='flex items-center gap-3'>
           <div className={cn(
             'flex h-11 w-11 items-center justify-center rounded-xl border',
@@ -234,7 +234,7 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
       )}
 
       {warnings.length > 0 && (
-        <div className='flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-4 py-3'>
+        <div className='flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-3 sm:px-4'>
           <AlertTriangle className='mt-0.5 h-4 w-4 shrink-0 text-amber-400' />
           <div className='text-sm text-amber-300'>
             <span className='font-semibold'>Active warnings: </span>
@@ -252,7 +252,7 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
       {telemetry && (
         <>
           {/* Hero metrics (highlighted) */}
-          <div className='grid grid-cols-2 gap-3 lg:grid-cols-4'>
+          <div className='grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4'>
             <HeroMetric
               icon={Zap}
               label='Voltage'
@@ -292,7 +292,7 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
           <HistoryCharts deviceId={device.deviceId} precision={dp} />
 
           {/* All parameter categories */}
-          <div className='grid gap-4 lg:grid-cols-2'>
+          <div className='grid gap-3 sm:gap-4 lg:grid-cols-2'>
             {sortedCategories.filter(c => c !== 'Cell Voltages').map((category) => {
               const params = grouped.get(category)!;
               return (
@@ -322,15 +322,15 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
 
 function HeroMetric({ icon: Icon, label, value, unit, accent }: { icon: typeof Zap; label: string; value: string; unit: string; accent: string }) {
   return (
-    <div className='rounded-2xl border border-border/80 bg-card/85 p-4 shadow-sm sm:p-5'>
+    <div className='rounded-2xl border border-border/80 bg-card/85 p-3 shadow-sm sm:p-5'>
       <div className='flex items-start justify-between'>
         <div>
           <div className='text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground'>{label}</div>
-          <div className={cn('mt-2 text-2xl font-bold tracking-tight sm:text-3xl', accent)}>
+          <div className={cn('mt-1.5 text-[1.35rem] font-bold tracking-tight sm:mt-2 sm:text-3xl', accent)}>
             {value}<span className='ml-1 text-base font-medium text-muted-foreground'>{unit}</span>
           </div>
         </div>
-        <div className='rounded-xl border border-border/70 bg-background/60 p-2 sm:p-2.5'>
+        <div className='rounded-xl border border-border/70 bg-background/60 p-1.5 sm:p-2.5'>
           <Icon className='h-4 w-4 text-muted-foreground' />
         </div>
       </div>
@@ -339,7 +339,7 @@ function HeroMetric({ icon: Icon, label, value, unit, accent }: { icon: typeof Z
 }
 
 function CellVoltageChart({ cells, minV, maxV, avgV }: { cells: CellVoltageSnapshot[]; minV?: number | null; maxV?: number | null; avgV?: number | null }) {
-  const [mode, setMode] = useState<CellVoltageChartMode>('absolute');
+  const [mode, setMode] = useState<CellVoltageChartMode>('delta');
   const sorted = [...cells].sort((a, b) => a.index - b.index);
   const voltages = sorted.map(c => c.voltageVolts);
   const absMin = Math.min(...voltages);
@@ -347,9 +347,9 @@ function CellVoltageChart({ cells, minV, maxV, avgV }: { cells: CellVoltageSnaps
   const spread = Math.max(absMax - absMin, 0.001);
   const rangeMin = mode === 'delta' ? absMin - spread * 0.5 : 0;
   const rangeMax = mode === 'delta' ? absMax + spread * 0.5 : Math.max(absMax * 1.02, 0.1);
-  const scaleLabel = mode === 'delta'
-    ? `${rangeMin.toFixed(3)}V to ${rangeMax.toFixed(3)}V`
-    : `0.000V to ${rangeMax.toFixed(3)}V`;
+  const toggleTitle = mode === 'delta'
+    ? 'Delta view enabled. Bars are zoomed around the cell spread to make balancing differences clearer. Toggle to switch to absolute 0V scale.'
+    : 'Absolute view enabled. Bars start at 0V so each cell shows full height. Toggle to switch to delta zoom.';
 
   return (
     <Card className='border border-border/80 bg-card/85 shadow-sm'>
@@ -360,13 +360,16 @@ function CellVoltageChart({ cells, minV, maxV, avgV }: { cells: CellVoltageSnaps
               <Battery className='h-4 w-4 text-muted-foreground' />
               Cell Voltages
             </div>
-            <div className='flex items-center gap-2 rounded-full border border-border/70 bg-background/50 px-2.5 py-1'>
-              <span className='text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>Delta view</span>
+            <div
+              className='flex items-center rounded-full border border-border/70 bg-background/50 px-2 py-1'
+              title={toggleTitle}
+            >
               <Switch
                 size='sm'
                 checked={mode === 'delta'}
                 onCheckedChange={(checked) => setMode(checked ? 'delta' : 'absolute')}
-                aria-label='Toggle delta cell voltage view'
+                aria-label='Toggle between delta and absolute cell voltage view'
+                title={toggleTitle}
               />
             </div>
           </div>
@@ -378,12 +381,8 @@ function CellVoltageChart({ cells, minV, maxV, avgV }: { cells: CellVoltageSnaps
           </div>
         </CardTitle>
       </CardHeader>
-      <CardContent className='space-y-3 pt-4'>
-        <div className='flex items-center justify-between text-xs text-muted-foreground'>
-          <span>{mode === 'delta' ? 'Zoomed scale for balancing differences' : 'Absolute scale from 0V to cell voltage'}</span>
-          <span className='font-medium text-foreground/90'>{scaleLabel}</span>
-        </div>
-        <div className='pb-2'>
+      <CardContent className='pt-4'>
+        <div className='pb-1 sm:pb-2'>
           <div
             className='grid items-end gap-1 pt-5 sm:gap-2 sm:pt-6'
             style={{ height: '164px', gridTemplateColumns: `repeat(${sorted.length}, minmax(0, 1fr))` }}
@@ -395,7 +394,7 @@ function CellVoltageChart({ cells, minV, maxV, avgV }: { cells: CellVoltageSnaps
 
             return (
               <div key={cell.index} className='relative flex h-full min-w-0 flex-col items-center justify-end'>
-                <div className='absolute -top-4 left-1/2 -translate-x-1/2 rounded border border-border bg-popover px-1 py-0.5 text-[8px] font-semibold tabular-nums whitespace-nowrap text-foreground shadow sm:-top-5 sm:px-1.5 sm:text-[10px]'>
+                <div className='absolute -top-3.5 left-1/2 -translate-x-1/2 rounded border border-border bg-popover px-0.5 py-0.5 text-[7px] font-semibold tabular-nums whitespace-nowrap text-foreground shadow sm:-top-5 sm:px-1.5 sm:text-[10px]'>
                   {cell.voltageVolts.toFixed(3)}
                 </div>
                 <div
@@ -405,7 +404,7 @@ function CellVoltageChart({ cells, minV, maxV, avgV }: { cells: CellVoltageSnaps
                   )}
                   style={{ height: `${pct}%`, minHeight: '4px' }}
                 />
-                <div className='mt-1 text-[8px] text-muted-foreground leading-none sm:text-[9px]'>{cell.index}</div>
+                <div className='mt-1 text-[7px] text-muted-foreground leading-none sm:text-[9px]'>{cell.index}</div>
               </div>
             );
           })}
