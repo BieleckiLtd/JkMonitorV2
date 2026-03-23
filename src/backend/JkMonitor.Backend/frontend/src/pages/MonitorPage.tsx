@@ -174,6 +174,7 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
   const isHealthy = device.lastOutcome === 'Succeeded';
   const isFailing = device.lastOutcome === 'Failed';
   const dp = device.displayPrecision ?? defaultPrecision;
+  const [selectedCellIndex, setSelectedCellIndex] = useState<number | null>(null);
 
   // Group parameters by category
   const grouped = new Map<string, DeviceParameter[]>();
@@ -285,11 +286,11 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
 
           {/* Cell voltages visualization */}
           {cells.length > 0 && (
-            <CellVoltageChart cells={cells} minV={telemetry.minCellVoltageVolts} maxV={telemetry.maxCellVoltageVolts} avgV={telemetry.averageCellVoltageVolts} />
+            <CellVoltageChart cells={cells} minV={telemetry.minCellVoltageVolts} maxV={telemetry.maxCellVoltageVolts} avgV={telemetry.averageCellVoltageVolts} selectedCellIndex={selectedCellIndex} onCellClick={setSelectedCellIndex} />
           )}
 
           {/* Time-series history charts */}
-          <HistoryCharts deviceId={device.deviceId} precision={dp} />
+          <HistoryCharts deviceId={device.deviceId} precision={dp} selectedCellIndex={selectedCellIndex} onClearCellSelection={() => setSelectedCellIndex(null)} />
 
           {/* All parameter categories */}
           <div className='grid gap-3 sm:gap-4 lg:grid-cols-2'>
@@ -338,7 +339,7 @@ function HeroMetric({ icon: Icon, label, value, unit, accent }: { icon: typeof Z
   );
 }
 
-function CellVoltageChart({ cells, minV, maxV, avgV }: { cells: CellVoltageSnapshot[]; minV?: number | null; maxV?: number | null; avgV?: number | null }) {
+function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndex, onCellClick }: { cells: CellVoltageSnapshot[]; minV?: number | null; maxV?: number | null; avgV?: number | null; selectedCellIndex?: number | null; onCellClick?: (index: number | null) => void }) {
   const [mode, setMode] = useState<CellVoltageChartMode>('delta');
   const sorted = [...cells].sort((a, b) => a.index - b.index);
   const voltages = sorted.map(c => c.voltageVolts);
@@ -391,15 +392,21 @@ function CellVoltageChart({ cells, minV, maxV, avgV }: { cells: CellVoltageSnaps
             const pct = Math.max(((cell.voltageVolts - rangeMin) / (rangeMax - rangeMin)) * 100, mode === 'delta' ? 8 : 4);
             const isMin = cell.voltageVolts === absMin && absMin !== absMax;
             const isMax = cell.voltageVolts === absMax && absMin !== absMax;
+            const isSelected = selectedCellIndex === cell.index;
 
             return (
-              <div key={cell.index} className='relative flex h-full min-w-0 flex-col items-center justify-end'>
+              <div
+                key={cell.index}
+                className='relative flex h-full min-w-0 flex-col items-center justify-end cursor-pointer'
+                onClick={(e) => { e.stopPropagation(); onCellClick?.(isSelected ? null : cell.index); }}
+              >
                 <div className='absolute -top-3.5 left-1/2 -translate-x-1/2 rounded border border-border bg-popover px-0.5 py-0.5 text-[7px] font-semibold tabular-nums whitespace-nowrap text-foreground shadow sm:-top-5 sm:px-1.5 sm:text-[10px]'>
                   {cell.voltageVolts.toFixed(3)}
                 </div>
                 <div
                   className={cn(
                     'w-full rounded-t transition-all duration-500',
+                    isSelected ? 'bg-violet-500/90 ring-2 ring-violet-400/60' :
                     isMin ? 'bg-rose-500/80' : isMax ? 'bg-emerald-500/80' : 'bg-primary/60'
                   )}
                   style={{ height: `${pct}%`, minHeight: '4px' }}

@@ -43,13 +43,13 @@ public sealed class StorageConfiguration
 
 public sealed class RetentionConfiguration
 {
-    public int RawSecondsWindowMinutes { get; init; } = 10;
+    public int RawSecondsWindowMinutes { get; init; } = 1440;
 
-    public int OneMinuteWindowHours { get; init; } = 1;
+    public int OneMinuteWindowHours { get; init; } = 8760;
 
     public int FiveMinuteWindowDays { get; init; } = 365;
 
-    public int OneHourWindowDays { get; init; } = 365;
+    public int OneHourWindowDays { get; init; } = 3650;
 }
 
 public sealed class AlertingConfiguration

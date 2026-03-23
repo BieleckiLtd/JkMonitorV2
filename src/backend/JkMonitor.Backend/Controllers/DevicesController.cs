@@ -71,6 +71,36 @@ public sealed class DevicesController(
         return Ok(new { deviceId, resolution, from = fromValue, to = toValue, points });
     }
 
+    [HttpGet("{deviceId}/history/cell/{cellIndex:int}")]
+    public async Task<IActionResult> GetCellHistory(
+        string deviceId,
+        int cellIndex,
+        [FromQuery] string resolution = "1m",
+        [FromQuery] DateTimeOffset? from = null,
+        [FromQuery] DateTimeOffset? to = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (cellIndex < 1 || cellIndex > 31)
+            return BadRequest(new { message = "Cell index must be between 1 and 31." });
+
+        var allowed = new HashSet<string>(StringComparer.Ordinal) { "1s", "1m", "5m", "1h" };
+        if (!allowed.Contains(resolution))
+            return BadRequest(new { message = $"Invalid resolution '{resolution}'. Use: 1s, 1m, 5m, 1h." });
+
+        var toValue = to ?? DateTimeOffset.UtcNow;
+        var fromValue = from ?? resolution switch
+        {
+            "1s" => toValue.AddMinutes(-10),
+            "1m" => toValue.AddHours(-1),
+            "5m" => toValue.AddDays(-1),
+            "1h" => toValue.AddDays(-7),
+            _ => toValue.AddHours(-1),
+        };
+
+        var points = await telemetryRepository.QueryCellHistoryAsync(deviceId, cellIndex, resolution, fromValue, toValue, cancellationToken);
+        return Ok(new { deviceId, cellIndex, resolution, from = fromValue, to = toValue, points });
+    }
+
     [HttpPost("{deviceId}/parameters/{parameterKey}")]
     public async Task<IActionResult> WriteParameter(
         string deviceId, string parameterKey,

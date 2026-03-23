@@ -20,12 +20,26 @@ type HistoryPoint = {
   batteryTemperatureCelsius?: number | null;
 };
 
+type CellHistoryPoint = {
+  timestamp: string;
+  voltageVolts?: number | null;
+};
+
 type HistoryResponse = {
   deviceId: string;
   resolution: string;
   from: string;
   to: string;
   points: HistoryPoint[];
+};
+
+type CellHistoryResponse = {
+  deviceId: string;
+  cellIndex: number;
+  resolution: string;
+  from: string;
+  to: string;
+  points: CellHistoryPoint[];
 };
 
 type Resolution = '1s' | '1m' | '5m' | '1h';
@@ -60,9 +74,10 @@ const keyPrecisionMap: Record<string, keyof DisplayPrecision> = {
   batteryTemperatureCelsius: 'temperature',
 };
 
-export function HistoryCharts({ deviceId, precision }: { deviceId: string; precision: DisplayPrecision }) {
+export function HistoryCharts({ deviceId, precision, selectedCellIndex, onClearCellSelection }: { deviceId: string; precision: DisplayPrecision; selectedCellIndex?: number | null; onClearCellSelection?: () => void }) {
   const [resolution, setResolution] = useState<Resolution>('1m');
   const [data, setData] = useState<HistoryPoint[]>([]);
+  const [cellData, setCellData] = useState<CellHistoryPoint[]>([]);
   const [isLoading, setIsLoading] = useState(true);
 
   const load = useCallback(async () => {
@@ -75,12 +90,23 @@ export function HistoryCharts({ deviceId, precision }: { deviceId: string; preci
     finally { setIsLoading(false); }
   }, [deviceId, resolution]);
 
+  const loadCell = useCallback(async () => {
+    if (selectedCellIndex == null) { setCellData([]); return; }
+    try {
+      const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history/cell/${selectedCellIndex}?resolution=${resolution}`);
+      if (!resp.ok) return;
+      const json = (await resp.json()) as CellHistoryResponse;
+      setCellData(json.points);
+    } catch { /* ignore */ }
+  }, [deviceId, resolution, selectedCellIndex]);
+
   useEffect(() => {
     setIsLoading(true);
     void load();
-    const id = window.setInterval(() => { void load(); }, resolution === '1s' ? 5000 : 30000);
+    void loadCell();
+    const id = window.setInterval(() => { void load(); void loadCell(); }, resolution === '1s' ? 5000 : 30000);
     return () => window.clearInterval(id);
-  }, [load, resolution]);
+  }, [load, loadCell, resolution]);
 
   const formatted = data.map((p) => ({
     ...p,
@@ -122,8 +148,17 @@ export function HistoryCharts({ deviceId, precision }: { deviceId: string; preci
           <div className='flex items-center justify-center py-12 text-sm text-muted-foreground'>No history data yet. Samples will appear once the data store collects readings.</div>
         ) : (
           <>
-            <ChartSection title='Voltage' unit='V' data={formatted} precision={precision}
-              lines={[{ key: 'totalVoltageVolts', color: '#38bdf8', name: 'Pack Voltage' }]} />
+            {selectedCellIndex != null ? (
+              <CellChartSection
+                title={`Cell ${selectedCellIndex} Voltage`}
+                data={cellData.map(p => ({ ...p, time: fmtTime(p.timestamp, resolution) }))}
+                precision={precision}
+                onDismiss={onClearCellSelection}
+              />
+            ) : (
+              <ChartSection title='Voltage' unit='V' data={formatted} precision={precision}
+                lines={[{ key: 'totalVoltageVolts', color: '#38bdf8', name: 'Pack Voltage' }]} />
+            )}
             <ChartSection title='Current & Power' unit='' data={formatted} precision={precision}
               lines={[
                 { key: 'currentAmps', color: '#34d399', name: 'Current (A)' },
@@ -255,6 +290,94 @@ function ChartSection({ title, data, lines, domain, precision }: {
               isAnimationActive={false}
             />
           ))}
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function CellChartSection({ title, data, precision, onDismiss }: {
+  title: string; data: Record<string, unknown>[]; precision: DisplayPrecision; onDismiss?: () => void;
+}) {
+  const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
+  const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(null);
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const tooltipFormatter: any = useCallback((value: unknown) => {
+    const num = typeof value === 'number' ? value : Number(value);
+    if (Number.isNaN(num)) return [String(value), title];
+    return [num.toFixed(precision.cellVoltage), 'Voltage'];
+  }, [precision, title]);
+
+  const activePoint = getActivePoint(data, hoveredPointIndex, selectedPointIndex);
+  const activeTime = activePoint != null ? formatSummaryTime(activePoint.timestamp) : null;
+  const isPinned = hoveredPointIndex == null && selectedPointIndex != null;
+
+  const handleChartMove = useCallback((state: unknown) => {
+    setHoveredPointIndex(extractActiveIndex(state));
+  }, []);
+  const handleChartLeave = useCallback(() => { setHoveredPointIndex(null); }, []);
+  const handleChartClick = useCallback((state: unknown) => {
+    setSelectedPointIndex(extractActiveIndex(state));
+  }, []);
+
+  const rawVoltage = activePoint?.voltageVolts;
+  const voltageNum = typeof rawVoltage === 'number' ? rawVoltage : Number(rawVoltage);
+  const formattedVoltage = Number.isNaN(voltageNum) ? 'N/D' : voltageNum.toFixed(precision.cellVoltage);
+
+  return (
+    <div>
+      <div className='mb-2 flex items-start justify-between gap-3'>
+        <div className='flex items-center gap-2'>
+          <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{title}</div>
+          {onDismiss && (
+            <button
+              onClick={onDismiss}
+              className='rounded-full border border-border/70 bg-background/70 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground'
+            >
+              ✕ Back to Pack
+            </button>
+          )}
+        </div>
+        <div className='max-w-[60%] text-right'>
+          <div className='text-[11px] font-medium text-foreground'>
+            {activeTime ?? 'No data'}
+            {isPinned && <span className='ml-2 rounded-full border border-border/70 bg-background/70 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-muted-foreground'>Pinned</span>}
+          </div>
+          <div className='mt-1 flex flex-wrap justify-end gap-1.5'>
+            <span className='rounded-full border border-border/70 bg-background/70 px-2 py-1 text-[10px] font-medium text-foreground'>
+              <span className='mr-1 inline-block h-2 w-2 rounded-full align-middle' style={{ backgroundColor: '#a78bfa' }} />
+              Voltage: {formattedVoltage}V
+            </span>
+          </div>
+          {selectedPointIndex != null && (
+            <button
+              onClick={() => setSelectedPointIndex(null)}
+              className='mt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground'
+            >
+              Show latest
+            </button>
+          )}
+        </div>
+      </div>
+      <ResponsiveContainer width='100%' height={180}>
+        <LineChart
+          data={data}
+          margin={{ top: 4, right: 8, bottom: 0, left: -12 }}
+          onMouseMove={handleChartMove}
+          onMouseLeave={handleChartLeave}
+          onClick={handleChartClick}
+        >
+          <CartesianGrid strokeDasharray='3 3' stroke='hsl(var(--border))' opacity={0.4} />
+          <XAxis dataKey='time' tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} />
+          <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
+          <Tooltip
+            contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '0.5rem', fontSize: 12 }}
+            labelStyle={{ color: 'hsl(var(--muted-foreground))' }}
+            formatter={tooltipFormatter}
+          />
+          <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
+          <Line type='monotone' dataKey='voltageVolts' stroke='#a78bfa' name='Voltage (V)' dot={false} strokeWidth={1.5} connectNulls isAnimationActive={false} />
         </LineChart>
       </ResponsiveContainer>
     </div>

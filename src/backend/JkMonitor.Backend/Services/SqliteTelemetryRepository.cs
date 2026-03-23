@@ -148,6 +148,10 @@ LIMIT 2000;";
         return points;
     }
 
+    public Task<IReadOnlyList<CellHistoryDataPoint>> QueryCellHistoryAsync(
+        string deviceId, int cellIndex, string resolution, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyList<CellHistoryDataPoint>>([]);
+
     /// <summary>Delete samples older than the configured retention windows.</summary>
     public async Task ApplyRetentionAsync(CancellationToken cancellationToken)
     {

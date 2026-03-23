@@ -14,6 +14,8 @@ public interface ITelemetryRepository
     Task PersistAsync(DeviceConfiguration device, DevicePollResult sample, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<HistoryDataPoint>> QueryHistoryAsync(string deviceId, string resolution, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken);
+
+    Task<IReadOnlyList<CellHistoryDataPoint>> QueryCellHistoryAsync(string deviceId, int cellIndex, string resolution, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken);
 }
 
 public sealed record HistoryDataPoint(
@@ -28,6 +30,10 @@ public sealed record HistoryDataPoint(
     decimal? MosTemperatureCelsius,
     decimal? BatteryTemperatureCelsius);
 
+public sealed record CellHistoryDataPoint(
+    DateTimeOffset Timestamp,
+    decimal? VoltageVolts);
+
 public sealed class NoOpTelemetryRepository : ITelemetryRepository
 {
     public Task InitializeAsync(CancellationToken cancellationToken) => Task.CompletedTask;
@@ -36,6 +42,9 @@ public sealed class NoOpTelemetryRepository : ITelemetryRepository
 
     public Task<IReadOnlyList<HistoryDataPoint>> QueryHistoryAsync(string deviceId, string resolution, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
         => Task.FromResult<IReadOnlyList<HistoryDataPoint>>([]);
+
+    public Task<IReadOnlyList<CellHistoryDataPoint>> QueryCellHistoryAsync(string deviceId, int cellIndex, string resolution, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyList<CellHistoryDataPoint>>([]);
 }
 
 public sealed class TimescaleTelemetryRepository(
@@ -86,7 +95,8 @@ CREATE TABLE IF NOT EXISTS jk_raw_samples (
     charging_enabled boolean NULL,
     discharging_enabled boolean NULL,
     balancing_enabled boolean NULL,
-    battery_online boolean NULL
+    battery_online boolean NULL,
+    cell_voltages jsonb NULL
 );
 
 SELECT create_hypertable('jk_raw_samples', by_range('sampled_at'), if_not_exists => TRUE);
@@ -100,6 +110,7 @@ CREATE INDEX IF NOT EXISTS ix_jk_raw_samples_device_sampled_at
 DO $$ BEGIN
   ALTER TABLE jk_raw_samples ADD COLUMN IF NOT EXISTS mos_temperature_celsius numeric NULL;
   ALTER TABLE jk_raw_samples ADD COLUMN IF NOT EXISTS battery_temperature_celsius numeric NULL;
+  ALTER TABLE jk_raw_samples ADD COLUMN IF NOT EXISTS cell_voltages jsonb NULL;
 END $$;
 ", cancellationToken);
 
@@ -119,6 +130,7 @@ CREATE TABLE IF NOT EXISTS {table} (
     avg_delta_cell_voltage_volts numeric NULL,
     avg_mos_temperature_celsius numeric NULL,
     avg_battery_temperature_celsius numeric NULL,
+    avg_cell_voltages jsonb NULL,
     last_sampled_at timestamptz NOT NULL,
     PRIMARY KEY (bucket_start, device_id)
 );
@@ -128,6 +140,7 @@ SELECT create_hypertable('{table}', by_range('bucket_start'), if_not_exists => T
 DO $$ BEGIN
   ALTER TABLE {table} ADD COLUMN IF NOT EXISTS avg_mos_temperature_celsius numeric NULL;
   ALTER TABLE {table} ADD COLUMN IF NOT EXISTS avg_battery_temperature_celsius numeric NULL;
+  ALTER TABLE {table} ADD COLUMN IF NOT EXISTS avg_cell_voltages jsonb NULL;
 END $$;
 ", cancellationToken);
             }
@@ -159,14 +172,16 @@ INSERT INTO jk_raw_samples (
     total_voltage_volts, current_amps, power_watts, state_of_charge_percent,
     min_cell_voltage_volts, max_cell_voltage_volts, delta_cell_voltage_volts,
     mos_temperature_celsius, battery_temperature_celsius,
-    charging_enabled, discharging_enabled, balancing_enabled, battery_online)
+    charging_enabled, discharging_enabled, balancing_enabled, battery_online,
+    cell_voltages)
 VALUES (
     @sampled_at, @device_id, @display_name, @protocol, @register_profile,
     @raw_frame_hex, @snapshot, @raw_registers,
     @total_voltage_volts, @current_amps, @power_watts, @state_of_charge_percent,
     @min_cell_voltage_volts, @max_cell_voltage_volts, @delta_cell_voltage_volts,
     @mos_temperature_celsius, @battery_temperature_celsius,
-    @charging_enabled, @discharging_enabled, @balancing_enabled, @battery_online);
+    @charging_enabled, @discharging_enabled, @balancing_enabled, @battery_online,
+    @cell_voltages);
 ";
             AddSnapshotParameters(command, device, sample);
             await command.ExecuteNonQueryAsync(cancellationToken);
@@ -278,12 +293,14 @@ INSERT INTO {tableName} (
     avg_total_voltage_volts, avg_current_amps, avg_power_watts, avg_state_of_charge_percent,
     min_cell_voltage_volts, max_cell_voltage_volts, avg_delta_cell_voltage_volts,
     avg_mos_temperature_celsius, avg_battery_temperature_celsius,
+    avg_cell_voltages,
     last_sampled_at)
 VALUES (
     @bucket_start, @device_id, 1,
     @avg_total_voltage_volts, @avg_current_amps, @avg_power_watts, @avg_state_of_charge_percent,
     @min_cell_voltage_volts, @max_cell_voltage_volts, @avg_delta_cell_voltage_volts,
     @avg_mos_temperature_celsius, @avg_battery_temperature_celsius,
+    @avg_cell_voltages,
     @last_sampled_at)
 ON CONFLICT (bucket_start, device_id)
 DO UPDATE SET
@@ -297,6 +314,7 @@ DO UPDATE SET
     avg_delta_cell_voltage_volts = CASE WHEN EXCLUDED.avg_delta_cell_voltage_volts IS NULL THEN {tableName}.avg_delta_cell_voltage_volts WHEN {tableName}.avg_delta_cell_voltage_volts IS NULL OR {tableName}.sample_count = 0 THEN EXCLUDED.avg_delta_cell_voltage_volts ELSE (({tableName}.avg_delta_cell_voltage_volts * {tableName}.sample_count) + EXCLUDED.avg_delta_cell_voltage_volts) / ({tableName}.sample_count + 1) END,
     avg_mos_temperature_celsius = CASE WHEN EXCLUDED.avg_mos_temperature_celsius IS NULL THEN {tableName}.avg_mos_temperature_celsius WHEN {tableName}.avg_mos_temperature_celsius IS NULL OR {tableName}.sample_count = 0 THEN EXCLUDED.avg_mos_temperature_celsius ELSE (({tableName}.avg_mos_temperature_celsius * {tableName}.sample_count) + EXCLUDED.avg_mos_temperature_celsius) / ({tableName}.sample_count + 1) END,
     avg_battery_temperature_celsius = CASE WHEN EXCLUDED.avg_battery_temperature_celsius IS NULL THEN {tableName}.avg_battery_temperature_celsius WHEN {tableName}.avg_battery_temperature_celsius IS NULL OR {tableName}.sample_count = 0 THEN EXCLUDED.avg_battery_temperature_celsius ELSE (({tableName}.avg_battery_temperature_celsius * {tableName}.sample_count) + EXCLUDED.avg_battery_temperature_celsius) / ({tableName}.sample_count + 1) END,
+    avg_cell_voltages = CASE WHEN EXCLUDED.avg_cell_voltages IS NULL THEN {tableName}.avg_cell_voltages WHEN {tableName}.avg_cell_voltages IS NULL OR {tableName}.sample_count = 0 THEN EXCLUDED.avg_cell_voltages ELSE (SELECT jsonb_object_agg(k, (COALESCE(({tableName}.avg_cell_voltages->>k)::numeric * {tableName}.sample_count, 0) + v::numeric) / ({tableName}.sample_count + 1)) FROM jsonb_each_text(EXCLUDED.avg_cell_voltages) AS j(k, v)) END,
     last_sampled_at = GREATEST({tableName}.last_sampled_at, EXCLUDED.last_sampled_at);
 ";
 
@@ -311,6 +329,7 @@ DO UPDATE SET
         command.Parameters.AddWithValue("avg_delta_cell_voltage_volts", (object?)sample.Snapshot.DeltaCellVoltageVolts ?? DBNull.Value);
         command.Parameters.AddWithValue("avg_mos_temperature_celsius", (object?)sample.Snapshot.MosTemperatureCelsius ?? DBNull.Value);
         command.Parameters.AddWithValue("avg_battery_temperature_celsius", (object?)sample.Snapshot.BatteryTemperatureCelsius ?? DBNull.Value);
+        command.Parameters.Add(new NpgsqlParameter("avg_cell_voltages", NpgsqlDbType.Jsonb) { Value = BuildCellVoltagesJson(sample.Snapshot.Cells) });
         command.Parameters.AddWithValue("last_sampled_at", sample.Snapshot.CollectedAt);
         await command.ExecuteNonQueryAsync(cancellationToken);
     }
@@ -338,6 +357,7 @@ DO UPDATE SET
         command.Parameters.AddWithValue("discharging_enabled", (object?)sample.Snapshot.DischargingEnabled ?? DBNull.Value);
         command.Parameters.AddWithValue("balancing_enabled", (object?)sample.Snapshot.BalancingEnabled ?? DBNull.Value);
         command.Parameters.AddWithValue("battery_online", (object?)sample.Snapshot.BatteryOnline ?? DBNull.Value);
+        command.Parameters.Add(new NpgsqlParameter("cell_voltages", NpgsqlDbType.Jsonb) { Value = BuildCellVoltagesJson(sample.Snapshot.Cells) });
     }
 
     private static DateTimeOffset AlignBucket(DateTimeOffset value, TimeSpan bucketSize)
@@ -359,5 +379,57 @@ DO UPDATE SET
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<CellHistoryDataPoint>> QueryCellHistoryAsync(string deviceId, int cellIndex, string resolution, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken);
+
+        var cellKey = cellIndex.ToString();
+
+        var (table, tsCol, voltExpr) = resolution switch
+        {
+            "1s" => ("jk_raw_samples", "sampled_at", $"(cell_voltages->>'{cellKey}')::numeric"),
+            "1m" => ("jk_rollup_1m", "bucket_start", $"(avg_cell_voltages->>'{cellKey}')::numeric"),
+            "5m" => ("jk_rollup_5m", "bucket_start", $"(avg_cell_voltages->>'{cellKey}')::numeric"),
+            "1h" => ("jk_rollup_1h", "bucket_start", $"(avg_cell_voltages->>'{cellKey}')::numeric"),
+            _ => ("jk_rollup_5m", "bucket_start", $"(avg_cell_voltages->>'{cellKey}')::numeric"),
+        };
+
+        await using var connection = new NpgsqlConnection(_storage.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        await using var command = connection.CreateCommand();
+        command.CommandText = $@"
+SELECT {tsCol}, {voltExpr}
+FROM {table}
+WHERE device_id = @device_id AND {tsCol} >= @from AND {tsCol} <= @to
+ORDER BY {tsCol}
+LIMIT 2000;
+";
+        command.Parameters.AddWithValue("device_id", deviceId);
+        command.Parameters.AddWithValue("from", from);
+        command.Parameters.AddWithValue("to", to);
+
+        var points = new List<CellHistoryDataPoint>();
+        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+
+        while (await reader.ReadAsync(cancellationToken))
+        {
+            points.Add(new CellHistoryDataPoint(
+                reader.GetDateTime(0),
+                reader.IsDBNull(1) ? null : reader.GetDecimal(1)));
+        }
+
+        return points;
+    }
+
+    private static object BuildCellVoltagesJson(IReadOnlyList<Contracts.Status.CellVoltageSnapshot> cells)
+    {
+        if (cells.Count == 0) return DBNull.Value;
+        var dict = new Dictionary<string, decimal>(cells.Count);
+        foreach (var cell in cells)
+            dict[cell.Index.ToString()] = cell.VoltageVolts;
+        return JsonSerializer.Serialize(dict);
     }
 }
