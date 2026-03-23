@@ -8,6 +8,7 @@ public sealed class PollingBackgroundService(
     IDevicePollingClient pollingClient,
     ITelemetryRepository telemetryRepository,
     DeviceStateStore stateStore,
+    PollTrigger pollTrigger,
     ILogger<PollingBackgroundService> logger) : BackgroundService
 {
     private readonly MonitorConfiguration _configuration = configuration.Value;
@@ -66,9 +67,15 @@ public sealed class PollingBackgroundService(
                 logger.LogError(exception, "Polling failed for device {DeviceId}.", device.DeviceId);
             }
 
-            if (!await timer.WaitForNextTickAsync(cancellationToken))
+            try
             {
-                break;
+                await Task.WhenAny(
+                    timer.WaitForNextTickAsync(cancellationToken).AsTask(),
+                    Task.Delay(Timeout.Infinite, pollTrigger.GetToken()));
+            }
+            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+            {
+                // PollTrigger signalled – run next poll immediately.
             }
         }
     }

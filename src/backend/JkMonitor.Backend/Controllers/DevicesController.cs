@@ -14,6 +14,7 @@ public sealed class DevicesController(
     SetupConfigurationService setupConfigurationService,
     JkRs485PollingClient rs485PollingClient,
     ITelemetryRepository telemetryRepository,
+    PollTrigger pollTrigger,
     IOptions<MonitorConfiguration> configuration) : ControllerBase
 {
     private readonly MonitorConfiguration _configuration = configuration.Value;
@@ -92,6 +93,8 @@ public sealed class DevicesController(
         {
             var result = await rs485PollingClient.WriteConfigRegisterAsync(
                 device, profile, parameterKey, request.RawValue, cancellationToken);
+
+            pollTrigger.Signal();
 
             return Ok(result);
         }
