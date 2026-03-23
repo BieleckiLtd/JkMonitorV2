@@ -174,7 +174,7 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
   const isHealthy = device.lastOutcome === 'Succeeded';
   const isFailing = device.lastOutcome === 'Failed';
   const dp = device.displayPrecision ?? defaultPrecision;
-  const [selectedCellIndex, setSelectedCellIndex] = useState<number | null>(null);
+  const [selectedCellIndices, setSelectedCellIndices] = useState<number[]>([]);
 
   // Group parameters by category
   const grouped = new Map<string, DeviceParameter[]>();
@@ -286,11 +286,11 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
 
           {/* Cell voltages visualization */}
           {cells.length > 0 && (
-            <CellVoltageChart cells={cells} minV={telemetry.minCellVoltageVolts} maxV={telemetry.maxCellVoltageVolts} avgV={telemetry.averageCellVoltageVolts} selectedCellIndex={selectedCellIndex} onCellClick={setSelectedCellIndex} />
+            <CellVoltageChart cells={cells} minV={telemetry.minCellVoltageVolts} maxV={telemetry.maxCellVoltageVolts} avgV={telemetry.averageCellVoltageVolts} selectedCellIndices={selectedCellIndices} onCellClick={(idx) => setSelectedCellIndices(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx])} />
           )}
 
           {/* Time-series history charts */}
-          <HistoryCharts deviceId={device.deviceId} precision={dp} selectedCellIndex={selectedCellIndex} onClearCellSelection={() => setSelectedCellIndex(null)} />
+          <HistoryCharts deviceId={device.deviceId} precision={dp} selectedCellIndices={selectedCellIndices} onClearCellSelection={() => setSelectedCellIndices([])} />
 
           {/* All parameter categories */}
           <div className='grid gap-3 sm:gap-4 lg:grid-cols-2'>
@@ -339,7 +339,7 @@ function HeroMetric({ icon: Icon, label, value, unit, accent }: { icon: typeof Z
   );
 }
 
-function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndex, onCellClick }: { cells: CellVoltageSnapshot[]; minV?: number | null; maxV?: number | null; avgV?: number | null; selectedCellIndex?: number | null; onCellClick?: (index: number | null) => void }) {
+function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndices, onCellClick }: { cells: CellVoltageSnapshot[]; minV?: number | null; maxV?: number | null; avgV?: number | null; selectedCellIndices?: number[]; onCellClick?: (index: number) => void }) {
   const [mode, setMode] = useState<CellVoltageChartMode>('delta');
   const sorted = [...cells].sort((a, b) => a.index - b.index);
   const voltages = sorted.map(c => c.voltageVolts);
@@ -353,7 +353,7 @@ function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndex, onCellCl
     : 'Absolute view enabled. Bars start at 0V so each cell shows full height. Toggle to switch to delta zoom.';
 
   return (
-    <Card className='border border-border/80 bg-card/85 shadow-sm'>
+    <Card className='bg-card/85 shadow-sm'>
       <CardHeader className='border-b border-border/60 pb-3'>
         <CardTitle className='flex flex-col gap-3 text-sm lg:flex-row lg:items-center lg:justify-between'>
           <div className='flex flex-wrap items-center gap-3'>
@@ -362,9 +362,10 @@ function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndex, onCellCl
               Cell Voltages
             </div>
             <div
-              className='flex items-center rounded-full border border-border/70 bg-background/50 px-2 py-1'
+              className='flex items-center gap-1.5 rounded-full border border-border/70 bg-background/50 px-2 py-1'
               title={toggleTitle}
             >
+              <span className={cn('text-[9px] font-medium', mode === 'absolute' ? 'text-foreground' : 'text-muted-foreground/60')}>Total</span>
               <Switch
                 size='sm'
                 checked={mode === 'delta'}
@@ -372,6 +373,7 @@ function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndex, onCellCl
                 aria-label='Toggle between delta and absolute cell voltage view'
                 title={toggleTitle}
               />
+              <span className={cn('text-[9px] font-medium', mode === 'delta' ? 'text-foreground' : 'text-muted-foreground/60')}>Δ</span>
             </div>
           </div>
           <div className='flex flex-wrap gap-x-4 gap-y-1 text-xs font-normal text-muted-foreground'>
@@ -382,7 +384,7 @@ function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndex, onCellCl
           </div>
         </CardTitle>
       </CardHeader>
-      <CardContent className='pt-4'>
+      <CardContent className='px-2 pt-4 sm:px-4'>
         <div className='pb-1 sm:pb-2'>
           <div
             className='grid items-end gap-1 pt-5 sm:gap-2 sm:pt-6'
@@ -392,13 +394,13 @@ function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndex, onCellCl
             const pct = Math.max(((cell.voltageVolts - rangeMin) / (rangeMax - rangeMin)) * 100, mode === 'delta' ? 8 : 4);
             const isMin = cell.voltageVolts === absMin && absMin !== absMax;
             const isMax = cell.voltageVolts === absMax && absMin !== absMax;
-            const isSelected = selectedCellIndex === cell.index;
+            const isSelected = selectedCellIndices?.includes(cell.index) ?? false;
 
             return (
               <div
                 key={cell.index}
                 className='relative flex h-full min-w-0 flex-col items-center justify-end cursor-pointer'
-                onClick={(e) => { e.stopPropagation(); onCellClick?.(isSelected ? null : cell.index); }}
+                onClick={(e) => { e.stopPropagation(); onCellClick?.(cell.index); }}
               >
                 <div className='absolute -top-3.5 left-1/2 -translate-x-1/2 rounded border border-border bg-popover px-0.5 py-0.5 text-[7px] font-semibold tabular-nums whitespace-nowrap text-foreground shadow sm:-top-5 sm:px-1.5 sm:text-[10px]'>
                   {cell.voltageVolts.toFixed(3)}
@@ -406,7 +408,7 @@ function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndex, onCellCl
                 <div
                   className={cn(
                     'w-full rounded-t transition-all duration-500',
-                    isSelected ? 'bg-violet-500/90 ring-2 ring-violet-400/60' :
+                    isSelected ? 'bg-violet-500/90' :
                     isMin ? 'bg-rose-500/80' : isMax ? 'bg-emerald-500/80' : 'bg-primary/60'
                   )}
                   style={{ height: `${pct}%`, minHeight: '4px' }}
