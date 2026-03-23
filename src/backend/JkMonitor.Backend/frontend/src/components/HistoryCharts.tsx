@@ -150,11 +150,18 @@ export function HistoryCharts({ deviceId, precision }: { deviceId: string; preci
 }
 
 type LineSpec = { key: string; color: string; name: string };
+type ChartInteractionState = {
+  activeTooltipIndex?: number;
+  activeIndex?: number;
+};
 
 function ChartSection({ title, data, lines, domain, precision }: {
   title: string; unit: string; data: Record<string, unknown>[]; lines: LineSpec[];
   domain?: [number, number]; precision: DisplayPrecision;
 }) {
+  const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
+  const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(null);
+
   // Build a formatter that rounds tooltip values based on precision config.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tooltipFormatter: any = useCallback((value: unknown, name: string, props: { dataKey?: string | number }) => {
@@ -166,11 +173,66 @@ function ChartSection({ title, data, lines, domain, precision }: {
     return [num.toFixed(decimals), name];
   }, [precision]);
 
+  const activePoint = getActivePoint(data, hoveredPointIndex, selectedPointIndex);
+  const activeTime = activePoint != null ? formatSummaryTime(activePoint.timestamp) : null;
+  const isPinned = hoveredPointIndex == null && selectedPointIndex != null;
+
+  const handleChartMove = useCallback((state: unknown) => {
+    const activeIndex = extractActiveIndex(state);
+    setHoveredPointIndex(activeIndex);
+  }, []);
+
+  const handleChartLeave = useCallback(() => {
+    setHoveredPointIndex(null);
+  }, []);
+
+  const handleChartClick = useCallback((state: unknown) => {
+    setSelectedPointIndex(extractActiveIndex(state));
+  }, []);
+
   return (
     <div>
-      <div className='mb-2 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{title}</div>
+      <div className='mb-2 flex items-start justify-between gap-3'>
+        <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{title}</div>
+        <div className='max-w-[60%] text-right'>
+          <div className='text-[11px] font-medium text-foreground'>
+            {activeTime ?? 'No data'}
+            {isPinned && <span className='ml-2 rounded-full border border-border/70 bg-background/70 px-2 py-0.5 text-[10px] uppercase tracking-[0.16em] text-muted-foreground'>Pinned</span>}
+          </div>
+          <div className='mt-1 flex flex-wrap justify-end gap-1.5'>
+            {lines.map((line) => {
+              const rawValue = activePoint?.[line.key];
+              const formattedValue = formatLineSummaryValue(rawValue, line.key, precision);
+
+              return (
+                <span
+                  key={line.key}
+                  className='rounded-full border border-border/70 bg-background/70 px-2 py-1 text-[10px] font-medium text-foreground'
+                >
+                  <span className='mr-1 inline-block h-2 w-2 rounded-full align-middle' style={{ backgroundColor: line.color }} />
+                  {line.name}: {formattedValue}
+                </span>
+              );
+            })}
+          </div>
+          {selectedPointIndex != null && (
+            <button
+              onClick={() => setSelectedPointIndex(null)}
+              className='mt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground'
+            >
+              Show latest
+            </button>
+          )}
+        </div>
+      </div>
       <ResponsiveContainer width='100%' height={180}>
-        <LineChart data={data} margin={{ top: 4, right: 8, bottom: 0, left: -12 }}>
+        <LineChart
+          data={data}
+          margin={{ top: 4, right: 8, bottom: 0, left: -12 }}
+          onMouseMove={handleChartMove}
+          onMouseLeave={handleChartLeave}
+          onClick={handleChartClick}
+        >
           <CartesianGrid strokeDasharray='3 3' stroke='hsl(var(--border))' opacity={0.4} />
           <XAxis dataKey='time' tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} />
           <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} domain={domain ?? ['auto', 'auto']} />
@@ -208,4 +270,56 @@ function fmtTime(iso: string, resolution: Resolution): string {
     return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
   }
   return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
+}
+
+function extractActiveIndex(state: unknown): number | null {
+  if (typeof state !== 'object' || state == null) {
+    return null;
+  }
+
+  const chartState = state as ChartInteractionState;
+  const candidate = chartState.activeTooltipIndex ?? chartState.activeIndex;
+  return typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : null;
+}
+
+function getActivePoint(data: Record<string, unknown>[], hoveredPointIndex: number | null, selectedPointIndex: number | null) {
+  if (hoveredPointIndex != null) {
+    return data[hoveredPointIndex] ?? null;
+  }
+
+  if (selectedPointIndex != null) {
+    return data[selectedPointIndex] ?? null;
+  }
+
+  return data.at(-1) ?? null;
+}
+
+function formatLineSummaryValue(value: unknown, key: string, precision: DisplayPrecision) {
+  const num = typeof value === 'number' ? value : Number(value);
+  if (Number.isNaN(num)) {
+    return 'N/D';
+  }
+
+  const precisionKey = keyPrecisionMap[key];
+  const decimals = precisionKey != null ? precision[precisionKey] : 2;
+  return num.toFixed(decimals);
+}
+
+function formatSummaryTime(value: unknown) {
+  if (typeof value !== 'string') {
+    return 'Latest sample';
+  }
+
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.getTime())) {
+    return 'Latest sample';
+  }
+
+  return parsed.toLocaleString([], {
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
 }

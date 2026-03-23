@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Activity, AlertTriangle, Battery, BatteryCharging, Check, Edit2, LoaderCircle, Shield, Thermometer, X, Zap } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Switch } from '../components/ui/switch';
 import { HistoryCharts } from '../components/HistoryCharts';
 import { cn } from '../lib/utils';
 
@@ -82,6 +83,7 @@ type DeviceRuntimeState = {
 
 const refreshIntervalMs = 2000;
 const nd = 'N/D';
+type CellVoltageChartMode = 'absolute' | 'delta';
 
 export function MonitorPage() {
   const [devices, setDevices] = useState<DeviceRuntimeState[]>([]);
@@ -250,7 +252,7 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
       {telemetry && (
         <>
           {/* Hero metrics (highlighted) */}
-          <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-4'>
+          <div className='grid grid-cols-2 gap-3 lg:grid-cols-4'>
             <HeroMetric
               icon={Zap}
               label='Voltage'
@@ -320,15 +322,15 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
 
 function HeroMetric({ icon: Icon, label, value, unit, accent }: { icon: typeof Zap; label: string; value: string; unit: string; accent: string }) {
   return (
-    <div className='rounded-2xl border border-border/80 bg-card/85 p-5 shadow-sm'>
+    <div className='rounded-2xl border border-border/80 bg-card/85 p-4 shadow-sm sm:p-5'>
       <div className='flex items-start justify-between'>
         <div>
           <div className='text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground'>{label}</div>
-          <div className={cn('mt-2 text-3xl font-bold tracking-tight', accent)}>
+          <div className={cn('mt-2 text-2xl font-bold tracking-tight sm:text-3xl', accent)}>
             {value}<span className='ml-1 text-base font-medium text-muted-foreground'>{unit}</span>
           </div>
         </div>
-        <div className='rounded-xl border border-border/70 bg-background/60 p-2.5'>
+        <div className='rounded-xl border border-border/70 bg-background/60 p-2 sm:p-2.5'>
           <Icon className='h-4 w-4 text-muted-foreground' />
         </div>
       </div>
@@ -337,24 +339,38 @@ function HeroMetric({ icon: Icon, label, value, unit, accent }: { icon: typeof Z
 }
 
 function CellVoltageChart({ cells, minV, maxV, avgV }: { cells: CellVoltageSnapshot[]; minV?: number | null; maxV?: number | null; avgV?: number | null }) {
+  const [mode, setMode] = useState<CellVoltageChartMode>('absolute');
   const sorted = [...cells].sort((a, b) => a.index - b.index);
   const voltages = sorted.map(c => c.voltageVolts);
   const absMin = Math.min(...voltages);
   const absMax = Math.max(...voltages);
   const spread = Math.max(absMax - absMin, 0.001);
-  // Show voltage range centered around average, with some padding
-  const rangeMin = absMin - spread * 0.5;
-  const rangeMax = absMax + spread * 0.5;
+  const rangeMin = mode === 'delta' ? absMin - spread * 0.5 : 0;
+  const rangeMax = mode === 'delta' ? absMax + spread * 0.5 : Math.max(absMax * 1.02, 0.1);
+  const scaleLabel = mode === 'delta'
+    ? `${rangeMin.toFixed(3)}V to ${rangeMax.toFixed(3)}V`
+    : `0.000V to ${rangeMax.toFixed(3)}V`;
 
   return (
     <Card className='border border-border/80 bg-card/85 shadow-sm'>
       <CardHeader className='border-b border-border/60 pb-3'>
-        <CardTitle className='flex items-center justify-between text-sm'>
-          <div className='flex items-center gap-2'>
-            <Battery className='h-4 w-4 text-muted-foreground' />
-            Cell Voltages
+        <CardTitle className='flex flex-col gap-3 text-sm lg:flex-row lg:items-center lg:justify-between'>
+          <div className='flex flex-wrap items-center gap-3'>
+            <div className='flex items-center gap-2'>
+              <Battery className='h-4 w-4 text-muted-foreground' />
+              Cell Voltages
+            </div>
+            <div className='flex items-center gap-2 rounded-full border border-border/70 bg-background/50 px-2.5 py-1'>
+              <span className='text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>Delta view</span>
+              <Switch
+                size='sm'
+                checked={mode === 'delta'}
+                onCheckedChange={(checked) => setMode(checked ? 'delta' : 'absolute')}
+                aria-label='Toggle delta cell voltage view'
+              />
+            </div>
           </div>
-          <div className='flex gap-4 text-xs font-normal text-muted-foreground'>
+          <div className='flex flex-wrap gap-x-4 gap-y-1 text-xs font-normal text-muted-foreground'>
             {minV != null && <span>Min: <span className='font-semibold text-foreground'>{minV.toFixed(3)}V</span></span>}
             {avgV != null && <span>Avg: <span className='font-semibold text-foreground'>{avgV.toFixed(3)}V</span></span>}
             {maxV != null && <span>Max: <span className='font-semibold text-foreground'>{maxV.toFixed(3)}V</span></span>}
@@ -362,16 +378,21 @@ function CellVoltageChart({ cells, minV, maxV, avgV }: { cells: CellVoltageSnaps
           </div>
         </CardTitle>
       </CardHeader>
-      <CardContent className='pt-4'>
-        <div className='flex items-end gap-1' style={{ height: '120px' }}>
+      <CardContent className='space-y-3 pt-4'>
+        <div className='flex items-center justify-between text-xs text-muted-foreground'>
+          <span>{mode === 'delta' ? 'Zoomed scale for balancing differences' : 'Absolute scale from 0V to cell voltage'}</span>
+          <span className='font-medium text-foreground/90'>{scaleLabel}</span>
+        </div>
+        <div className='overflow-x-auto pb-2'>
+          <div className='flex min-w-full items-end gap-2 pt-6' style={{ height: '164px' }}>
           {sorted.map((cell) => {
-            const pct = Math.max(((cell.voltageVolts - rangeMin) / (rangeMax - rangeMin)) * 100, 8);
+            const pct = Math.max(((cell.voltageVolts - rangeMin) / (rangeMax - rangeMin)) * 100, mode === 'delta' ? 8 : 4);
             const isMin = cell.voltageVolts === absMin && absMin !== absMax;
             const isMax = cell.voltageVolts === absMax && absMin !== absMax;
 
             return (
-              <div key={cell.index} className='group relative flex flex-1 flex-col items-center justify-end h-full'>
-                <div className='absolute -top-1 left-1/2 -translate-x-1/2 opacity-0 group-hover:opacity-100 transition-opacity text-[10px] text-foreground font-semibold bg-popover border border-border rounded px-1.5 py-0.5 shadow whitespace-nowrap z-10'>
+              <div key={cell.index} className='relative flex h-full min-w-12 flex-1 flex-col items-center justify-end'>
+                <div className='absolute -top-5 left-1/2 -translate-x-1/2 rounded border border-border bg-popover px-1.5 py-0.5 text-[10px] font-semibold whitespace-nowrap text-foreground shadow'>
                   {cell.voltageVolts.toFixed(3)}V
                 </div>
                 <div
@@ -385,6 +406,7 @@ function CellVoltageChart({ cells, minV, maxV, avgV }: { cells: CellVoltageSnaps
               </div>
             );
           })}
+          </div>
         </div>
       </CardContent>
     </Card>

@@ -2,8 +2,10 @@ import { create } from 'zustand';
 import { type ThemeConfig, builtInThemes } from '../lib/themes';
 
 interface AppState {
-  isSidebarOpen: boolean;
+  isDesktopSidebarOpen: boolean;
+  isMobileSidebarOpen: boolean;
   toggleSidebar: () => void;
+  closeMobileSidebar: () => void;
   themes: ThemeConfig[];
   activeThemeId: string;
   setActiveThemeId: (id: string) => void;
@@ -12,8 +14,16 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
-  isSidebarOpen: true,
-  toggleSidebar: () => set((state) => ({ isSidebarOpen: !state.isSidebarOpen })),
+  isDesktopSidebarOpen: true,
+  isMobileSidebarOpen: false,
+  toggleSidebar: () => {
+    const isMobileViewport = typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches;
+
+    set((state) => isMobileViewport
+      ? { isMobileSidebarOpen: !state.isMobileSidebarOpen }
+      : { isDesktopSidebarOpen: !state.isDesktopSidebarOpen });
+  },
+  closeMobileSidebar: () => set({ isMobileSidebarOpen: false }),
   
   themes: builtInThemes,
   activeThemeId: 'emerald-dark',

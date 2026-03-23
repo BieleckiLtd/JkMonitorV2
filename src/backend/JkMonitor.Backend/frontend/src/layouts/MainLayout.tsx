@@ -1,7 +1,7 @@
-import type { ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAppStore } from '../store/useAppStore';
-import { Cable, Settings, Puzzle, Menu, Activity, Monitor, Gauge } from 'lucide-react';
+import { Cable, Settings, Puzzle, Menu, Activity, Monitor, Gauge, X } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -10,7 +10,9 @@ export function cn(...inputs: ClassValue[]) {
 }
 
 export function Sidebar() {
-  const isSidebarOpen = useAppStore((state) => state.isSidebarOpen);
+  const isDesktopSidebarOpen = useAppStore((state) => state.isDesktopSidebarOpen);
+  const isMobileSidebarOpen = useAppStore((state) => state.isMobileSidebarOpen);
+  const closeMobileSidebar = useAppStore((state) => state.closeMobileSidebar);
 
   const navItems = [
     { name: 'System', path: '/', icon: Monitor },
@@ -21,56 +23,55 @@ export function Sidebar() {
   ];
 
   return (
-    <aside
-      className={cn(
-        "bg-background border-r border-border transition-all duration-300 flex flex-col h-full shrink-0 hidden md:flex",
-        isSidebarOpen ? "w-64" : "w-16"
-      )}
-    >
-      <div className="h-14 flex items-center justify-center border-b border-border">
-        <Activity className="h-6 w-6 text-primary shrink-0" />
-        {isSidebarOpen && (
-          <span className="ml-3 font-semibold text-foreground tracking-tight whitespace-nowrap overflow-hidden text-ellipsis">
-            JK Monitor <span className="text-muted-foreground/70 font-light">V2</span>
-          </span>
+    <>
+      <aside
+        className={cn(
+          'hidden h-full shrink-0 flex-col border-r border-border bg-background transition-all duration-300 md:flex',
+          isDesktopSidebarOpen ? 'w-64' : 'w-16'
         )}
-      </div>
+      >
+        <SidebarContent navItems={navItems} isCollapsed={!isDesktopSidebarOpen} />
+      </aside>
 
-      <nav className="flex-1 overflow-y-auto px-2 py-4 space-y-1">
-        {navItems.map((item) => (
-          <NavLink
-            key={item.path}
-            to={item.path}
-            className={({ isActive }) =>
-              cn(
-                "flex items-center px-2 py-2.5 rounded-md transition-colors group relative",
-                isActive 
-                  ? "bg-primary/10 text-primary" 
-                  : "text-muted-foreground hover:bg-muted hover:text-foreground"
-              )
-            }
-            title={!isSidebarOpen ? item.name : undefined}
-          >
-            <item.icon className={cn("h-5 w-5 shrink-0", !isSidebarOpen && "mx-auto")} />
-            {isSidebarOpen && <span className="ml-3 font-medium text-sm">{item.name}</span>}
-          </NavLink>
-        ))}
-      </nav>
-
-      {/* Extension Injection Point Reminder */}
-      <div className="p-4 border-t border-border">
-        {isSidebarOpen ? (
-          <div className="text-xs text-muted-foreground/50 font-mono text-center">Open for Extensions</div>
-        ) : (
-          <Puzzle className="h-4 w-4 mx-auto text-muted-foreground/50" />
+      <div
+        className={cn(
+          'fixed inset-0 z-40 bg-black/50 transition-opacity duration-300 md:hidden',
+          isMobileSidebarOpen ? 'pointer-events-auto opacity-100' : 'pointer-events-none opacity-0'
         )}
+        onClick={closeMobileSidebar}
+        aria-hidden={!isMobileSidebarOpen}
+      >
+        <aside
+          className={cn(
+            'flex h-full w-[min(18rem,85vw)] flex-col border-r border-border bg-background shadow-2xl transition-transform duration-300',
+            isMobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'
+          )}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className='flex h-14 items-center justify-between border-b border-border px-4'>
+            <div className='flex items-center gap-3'>
+              <Activity className='h-6 w-6 shrink-0 text-primary' />
+              <span className='font-semibold tracking-tight text-foreground'>
+                JK Monitor <span className='font-light text-muted-foreground/70'>V2</span>
+              </span>
+            </div>
+            <button
+              onClick={closeMobileSidebar}
+              className='rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+              aria-label='Close navigation'
+            >
+              <X className='h-5 w-5' />
+            </button>
+          </div>
+          <SidebarContent navItems={navItems} isCollapsed={false} onNavigate={closeMobileSidebar} />
+        </aside>
       </div>
-    </aside>
+    </>
   );
 }
 
 export function Header() {
-  const { toggleSidebar } = useAppStore();
+  const toggleSidebar = useAppStore((state) => state.toggleSidebar);
 
   return (
     <header className="h-14 bg-background/50 backdrop-blur-md border-b border-border flex items-center justify-between px-4 sticky top-0 z-10 shrink-0">
@@ -97,18 +98,78 @@ export function Header() {
 }
 
 export function MainLayout({ children }: { children: ReactNode }) {
+  const isMobileSidebarOpen = useAppStore((state) => state.isMobileSidebarOpen);
+
+  useEffect(() => {
+    document.body.style.overflow = isMobileSidebarOpen ? 'hidden' : '';
+
+    return () => {
+      document.body.style.overflow = '';
+    };
+  }, [isMobileSidebarOpen]);
 
   return (
-    <div className="h-screen w-full flex overflow-hidden font-sans text-foreground bg-background">
+    <div className="flex h-screen w-full overflow-hidden bg-background font-sans text-foreground">
       <Sidebar />
-      <div className="flex flex-col flex-1 min-w-0 h-full">
+      <div className="flex h-full min-w-0 flex-1 flex-col">
         <Header />
-        <main className="flex-1 overflow-y-auto w-full p-6">
-          <div className="max-w-7xl mx-auto w-full h-full">
+        <main className="flex-1 w-full overflow-y-auto p-4 md:p-6">
+          <div className="mx-auto h-full w-full max-w-7xl">
             {children}
           </div>
         </main>
       </div>
     </div>
+  );
+}
+
+type NavItem = {
+  name: string;
+  path: string;
+  icon: typeof Monitor;
+};
+
+function SidebarContent({ navItems, isCollapsed, onNavigate }: { navItems: NavItem[]; isCollapsed: boolean; onNavigate?: () => void }) {
+  return (
+    <>
+      <div className='flex h-14 items-center justify-center border-b border-border'>
+        <Activity className='h-6 w-6 shrink-0 text-primary' />
+        {!isCollapsed && (
+          <span className='ml-3 overflow-hidden text-ellipsis whitespace-nowrap font-semibold tracking-tight text-foreground'>
+            JK Monitor <span className='font-light text-muted-foreground/70'>V2</span>
+          </span>
+        )}
+      </div>
+
+      <nav className='flex-1 space-y-1 overflow-y-auto px-2 py-4'>
+        {navItems.map((item) => (
+          <NavLink
+            key={item.path}
+            to={item.path}
+            onClick={onNavigate}
+            className={({ isActive }) =>
+              cn(
+                'group relative flex items-center rounded-md px-2 py-2.5 transition-colors',
+                isActive
+                  ? 'bg-primary/10 text-primary'
+                  : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+              )
+            }
+            title={isCollapsed ? item.name : undefined}
+          >
+            <item.icon className={cn('h-5 w-5 shrink-0', isCollapsed && 'mx-auto')} />
+            {!isCollapsed && <span className='ml-3 text-sm font-medium'>{item.name}</span>}
+          </NavLink>
+        ))}
+      </nav>
+
+      <div className='border-t border-border p-4'>
+        {isCollapsed ? (
+          <Puzzle className='mx-auto h-4 w-4 text-muted-foreground/50' />
+        ) : (
+          <div className='text-center font-mono text-xs text-muted-foreground/50'>Open for Extensions</div>
+        )}
+      </div>
+    </>
   );
 }
