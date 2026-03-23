@@ -3,6 +3,7 @@ using JkMonitor.Backend.Models;
 using JkMonitor.Contracts.Configuration;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using NpgsqlTypes;
 
 namespace JkMonitor.Backend.Services;
 
@@ -322,8 +323,8 @@ DO UPDATE SET
         command.Parameters.AddWithValue("protocol", device.ProfileId);
         command.Parameters.AddWithValue("register_profile", device.ProfileId);
         command.Parameters.AddWithValue("raw_frame_hex", sample.RawFrameHex);
-        command.Parameters.AddWithValue("snapshot", JsonSerializer.Serialize(sample.Snapshot));
-        command.Parameters.AddWithValue("raw_registers", JsonSerializer.Serialize(sample.RawRegisters));
+        command.Parameters.Add(new NpgsqlParameter("snapshot", NpgsqlDbType.Jsonb) { Value = JsonSerializer.Serialize(sample.Snapshot) });
+        command.Parameters.Add(new NpgsqlParameter("raw_registers", NpgsqlDbType.Jsonb) { Value = JsonSerializer.Serialize(sample.RawRegisters) });
         command.Parameters.AddWithValue("total_voltage_volts", (object?)sample.Snapshot.TotalVoltageVolts ?? DBNull.Value);
         command.Parameters.AddWithValue("current_amps", (object?)sample.Snapshot.CurrentAmps ?? DBNull.Value);
         command.Parameters.AddWithValue("power_watts", (object?)sample.Snapshot.PowerWatts ?? DBNull.Value);
