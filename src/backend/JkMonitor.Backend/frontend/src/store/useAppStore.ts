@@ -26,12 +26,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   closeMobileSidebar: () => set({ isMobileSidebarOpen: false }),
   
   themes: builtInThemes,
-  activeThemeId: 'emerald-dark',
+  activeThemeId: (typeof window !== 'undefined' && localStorage.getItem('jkmonitor-theme')) || 'emerald-dark',
 
   setActiveThemeId: (id) => {
     const theme = get().themes.find(t => t.id === id);
     if (theme) {
       set({ activeThemeId: id });
+      if (typeof window !== 'undefined') localStorage.setItem('jkmonitor-theme', id);
       get().applyTheme(theme);
     }
   },
@@ -55,6 +56,11 @@ export const useAppStore = create<AppState>((set, get) => ({
         root.style.setProperty(key, value);
       });
     }
+
+    // Update the status-bar / notch color to match the theme background
+    const bg = theme.colors?.['--background'] ?? (theme.mode === 'dark' ? '#09090b' : '#f8fafc');
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) meta.setAttribute('content', bg);
   },
 
   loadExternalTheme: async () => {

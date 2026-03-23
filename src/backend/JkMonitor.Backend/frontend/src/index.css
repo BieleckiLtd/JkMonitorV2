@@ -124,11 +124,28 @@
 
   html {
     @apply font-sans antialiased;
+    touch-action: pan-x pan-y;
+    -ms-touch-action: pan-x pan-y;
   }
 
   body {
     @apply bg-background text-foreground;
     min-height: 100svh;
+    overscroll-behavior: none;
+  }
+
+  /* Prevent iOS zoom on input focus */
+  @supports (-webkit-touch-callout: none) {
+    input, select, textarea {
+      font-size: 16px !important;
+    }
+  }
+
+  /* Remove focus outlines from recharts chart wrappers */
+  .recharts-wrapper,
+  .recharts-wrapper *,
+  .recharts-surface {
+    outline: none !important;
   }
 
   #root {

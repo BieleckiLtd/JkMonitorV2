@@ -384,7 +384,7 @@ function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndices, onCell
           </div>
         </CardTitle>
       </CardHeader>
-      <CardContent className='px-2 pt-4 sm:px-4'>
+      <CardContent className='px-0 pt-4 sm:px-4'>
         <div className='pb-1 sm:pb-2'>
           <div
             className='grid items-end gap-1 pt-5 sm:gap-2 sm:pt-6'

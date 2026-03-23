@@ -207,7 +207,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
           </div>
         </CardTitle>
       </CardHeader>
-      <CardContent className='px-2 pt-4 space-y-6 sm:px-4'>
+      <CardContent className='px-0 pt-4 space-y-6 sm:px-4'>
         {isLoading && data.length === 0 ? (
           <div className='flex items-center justify-center py-12 text-sm text-muted-foreground'>Loading history…</div>
         ) : data.length === 0 ? (
@@ -325,7 +325,7 @@ function ChartSection({ title, data, lines, domain, precision }: {
       <ResponsiveContainer width='100%' height={180}>
         <LineChart
           data={data}
-          margin={{ top: 4, right: 8, bottom: 0, left: -12 }}
+          margin={{ top: 4, right: 4, bottom: 0, left: -16 }}
           onMouseMove={handleChartMove}
           onMouseLeave={handleChartLeave}
           onClick={handleChartClick}
@@ -373,10 +373,10 @@ function EnergyChartSection({ data, resolution }: {
       const power = typeof p.powerWatts === 'number' ? p.powerWatts : null;
       const current = typeof p.currentAmps === 'number' ? p.currentAmps : null;
       if (power == null || current == null) return { ...p, signedPowerKw: null };
-      const signedKw = current >= 0 ? power / 1000 : -power / 1000;
+      const signedKw = current >= 0 ? -power / 1000 : power / 1000;
       if (signedKw > dMax) dMax = signedKw;
       if (signedKw < dMin) dMin = signedKw;
-      if (current >= 0) discharged += power * intervalHours;
+      if (current < 0) discharged += power * intervalHours;
       else charged += power * intervalHours;
       return { ...p, signedPowerKw: signedKw };
     });
@@ -445,7 +445,7 @@ function EnergyChartSection({ data, resolution }: {
       <ResponsiveContainer width='100%' height={180}>
         <AreaChart
           data={energyData}
-          margin={{ top: 4, right: 8, bottom: 0, left: -12 }}
+          margin={{ top: 4, right: 4, bottom: 0, left: -16 }}
           onMouseMove={handleChartMove}
           onMouseLeave={handleChartLeave}
           onClick={handleChartClick}
@@ -466,7 +466,7 @@ function EnergyChartSection({ data, resolution }: {
             labelStyle={{ color: 'hsl(var(--muted-foreground))' }}
             formatter={tooltipFormatter}
           />
-          <ReferenceLine y={0} stroke='hsl(var(--muted-foreground))' strokeOpacity={0.5} strokeDasharray='3 3' />
+          <ReferenceLine y={0} stroke='hsl(var(--muted-foreground))' strokeOpacity={0.7} />
           <Area type='monotone' dataKey='signedPowerKw' stroke='#34d399' fill='url(#energyGradient)' strokeWidth={1.5} dot={false} connectNulls isAnimationActive={false} baseValue={0} />
         </AreaChart>
       </ResponsiveContainer>
@@ -548,7 +548,7 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss }: {
       <ResponsiveContainer width='100%' height={180}>
         <LineChart
           data={data}
-          margin={{ top: 4, right: 8, bottom: 0, left: -12 }}
+          margin={{ top: 4, right: 4, bottom: 0, left: -16 }}
           onMouseMove={handleChartMove}
           onMouseLeave={handleChartLeave}
           onClick={handleChartClick}
