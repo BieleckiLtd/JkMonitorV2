@@ -980,7 +980,7 @@ fi
 if [ "$reused_existing_configuration" = 'false' ] || [ ! -f "$ENV_PATH" ]; then
   write_env_file "$ENVIRONMENT"
 fi
-ACCESS_URL="$(get_access_url)"
+ACCESS_URL="$(get_access_url)" || ACCESS_URL="$APP_LOCAL_URL"
 
 INSTALL_SERVICE='n'
 if command -v systemctl >/dev/null 2>&1; then
