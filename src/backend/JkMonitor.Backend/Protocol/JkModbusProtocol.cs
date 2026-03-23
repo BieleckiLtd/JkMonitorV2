@@ -269,9 +269,11 @@ internal static class JkModbusProtocol
 
     /// <summary>
     /// Get the Modbus register address for a config register.
+    /// The JK BMS uses byte-offset addressing: each 32-bit config parameter
+    /// is addressed at ConfigBase + its byte offset (not divided by 2).
     /// </summary>
     public static ushort ConfigByteOffsetToRegisterAddress(int byteOffset)
-        => (ushort)(ConfigBase + byteOffset / 2);
+        => (ushort)(ConfigBase + byteOffset);
 
     /// <summary>
     /// Parse a Modbus RTU read response for the live data region.
