@@ -27,7 +27,8 @@ public sealed class AssemblyBuildMetadataProvider : IBuildMetadataProvider
             SourceRevisionId = GetMetadataValue(metadata, "JkMonitorSourceRevisionId"),
             InformationalVersion = assembly.GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion,
             WorkflowRunNumber = GetMetadataValue(metadata, "JkMonitorWorkflowRunNumber"),
-            WorkflowRunAttempt = GetMetadataValue(metadata, "JkMonitorWorkflowRunAttempt")
+            WorkflowRunAttempt = GetMetadataValue(metadata, "JkMonitorWorkflowRunAttempt"),
+            BuiltAt = GetMetadataValue(metadata, "JkMonitorBuiltAt")
         };
     }
 

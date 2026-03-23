@@ -79,6 +79,7 @@ jobs:
       - name: Publish linux-arm64 backend
         shell: bash
         run: |
+          BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
           dotnet publish "${{ env.PROJECT_PATH }}" \
             --configuration Release \
             --runtime linux-arm64 \
@@ -88,6 +89,7 @@ jobs:
             -p:JkMonitorSourceRevisionId="${{ github.sha }}" \
             -p:JkMonitorWorkflowRunNumber="${{ github.run_number }}" \
             -p:JkMonitorWorkflowRunAttempt="${{ github.run_attempt }}" \
+            -p:JkMonitorBuiltAt="$BUILT_AT" \
             --output artifacts/linux-arm64
 
       - name: Package linux artifact
@@ -138,6 +140,7 @@ jobs:
       - name: Publish win-x64 backend
         shell: pwsh
         run: |
+          $builtAt = (Get-Date -AsUTC -Format 'yyyy-MM-ddTHH:mm:ssZ')
           dotnet publish ${{ env.PROJECT_PATH }} `
             --configuration Release `
             --runtime win-x64 `
@@ -147,6 +150,7 @@ jobs:
             -p:JkMonitorSourceRevisionId="${{ github.sha }}" `
             -p:JkMonitorWorkflowRunNumber="${{ github.run_number }}" `
             -p:JkMonitorWorkflowRunAttempt="${{ github.run_attempt }}" `
+            -p:JkMonitorBuiltAt="$builtAt" `
             --output artifacts/win-x64
 
       - name: Package windows artifact

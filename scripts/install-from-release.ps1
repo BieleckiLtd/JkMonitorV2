@@ -169,7 +169,7 @@ $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $appRoot = Join-Path $scriptRoot 'app'
 $localDotnet = Join-Path $scriptRoot '.dotnet\dotnet.exe'
 $envPath = Join-Path $scriptRoot 'jkmonitor.env'
-$appEnvironment = 'Development'
+$appEnvironment = 'Production'
 $appUrls = 'http://0.0.0.0:5074'
 
 if (Test-Path $envPath) {
@@ -321,8 +321,8 @@ try {
     }
   }
 }
-'@ | Set-Content -Path (Join-Path $appRoot 'appsettings.Development.Local.json') -Encoding UTF8
-    Write-EnvironmentFile -EnvironmentName 'Development'
+'@ | Set-Content -Path (Join-Path $appRoot 'appsettings.Production.Local.json') -Encoding UTF8
+    Write-EnvironmentFile -EnvironmentName 'Production'
 
     Write-Section 'Configuring auto-start'
     $autostartMessage = Register-Autostart

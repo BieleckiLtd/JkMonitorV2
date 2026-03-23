@@ -37,6 +37,13 @@
     </AssemblyAttribute>
   </ItemGroup>
 
+  <ItemGroup Condition="'$(JkMonitorBuiltAt)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>JkMonitorBuiltAt</_Parameter1>
+      <_Parameter2>$(JkMonitorBuiltAt)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.4" />
     <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.0" />

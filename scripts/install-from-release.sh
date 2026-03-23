@@ -611,7 +611,7 @@ if [ -f "$ENV_PATH" ]; then
   set +a
 fi
 
-export ASPNETCORE_ENVIRONMENT="${ASPNETCORE_ENVIRONMENT:-Development}"
+export ASPNETCORE_ENVIRONMENT="${ASPNETCORE_ENVIRONMENT:-Production}"
 export ASPNETCORE_URLS="${ASPNETCORE_URLS:-http://0.0.0.0:5074}"
 
 cd "$APP_ROOT"

@@ -67,6 +67,8 @@ public sealed record class BuildRuntimeInfo
     public string? WorkflowRunNumber { get; init; }
 
     public string? WorkflowRunAttempt { get; init; }
+
+    public string? BuiltAt { get; init; }
 }
 
 public sealed record class SystemRuntimeMetrics
