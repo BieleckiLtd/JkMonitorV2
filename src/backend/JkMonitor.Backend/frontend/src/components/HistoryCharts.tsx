@@ -84,38 +84,49 @@ const cellColorPalette = [
 export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClearCellSelection }: {
   deviceId: string; precision: DisplayPrecision; selectedCellIndices?: number[]; onClearCellSelection?: () => void;
 }) {
-  const [resolution, setResolution] = useState<Resolution>('1m');
+  const [resolution, setResolution] = useState<Resolution | null>('1m');
   const [data, setData] = useState<HistoryPoint[]>([]);
   const [multiCellData, setMultiCellData] = useState<Record<string, unknown>[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<'default' | 'today'>('default');
+  // Shared hover/selection state across all chart sections
+  const [sharedHoveredIndex, setSharedHoveredIndex] = useState<number | null>(null);
+  const [sharedSelectedIndex, setSharedSelectedIndex] = useState<number | null>(null);
+
+  const effectiveResolution: Resolution = resolution ?? '5m';
 
   const selectedCells = selectedCellIndices ?? [];
   const cellKey = selectedCells.join(',');
 
-  const fromParam = useMemo(() => {
-    if (timeRange !== 'today') return '';
+  const todayRange = useMemo(() => {
+    if (timeRange !== 'today') return null;
     const now = new Date();
-    const midnight = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    return `&from=${midnight.toISOString()}`;
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const endOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    return { from: startOfDay, to: endOfDay };
   }, [timeRange]);
+
+  const fromParam = useMemo(() => {
+    if (!todayRange) return '';
+    return `&from=${todayRange.from.toISOString()}`;
+  }, [todayRange]);
 
   const load = useCallback(async () => {
     try {
-      const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history?resolution=${resolution}${fromParam}`);
+      const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history?resolution=${effectiveResolution}${fromParam}`);
       if (!resp.ok) return;
       const json = (await resp.json()) as HistoryResponse;
       setData(json.points);
     } catch { /* ignore */ }
     finally { setIsLoading(false); }
-  }, [deviceId, resolution, fromParam]);
+  }, [deviceId, effectiveResolution, fromParam]);
 
   const loadCells = useCallback(async () => {
     if (selectedCells.length === 0) { setMultiCellData([]); return; }
     try {
       const results = await Promise.all(
         selectedCells.map(async (idx) => {
-          const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history/cell/${idx}?resolution=${resolution}${fromParam}`);
+          const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history/cell/${idx}?resolution=${effectiveResolution}${fromParam}`);
           if (!resp.ok) return null;
           const json = (await resp.json()) as CellHistoryResponse;
           return { index: idx, points: json.points };
@@ -126,7 +137,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
         if (!result) continue;
         for (const point of result.points) {
           if (!timeMap.has(point.timestamp)) {
-            timeMap.set(point.timestamp, { timestamp: point.timestamp, time: fmtTime(point.timestamp, resolution) });
+            timeMap.set(point.timestamp, { timestamp: point.timestamp, time: fmtTime(point.timestamp, effectiveResolution) });
           }
           timeMap.get(point.timestamp)![`cell_${result.index}`] = point.voltageVolts;
         }
@@ -134,28 +145,47 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
       setMultiCellData([...timeMap.values()].sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp))));
     } catch { /* ignore */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deviceId, resolution, cellKey, fromParam]);
+  }, [deviceId, effectiveResolution, cellKey, fromParam]);
 
   useEffect(() => {
     setIsLoading(true);
     void load();
     void loadCells();
-    const id = window.setInterval(() => { void load(); void loadCells(); }, resolution === '1s' ? 5000 : 30000);
+    const id = window.setInterval(() => { void load(); void loadCells(); }, effectiveResolution === '1s' ? 5000 : 30000);
     return () => window.clearInterval(id);
-  }, [load, loadCells, resolution]);
+  }, [load, loadCells, effectiveResolution]);
 
   const formatted = data.map((p) => ({
     ...p,
-    time: fmtTime(p.timestamp, resolution),
+    time: fmtTime(p.timestamp, effectiveResolution),
   }));
+
+  // Build the X-axis domain ticks for 'today' mode (full 12am-12am scale)
+  const todayXDomain = useMemo(() => {
+    if (!todayRange) return undefined;
+    const ticks: string[] = [];
+    const cur = new Date(todayRange.from);
+    while (cur < todayRange.to) {
+      ticks.push(fmtTime(cur.toISOString(), effectiveResolution));
+      // step by 1h for readability
+      cur.setHours(cur.getHours() + 1);
+    }
+    return ticks;
+  }, [todayRange, effectiveResolution]);
 
   const handleTodayClick = () => {
     if (timeRange === 'today') {
       setTimeRange('default');
+      if (resolution == null) setResolution('5m');
     } else {
       setTimeRange('today');
-      if (resolution === '1s') setResolution('1m');
+      setResolution(null);
     }
+  };
+
+  const handleResolutionClick = (r: Resolution) => {
+    setResolution(r);
+    setTimeRange('default');
   };
 
   return (
@@ -184,7 +214,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
             {resolutions.map((r) => (
               <button
                 key={r.value}
-                onClick={() => setResolution(r.value)}
+                onClick={() => handleResolutionClick(r.value)}
                 className={cn(
                   'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
                   resolution === r.value
@@ -212,25 +242,44 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
                 data={multiCellData}
                 precision={precision}
                 onDismiss={onClearCellSelection}
+                hoveredPointIndex={sharedHoveredIndex}
+                selectedPointIndex={sharedSelectedIndex}
+                onHover={setSharedHoveredIndex}
+                onSelect={setSharedSelectedIndex}
               />
             ) : (
               <ChartSection title='Voltage' unit='V' data={formatted} precision={precision}
-                lines={[{ key: 'totalVoltageVolts', color: '#38bdf8', name: 'Pack Voltage' }]} />
+                lines={[{ key: 'totalVoltageVolts', color: '#38bdf8', name: 'Pack Voltage' }]}
+                hoveredPointIndex={sharedHoveredIndex} selectedPointIndex={sharedSelectedIndex}
+                onHover={setSharedHoveredIndex} onSelect={setSharedSelectedIndex}
+                todayXDomain={todayXDomain} />
             )}
-            <EnergyChartSection data={formatted} resolution={resolution} />
+            <EnergyChartSection data={formatted} resolution={effectiveResolution}
+              hoveredPointIndex={sharedHoveredIndex} selectedPointIndex={sharedSelectedIndex}
+              onHover={setSharedHoveredIndex} onSelect={setSharedSelectedIndex}
+              todayXDomain={todayXDomain} />
             <ChartSection title='State of Charge' unit='%' data={formatted} precision={precision}
               lines={[{ key: 'stateOfChargePercent', color: '#fbbf24', name: 'SOC' }]}
-              domain={[0, 100]} />
+              domain={[0, 100]}
+              hoveredPointIndex={sharedHoveredIndex} selectedPointIndex={sharedSelectedIndex}
+              onHover={setSharedHoveredIndex} onSelect={setSharedSelectedIndex}
+              todayXDomain={todayXDomain} />
             <ChartSection title='Cell Voltage Spread' unit='V' data={formatted} precision={precision}
               lines={[
                 { key: 'minCellVoltageVolts', color: '#f87171', name: 'Min Cell' },
                 { key: 'maxCellVoltageVolts', color: '#34d399', name: 'Max Cell' },
-              ]} />
+              ]}
+              hoveredPointIndex={sharedHoveredIndex} selectedPointIndex={sharedSelectedIndex}
+              onHover={setSharedHoveredIndex} onSelect={setSharedSelectedIndex}
+              todayXDomain={todayXDomain} />
             <ChartSection title='Temperature' unit='°C' data={formatted} precision={precision}
               lines={[
                 { key: 'mosTemperatureCelsius', color: '#fb923c', name: 'MOS' },
                 { key: 'batteryTemperatureCelsius', color: '#38bdf8', name: 'Battery' },
-              ]} />
+              ]}
+              hoveredPointIndex={sharedHoveredIndex} selectedPointIndex={sharedSelectedIndex}
+              onHover={setSharedHoveredIndex} onSelect={setSharedSelectedIndex}
+              todayXDomain={todayXDomain} />
           </>
         )}
       </CardContent>
@@ -244,12 +293,13 @@ type ChartInteractionState = {
   activeIndex?: number;
 };
 
-function ChartSection({ title, data, lines, domain, precision }: {
+function ChartSection({ title, data, lines, domain, precision, hoveredPointIndex, selectedPointIndex, onHover, onSelect, todayXDomain }: {
   title: string; unit: string; data: Record<string, unknown>[]; lines: LineSpec[];
   domain?: [number, number]; precision: DisplayPrecision;
+  hoveredPointIndex: number | null; selectedPointIndex: number | null;
+  onHover: (idx: number | null) => void; onSelect: (idx: number | null) => void;
+  todayXDomain?: string[];
 }) {
-  const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
-  const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(null);
 
   // Build a formatter that rounds tooltip values based on precision config.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -259,7 +309,8 @@ function ChartSection({ title, data, lines, domain, precision }: {
     const key = String(props.dataKey ?? '');
     const precKey = keyPrecisionMap[key];
     const decimals = precKey != null ? precision[precKey] : 2;
-    return [num.toFixed(decimals), name];
+    const suffix = key === 'stateOfChargePercent' ? ' %' : '';
+    return [`${num.toFixed(decimals)}${suffix}`, name];
   }, [precision]);
 
   const activePoint = getActivePoint(data, hoveredPointIndex, selectedPointIndex);
@@ -268,16 +319,16 @@ function ChartSection({ title, data, lines, domain, precision }: {
 
   const handleChartMove = useCallback((state: unknown) => {
     const activeIndex = extractActiveIndex(state);
-    setHoveredPointIndex(activeIndex);
-  }, []);
+    onHover(activeIndex);
+  }, [onHover]);
 
   const handleChartLeave = useCallback(() => {
-    setHoveredPointIndex(null);
-  }, []);
+    onHover(null);
+  }, [onHover]);
 
   const handleChartClick = useCallback((state: unknown) => {
-    setSelectedPointIndex(extractActiveIndex(state));
-  }, []);
+    onSelect(extractActiveIndex(state));
+  }, [onSelect]);
 
   return (
     <div>
@@ -306,7 +357,7 @@ function ChartSection({ title, data, lines, domain, precision }: {
           </div>
           {selectedPointIndex != null && (
             <button
-              onClick={() => setSelectedPointIndex(null)}
+              onClick={() => onSelect(null)}
               className='mt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground'
             >
               Show latest
@@ -323,12 +374,13 @@ function ChartSection({ title, data, lines, domain, precision }: {
           onClick={handleChartClick}
         >
           <CartesianGrid strokeDasharray='3 3' stroke='hsl(var(--border))' opacity={0.4} />
-          <XAxis dataKey='time' tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} />
+          <XAxis dataKey='time' tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} {...(todayXDomain ? { ticks: todayXDomain } : {})} />
           <YAxis orientation='right' width={32} tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.55)' }} tickLine={false} axisLine={false} domain={domain ?? ['auto', 'auto']} />
           <Tooltip
             contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '0.5rem', fontSize: 12 }}
             labelStyle={{ color: 'hsl(var(--muted-foreground))' }}
             formatter={tooltipFormatter}
+            trigger='click'
           />
           <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
           {lines.map((l) => (
@@ -350,11 +402,12 @@ function ChartSection({ title, data, lines, domain, precision }: {
   );
 }
 
-export function EnergyChartSection({ data, resolution }: {
+export function EnergyChartSection({ data, resolution, hoveredPointIndex, selectedPointIndex, onHover, onSelect, todayXDomain }: {
   data: Record<string, unknown>[]; resolution: Resolution;
+  hoveredPointIndex: number | null; selectedPointIndex: number | null;
+  onHover: (idx: number | null) => void; onSelect: (idx: number | null) => void;
+  todayXDomain?: string[];
 }) {
-  const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
-  const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(null);
 
   const { energyData, dischargedKwh, chargedKwh, yDomain, zeroOffset } = useMemo(
     () => computeEnergyData(data, resolution),
@@ -382,9 +435,9 @@ export function EnergyChartSection({ data, resolution }: {
   const activeKw = typeof activePoint?.displayPowerKw === 'number' ? activePoint.displayPowerKw : null;
   const activeFmt = formatEnergyValue(activeKw);
 
-  const handleChartMove = useCallback((state: unknown) => { setHoveredPointIndex(extractActiveIndex(state)); }, []);
-  const handleChartLeave = useCallback(() => { setHoveredPointIndex(null); }, []);
-  const handleChartClick = useCallback((state: unknown) => { setSelectedPointIndex(extractActiveIndex(state)); }, []);
+  const handleChartMove = useCallback((state: unknown) => { onHover(extractActiveIndex(state)); }, [onHover]);
+  const handleChartLeave = useCallback(() => { onHover(null); }, [onHover]);
+  const handleChartClick = useCallback((state: unknown) => { onSelect(extractActiveIndex(state)); }, [onSelect]);
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const tooltipFormatter: any = useCallback((value: unknown) => {
@@ -427,7 +480,7 @@ export function EnergyChartSection({ data, resolution }: {
           </div>
           {selectedPointIndex != null && (
             <button
-              onClick={() => setSelectedPointIndex(null)}
+              onClick={() => onSelect(null)}
               className='mt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground'
             >
               Show latest
@@ -452,12 +505,13 @@ export function EnergyChartSection({ data, resolution }: {
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray='3 3' stroke='hsl(var(--border))' opacity={0.4} />
-          <XAxis dataKey='time' tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} />
+          <XAxis dataKey='time' tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} {...(todayXDomain ? { ticks: todayXDomain } : {})} />
           <YAxis orientation='right' width={32} tick={{ fontSize: 9, fill: 'rgba(255,255,255,0.55)' }} tickLine={false} axisLine={false} domain={yDomain} tickFormatter={yTickFormatter} />
           <Tooltip
             contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '0.5rem', fontSize: 12 }}
             labelStyle={{ color: 'hsl(var(--muted-foreground))' }}
             formatter={tooltipFormatter}
+            trigger='click'
           />
           <ReferenceLine y={0} stroke='rgba(255,255,255,0.2)' strokeDasharray='2 10' strokeWidth={1.5} />
           {hourBoundaries.map(({ time, is6h }, i) => (
@@ -470,11 +524,11 @@ export function EnergyChartSection({ data, resolution }: {
   );
 }
 
-function MultiCellChartSection({ selectedCells, data, precision, onDismiss }: {
+function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hoveredPointIndex, selectedPointIndex, onHover, onSelect }: {
   selectedCells: number[]; data: Record<string, unknown>[]; precision: DisplayPrecision; onDismiss?: () => void;
+  hoveredPointIndex: number | null; selectedPointIndex: number | null;
+  onHover: (idx: number | null) => void; onSelect: (idx: number | null) => void;
 }) {
-  const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
-  const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(null);
 
   const cellLines = selectedCells.map((idx, i) => ({
     key: `cell_${idx}`,
@@ -493,9 +547,9 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss }: {
   const activeTime = activePoint != null ? formatSummaryTime(activePoint.timestamp) : null;
   const isPinned = hoveredPointIndex == null && selectedPointIndex != null;
 
-  const handleChartMove = useCallback((state: unknown) => { setHoveredPointIndex(extractActiveIndex(state)); }, []);
-  const handleChartLeave = useCallback(() => { setHoveredPointIndex(null); }, []);
-  const handleChartClick = useCallback((state: unknown) => { setSelectedPointIndex(extractActiveIndex(state)); }, []);
+  const handleChartMove = useCallback((state: unknown) => { onHover(extractActiveIndex(state)); }, [onHover]);
+  const handleChartLeave = useCallback(() => { onHover(null); }, [onHover]);
+  const handleChartClick = useCallback((state: unknown) => { onSelect(extractActiveIndex(state)); }, [onSelect]);
 
   return (
     <div>
@@ -533,7 +587,7 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss }: {
           </div>
           {selectedPointIndex != null && (
             <button
-              onClick={() => setSelectedPointIndex(null)}
+              onClick={() => onSelect(null)}
               className='mt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground'
             >
               Show latest
@@ -556,6 +610,7 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss }: {
             contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '0.5rem', fontSize: 12 }}
             labelStyle={{ color: 'hsl(var(--muted-foreground))' }}
             formatter={tooltipFormatter}
+            trigger='click'
           />
           <Legend wrapperStyle={{ fontSize: 11, paddingTop: 4 }} />
           {cellLines.map((l) => (
@@ -572,7 +627,7 @@ function fmtTime(iso: string, resolution: Resolution): string {
   if (resolution === '1h') {
     return `${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getDate().toString().padStart(2, '0')} ${d.getHours().toString().padStart(2, '0')}:00`;
   }
-  if (resolution === '5m') {
+  if (resolution === '5m' || resolution === '1m') {
     return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
   }
   return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
@@ -608,7 +663,8 @@ function formatLineSummaryValue(value: unknown, key: string, precision: DisplayP
 
   const precisionKey = keyPrecisionMap[key];
   const decimals = precisionKey != null ? precision[precisionKey] : 2;
-  return num.toFixed(decimals);
+  const suffix = key === 'stateOfChargePercent' ? ' %' : '';
+  return `${num.toFixed(decimals)}${suffix}`;
 }
 
 function formatSummaryTime(value: unknown) {

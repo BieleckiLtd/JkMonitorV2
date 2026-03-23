@@ -384,10 +384,10 @@ function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndices, onCell
           </div>
         </CardTitle>
       </CardHeader>
-      <CardContent className='px-0 pt-4 sm:px-4'>
+      <CardContent className='px-1 pt-2 sm:px-4 sm:pt-3'>
         <div className='pb-1 sm:pb-2'>
           <div
-            className='grid items-end gap-1 pt-5 sm:gap-2 sm:pt-6'
+            className='mx-1 grid items-end gap-px pt-2 sm:mx-2 sm:gap-0.5 sm:pt-3'
             style={{ height: '164px', gridTemplateColumns: `repeat(${sorted.length}, minmax(0, 1fr))` }}
           >
           {sorted.map((cell) => {
@@ -399,12 +399,9 @@ function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndices, onCell
             return (
               <div
                 key={cell.index}
-                className='relative flex h-full min-w-0 flex-col items-center justify-end cursor-pointer'
+                className='flex h-full min-w-0 flex-col items-center justify-end cursor-pointer'
                 onClick={(e) => { e.stopPropagation(); onCellClick?.(cell.index); }}
               >
-                <div className='absolute -top-3.5 left-1/2 -translate-x-1/2 rounded border border-border bg-popover px-0.5 py-0.5 text-[7px] font-semibold tabular-nums whitespace-nowrap text-foreground shadow sm:-top-5 sm:px-1.5 sm:text-[10px]'>
-                  {cell.voltageVolts.toFixed(3)}
-                </div>
                 <div
                   className={cn(
                     'w-full rounded-t transition-all duration-500',
@@ -413,7 +410,10 @@ function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndices, onCell
                   )}
                   style={{ height: `${pct}%`, minHeight: '4px' }}
                 />
-                <div className='mt-1 text-[7px] text-muted-foreground leading-none sm:text-[9px]'>{cell.index}</div>
+                <div className='mt-0.5 text-[7px] text-muted-foreground leading-none sm:text-[9px]'>{cell.index}</div>
+                <div className='text-[6px] font-semibold tabular-nums whitespace-nowrap text-muted-foreground/80 leading-none sm:text-[8px]'>
+                  {cell.voltageVolts.toFixed(3)}
+                </div>
               </div>
             );
           })}
