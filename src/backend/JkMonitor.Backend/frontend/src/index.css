@@ -130,7 +130,6 @@
 
   body {
     @apply bg-background text-foreground;
-    min-height: 100svh;
     overscroll-behavior: none;
   }
 
@@ -149,7 +148,7 @@
   }
 
   #root {
-    min-height: 100svh;
+    @apply h-full;
   }
 
   ::selection {

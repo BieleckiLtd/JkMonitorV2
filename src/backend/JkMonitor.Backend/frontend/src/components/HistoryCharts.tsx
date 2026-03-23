@@ -5,6 +5,7 @@ import {
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { cn } from '../lib/utils';
+import { computeEnergyData, formatEnergyValue, type Resolution } from '../lib/energyUtils';
 import { Clock, TrendingUp } from 'lucide-react';
 
 type HistoryPoint = {
@@ -42,7 +43,7 @@ type CellHistoryResponse = {
   points: CellHistoryPoint[];
 };
 
-type Resolution = '1s' | '1m' | '5m' | '1h';
+// Resolution type imported from energyUtils
 
 type DisplayPrecision = {
   voltage: number;
@@ -79,15 +80,6 @@ const cellColorPalette = [
   '#ec4899', '#818cf8', '#22d3ee', '#a3e635', '#f472b6', '#c084fc',
   '#2dd4bf', '#facc15', '#f97316', '#64748b',
 ];
-
-function getIntervalHours(resolution: Resolution): number {
-  switch (resolution) {
-    case '1s': return 1 / 3600;
-    case '1m': return 1 / 60;
-    case '5m': return 5 / 60;
-    case '1h': return 1;
-  }
-}
 
 export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClearCellSelection }: {
   deviceId: string; precision: DisplayPrecision; selectedCellIndices?: number[]; onClearCellSelection?: () => void;
@@ -289,7 +281,7 @@ function ChartSection({ title, data, lines, domain, precision }: {
 
   return (
     <div>
-      <div className='mb-2 flex items-start justify-between gap-3'>
+      <div className='mb-2 flex items-start justify-between gap-3 px-2 sm:px-0'>
         <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{title}</div>
         <div className='max-w-[60%] text-right'>
           <div className='text-[11px] font-medium text-foreground'>
@@ -325,14 +317,14 @@ function ChartSection({ title, data, lines, domain, precision }: {
       <ResponsiveContainer width='100%' height={180}>
         <LineChart
           data={data}
-          margin={{ top: 4, right: 4, bottom: 0, left: -16 }}
+          margin={{ top: 4, right: 0, bottom: 0, left: 0 }}
           onMouseMove={handleChartMove}
           onMouseLeave={handleChartLeave}
           onClick={handleChartClick}
         >
           <CartesianGrid strokeDasharray='3 3' stroke='hsl(var(--border))' opacity={0.4} />
           <XAxis dataKey='time' tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} />
-          <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} domain={domain ?? ['auto', 'auto']} />
+          <YAxis width={30} tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} domain={domain ?? ['auto', 'auto']} />
           <Tooltip
             contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '0.5rem', fontSize: 12 }}
             labelStyle={{ color: 'hsl(var(--muted-foreground))' }}
@@ -364,37 +356,16 @@ function EnergyChartSection({ data, resolution }: {
   const [selectedPointIndex, setSelectedPointIndex] = useState<number | null>(null);
   const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(null);
 
-  const { energyData, dischargedKwh, chargedKwh, zeroOffset } = useMemo(() => {
-    const intervalHours = getIntervalHours(resolution);
-    let discharged = 0, charged = 0;
-    let dMax = 0, dMin = 0;
-
-    const processed = data.map(p => {
-      const power = typeof p.powerWatts === 'number' ? p.powerWatts : null;
-      const current = typeof p.currentAmps === 'number' ? p.currentAmps : null;
-      if (power == null || current == null) return { ...p, signedPowerKw: null };
-      const signedKw = current >= 0 ? -power / 1000 : power / 1000;
-      if (signedKw > dMax) dMax = signedKw;
-      if (signedKw < dMin) dMin = signedKw;
-      if (current < 0) discharged += power * intervalHours;
-      else charged += power * intervalHours;
-      return { ...p, signedPowerKw: signedKw };
-    });
-
-    const range = dMax - dMin || 1;
-    return {
-      energyData: processed,
-      dischargedKwh: discharged / 1000,
-      chargedKwh: charged / 1000,
-      zeroOffset: Math.max(0, Math.min(1, dMax / range)),
-    };
-  }, [data, resolution]);
+  const { energyData, dischargedKwh, chargedKwh, yDomain, zeroOffset } = useMemo(
+    () => computeEnergyData(data, resolution),
+    [data, resolution],
+  );
 
   const activePoint = getActivePoint(energyData, hoveredPointIndex, selectedPointIndex);
   const activeTime = activePoint != null ? formatSummaryTime(activePoint.timestamp) : null;
   const isPinned = hoveredPointIndex == null && selectedPointIndex != null;
   const activeKw = typeof activePoint?.signedPowerKw === 'number' ? activePoint.signedPowerKw : null;
-  const formattedKw = activeKw != null ? activeKw.toFixed(2) : 'N/D';
+  const activeFmt = formatEnergyValue(activeKw);
 
   const handleChartMove = useCallback((state: unknown) => { setHoveredPointIndex(extractActiveIndex(state)); }, []);
   const handleChartLeave = useCallback(() => { setHoveredPointIndex(null); }, []);
@@ -404,12 +375,16 @@ function EnergyChartSection({ data, resolution }: {
   const tooltipFormatter: any = useCallback((value: unknown) => {
     const num = typeof value === 'number' ? value : Number(value);
     if (Number.isNaN(num)) return [String(value), 'Power'];
-    return [`${num.toFixed(2)} kW`, num >= 0 ? 'Discharge' : 'Charge'];
+    const fmt = formatEnergyValue(num);
+    return [fmt.text, fmt.label];
   }, []);
+
+  // Show absolute values on Y-axis (no negatives)
+  const yTickFormatter = useCallback((v: number) => `${Math.abs(v).toFixed(1)}`, []);
 
   return (
     <div>
-      <div className='mb-2 flex items-start justify-between gap-3'>
+      <div className='mb-2 flex items-start justify-between gap-3 px-2 sm:px-0'>
         <div>
           <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Energy</div>
           <div className='mt-1.5 flex flex-wrap gap-x-3 gap-y-1'>
@@ -429,7 +404,7 @@ function EnergyChartSection({ data, resolution }: {
           <div className='mt-1'>
             <span className='rounded-full border border-border/70 bg-background/70 px-2 py-1 text-[10px] font-medium text-foreground'>
               <span className='mr-1 inline-block h-2 w-2 rounded-full align-middle' style={{ backgroundColor: '#34d399' }} />
-              {formattedKw} kW
+              {activeFmt.text}{activeFmt.label ? ` ${activeFmt.label}` : ''}
             </span>
           </div>
           {selectedPointIndex != null && (
@@ -445,7 +420,7 @@ function EnergyChartSection({ data, resolution }: {
       <ResponsiveContainer width='100%' height={180}>
         <AreaChart
           data={energyData}
-          margin={{ top: 4, right: 4, bottom: 0, left: -16 }}
+          margin={{ top: 4, right: 0, bottom: 0, left: 0 }}
           onMouseMove={handleChartMove}
           onMouseLeave={handleChartLeave}
           onClick={handleChartClick}
@@ -460,13 +435,13 @@ function EnergyChartSection({ data, resolution }: {
           </defs>
           <CartesianGrid strokeDasharray='3 3' stroke='hsl(var(--border))' opacity={0.4} />
           <XAxis dataKey='time' tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} />
-          <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} />
+          <YAxis width={30} tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} domain={yDomain} tickFormatter={yTickFormatter} />
           <Tooltip
             contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '0.5rem', fontSize: 12 }}
             labelStyle={{ color: 'hsl(var(--muted-foreground))' }}
             formatter={tooltipFormatter}
           />
-          <ReferenceLine y={0} stroke='hsl(var(--muted-foreground))' strokeOpacity={0.7} />
+          <ReferenceLine y={0} stroke='hsl(var(--muted-foreground))' strokeOpacity={0.7} strokeDasharray='4 6' />
           <Area type='monotone' dataKey='signedPowerKw' stroke='#34d399' fill='url(#energyGradient)' strokeWidth={1.5} dot={false} connectNulls isAnimationActive={false} baseValue={0} />
         </AreaChart>
       </ResponsiveContainer>
@@ -503,7 +478,7 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss }: {
 
   return (
     <div>
-      <div className='mb-2 flex items-start justify-between gap-3'>
+      <div className='mb-2 flex items-start justify-between gap-3 px-2 sm:px-0'>
         <div className='flex items-center gap-2'>
           <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>
             Cell Voltage{selectedCells.length > 1 ? 's' : ''}
@@ -548,14 +523,14 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss }: {
       <ResponsiveContainer width='100%' height={180}>
         <LineChart
           data={data}
-          margin={{ top: 4, right: 4, bottom: 0, left: -16 }}
+          margin={{ top: 4, right: 0, bottom: 0, left: 0 }}
           onMouseMove={handleChartMove}
           onMouseLeave={handleChartLeave}
           onClick={handleChartClick}
         >
           <CartesianGrid strokeDasharray='3 3' stroke='hsl(var(--border))' opacity={0.4} />
           <XAxis dataKey='time' tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} />
-          <YAxis tick={{ fontSize: 10, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
+          <YAxis width={30} tick={{ fontSize: 9, fill: 'hsl(var(--muted-foreground))' }} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
           <Tooltip
             contentStyle={{ backgroundColor: 'hsl(var(--card))', border: '1px solid hsl(var(--border))', borderRadius: '0.5rem', fontSize: 12 }}
             labelStyle={{ color: 'hsl(var(--muted-foreground))' }}
