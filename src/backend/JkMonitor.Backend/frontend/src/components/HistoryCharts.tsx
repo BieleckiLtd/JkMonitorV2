@@ -130,7 +130,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
       : windowFrom;
 
     try {
-      const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history?resolution=${effectiveResolution}&from=${fetchFrom}`);
+      const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history?resolution=${effectiveResolution}&from=${encodeURIComponent(fetchFrom)}`);
       if (!resp.ok) return;
       const json = (await resp.json()) as HistoryResponse;
 
@@ -163,7 +163,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
     try {
       const results = await Promise.all(
         selectedCells.map(async (idx) => {
-          const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history/cell/${idx}?resolution=${effectiveResolution}&from=${fetchFrom}`);
+          const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history/cell/${idx}?resolution=${effectiveResolution}&from=${encodeURIComponent(fetchFrom)}`);
           if (!resp.ok) return null;
           const json = (await resp.json()) as CellHistoryResponse;
           return { index: idx, points: json.points };
