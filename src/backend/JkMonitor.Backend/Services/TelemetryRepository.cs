@@ -225,9 +225,12 @@ VALUES (
         await using var connection = new NpgsqlConnection(_storage.ConnectionString);
         await connection.OpenAsync(cancellationToken);
 
+        // ROUND rollup averages to 10 dp so values fit in System.Decimal (max 28-29 digits).
+        string R(string col) => resolution == "1s" ? col : $"ROUND({col},10)";
+
         await using var command = connection.CreateCommand();
         command.CommandText = $@"
-SELECT {tsCol}, {voltCol}, {curCol}, {pwrCol}, {socCol}, {minCol}, {maxCol}, {deltaCol}, {mosTCol}, {batTCol}
+SELECT {tsCol}, {R(voltCol)}, {R(curCol)}, {R(pwrCol)}, {R(socCol)}, {R(minCol)}, {R(maxCol)}, {R(deltaCol)}, {R(mosTCol)}, {R(batTCol)}
 FROM {table}
 WHERE device_id = @device_id AND {tsCol} >= @from AND {tsCol} <= @to
 ORDER BY {tsCol}
@@ -390,10 +393,10 @@ DO UPDATE SET
         var (table, tsCol, voltExpr) = resolution switch
         {
             "1s" => ("jk_raw_samples", "sampled_at", $"(cell_voltages->>'{cellKey}')::numeric"),
-            "1m" => ("jk_rollup_1m", "bucket_start", $"(avg_cell_voltages->>'{cellKey}')::numeric"),
-            "5m" => ("jk_rollup_5m", "bucket_start", $"(avg_cell_voltages->>'{cellKey}')::numeric"),
-            "1h" => ("jk_rollup_1h", "bucket_start", $"(avg_cell_voltages->>'{cellKey}')::numeric"),
-            _ => ("jk_rollup_5m", "bucket_start", $"(avg_cell_voltages->>'{cellKey}')::numeric"),
+            "1m" => ("jk_rollup_1m", "bucket_start", $"ROUND((avg_cell_voltages->>'{cellKey}')::numeric, 10)"),
+            "5m" => ("jk_rollup_5m", "bucket_start", $"ROUND((avg_cell_voltages->>'{cellKey}')::numeric, 10)"),
+            "1h" => ("jk_rollup_1h", "bucket_start", $"ROUND((avg_cell_voltages->>'{cellKey}')::numeric, 10)"),
+            _ => ("jk_rollup_5m", "bucket_start", $"ROUND((avg_cell_voltages->>'{cellKey}')::numeric, 10)"),
         };
 
         await using var connection = new NpgsqlConnection(_storage.ConnectionString);
