@@ -47,18 +47,35 @@ public class CellVoltageSmoothingFilterTests
     }
 
     [Fact]
-    public void NoisyReading_Damped()
+    public void NoisyReading_HeldByHysteresis()
     {
         var filter = new CellVoltageSmoothingFilter();
         var device = CreateDevice(smoothingFactor: 0.3m);
 
-        // First reading – accepted.
         filter.Apply(device, CreateSnapshot(3.300m));
 
-        // Noisy spike +2mV: EMA = 0.3 * 3.302 + 0.7 * 3.300 = 3.3006 → rounds to 3.301
+        // +2mV noise: EMA = 0.3×3.302 + 0.7×3.300 = 3.3006
+        // |3.3006 − 3.300| = 0.0006 < 0.001 → hysteresis holds at 3.300.
         var result = filter.Apply(device, CreateSnapshot(3.302m));
 
-        Assert.Equal(3.301m, result.Cells[0].VoltageVolts);
+        Assert.Equal(3.300m, result.Cells[0].VoltageVolts);
+    }
+
+    [Fact]
+    public void NoisyOscillation_RemainsStable()
+    {
+        var filter = new CellVoltageSmoothingFilter();
+        var device = CreateDevice(smoothingFactor: 0.2m);
+
+        filter.Apply(device, CreateSnapshot(3.300m));
+
+        // Alternating ±2mV noise – output must stay locked at 3.300.
+        var noise = new[] { 3.302m, 3.298m, 3.302m, 3.298m };
+        foreach (var reading in noise)
+        {
+            var result = filter.Apply(device, CreateSnapshot(reading));
+            Assert.Equal(3.300m, result.Cells[0].VoltageVolts);
+        }
     }
 
     [Fact]
@@ -70,20 +87,19 @@ public class CellVoltageSmoothingFilterTests
         // Start at 3.300.
         filter.Apply(device, CreateSnapshot(3.300m));
 
-        // Consistent +1mV per sample: the trend shows through.
+        // Consistent +1mV per sample: hysteresis delays the first step but
+        // the trend comes through cleanly.
         var r1 = filter.Apply(device, CreateSnapshot(3.301m));
-        // EMA: 0.3*3.301 + 0.7*3.300 = 3.3003 → 3.300
-        Assert.Equal(3.300m, r1.Cells[0].VoltageVolts);
+        Assert.Equal(3.300m, r1.Cells[0].VoltageVolts); // EMA 3.3003, below threshold
 
         var r2 = filter.Apply(device, CreateSnapshot(3.302m));
-        // EMA: 0.3*3.302 + 0.7*3.300 = 3.3006 → 3.301
-        Assert.Equal(3.301m, r2.Cells[0].VoltageVolts);
+        Assert.Equal(3.300m, r2.Cells[0].VoltageVolts); // EMA 3.30081, still below
 
         var r3 = filter.Apply(device, CreateSnapshot(3.303m));
-        // EMA: 0.3*3.303 + 0.7*3.301 = 3.3016 → 3.302
-        Assert.Equal(3.302m, r3.Cells[0].VoltageVolts);
+        Assert.Equal(3.301m, r3.Cells[0].VoltageVolts); // EMA ~3.3015, crosses 1mV
 
-        // Value is rising by ~1mV per sample – trend is visible.
+        var r4 = filter.Apply(device, CreateSnapshot(3.304m));
+        Assert.Equal(3.302m, r4.Cells[0].VoltageVolts); // EMA ~3.3022, crosses 1mV
     }
 
     [Fact]
@@ -122,8 +138,8 @@ public class CellVoltageSmoothingFilterTests
 
         filter.Apply(device, CreateSnapshot(3.300m));
 
-        // +4mV – within breakout but large: EMA applies.
-        // EMA: 0.3 * 3.304 + 0.7 * 3.300 = 3.3012 → 3.301
+        // +4mV – within breakout: EMA = 0.3×3.304 + 0.7×3.300 = 3.3012.
+        // |3.3012 − 3.300| = 0.0012 ≥ 0.001 → reported = round(3.3012) = 3.301.
         var result = filter.Apply(device, CreateSnapshot(3.304m));
 
         Assert.Equal(3.301m, result.Cells[0].VoltageVolts);
@@ -138,13 +154,13 @@ public class CellVoltageSmoothingFilterTests
         // First reading: cells at 3.300 and 3.310.
         filter.Apply(device, CreateSnapshot(3.300m, 3.310m));
 
-        // Cell 1 noisy +2mV, cell 2 real jump +10mV.
+        // Cell 1: +2mV noise → hysteresis holds at 3.300.
+        // Cell 2: +10mV jump → breakout → 3.320.
         var result = filter.Apply(device, CreateSnapshot(3.302m, 3.320m));
 
-        // Cell 1: EMA → 3.301, Cell 2: breakout → 3.320
-        Assert.Equal(3.301m, result.MinCellVoltageVolts);
+        Assert.Equal(3.300m, result.MinCellVoltageVolts);
         Assert.Equal(3.320m, result.MaxCellVoltageVolts);
-        Assert.Equal(0.019m, result.DeltaCellVoltageVolts);
+        Assert.Equal(0.020m, result.DeltaCellVoltageVolts);
     }
 
     [Fact]
@@ -199,13 +215,12 @@ public class CellVoltageSmoothingFilterTests
         filter.Apply(deviceA, CreateSnapshot(3.300m));
         filter.Apply(deviceB, CreateSnapshot(3.310m));
 
-        // Same raw reading – different smoothed outputs due to different previous state.
         var resultA = filter.Apply(deviceA, CreateSnapshot(3.302m));
         var resultB = filter.Apply(deviceB, CreateSnapshot(3.302m));
 
-        // A: EMA(0.3*3.302 + 0.7*3.300) = 3.3006 → 3.301
-        Assert.Equal(3.301m, resultA.Cells[0].VoltageVolts);
-        // B: EMA(0.3*3.302 + 0.7*3.310) = 3.3076 → 3.308
+        // A: EMA 3.3006, |0.0006| < 0.001 → hysteresis holds at 3.300
+        Assert.Equal(3.300m, resultA.Cells[0].VoltageVolts);
+        // B: EMA 3.3076, |3.3076−3.310| = 0.0024 ≥ 0.001 → round(3.3076) = 3.308
         Assert.Equal(3.308m, resultB.Cells[0].VoltageVolts);
     }
 
@@ -218,14 +233,14 @@ public class CellVoltageSmoothingFilterTests
         filter.Apply(device, CreateSnapshot(3.300m));
 
         // +10mV but breakout disabled – EMA still applies.
-        // EMA: 0.3 * 3.310 + 0.7 * 3.300 = 3.303
+        // EMA = 0.3×3.310 + 0.7×3.300 = 3.303. |3.303−3.300| = 0.003 ≥ 0.001 → 3.303.
         var result = filter.Apply(device, CreateSnapshot(3.310m));
 
         Assert.Equal(3.303m, result.Cells[0].VoltageVolts);
     }
 
     [Fact]
-    public void RandomNoise_DampedOverMultipleSamples()
+    public void RandomNoise_StaysStable()
     {
         var filter = new CellVoltageSmoothingFilter();
         var device = CreateDevice(smoothingFactor: 0.3m, breakoutMillivolts: 5);
@@ -234,17 +249,11 @@ public class CellVoltageSmoothingFilterTests
         filter.Apply(device, CreateSnapshot(3.300m));
 
         var values = new[] { 3.302m, 3.299m, 3.302m, 3.298m, 3.301m };
-        var results = new decimal[values.Length];
-        for (var i = 0; i < values.Length; i++)
+        foreach (var v in values)
         {
-            var r = filter.Apply(device, CreateSnapshot(values[i]));
-            results[i] = r.Cells[0].VoltageVolts;
-        }
-
-        // All smoothed values should stay very close to 3.300.
-        foreach (var v in results)
-        {
-            Assert.InRange(v, 3.299m, 3.302m);
+            var r = filter.Apply(device, CreateSnapshot(v));
+            // Hysteresis keeps output locked at 3.300.
+            Assert.Equal(3.300m, r.Cells[0].VoltageVolts);
         }
     }
 }

@@ -6,12 +6,13 @@ namespace JkMonitor.Backend.Services;
 
 /// <summary>
 /// Smooths cell-voltage measurement noise using an exponential moving average (EMA)
+/// with output hysteresis to eliminate rounding oscillation at millivolt boundaries,
 /// while preserving immediate response to genuine step changes via a breakout threshold.
 /// Thread-safe: each device gets its own independent state.
 /// </summary>
 public sealed class CellVoltageSmoothingFilter
 {
-    private readonly ConcurrentDictionary<string, ConcurrentDictionary<int, decimal>> _deviceState = new();
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<int, (decimal Ema, decimal Reported)>> _deviceState = new();
 
     /// <summary>
     /// Returns a new snapshot with cell voltages smoothed via EMA,
@@ -25,7 +26,7 @@ public sealed class CellVoltageSmoothingFilter
             return snapshot;
 
         var breakoutVolts = device.CellVoltageSmoothingBreakoutMillivolts / 1000m;
-        var cellState = _deviceState.GetOrAdd(device.DeviceId, _ => new ConcurrentDictionary<int, decimal>());
+        var cellState = _deviceState.GetOrAdd(device.DeviceId, _ => new ConcurrentDictionary<int, (decimal, decimal)>());
 
         var smoothedCells = new CellVoltageSnapshot[snapshot.Cells.Count];
         for (var i = 0; i < snapshot.Cells.Count; i++)
@@ -33,25 +34,34 @@ public sealed class CellVoltageSmoothingFilter
             var cell = snapshot.Cells[i];
             var raw = cell.VoltageVolts;
 
-            decimal smoothed;
-            if (!cellState.TryGetValue(cell.Index, out var previous))
+            decimal ema, reported;
+            if (!cellState.TryGetValue(cell.Index, out var prev))
             {
                 // First reading – accept as-is.
-                smoothed = raw;
+                ema = raw;
+                reported = raw;
             }
-            else if (breakoutVolts > 0m && Math.Abs(raw - previous) > breakoutVolts)
+            else if (breakoutVolts > 0m && Math.Abs(raw - prev.Ema) > breakoutVolts)
             {
                 // Step change exceeds breakout – snap to raw immediately.
-                smoothed = raw;
+                ema = raw;
+                reported = raw;
             }
             else
             {
                 // EMA: smoothed = α * raw + (1 − α) * previous
-                smoothed = decimal.Round(alpha * raw + (1m - alpha) * previous, 3);
+                ema = alpha * raw + (1m - alpha) * prev.Ema;
+
+                // Output hysteresis: hold the reported value until the smoothed
+                // EMA has moved at least 1 mV away, preventing rounding oscillation
+                // at millivolt boundaries.
+                reported = Math.Abs(ema - prev.Reported) >= 0.001m
+                    ? decimal.Round(ema, 3)
+                    : prev.Reported;
             }
 
-            cellState[cell.Index] = smoothed;
-            smoothedCells[i] = cell with { VoltageVolts = smoothed };
+            cellState[cell.Index] = (ema, reported);
+            smoothedCells[i] = cell with { VoltageVolts = reported };
         }
 
         // Recalculate aggregate stats from smoothed values.
