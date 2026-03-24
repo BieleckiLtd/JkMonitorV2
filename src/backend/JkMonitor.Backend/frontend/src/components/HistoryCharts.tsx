@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area, ReferenceDot,
   XAxis, YAxis, Tooltip, CartesianGrid, Legend,
@@ -98,6 +98,10 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
   const selectedCells = selectedCellIndices ?? [];
   const cellKey = selectedCells.join(',');
 
+  // Per-resolution data cache — survives resolution switches so toggling back is instant
+  const historyCacheRef = useRef(new Map<string, HistoryPoint[]>());
+  const cellCacheRef = useRef(new Map<string, Record<string, unknown>[]>());
+
   const todayRange = useMemo(() => {
     if (timeRange !== 'today') return null;
     const now = new Date();
@@ -116,29 +120,64 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
   }, [timeRange, effectiveResolution]);
 
   const load = useCallback(async () => {
+    const key = `${deviceId}:${effectiveResolution}:${timeRange}`;
+    const cached = historyCacheRef.current.get(key);
+    const windowFrom = getFromIso();
+
+    // Incremental: only fetch from the last known timestamp when cache exists
+    const fetchFrom = (cached && cached.length > 0)
+      ? cached[cached.length - 1].timestamp
+      : windowFrom;
+
     try {
-      const from = getFromIso();
-      const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history?resolution=${effectiveResolution}&from=${from}`);
+      const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history?resolution=${effectiveResolution}&from=${fetchFrom}`);
       if (!resp.ok) return;
       const json = (await resp.json()) as HistoryResponse;
-      setData(json.points);
+
+      let points: HistoryPoint[];
+      if (cached && cached.length > 0 && fetchFrom !== windowFrom) {
+        // Merge: keep cached points still inside the sliding window, add/overwrite new
+        const merged = new Map<string, HistoryPoint>();
+        for (const p of cached) if (p.timestamp >= windowFrom) merged.set(p.timestamp, p);
+        for (const p of json.points) merged.set(p.timestamp, p);
+        points = [...merged.values()].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
+      } else {
+        points = json.points;
+      }
+
+      historyCacheRef.current.set(key, points);
+      setData(points);
     } catch { /* ignore */ }
     finally { setIsLoading(false); }
-  }, [deviceId, effectiveResolution, getFromIso]);
+  }, [deviceId, effectiveResolution, timeRange, getFromIso]);
 
   const loadCells = useCallback(async () => {
     if (selectedCells.length === 0) { setMultiCellData([]); return; }
+    const key = `${deviceId}:${effectiveResolution}:${timeRange}:${cellKey}`;
+    const cached = cellCacheRef.current.get(key);
+    const windowFrom = getFromIso();
+
+    const lastTs = cached && cached.length > 0 ? String(cached[cached.length - 1].timestamp ?? '') : '';
+    const fetchFrom = lastTs || windowFrom;
+
     try {
-      const from = getFromIso();
       const results = await Promise.all(
         selectedCells.map(async (idx) => {
-          const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history/cell/${idx}?resolution=${effectiveResolution}&from=${from}`);
+          const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history/cell/${idx}?resolution=${effectiveResolution}&from=${fetchFrom}`);
           if (!resp.ok) return null;
           const json = (await resp.json()) as CellHistoryResponse;
           return { index: idx, points: json.points };
         })
       );
+
       const timeMap = new Map<string, Record<string, unknown>>();
+      // Seed with cached data still within the window
+      if (cached && cached.length > 0 && fetchFrom !== windowFrom) {
+        for (const row of cached) {
+          const ts = String(row.timestamp ?? '');
+          if (ts >= windowFrom) timeMap.set(ts, { ...row });
+        }
+      }
       for (const result of results) {
         if (!result) continue;
         for (const point of result.points) {
@@ -148,20 +187,39 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
           timeMap.get(point.timestamp)![`cell_${result.index}`] = point.voltageVolts;
         }
       }
-      setMultiCellData([...timeMap.values()].sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp))));
+
+      const merged = [...timeMap.values()].sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
+      cellCacheRef.current.set(key, merged);
+      setMultiCellData(merged);
     } catch { /* ignore */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deviceId, effectiveResolution, cellKey, getFromIso]);
+  }, [deviceId, effectiveResolution, timeRange, cellKey, getFromIso]);
 
   useEffect(() => {
-    setIsLoading(true);
-    setData([]);
-    setMultiCellData([]);
+    // Show cached data instantly on switch; refresh incrementally in background
+    const histKey = `${deviceId}:${effectiveResolution}:${timeRange}`;
+    const cached = historyCacheRef.current.get(histKey);
+    if (cached && cached.length > 0) {
+      setData(cached);
+      setIsLoading(false);
+    } else {
+      setIsLoading(true);
+      setData([]);
+    }
+
+    const cellHistKey = `${histKey}:${cellKey}`;
+    const cellCached = cellCacheRef.current.get(cellHistKey);
+    if (cellCached && cellCached.length > 0) {
+      setMultiCellData(cellCached);
+    } else {
+      setMultiCellData([]);
+    }
+
     void load();
     void loadCells();
     const id = window.setInterval(() => { void load(); void loadCells(); }, effectiveResolution === '1s' ? 2000 : 30000);
     return () => window.clearInterval(id);
-  }, [load, loadCells, effectiveResolution]);
+  }, [load, loadCells, effectiveResolution, timeRange, cellKey, deviceId]);
 
   const formatted = data.map((p) => ({
     ...p,
