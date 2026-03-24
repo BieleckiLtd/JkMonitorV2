@@ -151,7 +151,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
     setIsLoading(true);
     void load();
     void loadCells();
-    const id = window.setInterval(() => { void load(); void loadCells(); }, effectiveResolution === '1s' ? 5000 : 30000);
+    const id = window.setInterval(() => { void load(); void loadCells(); }, effectiveResolution === '1s' ? 2000 : 30000);
     return () => window.clearInterval(id);
   }, [load, loadCells, effectiveResolution]);
 
