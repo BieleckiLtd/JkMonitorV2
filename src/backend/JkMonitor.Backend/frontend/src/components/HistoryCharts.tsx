@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area, ReferenceDot,
-  XAxis, YAxis, Tooltip, CartesianGrid,
+  XAxis, YAxis, Tooltip, CartesianGrid, Legend,
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { cn } from '../lib/utils';
@@ -320,6 +320,7 @@ const xTickStyle = { fontSize: 10, fill: 'var(--muted-foreground)' };
 const yTickStyle = { fontSize: 9, fill: 'var(--muted-foreground)' };
 const tooltipContentStyle = { backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '0.5rem', fontSize: 12, color: 'var(--foreground)' };
 const tooltipLabelStyle = { color: 'var(--muted-foreground)' };
+const legendStyle = { fontSize: 11, paddingTop: 4, color: 'var(--muted-foreground)' };
 
 function ChartSection({ title, data, lines, domain, precision, hoveredTime, selectedTime, onHover, onSelect, todayXTicks }: {
   title: string; unit: string; data: Record<string, unknown>[]; lines: LineSpec[];
@@ -370,25 +371,9 @@ function ChartSection({ title, data, lines, domain, precision, hoveredTime, sele
     <div>
       <div className='mb-2 flex items-start justify-between gap-3 px-2 sm:px-0'>
         <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{title}</div>
-        <div className='max-w-[60%] text-right'>
+        <div className='text-right'>
           <div className='text-[11px] font-medium text-foreground'>
             {isShowingLatest ? 'Latest' : activeTime ?? 'No data'}
-          </div>
-          <div className='mt-1 flex flex-wrap justify-end gap-1.5'>
-            {lines.map((line) => {
-              const rawValue = activePoint?.[line.key];
-              const formattedValue = formatLineSummaryValue(rawValue, line.key, precision);
-
-              return (
-                <span
-                  key={line.key}
-                  className='rounded-full border border-border/70 bg-background/70 px-2 py-1 text-[10px] font-medium text-foreground'
-                >
-                  <span className='mr-1 inline-block h-2 w-2 rounded-full align-middle' style={{ backgroundColor: line.color }} />
-                  {line.name}: {formattedValue}
-                </span>
-              );
-            })}
           </div>
           {selectedTime != null && (
             <button
@@ -417,6 +402,7 @@ function ChartSection({ title, data, lines, domain, precision, hoveredTime, sele
             itemStyle={{ color: 'var(--foreground)' }}
             formatter={tooltipFormatter}
           />
+          <Legend wrapperStyle={legendStyle} />
           {lines.map((l) => (
             <Line
               key={l.key}
@@ -465,8 +451,6 @@ export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime
   const activePoint = getActivePoint(energyData, hoveredTime, selectedTime);
   const activeTime = activePoint != null ? formatSummaryTime(activePoint.timestamp) : null;
   const isShowingLatest = hoveredTime == null && selectedTime == null;
-  const activeKw = typeof activePoint?.displayPowerKw === 'number' ? activePoint.displayPowerKw : null;
-  const activeFmt = formatEnergyValue(activeKw);
 
   const handleChartMove = useCallback((state: unknown) => {
     const idx = extractActiveIndex(state);
@@ -511,18 +495,9 @@ export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime
             </span>
           </div>
         </div>
-        <div className='max-w-[50%] text-right'>
+        <div className='text-right'>
           <div className='text-[11px] font-medium text-foreground'>
             {isShowingLatest ? 'Latest' : activeTime ?? 'No data'}
-          </div>
-          <div className='mt-1'>
-            <span className={cn(
-              'whitespace-nowrap rounded-full border border-border/70 bg-background/70 px-2 py-1 text-[10px] font-medium',
-              activeFmt.isZero ? 'text-muted-foreground' : 'text-foreground'
-            )}>
-              <span className='mr-1 inline-block h-2 w-2 rounded-full align-middle' style={{ backgroundColor: activeFmt.isZero ? 'var(--muted-foreground)' : '#34d399' }} />
-              {activeFmt.text}{activeFmt.label ? ` ${activeFmt.label}` : ''}
-            </span>
           </div>
           {selectedTime != null && (
             <button
@@ -544,10 +519,11 @@ export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime
         >
           <defs>
             <linearGradient id='energyGradient' x1='0' y1='0' x2='0' y2='1'>
-              <stop offset='0%' stopColor='#34d399' stopOpacity={0.5} />
-              <stop offset={`${zeroOffset * 100}%`} stopColor='#34d399' stopOpacity={0} />
-              <stop offset={`${zeroOffset * 100}%`} stopColor='#34d399' stopOpacity={0} />
-              <stop offset='100%' stopColor='#34d399' stopOpacity={0.5} />
+              <stop offset='0%' stopColor='#34d399' stopOpacity={0.45} />
+              <stop offset={`${Math.max(0, zeroOffset * 100 - 15)}%`} stopColor='#34d399' stopOpacity={0.15} />
+              <stop offset={`${zeroOffset * 100}%`} stopColor='#34d399' stopOpacity={0.02} />
+              <stop offset={`${Math.min(100, zeroOffset * 100 + 15)}%`} stopColor='#34d399' stopOpacity={0.15} />
+              <stop offset='100%' stopColor='#34d399' stopOpacity={0.45} />
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray='3 3' stroke='var(--border)' opacity={0.4} />
@@ -625,22 +601,9 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hove
             </button>
           )}
         </div>
-        <div className='max-w-[60%] text-right'>
+        <div className='text-right'>
           <div className='text-[11px] font-medium text-foreground'>
             {isShowingLatest ? 'Latest' : activeTime ?? 'No data'}
-          </div>
-          <div className='mt-1 flex flex-wrap justify-end gap-1.5'>
-            {cellLines.map((line) => {
-              const rawValue = activePoint?.[line.key];
-              const num = typeof rawValue === 'number' ? rawValue : Number(rawValue);
-              const formatted = Number.isNaN(num) ? 'N/D' : `${num.toFixed(precision.cellVoltage)}V`;
-              return (
-                <span key={line.key} className='rounded-full border border-border/70 bg-background/70 px-2 py-1 text-[10px] font-medium text-foreground'>
-                  <span className='mr-1 inline-block h-2 w-2 rounded-full align-middle' style={{ backgroundColor: line.color }} />
-                  {line.name}: {formatted}
-                </span>
-              );
-            })}
           </div>
           {selectedTime != null && (
             <button
@@ -669,6 +632,7 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hove
             itemStyle={{ color: 'var(--foreground)' }}
             formatter={tooltipFormatter}
           />
+          <Legend wrapperStyle={legendStyle} />
           {cellLines.map((l) => (
             <Line key={l.key} type='monotone' dataKey={l.key} stroke={l.color} name={l.name} dot={false} strokeWidth={1.5} connectNulls isAnimationActive={false} />
           ))}
@@ -706,18 +670,6 @@ function getActivePoint(data: Record<string, unknown>[], hoveredTime: string | n
   }
 
   return data.at(-1) ?? null;
-}
-
-function formatLineSummaryValue(value: unknown, key: string, precision: DisplayPrecision) {
-  const num = typeof value === 'number' ? value : Number(value);
-  if (Number.isNaN(num)) {
-    return 'N/D';
-  }
-
-  const precisionKey = keyPrecisionMap[key];
-  const decimals = precisionKey != null ? precision[precisionKey] : 2;
-  const suffix = key === 'stateOfChargePercent' ? ' %' : '';
-  return `${num.toFixed(decimals)}${suffix}`;
 }
 
 function formatSummaryTime(value: unknown) {
