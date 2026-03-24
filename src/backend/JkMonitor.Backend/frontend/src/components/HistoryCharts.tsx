@@ -106,27 +106,33 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
     return { from: startOfDay, to: endOfDay };
   }, [timeRange]);
 
-  const fromParam = useMemo(() => {
-    if (!todayRange) return '';
-    return `&from=${todayRange.from.toISOString()}`;
-  }, [todayRange]);
+  const getFromIso = useCallback(() => {
+    const now = new Date();
+    if (timeRange === 'today') {
+      return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
+    }
+    const ms: Record<Resolution, number> = { '1s': 600_000, '1m': 3_600_000, '5m': 86_400_000, '1h': 604_800_000 };
+    return new Date(now.getTime() - ms[effectiveResolution]).toISOString();
+  }, [timeRange, effectiveResolution]);
 
   const load = useCallback(async () => {
     try {
-      const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history?resolution=${effectiveResolution}${fromParam}`);
+      const from = getFromIso();
+      const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history?resolution=${effectiveResolution}&from=${from}`);
       if (!resp.ok) return;
       const json = (await resp.json()) as HistoryResponse;
       setData(json.points);
     } catch { /* ignore */ }
     finally { setIsLoading(false); }
-  }, [deviceId, effectiveResolution, fromParam]);
+  }, [deviceId, effectiveResolution, getFromIso]);
 
   const loadCells = useCallback(async () => {
     if (selectedCells.length === 0) { setMultiCellData([]); return; }
     try {
+      const from = getFromIso();
       const results = await Promise.all(
         selectedCells.map(async (idx) => {
-          const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history/cell/${idx}?resolution=${effectiveResolution}${fromParam}`);
+          const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history/cell/${idx}?resolution=${effectiveResolution}&from=${from}`);
           if (!resp.ok) return null;
           const json = (await resp.json()) as CellHistoryResponse;
           return { index: idx, points: json.points };
@@ -145,10 +151,12 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
       setMultiCellData([...timeMap.values()].sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp))));
     } catch { /* ignore */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deviceId, effectiveResolution, cellKey, fromParam]);
+  }, [deviceId, effectiveResolution, cellKey, getFromIso]);
 
   useEffect(() => {
     setIsLoading(true);
+    setData([]);
+    setMultiCellData([]);
     void load();
     void loadCells();
     const id = window.setInterval(() => { void load(); void loadCells(); }, effectiveResolution === '1s' ? 2000 : 30000);
@@ -645,8 +653,16 @@ function fmtTime(iso: string, resolution: Resolution): string {
   if (resolution === '1h') {
     return `${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getDate().toString().padStart(2, '0')} ${d.getHours().toString().padStart(2, '0')}:00`;
   }
-  if (resolution === '5m' || resolution === '1m') {
-    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+  const time = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+  if (resolution === '5m') {
+    const now = new Date();
+    if (d.getDate() !== now.getDate() || d.getMonth() !== now.getMonth() || d.getFullYear() !== now.getFullYear()) {
+      return `${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getDate().toString().padStart(2, '0')} ${time}`;
+    }
+    return time;
+  }
+  if (resolution === '1m') {
+    return time;
   }
   return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
 }
