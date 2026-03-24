@@ -5,7 +5,7 @@ import {
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { cn } from '../lib/utils';
-import { computeEnergyData, formatEnergyValue, type Resolution } from '../lib/energyUtils';
+import { computeEnergyData, computeEnergyGradientStops, formatEnergyValue, type Resolution } from '../lib/energyUtils';
 import { TrendingUp } from 'lucide-react';
 
 type HistoryPoint = {
@@ -519,11 +519,9 @@ export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime
         >
           <defs>
             <linearGradient id='energyGradient' x1='0' y1='0' x2='0' y2='1'>
-              <stop offset='0%' stopColor='#34d399' stopOpacity={0.45} />
-              <stop offset={`${Math.max(0, zeroOffset * 100 - 15)}%`} stopColor='#34d399' stopOpacity={0.15} />
-              <stop offset={`${zeroOffset * 100}%`} stopColor='#34d399' stopOpacity={0.02} />
-              <stop offset={`${Math.min(100, zeroOffset * 100 + 15)}%`} stopColor='#34d399' stopOpacity={0.15} />
-              <stop offset='100%' stopColor='#34d399' stopOpacity={0.45} />
+              {computeEnergyGradientStops(zeroOffset).map((s, i) => (
+                <stop key={i} offset={s.offset} stopColor='#34d399' stopOpacity={s.opacity} />
+              ))}
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray='3 3' stroke='var(--border)' opacity={0.4} />

@@ -51,17 +51,22 @@ export function computeEnergyData(
     return { ...p, signedPowerKw: normalKw === 0 ? null : normalKw, displayPowerKw: normalKw };
   });
 
-  // Ensure at least ±0.5 kW margin around the zero baseline
+  // Ensure at least ±0.5 kW margin around the zero baseline for the chart axis
   const yMin = Math.min(dMin, -0.5);
   const yMax = Math.max(dMax, 0.5);
-  const range = yMax - yMin || 1;
+
+  // zeroOffset for the gradient: where y=0 sits within the Area element's
+  // bounding box (SVG objectBoundingBox).  The bbox spans from max(0, dMax)
+  // at the top to min(0, dMin) at the bottom — NOT the padded yDomain.
+  const bboxRange = dMax - dMin;  // dMax >= 0, dMin <= 0
+  const zeroOffset = bboxRange > 0 ? dMax / bboxRange : 0.5;
 
   return {
     energyData: processed,
     dischargedKwh: discharged / 1000,
     chargedKwh: charged / 1000,
     yDomain: [yMin, yMax],
-    zeroOffset: Math.max(0, Math.min(1, yMax / range)),
+    zeroOffset,
   };
 }
 
@@ -75,4 +80,46 @@ export function formatEnergyValue(kw: number | null): { text: string; label: str
   if (kw > 0) return { text: `${abs.toFixed(1)} kW`, label: 'Discharged', isZero: false };
   if (kw < 0) return { text: `${abs.toFixed(1)} kW`, label: 'Charged', isZero: false };
   return { text: '0.0 kW', label: 'Discharged', isZero: true };
+}
+
+export interface GradientStop {
+  offset: string;
+  opacity: number;
+}
+
+/**
+ * Compute SVG linearGradient stops for the energy area chart.
+ *
+ * The gradient maps to the Area element's objectBoundingBox (SVG default),
+ * so `zeroOffset` must represent where y=0 sits within that bbox (0 = top, 1 = bottom).
+ *
+ * The result is a simple V-shaped opacity profile: transparent at the zero line,
+ * linearly increasing to `maxOpacity` at the extremes (top / bottom of bbox).
+ */
+export function computeEnergyGradientStops(
+  zeroOffset: number,
+  maxOpacity = 0.45,
+): GradientStop[] {
+  const z = Math.max(0, Math.min(1, zeroOffset));
+
+  if (z <= 0.005) {
+    // Zero at top – only charge data visible
+    return [
+      { offset: '0%', opacity: 0 },
+      { offset: '100%', opacity: maxOpacity },
+    ];
+  }
+  if (z >= 0.995) {
+    // Zero at bottom – only discharge data visible
+    return [
+      { offset: '0%', opacity: maxOpacity },
+      { offset: '100%', opacity: 0 },
+    ];
+  }
+
+  return [
+    { offset: '0%', opacity: maxOpacity },
+    { offset: `${(z * 100).toFixed(1)}%`, opacity: 0 },
+    { offset: '100%', opacity: maxOpacity },
+  ];
 }

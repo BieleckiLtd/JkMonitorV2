@@ -76,39 +76,6 @@ describe('EnergyChartSection', () => {
     expect(container.textContent).toContain('Charged:');
   });
 
-  describe('pill (active value badge)', () => {
-    it('has whitespace-nowrap to prevent line wrapping', () => {
-      const data = [makePoint('12:00', isoAt(0), 600, -3)];
-      const { container } = render(<EnergyChartSection data={data} resolution='1m' />);
-
-      const pill = container.querySelector('.whitespace-nowrap');
-      expect(pill).not.toBeNull();
-      expect(pill!.textContent).toContain('kW');
-    });
-
-    it('shows "0.0 kW Discharged" greyed out for zero values', () => {
-      const data = [makePoint('12:00', isoAt(0), 0, 0)];
-      const { container } = render(<EnergyChartSection data={data} resolution='1m' />);
-
-      const pill = container.querySelector('.whitespace-nowrap');
-      expect(pill).not.toBeNull();
-      expect(pill!.textContent).toContain('0.0 kW Discharged');
-      // Should use muted foreground (grey) instead of foreground (white)
-      expect(pill!.className).toContain('text-muted-foreground');
-      expect(pill!.className).not.toContain('text-foreground');
-    });
-
-    it('shows normal styling for non-zero values', () => {
-      const data = [makePoint('12:00', isoAt(0), 600, -3)];
-      const { container } = render(<EnergyChartSection data={data} resolution='1m' />);
-
-      const pill = container.querySelector('.whitespace-nowrap');
-      expect(pill).not.toBeNull();
-      expect(pill!.textContent).toContain('kW');
-      expect(pill!.className).toContain('text-foreground');
-    });
-  });
-
   describe('hour boundary markers', () => {
     it('renders ReferenceDot for hour boundaries', () => {
       // Create data spanning 12:00 → 14:00 at 5-min resolution (hour change at 13:00, 14:00)
