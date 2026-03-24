@@ -1,12 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-  ResponsiveContainer, LineChart, Line, AreaChart, Area, ReferenceLine, ReferenceDot,
-  XAxis, YAxis, Tooltip, CartesianGrid, Legend,
+  ResponsiveContainer, LineChart, Line, AreaChart, Area, ReferenceDot,
+  XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { cn } from '../lib/utils';
 import { computeEnergyData, formatEnergyValue, type Resolution } from '../lib/energyUtils';
-import { Clock, TrendingUp } from 'lucide-react';
+import { TrendingUp } from 'lucide-react';
 
 type HistoryPoint = {
   timestamp: string;
@@ -56,10 +56,10 @@ type DisplayPrecision = {
 };
 
 const resolutions: { value: Resolution; label: string; hint: string }[] = [
-  { value: '1s', label: '1s', hint: 'Last 10 min' },
-  { value: '1m', label: '1m', hint: 'Last hour' },
-  { value: '5m', label: '5m', hint: 'Last 24h' },
-  { value: '1h', label: '1h', hint: 'Last 7d' },
+  { value: '1s', label: '10m', hint: 'Last 10 minutes — 1s samples' },
+  { value: '1m', label: '1h', hint: 'Last hour — 1 min averages' },
+  { value: '5m', label: '24h', hint: 'Last 24 hours — 5 min averages' },
+  { value: '1h', label: '7d', hint: 'Last 7 days — 1 hour averages' },
 ];
 
 // Map data keys to the precision field that governs their formatting.
@@ -233,7 +233,6 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
               Today
             </button>
             <div className='mx-0.5 h-4 w-px bg-border/60' />
-            <Clock className='mr-1 h-3.5 w-3.5 text-muted-foreground' />
             {resolutions.map((r) => (
               <button
                 key={r.value}
@@ -321,7 +320,6 @@ const xTickStyle = { fontSize: 10, fill: 'var(--muted-foreground)' };
 const yTickStyle = { fontSize: 9, fill: 'var(--muted-foreground)' };
 const tooltipContentStyle = { backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '0.5rem', fontSize: 12, color: 'var(--foreground)' };
 const tooltipLabelStyle = { color: 'var(--muted-foreground)' };
-const legendStyle = { fontSize: 11, paddingTop: 4, color: 'var(--muted-foreground)' };
 
 function ChartSection({ title, data, lines, domain, precision, hoveredTime, selectedTime, onHover, onSelect, todayXTicks }: {
   title: string; unit: string; data: Record<string, unknown>[]; lines: LineSpec[];
@@ -344,6 +342,7 @@ function ChartSection({ title, data, lines, domain, precision, hoveredTime, sele
 
   const activePoint = getActivePoint(data, hoveredTime, selectedTime);
   const activeTime = activePoint != null ? formatSummaryTime(activePoint.timestamp) : null;
+  const isShowingLatest = hoveredTime == null && selectedTime == null;
 
   const handleChartMove = useCallback((state: unknown) => {
     const idx = extractActiveIndex(state);
@@ -373,7 +372,7 @@ function ChartSection({ title, data, lines, domain, precision, hoveredTime, sele
         <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{title}</div>
         <div className='max-w-[60%] text-right'>
           <div className='text-[11px] font-medium text-foreground'>
-            {activeTime ?? 'No data'}
+            {isShowingLatest ? 'Latest' : activeTime ?? 'No data'}
           </div>
           <div className='mt-1 flex flex-wrap justify-end gap-1.5'>
             {lines.map((line) => {
@@ -418,7 +417,6 @@ function ChartSection({ title, data, lines, domain, precision, hoveredTime, sele
             itemStyle={{ color: 'var(--foreground)' }}
             formatter={tooltipFormatter}
           />
-          <Legend wrapperStyle={legendStyle} />
           {lines.map((l) => (
             <Line
               key={l.key}
@@ -466,6 +464,7 @@ export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime
 
   const activePoint = getActivePoint(energyData, hoveredTime, selectedTime);
   const activeTime = activePoint != null ? formatSummaryTime(activePoint.timestamp) : null;
+  const isShowingLatest = hoveredTime == null && selectedTime == null;
   const activeKw = typeof activePoint?.displayPowerKw === 'number' ? activePoint.displayPowerKw : null;
   const activeFmt = formatEnergyValue(activeKw);
 
@@ -514,7 +513,7 @@ export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime
         </div>
         <div className='max-w-[50%] text-right'>
           <div className='text-[11px] font-medium text-foreground'>
-            {activeTime ?? 'No data'}
+            {isShowingLatest ? 'Latest' : activeTime ?? 'No data'}
           </div>
           <div className='mt-1'>
             <span className={cn(
@@ -560,7 +559,6 @@ export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime
             itemStyle={{ color: 'var(--foreground)' }}
             formatter={tooltipFormatter}
           />
-          <ReferenceLine y={0} stroke='rgba(255,255,255,0.2)' strokeDasharray='2 10' strokeWidth={1.5} />
           {hourBoundaries.map(({ time, is6h }, i) => (
             <ReferenceDot key={`hb-${i}`} x={time} y={0} r={is6h ? 3 : 1.5} fill={is6h ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.2)'} stroke='none' />
           ))}
@@ -591,6 +589,7 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hove
 
   const activePoint = getActivePoint(data, hoveredTime, selectedTime);
   const activeTime = activePoint != null ? formatSummaryTime(activePoint.timestamp) : null;
+  const isShowingLatest = hoveredTime == null && selectedTime == null;
 
   const handleChartMove = useCallback((state: unknown) => {
     const idx = extractActiveIndex(state);
@@ -628,7 +627,7 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hove
         </div>
         <div className='max-w-[60%] text-right'>
           <div className='text-[11px] font-medium text-foreground'>
-            {activeTime ?? 'No data'}
+            {isShowingLatest ? 'Latest' : activeTime ?? 'No data'}
           </div>
           <div className='mt-1 flex flex-wrap justify-end gap-1.5'>
             {cellLines.map((line) => {
@@ -670,7 +669,6 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hove
             itemStyle={{ color: 'var(--foreground)' }}
             formatter={tooltipFormatter}
           />
-          <Legend wrapperStyle={legendStyle} />
           {cellLines.map((l) => (
             <Line key={l.key} type='monotone' dataKey={l.key} stroke={l.color} name={l.name} dot={false} strokeWidth={1.5} connectNulls isAnimationActive={false} />
           ))}

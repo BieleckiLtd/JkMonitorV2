@@ -357,7 +357,7 @@ function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndices, onCell
       <CardHeader className='border-b border-border/60 pb-3'>
         <CardTitle className='flex flex-col gap-3 text-sm lg:flex-row lg:items-center lg:justify-between'>
           <div className='flex flex-wrap items-center gap-3'>
-            <div className='flex items-center gap-2'>
+            <div className='flex items-center gap-2' title='Cell voltages are smoothed using an Exponential Moving Average (EMA) with output hysteresis. The EMA dampens ±2mV measurement noise while tracking real trends. Hysteresis holds the reported millivolt value until the smoothed average has moved at least 1mV, preventing rounding oscillation at millivolt boundaries. A breakout threshold snaps to raw readings when sudden genuine voltage changes exceed 5mV.'>
               <Battery className='h-4 w-4 text-muted-foreground' />
               Cell Voltages
             </div>
