@@ -91,6 +91,13 @@ public sealed class DeviceConfiguration
 
     public bool Enabled { get; init; } = true;
 
+    /// <summary>
+    /// Deadband threshold for cell voltage readings in millivolts.
+    /// When non-zero, small fluctuations within ±threshold from the last accepted
+    /// value are suppressed (the previous value is re-used). Zero disables filtering.
+    /// </summary>
+    public int CellVoltageDeadbandMillivolts { get; init; }
+
     public DisplayPrecisionConfiguration DisplayPrecision { get; init; } = new();
 }
 

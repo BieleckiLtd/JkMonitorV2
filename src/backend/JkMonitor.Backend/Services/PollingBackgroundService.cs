@@ -9,6 +9,7 @@ public sealed class PollingBackgroundService(
     ITelemetryRepository telemetryRepository,
     DeviceStateStore stateStore,
     PollTrigger pollTrigger,
+    CellVoltageDeadbandFilter deadbandFilter,
     ILogger<PollingBackgroundService> logger) : BackgroundService
 {
     private readonly MonitorConfiguration _configuration = configuration.Value;
@@ -38,7 +39,9 @@ public sealed class PollingBackgroundService(
             {
                 logger.LogDebug("Polling device {DeviceId} using profile {ProfileId}.", device.DeviceId, device.ProfileId);
 
-                var sample = await pollingClient.PollAsync(device, cancellationToken);
+                var rawSample = await pollingClient.PollAsync(device, cancellationToken);
+                var filteredSnapshot = deadbandFilter.Apply(device, rawSample.Snapshot);
+                var sample = rawSample with { Snapshot = filteredSnapshot };
                 DateTimeOffset? persistedAt = null;
                 var outcome = "Succeeded";
                 string? persistenceError = null;
