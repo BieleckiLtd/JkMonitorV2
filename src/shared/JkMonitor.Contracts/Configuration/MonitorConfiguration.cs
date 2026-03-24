@@ -92,11 +92,18 @@ public sealed class DeviceConfiguration
     public bool Enabled { get; init; } = true;
 
     /// <summary>
-    /// Deadband threshold for cell voltage readings in millivolts.
-    /// When non-zero, small fluctuations within ±threshold from the last accepted
-    /// value are suppressed (the previous value is re-used). Zero disables filtering.
+    /// EMA weight for new cell-voltage readings (0–1). 0 disables smoothing.
+    /// Lower values smooth more aggressively; 0.3 is a good starting point
+    /// for ±2 mV measurement noise at 1 Hz polling.
     /// </summary>
-    public int CellVoltageDeadbandMillivolts { get; init; }
+    public decimal CellVoltageSmoothingFactor { get; init; }
+
+    /// <summary>
+    /// When the raw reading differs from the smoothed value by more than this
+    /// many millivolts, the smoothed value snaps to the raw reading immediately.
+    /// 0 disables breakout detection (pure EMA).
+    /// </summary>
+    public int CellVoltageSmoothingBreakoutMillivolts { get; init; }
 
     public DisplayPrecisionConfiguration DisplayPrecision { get; init; } = new();
 }
