@@ -54,11 +54,6 @@ if (string.Equals(storageProvider, "TimescaleDb", StringComparison.OrdinalIgnore
     builder.Services.AddSingleton<JkMonitor.Backend.Services.TimescaleTelemetryRepository>();
     builder.Services.AddSingleton<JkMonitor.Backend.Services.ITelemetryRepository>(sp => sp.GetRequiredService<JkMonitor.Backend.Services.TimescaleTelemetryRepository>());
 }
-else if (string.Equals(storageProvider, "Sqlite", StringComparison.OrdinalIgnoreCase))
-{
-    builder.Services.AddSingleton<JkMonitor.Backend.Services.SqliteTelemetryRepository>();
-    builder.Services.AddSingleton<JkMonitor.Backend.Services.ITelemetryRepository>(sp => sp.GetRequiredService<JkMonitor.Backend.Services.SqliteTelemetryRepository>());
-}
 else
 {
     builder.Services.AddSingleton<JkMonitor.Backend.Services.ITelemetryRepository, JkMonitor.Backend.Services.NoOpTelemetryRepository>();

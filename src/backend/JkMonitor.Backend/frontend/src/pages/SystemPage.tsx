@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Activity, CircleAlert, Cpu, Gauge, HardDrive, Leaf, LoaderCircle, MemoryStick } from 'lucide-react';
+import { useEffect, useState, useRef } from 'react';
+import { Activity, CircleAlert, Cpu, Database, Download, Gauge, HardDrive, Leaf, LoaderCircle, MemoryStick, Upload } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { cn } from '../lib/utils';
 import { LogsPanel } from '../components/LogsPanel';
@@ -66,10 +66,28 @@ type MonitorRuntimeStatus = {
 const refreshIntervalMs = 5000;
 const noDataLabel = 'N/D';
 
+type TableSizeInfo = {
+  tableName: string;
+  sizeBytes: number;
+  sizeFormatted: string;
+  rowCount: number;
+};
+
+type DatabaseSizeInfo = {
+  totalSizeBytes: number;
+  totalSizeFormatted: string;
+  tables: TableSizeInfo[];
+};
+
 export function SystemPage() {
   const [status, setStatus] = useState<MonitorRuntimeStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [dbSize, setDbSize] = useState<DatabaseSizeInfo | null>(null);
+  const [dbLoading, setDbLoading] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [importResult, setImportResult] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -123,6 +141,51 @@ export function SystemPage() {
       window.clearInterval(intervalId);
     };
   }, []);
+
+  const loadDbSize = async () => {
+    setDbLoading(true);
+    try {
+      const response = await fetch('/api/database/size', { cache: 'no-store' });
+      if (response.ok) {
+        setDbSize(await response.json() as DatabaseSizeInfo);
+      }
+    } catch {
+      // Silently ignore — the card will show a loading state.
+    } finally {
+      setDbLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    void loadDbSize();
+    const id = window.setInterval(() => void loadDbSize(), 30000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const handleExport = () => {
+    window.location.href = '/api/database/export';
+  };
+
+  const handleImport = async (file: File) => {
+    setImporting(true);
+    setImportResult(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const response = await fetch('/api/database/import', { method: 'POST', body: formData });
+      if (response.ok) {
+        setImportResult('Import completed successfully.');
+        void loadDbSize();
+      } else {
+        const body = await response.json().catch(() => null) as { error?: string } | null;
+        setImportResult(body?.error ?? 'Import failed.');
+      }
+    } catch {
+      setImportResult('Import failed — network error.');
+    } finally {
+      setImporting(false);
+    }
+  };
 
   const metrics = status?.systemMetrics ?? null;
   const cpuUsage = metrics?.cpuUtilizationPercent ?? null;
@@ -343,6 +406,80 @@ export function SystemPage() {
                 <DetailTile label='Enabled devices' value={status.enabledDeviceCount.toLocaleString()} />
                 <DetailTile label='Healthy devices' value={healthyDevices.toLocaleString()} />
                 <DetailTile label='Devices needing attention' value={failingDevices.toLocaleString()} />
+              </CardContent>
+            </Card>
+
+            <Card className='border border-border/80 bg-card/85 shadow-sm'>
+              <CardHeader className='border-b border-border/60 pb-4'>
+                <div className='flex items-center gap-2'>
+                  <Database className='h-4 w-4 text-muted-foreground' />
+                  <div>
+                    <CardTitle>Database</CardTitle>
+                    <CardDescription>TimescaleDB storage size, backup, and restore.</CardDescription>
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className='space-y-4 pt-5'>
+                {dbLoading && !dbSize ? (
+                  <div className='flex items-center justify-center py-6'>
+                    <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
+                  </div>
+                ) : dbSize ? (
+                  <>
+                    <DetailTile label='Total database size' value={dbSize.totalSizeFormatted} />
+                    <div className='space-y-2'>
+                      {dbSize.tables.map((t) => (
+                        <div key={t.tableName} className='rounded-2xl border border-border/70 bg-background/50 px-4 py-3'>
+                          <div className='flex items-center justify-between'>
+                            <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground font-mono'>{t.tableName}</div>
+                            <div className='text-xs text-muted-foreground'>{t.rowCount.toLocaleString()} rows</div>
+                          </div>
+                          <div className='mt-1 text-sm font-semibold text-foreground'>{t.sizeFormatted}</div>
+                        </div>
+                      ))}
+                    </div>
+                  </>
+                ) : (
+                  <div className='text-sm text-muted-foreground'>Unable to load database info.</div>
+                )}
+
+                <div className='flex flex-col gap-2 pt-2'>
+                  <button
+                    type='button'
+                    onClick={handleExport}
+                    className='inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
+                  >
+                    <Download className='h-4 w-4' />
+                    Export database
+                  </button>
+
+                  <input
+                    ref={fileInputRef}
+                    type='file'
+                    accept='.csv,.sql'
+                    className='hidden'
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) void handleImport(file);
+                      e.target.value = '';
+                    }}
+                  />
+                  <button
+                    type='button'
+                    disabled={importing}
+                    onClick={() => fileInputRef.current?.click()}
+                    className='inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
+                  >
+                    {importing ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Upload className='h-4 w-4' />}
+                    {importing ? 'Importing…' : 'Import database'}
+                  </button>
+
+                  {importResult ? (
+                    <div className={cn('rounded-xl border px-3 py-2 text-xs', importResult.includes('successfully') ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200' : 'border-rose-500/20 bg-rose-500/10 text-rose-200')}>
+                      {importResult}
+                    </div>
+                  ) : null}
+                </div>
               </CardContent>
             </Card>
 

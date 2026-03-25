@@ -16,7 +16,19 @@ public interface ITelemetryRepository
     Task<IReadOnlyList<HistoryDataPoint>> QueryHistoryAsync(string deviceId, string resolution, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<CellHistoryDataPoint>> QueryCellHistoryAsync(string deviceId, int cellIndex, string resolution, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken);
+
+    Task ApplyRetentionAsync(CancellationToken cancellationToken);
+
+    Task<DatabaseSizeInfo> GetDatabaseSizeAsync(CancellationToken cancellationToken);
+
+    Task ExportAsync(Stream destination, CancellationToken cancellationToken);
+
+    Task ImportAsync(Stream source, CancellationToken cancellationToken);
 }
+
+public sealed record TableSizeInfo(string TableName, long SizeBytes, string SizeFormatted, long RowCount);
+
+public sealed record DatabaseSizeInfo(long TotalSizeBytes, string TotalSizeFormatted, IReadOnlyList<TableSizeInfo> Tables);
 
 public sealed record HistoryDataPoint(
     DateTimeOffset Timestamp,
@@ -45,6 +57,15 @@ public sealed class NoOpTelemetryRepository : ITelemetryRepository
 
     public Task<IReadOnlyList<CellHistoryDataPoint>> QueryCellHistoryAsync(string deviceId, int cellIndex, string resolution, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
         => Task.FromResult<IReadOnlyList<CellHistoryDataPoint>>([]);
+
+    public Task ApplyRetentionAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task<DatabaseSizeInfo> GetDatabaseSizeAsync(CancellationToken cancellationToken)
+        => Task.FromResult(new DatabaseSizeInfo(0, "0 B", []));
+
+    public Task ExportAsync(Stream destination, CancellationToken cancellationToken) => Task.CompletedTask;
+
+    public Task ImportAsync(Stream source, CancellationToken cancellationToken) => Task.CompletedTask;
 }
 
 public sealed class TimescaleTelemetryRepository(
@@ -272,7 +293,11 @@ LIMIT 2000;
         await DeleteOlderThan(connection, "jk_raw_samples", "sampled_at", now.AddMinutes(-_retention.RawSecondsWindowMinutes), cancellationToken);
         await DeleteOlderThan(connection, "jk_rollup_1m", "bucket_start", now.AddHours(-_retention.OneMinuteWindowHours), cancellationToken);
         await DeleteOlderThan(connection, "jk_rollup_5m", "bucket_start", now.AddDays(-_retention.FiveMinuteWindowDays), cancellationToken);
-        await DeleteOlderThan(connection, "jk_rollup_1h", "bucket_start", now.AddDays(-_retention.OneHourWindowDays), cancellationToken);
+
+        if (_retention.OneHourWindowDays > 0)
+        {
+            await DeleteOlderThan(connection, "jk_rollup_1h", "bucket_start", now.AddDays(-_retention.OneHourWindowDays), cancellationToken);
+        }
 
         logger.LogDebug("Retention sweep completed.");
     }
@@ -427,6 +452,171 @@ LIMIT 2000;
         return points;
     }
 
+    public async Task<DatabaseSizeInfo> GetDatabaseSizeAsync(CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken);
+
+        await using var connection = new NpgsqlConnection(_storage.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        // Total database size.
+        long totalBytes = 0;
+        await using (var cmd = connection.CreateCommand())
+        {
+            cmd.CommandText = "SELECT pg_database_size(current_database());";
+            var result = await cmd.ExecuteScalarAsync(cancellationToken);
+            totalBytes = result is long l ? l : 0;
+        }
+
+        // Per-table sizes.
+        var tables = new List<TableSizeInfo>();
+        var tableNames = new[] { "jk_raw_samples", "jk_rollup_1m", "jk_rollup_5m", "jk_rollup_1h" };
+
+        foreach (var tableName in tableNames)
+        {
+            long tableBytes = 0;
+            long rowCount = 0;
+
+            await using (var cmd = connection.CreateCommand())
+            {
+                cmd.CommandText = $"SELECT pg_total_relation_size('{tableName}');";
+                var result = await cmd.ExecuteScalarAsync(cancellationToken);
+                tableBytes = result is long l ? l : 0;
+            }
+
+            await using (var cmd = connection.CreateCommand())
+            {
+                cmd.CommandText = $"SELECT COUNT(*) FROM {tableName};";
+                var result = await cmd.ExecuteScalarAsync(cancellationToken);
+                rowCount = result is long l ? l : 0;
+            }
+
+            tables.Add(new TableSizeInfo(tableName, tableBytes, FormatBytes(tableBytes), rowCount));
+        }
+
+        return new DatabaseSizeInfo(totalBytes, FormatBytes(totalBytes), tables);
+    }
+
+    public async Task ExportAsync(Stream destination, CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken);
+
+        await using var connection = new NpgsqlConnection(_storage.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        var tableNames = new[] { "jk_raw_samples", "jk_rollup_1m", "jk_rollup_5m", "jk_rollup_1h" };
+
+        var writer = new StreamWriter(destination, leaveOpen: true);
+        await writer.WriteLineAsync("-- JkMonitor Database Export");
+        await writer.WriteLineAsync($"-- Exported at: {DateTimeOffset.UtcNow:O}");
+        await writer.WriteLineAsync();
+
+        foreach (var tableName in tableNames)
+        {
+            await writer.WriteLineAsync($"-- TABLE: {tableName}");
+
+            using var exportReader = await connection.BeginTextExportAsync(
+                $"COPY {tableName} TO STDOUT (FORMAT CSV, HEADER)", cancellationToken);
+
+            string? line;
+            while ((line = await exportReader.ReadLineAsync(cancellationToken)) != null)
+            {
+                await writer.WriteLineAsync(line);
+            }
+
+            await writer.WriteLineAsync($"-- END: {tableName}");
+            await writer.WriteLineAsync();
+        }
+
+        await writer.FlushAsync(cancellationToken);
+    }
+
+    public async Task ImportAsync(Stream source, CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken);
+
+        await using var connection = new NpgsqlConnection(_storage.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        var reader = new StreamReader(source);
+        string? currentTable = null;
+        bool headerSkipped = false;
+
+        string? line;
+        while ((line = await reader.ReadLineAsync(cancellationToken)) != null)
+        {
+            if (line.StartsWith("-- TABLE: "))
+            {
+                currentTable = line["-- TABLE: ".Length..].Trim();
+                headerSkipped = false;
+
+                // Validate table name against known tables.
+                var allowedTables = new HashSet<string> { "jk_raw_samples", "jk_rollup_1m", "jk_rollup_5m", "jk_rollup_1h" };
+                if (!allowedTables.Contains(currentTable))
+                {
+                    throw new InvalidOperationException($"Unknown table in import file: {currentTable}");
+                }
+
+                // Truncate the table before import.
+                await using var truncateCmd = connection.CreateCommand();
+                truncateCmd.CommandText = $"TRUNCATE {currentTable};";
+                await truncateCmd.ExecuteNonQueryAsync(cancellationToken);
+
+                continue;
+            }
+
+            if (line.StartsWith("TRUNCATE ") || line.StartsWith("-- ") || string.IsNullOrWhiteSpace(line))
+            {
+                if (line.StartsWith("-- END: "))
+                {
+                    currentTable = null;
+                }
+
+                continue;
+            }
+
+            if (currentTable != null)
+            {
+                if (!headerSkipped)
+                {
+                    // First data line after TABLE marker is the CSV header — start the COPY import.
+                    headerSkipped = true;
+                    var columns = line;
+
+                    // Collect all CSV data lines for this table.
+                    var csvLines = new List<string>();
+                    while ((line = await reader.ReadLineAsync(cancellationToken)) != null)
+                    {
+                        if (line.StartsWith("-- END: "))
+                        {
+                            currentTable = null;
+                            break;
+                        }
+
+                        if (line.StartsWith("-- ") || string.IsNullOrWhiteSpace(line))
+                            continue;
+
+                        csvLines.Add(line);
+                    }
+
+                    if (csvLines.Count > 0)
+                    {
+                        // Use COPY FROM STDIN with header.
+                        await using var writer = await connection.BeginTextImportAsync(
+                            $"COPY {currentTable} FROM STDIN (FORMAT CSV, HEADER)", cancellationToken);
+                        await writer.WriteLineAsync(columns);
+                        foreach (var dataLine in csvLines)
+                        {
+                            await writer.WriteLineAsync(dataLine);
+                        }
+                    }
+                }
+            }
+        }
+
+        logger.LogInformation("Database import completed successfully.");
+    }
+
     private static object BuildCellVoltagesJson(IReadOnlyList<Contracts.Status.CellVoltageSnapshot> cells)
     {
         if (cells.Count == 0) return DBNull.Value;
@@ -434,5 +624,19 @@ LIMIT 2000;
         foreach (var cell in cells)
             dict[cell.Index.ToString()] = cell.VoltageVolts;
         return JsonSerializer.Serialize(dict);
+    }
+
+    private static string FormatBytes(long bytes)
+    {
+        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        var index = 0;
+        var value = (double)bytes;
+        while (value >= 1024 && index < units.Length - 1)
+        {
+            value /= 1024;
+            index++;
+        }
+
+        return $"{value:F1} {units[index]}";
     }
 }

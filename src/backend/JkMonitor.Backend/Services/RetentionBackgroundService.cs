@@ -4,7 +4,7 @@ public sealed class RetentionBackgroundService(
     ITelemetryRepository repository,
     ILogger<RetentionBackgroundService> logger) : BackgroundService
 {
-    private static readonly TimeSpan Interval = TimeSpan.FromMinutes(1);
+    private static readonly TimeSpan Interval = TimeSpan.FromMinutes(10);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -18,14 +18,7 @@ public sealed class RetentionBackgroundService(
 
             try
             {
-                if (repository is SqliteTelemetryRepository sqlite)
-                {
-                    await sqlite.ApplyRetentionAsync(stoppingToken);
-                }
-                else if (repository is TimescaleTelemetryRepository timescale)
-                {
-                    await timescale.ApplyRetentionAsync(stoppingToken);
-                }
+                await repository.ApplyRetentionAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
