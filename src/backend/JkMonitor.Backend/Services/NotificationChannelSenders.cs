@@ -23,13 +23,20 @@ public sealed class NtfyChannelSender(IHttpClientFactory httpClientFactory) : IN
         var priority = GetInt(settings, "priority") ?? SeverityToPriority(severity);
 
         using var client = httpClientFactory.CreateClient();
-        var url = $"{baseUrl.TrimEnd('/')}/{Uri.EscapeDataString(topic)}";
+        var url = baseUrl.TrimEnd('/');
+
+        // Use JSON publish format to support non-ASCII characters in title/body
+        var payload = new Dictionary<string, object>
+        {
+            ["topic"] = topic,
+            ["title"] = subject,
+            ["message"] = body,
+            ["priority"] = priority,
+            ["tags"] = new[] { SeverityToTag(severity) }
+        };
 
         using var request = new HttpRequestMessage(HttpMethod.Post, url);
-        request.Content = new StringContent(body, Encoding.UTF8, "text/plain");
-        request.Headers.Add("Title", subject);
-        request.Headers.Add("Priority", priority.ToString());
-        request.Headers.Add("Tags", SeverityToTag(severity));
+        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
         if (!string.IsNullOrEmpty(accessToken))
         {
