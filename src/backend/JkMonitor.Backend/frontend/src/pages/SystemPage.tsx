@@ -1,5 +1,5 @@
-import { useEffect, useState, useRef } from 'react';
-import { Activity, CircleAlert, Cpu, Database, Download, Gauge, HardDrive, Leaf, LoaderCircle, MemoryStick, Upload } from 'lucide-react';
+import { useEffect, useState, useRef, useCallback } from 'react';
+import { Activity, CircleAlert, Cpu, Database, Download, Gauge, HardDrive, Leaf, LoaderCircle, MemoryStick, Upload, RefreshCcw, CheckCircle2, XCircle, Usb } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { cn } from '../lib/utils';
 import { LogsPanel } from '../components/LogsPanel';
@@ -79,6 +79,54 @@ type DatabaseSizeInfo = {
   tables: TableSizeInfo[];
 };
 
+type UpdateCheckResult = {
+  currentReleaseTag?: string | null;
+  currentSourceRevision?: string | null;
+  currentBuiltAt?: string | null;
+  canUpdate: boolean;
+  reason?: string | null;
+  updateAvailable: boolean;
+  remoteReleasePublishedAt?: string | null;
+  remoteChecksum?: string | null;
+  localChecksum?: string | null;
+  checkError?: string | null;
+};
+
+type UpdateProgress = {
+  isRunning: boolean;
+  stage: string;
+  success?: boolean | null;
+};
+
+type SerialPortInfo = {
+  name: string;
+  description?: string | null;
+};
+
+type BlockDeviceInfo = {
+  name: string;
+  model?: string | null;
+  sizeBytes: number;
+  sizeFormatted?: string | null;
+  readOnly: boolean;
+};
+
+type NetworkInterfaceInfo = {
+  name: string;
+  description?: string | null;
+  type?: string | null;
+  status?: string | null;
+  macAddress?: string | null;
+  addresses: string[];
+  speedMbps?: number | null;
+};
+
+type SystemInterfacesResponse = {
+  serialPorts: SerialPortInfo[];
+  blockDevices: BlockDeviceInfo[];
+  networkInterfaces: NetworkInterfaceInfo[];
+};
+
 export function SystemPage() {
   const [status, setStatus] = useState<MonitorRuntimeStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -88,6 +136,11 @@ export function SystemPage() {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult | null>(null);
+  const [updateChecking, setUpdateChecking] = useState(false);
+  const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
+  const [updateInstalling, setUpdateInstalling] = useState(false);
+  const [interfaces, setInterfaces] = useState<SystemInterfacesResponse | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -162,6 +215,75 @@ export function SystemPage() {
     return () => window.clearInterval(id);
   }, []);
 
+  const checkForUpdate = useCallback(async () => {
+    setUpdateChecking(true);
+    try {
+      const response = await fetch('/api/system/update/check', { cache: 'no-store' });
+      if (response.ok) {
+        setUpdateCheck(await response.json() as UpdateCheckResult);
+      }
+    } catch {
+      // Silently ignore.
+    } finally {
+      setUpdateChecking(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void checkForUpdate();
+  }, [checkForUpdate]);
+
+  const installUpdate = async () => {
+    setUpdateInstalling(true);
+    try {
+      const response = await fetch('/api/system/update/install', { method: 'POST' });
+      if (!response.ok) {
+        const body = await response.json().catch(() => null) as { error?: string } | null;
+        setUpdateProgress({ isRunning: false, stage: body?.error ?? 'Failed to start update.', success: false });
+        return;
+      }
+      // Poll progress
+      const pollProgress = async () => {
+        for (let i = 0; i < 120; i++) {
+          await new Promise((resolve) => setTimeout(resolve, 2000));
+          try {
+            const resp = await fetch('/api/system/update/progress', { cache: 'no-store' });
+            if (resp.ok) {
+              const progress = await resp.json() as UpdateProgress;
+              setUpdateProgress(progress);
+              if (!progress.isRunning) return;
+            }
+          } catch {
+            // Service might be restarting
+            setUpdateProgress({ isRunning: false, stage: 'Service restarting — refresh the page in a moment.', success: true });
+            return;
+          }
+        }
+      };
+      void pollProgress();
+    } catch {
+      setUpdateProgress({ isRunning: false, stage: 'Network error starting update.', success: false });
+    } finally {
+      setUpdateInstalling(false);
+    }
+  };
+
+  useEffect(() => {
+    const loadInterfaces = async () => {
+      try {
+        const response = await fetch('/api/system/interfaces', { cache: 'no-store' });
+        if (response.ok) {
+          setInterfaces(await response.json() as SystemInterfacesResponse);
+        }
+      } catch {
+        // Silently ignore.
+      }
+    };
+    void loadInterfaces();
+    const id = window.setInterval(() => void loadInterfaces(), 30000);
+    return () => window.clearInterval(id);
+  }, []);
+
   const handleExport = () => {
     window.location.href = '/api/database/export';
   };
@@ -207,7 +329,6 @@ export function SystemPage() {
   const deviceCount = status?.devices.length ?? 0;
   const healthyDevices = status?.devices.filter((device) => device.lastOutcome === 'Succeeded').length ?? 0;
   const failingDevices = status?.devices.filter((device) => device.lastOutcome === 'Failed' || device.lastOutcome === 'PersistFailed').length ?? 0;
-  const latestReport = status?.reportedAt ? formatTimestamp(status.reportedAt) : 'Waiting for first sample';
   const releaseTag = formatReleaseDisplay(status?.build);
   const sourceRevisionId = status?.build?.sourceRevisionId ?? noDataLabel;
   const workflowRun = formatWorkflowRun(status?.build?.workflowRunNumber, status?.build?.workflowRunAttempt);
@@ -229,10 +350,12 @@ export function SystemPage() {
             </div>
           </div>
 
-          <div className='grid gap-3 sm:grid-cols-3'>
+          <div className='grid gap-3 sm:grid-cols-3 lg:grid-cols-5'>
             <StatusChip label='Environment' value={status?.environmentName ?? 'Loading'} />
             <StatusChip label='Mode' value={status?.startupMode ?? 'Loading'} />
             <StatusChip label='Release' value={releaseTag} />
+            <StatusChip label='Commit' value={formatCommit(sourceRevisionId)} />
+            <StatusChip label='Workflow' value={workflowRun} />
           </div>
         </div>
       </section>
@@ -326,49 +449,91 @@ export function SystemPage() {
 
             <Card className='border border-border/80 bg-card/85 shadow-sm'>
               <CardHeader className='border-b border-border/60 pb-4'>
-                <CardTitle>Device activity</CardTitle>
-                <CardDescription>Latest polling outcome for each configured BMS definition.</CardDescription>
+                <div className='flex items-center gap-2'>
+                  <RefreshCcw className='h-4 w-4 text-muted-foreground' />
+                  <div>
+                    <CardTitle>Software update</CardTitle>
+                    <CardDescription>Check for new releases and install updates from GitHub.</CardDescription>
+                  </div>
+                </div>
               </CardHeader>
-              <CardContent className='space-y-3 pt-5'>
-                {status.devices.length > 0 ? status.devices.map((device) => (
-                  <article key={device.deviceId} className='rounded-2xl border border-border/70 bg-background/60 p-4'>
-                    <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
-                      <div>
-                        <div className='flex flex-wrap items-center gap-2'>
-                          <h3 className='text-sm font-semibold text-foreground'>{device.displayName}</h3>
-                          {device.isMaster ? <span className='rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary'>Master</span> : null}
-                          {!device.enabled ? <span className='rounded-full border border-border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>Disabled</span> : null}
+              <CardContent className='space-y-4 pt-5'>
+                {updateChecking && !updateCheck ? (
+                  <div className='flex items-center justify-center py-6'>
+                    <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
+                  </div>
+                ) : updateCheck ? (
+                  <>
+                    <DetailTile label='Installed release' value={updateCheck.currentReleaseTag ?? noDataLabel} />
+                    <DetailTile label='Installed commit' value={formatCommit(updateCheck.currentSourceRevision)} />
+                    {updateCheck.currentBuiltAt ? <DetailTile label='Built at' value={formatTimestamp(updateCheck.currentBuiltAt)} /> : null}
+
+                    {updateCheck.checkError ? (
+                      <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
+                        Update check failed: {updateCheck.checkError}
+                      </div>
+                    ) : updateCheck.updateAvailable ? (
+                      <div className='rounded-xl border border-primary/20 bg-primary/10 px-3 py-2 text-sm text-primary'>
+                        <div className='flex items-center gap-2'>
+                          <Download className='h-4 w-4' />
+                          A new version is available.
                         </div>
-                        <div className='mt-1 text-xs font-mono text-muted-foreground'>{device.deviceId} • {device.protocolHandler ?? device.profileId}</div>
+                        {updateCheck.remoteReleasePublishedAt ? (
+                          <div className='mt-1 text-xs text-primary/80'>Published {formatTimestamp(updateCheck.remoteReleasePublishedAt)}</div>
+                        ) : null}
                       </div>
-                      <div className={cn('inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em]', getOutcomeClassName(device.lastOutcome))}>
-                        {device.lastOutcome}
-                      </div>
-                    </div>
-
-                    <div className='mt-4 grid gap-3 md:grid-cols-3'>
-                      <DetailTile label='Last poll' value={formatTimestamp(device.lastPollCompletedAt)} />
-                      <DetailTile label='Persisted' value={formatTimestamp(device.lastPersistedAt)} />
-                      <DetailTile label='Interval' value={`${device.pollIntervalMilliseconds.toLocaleString()} ms`} />
-                    </div>
-
-                    <div className='mt-4 grid gap-3 md:grid-cols-3'>
-                      <DetailTile label='Voltage' value={formatDecimalValue(device.latestTelemetry?.totalVoltageVolts, 'V')} />
-                      <DetailTile label='Current' value={formatDecimalValue(device.latestTelemetry?.currentAmps, 'A')} />
-                      <DetailTile label='State of charge' value={formatDecimalValue(device.latestTelemetry?.stateOfChargePercent, '%')} />
-                    </div>
-
-                    {device.lastError ? (
-                      <div className='mt-4 rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
-                        {device.lastError}
+                    ) : updateCheck.localChecksum && updateCheck.remoteChecksum ? (
+                      <div className='rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200 flex items-center gap-2'>
+                        <CheckCircle2 className='h-4 w-4' />
+                        You are running the latest version.
                       </div>
                     ) : null}
-                  </article>
-                )) : (
-                  <div className='rounded-2xl border border-dashed border-border bg-background/40 px-5 py-10 text-center text-sm text-muted-foreground'>
-                    No devices configured yet.
-                  </div>
+
+                    {!updateCheck.canUpdate ? (
+                      <div className='rounded-xl border border-border bg-muted/70 px-3 py-2 text-xs text-muted-foreground'>
+                        {updateCheck.reason}
+                      </div>
+                    ) : null}
+
+                    {updateProgress ? (
+                      <div className={cn(
+                        'rounded-xl border px-3 py-2 text-xs flex items-center gap-2',
+                        updateProgress.success === true ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                          : updateProgress.success === false ? 'border-rose-500/20 bg-rose-500/10 text-rose-200'
+                          : 'border-primary/20 bg-primary/10 text-primary'
+                      )}>
+                        {updateProgress.isRunning ? <LoaderCircle className='h-3.5 w-3.5 animate-spin' /> : updateProgress.success ? <CheckCircle2 className='h-3.5 w-3.5' /> : <XCircle className='h-3.5 w-3.5' />}
+                        {updateProgress.stage}
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <div className='text-sm text-muted-foreground'>Unable to check for updates.</div>
                 )}
+
+                <div className='flex gap-2 pt-2'>
+                  <button
+                    type='button'
+                    disabled={updateChecking}
+                    onClick={() => void checkForUpdate()}
+                    className='inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
+                  >
+                    {updateChecking ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <RefreshCcw className='h-4 w-4' />}
+                    Check for updates
+                  </button>
+
+                  {updateCheck?.canUpdate && updateCheck?.updateAvailable ? (
+                    <button
+                      type='button'
+                      disabled={updateInstalling || (updateProgress?.isRunning ?? false)}
+                      onClick={() => void installUpdate()}
+                      className='inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
+                    >
+                      {updateInstalling || updateProgress?.isRunning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Download className='h-4 w-4' />}
+                      Install update
+                    </button>
+                  ) : null}
+                </div>
               </CardContent>
             </Card>
           </div>
@@ -376,36 +541,79 @@ export function SystemPage() {
           <div className='space-y-6'>
             <Card className='border border-border/80 bg-card/85 shadow-sm'>
               <CardHeader className='border-b border-border/60 pb-4'>
-                <CardTitle>Host profile</CardTitle>
-                <CardDescription>Static runtime details and hardware characteristics for the current machine.</CardDescription>
+                <div className='flex items-center gap-2'>
+                  <Usb className='h-4 w-4 text-muted-foreground' />
+                  <div>
+                    <CardTitle>Connected interfaces</CardTitle>
+                    <CardDescription>Serial ports, block devices, and network adapters detected on this host.</CardDescription>
+                  </div>
+                </div>
               </CardHeader>
-              <CardContent className='grid gap-4 pt-5'>
-                <DetailTile label='Service' value={status.serviceName} />
-                <DetailTile label='Environment' value={status.environmentName} />
-                <DetailTile label='Startup mode' value={status.startupMode} />
-                <DetailTile label='Release tag' value={releaseTag} />
-                <DetailTile label='Commit' value={formatCommit(sourceRevisionId)} />
-                <DetailTile label='Workflow run' value={workflowRun} />
-                <DetailTile label='Last report' value={latestReport} />
-                <DetailTile label='Service uptime' value={formatDuration(status.startedAt, status.reportedAt)} />
-                <DetailTile label='CPU current speed' value={formatFrequency(metrics?.cpuCurrentClockSpeedMegahertz)} />
-                <DetailTile label='CPU max speed' value={formatFrequency(metrics?.cpuMaxClockSpeedMegahertz)} />
-                <DetailTile label='CPU cores' value={formatWholeNumber(metrics?.cpuCoreCount)} />
-                <DetailTile label='Fan speed' value={formatRpm(metrics?.mainFanSpeedRpm)} />
-                <DetailTile label='Temperature' value={formatDecimalValue(metrics?.systemTemperatureCelsius, '°C')} />
-              </CardContent>
-            </Card>
+              <CardContent className='space-y-4 pt-5'>
+                {interfaces ? (
+                  <>
+                    {interfaces.serialPorts.length > 0 ? (
+                      <div className='space-y-2'>
+                        <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>Serial ports</div>
+                        {interfaces.serialPorts.map((port) => (
+                          <div key={port.name} className='rounded-2xl border border-border/70 bg-background/50 px-4 py-3'>
+                            <div className='text-sm font-semibold text-foreground font-mono'>{port.name}</div>
+                            {port.description ? <div className='mt-1 text-xs text-muted-foreground'>{port.description}</div> : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className='rounded-2xl border border-dashed border-border bg-background/40 px-4 py-3 text-center text-xs text-muted-foreground'>
+                        No serial ports detected.
+                      </div>
+                    )}
 
-            <Card className='border border-border/80 bg-card/85 shadow-sm'>
-              <CardHeader className='border-b border-border/60 pb-4'>
-                <CardTitle>Polling summary</CardTitle>
-                <CardDescription>Quick view of how many configured devices are active and reporting.</CardDescription>
-              </CardHeader>
-              <CardContent className='grid gap-3 pt-5'>
-                <DetailTile label='Configured devices' value={status.configuredDeviceCount.toLocaleString()} />
-                <DetailTile label='Enabled devices' value={status.enabledDeviceCount.toLocaleString()} />
-                <DetailTile label='Healthy devices' value={healthyDevices.toLocaleString()} />
-                <DetailTile label='Devices needing attention' value={failingDevices.toLocaleString()} />
+                    {interfaces.blockDevices.length > 0 ? (
+                      <div className='space-y-2'>
+                        <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>Block devices</div>
+                        {interfaces.blockDevices.map((dev) => (
+                          <div key={dev.name} className='rounded-2xl border border-border/70 bg-background/50 px-4 py-3'>
+                            <div className='flex items-center justify-between'>
+                              <div className='text-sm font-semibold text-foreground font-mono'>{dev.name}</div>
+                              <div className='text-xs text-muted-foreground'>{dev.sizeFormatted}</div>
+                            </div>
+                            {dev.model ? <div className='mt-1 text-xs text-muted-foreground'>{dev.model}</div> : null}
+                            {dev.readOnly ? <div className='mt-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-400'>Read-only</div> : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+
+                    {interfaces.networkInterfaces.length > 0 ? (
+                      <div className='space-y-2'>
+                        <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>Network adapters</div>
+                        {interfaces.networkInterfaces.map((ni) => (
+                          <div key={ni.name} className='rounded-2xl border border-border/70 bg-background/50 px-4 py-3'>
+                            <div className='flex items-center justify-between'>
+                              <div className='text-sm font-semibold text-foreground font-mono'>{ni.name}</div>
+                              <div className={cn('text-[10px] font-semibold uppercase tracking-[0.18em]', ni.status === 'Up' ? 'text-emerald-400' : 'text-muted-foreground')}>
+                                {ni.status}
+                              </div>
+                            </div>
+                            {ni.type ? <div className='mt-1 text-xs text-muted-foreground'>{ni.type}{ni.speedMbps ? ` • ${ni.speedMbps} Mbps` : ''}</div> : null}
+                            {ni.macAddress ? <div className='mt-0.5 text-xs text-muted-foreground font-mono'>{ni.macAddress.replace(/(.{2})(?=.)/g, '$1:')}</div> : null}
+                            {ni.addresses.length > 0 ? (
+                              <div className='mt-1 space-y-0.5'>
+                                {ni.addresses.map((addr) => (
+                                  <div key={addr} className='text-xs text-foreground font-mono'>{addr}</div>
+                                ))}
+                              </div>
+                            ) : null}
+                          </div>
+                        ))}
+                      </div>
+                    ) : null}
+                  </>
+                ) : (
+                  <div className='flex items-center justify-center py-6'>
+                    <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
+                  </div>
+                )}
               </CardContent>
             </Card>
 
@@ -746,17 +954,4 @@ function getDerivedUsedBytes(totalBytes: number | null | undefined, availableByt
   }
 
   return Math.max(totalBytes - availableBytes, 0);
-}
-
-function getOutcomeClassName(outcome: string) {
-  switch (outcome) {
-    case 'Succeeded':
-      return 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-300';
-    case 'PersistFailed':
-      return 'border border-amber-500/20 bg-amber-500/10 text-amber-300';
-    case 'Failed':
-      return 'border border-rose-500/20 bg-rose-500/10 text-rose-300';
-    default:
-      return 'border border-border bg-muted/70 text-muted-foreground';
-  }
 }

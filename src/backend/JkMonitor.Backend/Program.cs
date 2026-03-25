@@ -24,6 +24,7 @@ builder.Services.AddSingleton<JkMonitor.Backend.Services.HostSystemMonitoringSer
 builder.Services.AddSingleton<JkMonitor.Backend.Services.IBuildMetadataProvider, JkMonitor.Backend.Services.AssemblyBuildMetadataProvider>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.DeviceStateStore>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.ManagedRestartService>();
+builder.Services.AddSingleton<JkMonitor.Backend.Services.SystemUpdateService>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.PollTrigger>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.CellVoltageSmoothingFilter>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.ExpressionEvaluator>();

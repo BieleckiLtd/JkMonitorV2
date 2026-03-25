@@ -1,0 +1,263 @@
+using System.Diagnostics;
+using System.Net.Http.Json;
+using System.Text.Json;
+using System.Text.Json.Serialization;
+
+namespace JkMonitor.Backend.Services;
+
+public sealed class SystemUpdateService(
+    IHttpClientFactory httpClientFactory,
+    IBuildMetadataProvider buildMetadataProvider,
+    ManagedRestartService managedRestartService,
+    IHostApplicationLifetime applicationLifetime,
+    ILogger<SystemUpdateService> logger)
+{
+    private const string Repository = "BieleckiLtd/JkMonitorV2";
+    private const string ReleaseTag = "dev-latest";
+    private const string AssetName = "jkmonitor-backend-linux-arm64.tar.gz";
+    private const string ChecksumAssetName = AssetName + ".sha256";
+    private const string InstallerScriptUrl = $"https://raw.githubusercontent.com/{Repository}/dev/scripts/install-from-release.sh";
+    private const string ReleaseApiUrl = $"https://api.github.com/repos/{Repository}/releases/tags/{ReleaseTag}";
+
+    private UpdateProgress? _currentProgress;
+    private readonly Lock _lock = new();
+
+    public UpdateCheckResult CheckForUpdate()
+    {
+        var build = buildMetadataProvider.GetBuildInfo();
+        var canUpdate = managedRestartService.IsManagedInstall && OperatingSystem.IsLinux();
+
+        return new UpdateCheckResult
+        {
+            CurrentReleaseTag = build.ReleaseTag,
+            CurrentSourceRevision = build.SourceRevisionId,
+            CurrentBuiltAt = build.BuiltAt,
+            CanUpdate = canUpdate,
+            Reason = canUpdate ? null : "In-app update is only available on managed Linux installs."
+        };
+    }
+
+    public async Task<UpdateCheckResult> CheckForUpdateAsync(CancellationToken cancellationToken)
+    {
+        var result = CheckForUpdate();
+
+        try
+        {
+            using var client = httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("User-Agent", "JkMonitor");
+
+            var release = await client.GetFromJsonAsync<GitHubRelease>(ReleaseApiUrl, cancellationToken);
+            if (release is not null)
+            {
+                var checksumAsset = release.Assets?.FirstOrDefault(a =>
+                    string.Equals(a.Name, ChecksumAssetName, StringComparison.OrdinalIgnoreCase));
+
+                string? remoteChecksum = null;
+                if (checksumAsset?.BrowserDownloadUrl is not null)
+                {
+                    var checksumContent = await client.GetStringAsync(checksumAsset.BrowserDownloadUrl, cancellationToken);
+                    remoteChecksum = checksumContent.Split(' ', 2)[0].Trim();
+                }
+
+                var localChecksum = GetLocalChecksum();
+
+                result.RemoteReleasePublishedAt = release.PublishedAt;
+                result.RemoteChecksum = remoteChecksum;
+                result.LocalChecksum = localChecksum;
+                result.UpdateAvailable = remoteChecksum is not null
+                    && localChecksum is not null
+                    && !string.Equals(remoteChecksum, localChecksum, StringComparison.OrdinalIgnoreCase);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to check for updates from GitHub.");
+            result.CheckError = ex.Message;
+        }
+
+        return result;
+    }
+
+    public UpdateProgress? GetProgress()
+    {
+        lock (_lock) return _currentProgress;
+    }
+
+    public bool StartUpdate()
+    {
+        if (!managedRestartService.IsManagedInstall || !OperatingSystem.IsLinux())
+        {
+            return false;
+        }
+
+        lock (_lock)
+        {
+            if (_currentProgress is { IsRunning: true })
+            {
+                return false;
+            }
+
+            _currentProgress = new UpdateProgress { IsRunning = true, Stage = "Starting update…" };
+        }
+
+        _ = Task.Run(RunUpdateAsync);
+        return true;
+    }
+
+    private async Task RunUpdateAsync()
+    {
+        try
+        {
+            SetProgress("Downloading installer script…");
+
+            var installRoot = GetInstallRoot();
+            if (installRoot is null)
+            {
+                SetProgress("Failed: cannot determine install root.", done: true, success: false);
+                return;
+            }
+
+            var destination = Directory.GetParent(installRoot)?.FullName ?? installRoot;
+
+            SetProgress("Running install-from-release…");
+
+            var env = new Dictionary<string, string>
+            {
+                ["JKMONITOR_REUSE_EXISTING_CONFIGURATION"] = "yes",
+                ["JKMONITOR_INSTALL_RUNTIME"] = "no",
+                ["JKMONITOR_INSTALL_SERVICE"] = "yes"
+            };
+
+            var psi = new ProcessStartInfo
+            {
+                FileName = "/bin/bash",
+                Arguments = $"-c \"wget -qO- '{InstallerScriptUrl}' | bash -s -- https://github.com/{Repository} {ReleaseTag} '{destination}'\"",
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+                WorkingDirectory = destination
+            };
+
+            foreach (var kv in env)
+            {
+                psi.Environment[kv.Key] = kv.Value;
+            }
+
+            using var process = Process.Start(psi);
+            if (process is null)
+            {
+                SetProgress("Failed: could not start installer process.", done: true, success: false);
+                return;
+            }
+
+            var output = await process.StandardOutput.ReadToEndAsync();
+            var errors = await process.StandardError.ReadToEndAsync();
+            await process.WaitForExitAsync();
+
+            if (process.ExitCode != 0)
+            {
+                var lastLines = string.Join('\n', (output + "\n" + errors).Split('\n').TakeLast(5));
+                logger.LogError("Update installer failed with exit code {ExitCode}. Output: {Output}", process.ExitCode, output + "\n" + errors);
+                SetProgress($"Failed (exit code {process.ExitCode}): {lastLines}", done: true, success: false);
+                return;
+            }
+
+            SetProgress("Update installed. Restarting service…", done: true, success: true);
+            logger.LogInformation("Update installed successfully. Scheduling restart.");
+
+            await Task.Delay(TimeSpan.FromSeconds(1));
+            applicationLifetime.StopApplication();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "In-app update failed.");
+            SetProgress($"Failed: {ex.Message}", done: true, success: false);
+        }
+    }
+
+    private void SetProgress(string stage, bool done = false, bool? success = null)
+    {
+        lock (_lock)
+        {
+            _currentProgress = new UpdateProgress
+            {
+                IsRunning = !done,
+                Stage = stage,
+                Success = success
+            };
+        }
+    }
+
+    private string? GetLocalChecksum()
+    {
+        var installRoot = GetInstallRoot();
+        if (installRoot is null) return null;
+
+        var releaseInfoPath = Path.Combine(Directory.GetParent(installRoot)?.FullName ?? installRoot, "release-info.env");
+        if (!File.Exists(releaseInfoPath)) return null;
+
+        foreach (var line in File.ReadLines(releaseInfoPath))
+        {
+            if (line.StartsWith("RELEASE_SHA256=", StringComparison.OrdinalIgnoreCase))
+            {
+                var value = line["RELEASE_SHA256=".Length..].Trim().Trim('"', '\'');
+                if (!string.IsNullOrWhiteSpace(value)) return value;
+            }
+        }
+
+        return null;
+    }
+
+    private string? GetInstallRoot()
+    {
+        var contentRoot = Path.GetDirectoryName(typeof(Program).Assembly.Location);
+        if (contentRoot is null) return null;
+        return contentRoot;
+    }
+}
+
+public sealed class UpdateCheckResult
+{
+    public string? CurrentReleaseTag { get; set; }
+    public string? CurrentSourceRevision { get; set; }
+    public string? CurrentBuiltAt { get; set; }
+    public bool CanUpdate { get; set; }
+    public string? Reason { get; set; }
+    public bool UpdateAvailable { get; set; }
+    public string? RemoteReleasePublishedAt { get; set; }
+    public string? RemoteChecksum { get; set; }
+    public string? LocalChecksum { get; set; }
+    public string? CheckError { get; set; }
+}
+
+public sealed class UpdateProgress
+{
+    public bool IsRunning { get; set; }
+    public string Stage { get; set; } = "";
+    public bool? Success { get; set; }
+}
+
+file sealed class GitHubRelease
+{
+    [JsonPropertyName("tag_name")]
+    public string? TagName { get; set; }
+
+    [JsonPropertyName("published_at")]
+    public string? PublishedAt { get; set; }
+
+    [JsonPropertyName("assets")]
+    public List<GitHubAsset>? Assets { get; set; }
+}
+
+file sealed class GitHubAsset
+{
+    [JsonPropertyName("name")]
+    public string? Name { get; set; }
+
+    [JsonPropertyName("browser_download_url")]
+    public string? BrowserDownloadUrl { get; set; }
+
+    [JsonPropertyName("size")]
+    public long Size { get; set; }
+}
