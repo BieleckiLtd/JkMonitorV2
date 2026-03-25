@@ -87,4 +87,31 @@ public sealed class DeviceDefinitionLoader
     /// </summary>
     public IReadOnlyDictionary<string, DeviceDefinition> GetAll()
         => _definitions;
+
+    /// <summary>
+    /// Save a device definition JSON to the definitions directory and load it into the cache.
+    /// </summary>
+    public DeviceDefinition SaveAndLoad(string json)
+    {
+        var definition = JsonSerializer.Deserialize<DeviceDefinition>(json, JsonOptions)
+            ?? throw new InvalidOperationException("Invalid device definition JSON.");
+
+        if (string.IsNullOrWhiteSpace(definition.Device.Id))
+            throw new InvalidOperationException("Device definition must have a device.id.");
+
+        var fileName = $"{definition.Device.Id}.json";
+        if (fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
+            throw new InvalidOperationException("Device definition id contains invalid file name characters.");
+
+        if (!Directory.Exists(_definitionsPath))
+            Directory.CreateDirectory(_definitionsPath);
+
+        var path = Path.Combine(_definitionsPath, fileName);
+        File.WriteAllText(path, json);
+
+        _definitions[definition.Device.Id] = definition;
+        _logger.LogInformation("Saved and loaded device definition '{Id}' to {File}.", definition.Device.Id, fileName);
+
+        return definition;
+    }
 }

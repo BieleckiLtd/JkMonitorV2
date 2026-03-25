@@ -19,3 +19,4 @@ build/
 artifacts/
 appsettings.Local.json
 appsettings.*.Local.json
+Docs/

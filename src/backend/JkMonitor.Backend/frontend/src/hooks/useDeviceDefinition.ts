@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { DeviceDefinition, DeviceDefinitionSummary } from '../types/deviceDefinition';
 
 /** In-memory cache for loaded definitions (survives re-renders, cleared on page reload). */
@@ -48,26 +48,26 @@ export function useDeviceDefinition(definitionId: string | null | undefined) {
 
 /**
  * Fetches the list of all available device definition summaries.
+ * Returns { definitions, refresh } where refresh reloads from the server.
  */
 export function useDeviceDefinitions() {
   const [definitions, setDefinitions] = useState<DeviceDefinitionSummary[]>([]);
   const loaded = useRef(false);
 
-  useEffect(() => {
-    if (loaded.current) return;
-    loaded.current = true;
-
-    const load = async () => {
-      try {
-        const resp = await fetch('/api/definitions');
-        if (!resp.ok) return;
-        const data = (await resp.json()) as DeviceDefinitionSummary[];
-        setDefinitions(data);
-      } catch { /* ignore */ }
-    };
-
-    void load();
+  const load = useCallback(async () => {
+    try {
+      const resp = await fetch('/api/definitions');
+      if (!resp.ok) return;
+      const data = (await resp.json()) as DeviceDefinitionSummary[];
+      setDefinitions(data);
+      loaded.current = true;
+    } catch { /* ignore */ }
   }, []);
 
-  return definitions;
+  useEffect(() => {
+    if (loaded.current) return;
+    void load();
+  }, [load]);
+
+  return { definitions, refresh: load };
 }

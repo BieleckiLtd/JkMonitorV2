@@ -175,6 +175,8 @@ public sealed class DevicesController(
         if (device is null)
             return NotFound(new { message = $"Device '{deviceId}' not found in configuration." });
 
+        IReadOnlyList<DeviceConfiguration> allDevices;
+
         if (!device.Enabled)
         {
             var updatedDevices = configState.Devices.Select(d =>
@@ -193,11 +195,14 @@ public sealed class DevicesController(
                     : d).ToList();
 
             setupConfigurationService.SaveDevices(new SaveDeviceConfigurationRequest { Devices = updatedDevices });
-            device = updatedDevices.First(d => string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase));
+            allDevices = updatedDevices;
+        }
+        else
+        {
+            allDevices = configState.Devices;
         }
 
-        // Apply configuration (starts the device polling loop)
-        var allDevices = setupConfigurationService.GetDeviceConfiguration().Devices;
+        // Apply using the in-memory device list (avoids config file-watcher race)
         await orchestrator.ApplyConfigurationAsync(allDevices, cancellationToken);
 
         // Wait for the first poll result (up to ~8 seconds)
@@ -247,6 +252,8 @@ public sealed class DevicesController(
         if (device is null)
             return NotFound(new { message = $"Device '{deviceId}' not found in configuration." });
 
+        IReadOnlyList<DeviceConfiguration> allDevices;
+
         if (device.Enabled)
         {
             var updatedDevices = configState.Devices.Select(d =>
@@ -265,10 +272,14 @@ public sealed class DevicesController(
                     : d).ToList();
 
             setupConfigurationService.SaveDevices(new SaveDeviceConfigurationRequest { Devices = updatedDevices });
+            allDevices = updatedDevices;
+        }
+        else
+        {
+            allDevices = configState.Devices;
         }
 
-        // Apply configuration (stops the device polling loop)
-        var allDevices = setupConfigurationService.GetDeviceConfiguration().Devices;
+        // Apply using the in-memory device list (avoids config file-watcher race)
         await orchestrator.ApplyConfigurationAsync(allDevices, cancellationToken);
 
         return Ok(new { deviceId, stopped = true, message = "Device stopped." });

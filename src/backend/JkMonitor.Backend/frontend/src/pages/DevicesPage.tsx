@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback } from 'react';
-import { Database, LoaderCircle, Play, Plus, Save, Square, Trash2 } from 'lucide-react';
+import { useEffect, useState, useCallback, useRef } from 'react';
+import { Check, Database, LoaderCircle, Play, Plus, Square, Trash2, Upload, X } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { useDeviceDefinitions } from '../hooks/useDeviceDefinition';
@@ -41,6 +41,8 @@ type DeviceDefinitionSummary = {
   name: string;
   manufacturer: string;
   model: string;
+  category?: string;
+  description?: string;
   transportType: string;
 };
 
@@ -58,9 +60,9 @@ type SchemaValidation = {
   isEmpty: boolean;
 };
 
-const defaultDevice = (index: number, definitionId: string): DeviceConfiguration => ({
+const defaultDevice = (index: number, definitionId: string, definitionName?: string): DeviceConfiguration => ({
   deviceId: `device-${index}`,
-  displayName: `Battery ${index}`,
+  displayName: definitionName ?? `Battery ${index}`,
   definitionId,
   transportPortName: '',
   databaseName: '',
@@ -77,12 +79,10 @@ function needsSerialPort(device: DeviceConfiguration, definitions: DeviceDefinit
 }
 
 export function DevicesPage() {
-  const availableDefinitions = useDeviceDefinitions();
+  const { definitions: availableDefinitions, refresh: refreshDefinitions } = useDeviceDefinitions();
   const [devices, setDevices] = useState<DeviceConfiguration[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [isSaving, setIsSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [saveMessage, setSaveMessage] = useState<string | null>(null);
   const [ports, setPorts] = useState<string[]>([]);
   const [defaultPort, setDefaultPort] = useState('');
   const [deviceActions, setDeviceActions] = useState<Record<string, { loading: boolean; result?: StartStopResult }>>({});
@@ -91,6 +91,18 @@ export function DevicesPage() {
   const [dbValidations, setDbValidations] = useState<Record<string, SchemaValidation | null>>({});
   const [dbCreating, setDbCreating] = useState<Record<string, boolean>>({});
   const [dbCreateMsg, setDbCreateMsg] = useState<Record<string, string | null>>({});
+
+  // Add device picker state
+  const [showAddPicker, setShowAddPicker] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Auto-save state
+  const [saveDirty, setSaveDirty] = useState(0);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const initialLoadDone = useRef(false);
+  const devicesRef = useRef(devices);
+  devicesRef.current = devices;
 
   const loadPorts = useCallback(async () => {
     try {
@@ -156,34 +168,26 @@ export function DevicesPage() {
     }
   }, [loadDatabases, validateDatabase]);
 
+  // Load initial data
   useEffect(() => {
     let isMounted = true;
 
     const loadDevices = async () => {
       try {
         const response = await fetch('/api/devices/config');
-
-        if (!response.ok) {
-          throw new Error('Unable to load device configuration.');
-        }
-
+        if (!response.ok) throw new Error('Unable to load device configuration.');
         const data = (await response.json()) as DeviceConfigurationResponse;
-
-        if (!isMounted) {
-          return;
-        }
-
+        if (!isMounted) return;
         setDevices(data.devices);
         setLoadError(null);
       } catch (error) {
-        if (!isMounted) {
-          return;
-        }
-
+        if (!isMounted) return;
         setLoadError(error instanceof Error ? error.message : 'Unable to load device configuration.');
       } finally {
         if (isMounted) {
           setIsLoading(false);
+          // Delay to avoid auto-save triggering on initial load side-effects
+          setTimeout(() => { initialLoadDone.current = true; }, 200);
         }
       }
     };
@@ -192,9 +196,7 @@ export function DevicesPage() {
     void loadPorts();
     void loadDatabases();
 
-    return () => {
-      isMounted = false;
-    };
+    return () => { isMounted = false; };
   }, [loadPorts, loadDatabases]);
 
   // Load DB suggestions for devices with definitions
@@ -206,88 +208,84 @@ export function DevicesPage() {
     }
   }, [devices, dbSuggestions, loadDbSuggestion]);
 
-  useEffect(() => {
-    if (availableDefinitions.length === 0) {
-      return;
-    }
-
-    const defaultDefinition = availableDefinitions[0];
-    setDevices((currentDevices) => currentDevices.map((device) => {
-      if (device.definitionId) {
-        return device;
+  // Auto-save function (reads latest devices from ref)
+  const saveDevicesNow = useCallback(async (devicesToSave?: DeviceConfiguration[]) => {
+    const payload = devicesToSave ?? devicesRef.current;
+    try {
+      setAutoSaveStatus('saving');
+      const response = await fetch('/api/devices/config', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ devices: payload }),
+      });
+      if (response.ok) {
+        const data = (await response.json()) as DeviceConfigurationResponse;
+        setDevices(data.devices);
+        setAutoSaveStatus('saved');
+        setTimeout(() => setAutoSaveStatus(prev => prev === 'saved' ? 'idle' : prev), 2000);
+      } else {
+        setAutoSaveStatus('error');
       }
+    } catch {
+      setAutoSaveStatus('error');
+    }
+  }, []);
 
-      return {
-        ...device,
-        definitionId: defaultDefinition.id,
-      };
-    }));
-  }, [availableDefinitions]);
+  // Debounced auto-save triggered by dirty counter
+  useEffect(() => {
+    if (!initialLoadDone.current || saveDirty === 0) return;
+    const timer = setTimeout(() => { void saveDevicesNow(); }, 600);
+    return () => clearTimeout(timer);
+  }, [saveDirty, saveDevicesNow]);
+
+  const markDirty = useCallback(() => {
+    setSaveDirty(d => d + 1);
+  }, []);
 
   const updateDevice = <K extends keyof DeviceConfiguration>(index: number, key: K, value: DeviceConfiguration[K]) => {
-    setDevices((currentDevices) => currentDevices.map((device, currentIndex) => {
-      if (currentIndex !== index) {
-        return device;
-      }
-
-      return {
-        ...device,
-        [key]: value,
-      };
+    setDevices(currentDevices => currentDevices.map((device, currentIndex) => {
+      if (currentIndex !== index) return device;
+      return { ...device, [key]: value };
     }));
+    markDirty();
   };
 
-  const addDevice = () => {
-    const defId = availableDefinitions[0]?.id ?? 'jk-inverter-bms';
-    setDevices((currentDevices) => [...currentDevices, defaultDevice(currentDevices.length + 1, defId)]);
-    setSaveMessage(null);
+  const addDeviceFromDefinition = (definitionId: string) => {
+    const def = availableDefinitions.find(d => d.id === definitionId);
+    setDevices(currentDevices => [...currentDevices, defaultDevice(currentDevices.length + 1, definitionId, def?.name)]);
+    setShowAddPicker(false);
+    markDirty();
+  };
+
+  const handleUploadDefinition = async (file: File) => {
+    setUploadError(null);
+    try {
+      const formData = new FormData();
+      formData.append('file', file);
+      const resp = await fetch('/api/definitions/upload', { method: 'POST', body: formData });
+      const data = (await resp.json()) as { id?: string; name?: string; message?: string };
+      if (!resp.ok) throw new Error(data.message ?? 'Upload failed');
+      await refreshDefinitions();
+      if (data.id) addDeviceFromDefinition(data.id);
+    } catch (err) {
+      setUploadError(err instanceof Error ? err.message : 'Upload failed');
+    }
   };
 
   const removeDevice = (index: number) => {
-    setDevices((currentDevices) => currentDevices.filter((_, currentIndex) => currentIndex !== index));
-    setSaveMessage(null);
-  };
-
-  const saveDevices = async () => {
-    setIsSaving(true);
-    setSaveMessage(null);
-
-    try {
-      const response = await fetch('/api/devices/config', {
-        method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ devices }),
-      });
-
-      const payload = await response.json() as DeviceConfigurationResponse | { message?: string };
-
-      if (!response.ok) {
-        throw new Error('message' in payload && payload.message ? payload.message : 'Unable to save device configuration.');
-      }
-
-      const data = payload as DeviceConfigurationResponse;
-      setDevices(data.devices);
-      setSaveMessage('Configuration saved.');
-    } catch (error) {
-      setSaveMessage(error instanceof Error ? error.message : 'Unable to save device configuration.');
-    } finally {
-      setIsSaving(false);
-    }
+    setDevices(currentDevices => currentDevices.filter((_, currentIndex) => currentIndex !== index));
+    markDirty();
   };
 
   const startDevice = async (deviceId: string) => {
     setDeviceActions(prev => ({ ...prev, [deviceId]: { loading: true } }));
     try {
-      // Save first to persist any unsaved changes
-      await saveDevices();
+      // Flush any pending changes immediately
+      await saveDevicesNow();
 
       const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/start`, { method: 'POST' });
       const data = (await resp.json()) as StartStopResult;
       setDeviceActions(prev => ({ ...prev, [deviceId]: { loading: false, result: data } }));
-
-      // Update local enabled state
       setDevices(prev => prev.map(d => d.deviceId === deviceId ? { ...d, enabled: true } : d));
     } catch (error) {
       setDeviceActions(prev => ({
@@ -306,8 +304,6 @@ export function DevicesPage() {
       const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/stop`, { method: 'POST' });
       const data = (await resp.json()) as StartStopResult;
       setDeviceActions(prev => ({ ...prev, [deviceId]: { loading: false, result: data } }));
-
-      // Update local enabled state
       setDevices(prev => prev.map(d => d.deviceId === deviceId ? { ...d, enabled: false } : d));
     } catch (error) {
       setDeviceActions(prev => ({
@@ -326,31 +322,100 @@ export function DevicesPage() {
         <div>
           <h2 className='text-3xl font-bold tracking-tight text-foreground'>Devices</h2>
           <p className='mt-2 text-sm text-muted-foreground'>
-            Add or remove devices and assign a device definition to drive polling, rendering, and storage.
+            Add or remove devices. Changes are saved automatically.
           </p>
+        </div>
+        <div className='flex items-center gap-3'>
+          {autoSaveStatus === 'saving' ? (
+            <span className='flex items-center gap-1.5 text-xs text-muted-foreground'>
+              <LoaderCircle className='h-3 w-3 animate-spin' /> Saving...
+            </span>
+          ) : autoSaveStatus === 'saved' ? (
+            <span className='flex items-center gap-1.5 text-xs text-emerald-500'>
+              <Check className='h-3 w-3' /> Saved
+            </span>
+          ) : autoSaveStatus === 'error' ? (
+            <span className='text-xs text-destructive'>Save failed</span>
+          ) : null}
         </div>
       </div>
 
       <div className='flex flex-wrap gap-3'>
-        <Button type='button' variant='outline' size='lg' onClick={addDevice}>
+        <Button type='button' variant='outline' size='lg' onClick={() => setShowAddPicker(true)}>
           <Plus className='h-4 w-4' />
           Add device
         </Button>
-        <Button type='button' size='lg' onClick={saveDevices} disabled={isLoading || isSaving}>
-          {isSaving ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Save className='h-4 w-4' />}
-          Save devices
-        </Button>
       </div>
+
+      {/* Add device picker */}
+      {showAddPicker ? (
+        <div className='rounded-2xl border border-border bg-card/70 p-5 shadow-sm'>
+          <div className='flex items-center justify-between mb-4'>
+            <h3 className='text-lg font-semibold text-foreground'>Add a new device</h3>
+            <Button type='button' variant='ghost' size='sm' onClick={() => { setShowAddPicker(false); setUploadError(null); }}>
+              <X className='h-4 w-4' />
+            </Button>
+          </div>
+
+          {availableDefinitions.length > 0 ? (
+            <div className='mb-4'>
+              <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground mb-3'>
+                From device library
+              </span>
+              <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3'>
+                {availableDefinitions.map(def => (
+                  <button
+                    key={def.id}
+                    type='button'
+                    className='flex flex-col gap-1 rounded-xl border border-border bg-muted/30 p-4 text-left transition hover:border-primary/50 hover:bg-muted/60'
+                    onClick={() => addDeviceFromDefinition(def.id)}
+                  >
+                    <span className='text-sm font-semibold text-foreground'>{def.name}</span>
+                    <span className='text-xs text-muted-foreground'>{def.manufacturer} · {def.model}</span>
+                    <span className='mt-1 text-[10px] uppercase tracking-wider text-muted-foreground/70'>
+                      {def.transportType}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          ) : null}
+
+          <div>
+            <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground mb-3'>
+              Upload definition JSON
+            </span>
+            <input
+              ref={fileInputRef}
+              type='file'
+              accept='.json'
+              className='hidden'
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file) void handleUploadDefinition(file);
+                e.target.value = '';
+              }}
+            />
+            <Button
+              type='button'
+              variant='outline'
+              onClick={() => fileInputRef.current?.click()}
+            >
+              <Upload className='h-4 w-4' />
+              Browse for .json file
+            </Button>
+            {uploadError ? (
+              <div className='mt-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive'>
+                {uploadError}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
 
       {loadError ? (
         <div className='rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive'>
           {loadError}
-        </div>
-      ) : null}
-
-      {saveMessage ? (
-        <div className='rounded-xl border border-border bg-muted/60 px-4 py-3 text-sm text-foreground'>
-          {saveMessage}
         </div>
       ) : null}
 
@@ -362,7 +427,9 @@ export function DevicesPage() {
         <div className='grid gap-4'>
           {devices.map((device, index) => {
             const action = deviceActions[device.deviceId];
-            const isSerial = needsSerialPort(device, availableDefinitions as DeviceDefinitionSummary[]);
+            const isSerial = needsSerialPort(device, availableDefinitions);
+            const isRunning = device.enabled;
+            const def = availableDefinitions.find(d => d.id === device.definitionId);
 
             return (
               <section key={`${device.deviceId}-${index}`} className='rounded-2xl border border-border bg-card/70 p-5 shadow-sm'>
@@ -370,16 +437,27 @@ export function DevicesPage() {
                   <div>
                     <div className='flex items-center gap-2'>
                       <h3 className='text-lg font-semibold text-foreground'>{device.displayName || `Device ${index + 1}`}</h3>
-                      {device.enabled ? (
+                      {isRunning ? (
                         <span className='rounded-full bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-500'>Running</span>
                       ) : (
                         <span className='rounded-full bg-muted border border-border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>Stopped</span>
                       )}
                     </div>
-                    <p className='mt-1 text-xs font-mono text-muted-foreground'>{device.deviceId || 'device-id-required'}</p>
+                    <div className='mt-1 flex items-center gap-2'>
+                      <span className='text-xs font-mono text-muted-foreground'>{device.deviceId || 'device-id-required'}</span>
+                      {def ? (
+                        <span className='rounded-md bg-primary/10 border border-primary/20 px-2 py-0.5 text-[10px] font-medium text-primary'>
+                          {def.name} ({def.model})
+                        </span>
+                      ) : device.definitionId ? (
+                        <span className='rounded-md bg-muted border border-border px-2 py-0.5 text-[10px] font-medium text-muted-foreground'>
+                          {device.definitionId}
+                        </span>
+                      ) : null}
+                    </div>
                   </div>
                   <div className='flex flex-wrap gap-2'>
-                    {device.enabled ? (
+                    {isRunning ? (
                       <Button
                         type='button'
                         variant='outline'
@@ -400,7 +478,7 @@ export function DevicesPage() {
                         Start
                       </Button>
                     )}
-                    <Button type='button' variant='destructive' onClick={() => removeDevice(index)}>
+                    <Button type='button' variant='destructive' onClick={() => removeDevice(index)} disabled={isRunning}>
                       <Trash2 className='h-4 w-4' />
                       Remove
                     </Button>
@@ -422,30 +500,19 @@ export function DevicesPage() {
                 <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-4'>
                   <label className='space-y-2 text-sm text-foreground'>
                     <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device ID</span>
-                    <Input value={device.deviceId} onChange={(event) => updateDevice(index, 'deviceId', event.target.value)} />
+                    <Input value={device.deviceId} disabled={isRunning} onChange={(event) => updateDevice(index, 'deviceId', event.target.value)} />
                   </label>
                   <label className='space-y-2 text-sm text-foreground'>
                     <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Display name</span>
                     <Input value={device.displayName} onChange={(event) => updateDevice(index, 'displayName', event.target.value)} />
                   </label>
-                  <label className='space-y-2 text-sm text-foreground'>
-                    <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device Definition</span>
-                    <select
-                      className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
-                      value={device.definitionId ?? availableDefinitions[0]?.id ?? ''}
-                      onChange={(event) => updateDevice(index, 'definitionId', event.target.value)}
-                    >
-                      {availableDefinitions.map(d => (
-                        <option key={d.id} value={d.id}>{d.name} ({d.model})</option>
-                      ))}
-                    </select>
-                  </label>
                   {isSerial ? (
                     <label className='space-y-2 text-sm text-foreground'>
                       <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Serial Port</span>
                       <select
-                        className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+                        className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50'
                         value={device.transportPortName ?? ''}
+                        disabled={isRunning}
                         onChange={(event) => updateDevice(index, 'transportPortName', event.target.value || null)}
                       >
                         <option value=''>Default ({defaultPort || 'auto'})</option>
@@ -462,6 +529,7 @@ export function DevicesPage() {
                       min={0}
                       max={255}
                       value={device.address}
+                      disabled={isRunning}
                       onChange={(event) => updateDevice(index, 'address', Number(event.target.value))}
                     />
                   </label>
@@ -494,51 +562,61 @@ export function DevicesPage() {
                           Database ({suggestion.provider})
                         </span>
                       </div>
-                      <div className='grid gap-4 md:grid-cols-2'>
-                        <label className='space-y-2 text-sm text-foreground'>
-                          <span className='block text-xs font-medium text-muted-foreground'>Database name</span>
-                          <div className='flex gap-2'>
-                            <select
-                              className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+
+                      <div className='flex items-start gap-3'>
+                        <div className='flex-1 max-w-sm'>
+                          <select
+                            className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50'
+                            value={currentDbName && dbExists ? currentDbName : (currentDbName ? '__custom__' : '')}
+                            disabled={isRunning}
+                            onChange={(event) => {
+                              const val = event.target.value;
+                              if (val === '__new__') {
+                                updateDevice(index, 'databaseName', suggestion.suggested || '');
+                                if (suggestion.suggested) void validateDatabase(device.deviceId, suggestion.suggested);
+                              } else if (val === '__custom__') {
+                                // keep current
+                              } else {
+                                updateDevice(index, 'databaseName', val || null);
+                                if (val) void validateDatabase(device.deviceId, val);
+                              }
+                            }}
+                          >
+                            <option value=''>Select a database...</option>
+                            {databases.map(db => (
+                              <option key={db} value={db}>{db}</option>
+                            ))}
+                            {currentDbName && !dbExists ? (
+                              <option value='__custom__'>{currentDbName} (new)</option>
+                            ) : null}
+                            <option value='__new__'>+ Create new database</option>
+                          </select>
+                        </div>
+
+                        {/* Show input + create button when name doesn't match an existing db */}
+                        {currentDbName && !dbExists && !isRunning ? (
+                          <div className='flex items-center gap-2'>
+                            <Input
+                              className='w-48'
                               value={currentDbName}
+                              placeholder={suggestion.suggested || 'database_name'}
                               onChange={(event) => {
                                 updateDevice(index, 'databaseName', event.target.value || null);
-                                if (event.target.value) void validateDatabase(device.deviceId, event.target.value);
                               }}
-                            >
-                              <option value=''>Select or create a database...</option>
-                              {suggestion.suggested && !databases.includes(suggestion.suggested) ? (
-                                <option value={suggestion.suggested}>✨ {suggestion.suggested} (create new)</option>
-                              ) : null}
-                              {databases.map(db => (
-                                <option key={db} value={db}>{db}</option>
-                              ))}
-                            </select>
-                          </div>
-                        </label>
-                        <label className='space-y-2 text-sm text-foreground'>
-                          <span className='block text-xs font-medium text-muted-foreground'>Or type a new name</span>
-                          <div className='flex gap-2'>
-                            <Input
-                              value={currentDbName}
-                              placeholder={suggestion.suggested || 'my_device_db'}
-                              onChange={(event) => updateDevice(index, 'databaseName', event.target.value || null)}
                             />
-                            {currentDbName && !dbExists ? (
-                              <Button
-                                type='button'
-                                variant='outline'
-                                size='sm'
-                                className='shrink-0'
-                                disabled={creating || !currentDbName}
-                                onClick={() => void createDatabase(device.deviceId, currentDbName, suggestion.provider)}
-                              >
-                                {creating ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Plus className='h-4 w-4' />}
-                                Create
-                              </Button>
-                            ) : null}
+                            <Button
+                              type='button'
+                              variant='outline'
+                              size='sm'
+                              className='shrink-0'
+                              disabled={creating || !currentDbName}
+                              onClick={() => void createDatabase(device.deviceId, currentDbName, suggestion.provider)}
+                            >
+                              {creating ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Plus className='h-4 w-4' />}
+                              Create
+                            </Button>
                           </div>
-                        </label>
+                        ) : null}
                       </div>
 
                       {createMsg ? (
@@ -579,12 +657,12 @@ export function DevicesPage() {
             );
           })}
 
-          {devices.length === 0 ? (
+          {devices.length === 0 && !showAddPicker ? (
             <div className='rounded-2xl border border-dashed border-border bg-card/40 px-6 py-12 text-center'>
               <div className='text-lg font-semibold text-foreground'>No devices configured</div>
-              <p className='mt-2 text-sm text-muted-foreground'>Create the first device and save to write an empty or populated device list back to JSON.</p>
+              <p className='mt-2 text-sm text-muted-foreground'>Add a device from the library or upload a definition JSON to get started.</p>
               <div className='mt-6'>
-                <Button type='button' onClick={addDevice}>
+                <Button type='button' onClick={() => setShowAddPicker(true)}>
                   <Plus className='h-4 w-4' />
                   Add first device
                 </Button>

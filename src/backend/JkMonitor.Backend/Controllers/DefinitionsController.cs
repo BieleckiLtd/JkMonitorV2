@@ -1,3 +1,4 @@
+using System.Text.Json;
 using JkMonitor.Backend.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -50,5 +51,42 @@ public sealed class DefinitionsController(DeviceDefinitionLoader definitionLoade
         }
 
         return Ok(pageDefinition);
+    }
+
+    [HttpPost("upload")]
+    public IActionResult Upload(IFormFile file)
+    {
+        if (file is null || file.Length == 0)
+            return BadRequest(new { message = "No file provided." });
+
+        using var reader = new StreamReader(file.OpenReadStream());
+        var json = reader.ReadToEnd();
+
+        try
+        {
+            var definition = definitionLoader.SaveAndLoad(json);
+            return Ok(new
+            {
+                definition.Device.Id,
+                definition.Device.Name,
+                definition.Device.Manufacturer,
+                definition.Device.Model,
+                definition.Device.Category,
+                definition.Device.Description,
+                definition.Device.Icon,
+                ProtocolType = definition.Connection.Protocol.Type,
+                TransportType = definition.Connection.Transport.Type,
+                EntityCount = definition.Entities.Count,
+                RegisterBankCount = definition.RegisterBanks.Count
+            });
+        }
+        catch (JsonException ex)
+        {
+            return BadRequest(new { message = $"Invalid JSON: {ex.Message}" });
+        }
+        catch (Exception ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
     }
 }
