@@ -328,8 +328,7 @@ public sealed class SetupConfigurationService(
             {
                 DeviceId = RequireValue(device.DeviceId, nameof(DeviceConfiguration.DeviceId), index),
                 DisplayName = RequireValue(device.DisplayName, nameof(DeviceConfiguration.DisplayName), index),
-                ProfileId = RequireValue(device.ProfileId, nameof(DeviceConfiguration.ProfileId), index),
-                DefinitionId = device.DefinitionId,
+                DefinitionId = RequireValue(device.DefinitionId, nameof(DeviceConfiguration.DefinitionId), index),
                 TransportPortName = device.TransportPortName,
                 DatabaseName = device.DatabaseName,
                 Address = device.Address,
@@ -372,7 +371,6 @@ public sealed class SetupConfigurationService(
         {
             DeviceId = device.DeviceId,
             DisplayName = device.DisplayName,
-            ProfileId = device.ProfileId,
             DefinitionId = device.DefinitionId,
             TransportPortName = device.TransportPortName,
             DatabaseName = device.DatabaseName,

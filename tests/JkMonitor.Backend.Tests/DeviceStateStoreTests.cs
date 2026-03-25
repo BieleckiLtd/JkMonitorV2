@@ -61,7 +61,7 @@ public class DeviceStateStoreTests
                     {
                         DeviceId = "device-01",
                         DisplayName = "Device 01",
-                        ProfileId = "jk-inverter-bms"
+                        DefinitionId = "jk-inverter-bms"
                     }
                 ]
             });
@@ -113,7 +113,7 @@ public class DeviceStateStoreTests
                 {
                     DeviceId = "device-01",
                     DisplayName = "Device 01",
-                    ProfileId = "jk-inverter-bms"
+                    DefinitionId = "jk-inverter-bms"
                 }
             ]
         };

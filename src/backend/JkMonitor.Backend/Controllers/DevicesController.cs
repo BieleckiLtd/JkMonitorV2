@@ -17,7 +17,6 @@ public sealed class DevicesController(
     DeviceDatabaseService deviceDatabaseService,
     GenericModbusPollingClient genericPollingClient,
     DeviceDefinitionLoader definitionLoader,
-    JkRs485PollingClient rs485PollingClient,
     ITelemetryRepository telemetryRepository,
     PollTrigger pollTrigger,
     IOptions<MonitorConfiguration> configuration) : ControllerBase
@@ -127,27 +126,11 @@ public sealed class DevicesController(
 
         try
         {
-            WriteRegisterResult result;
+            if (!definitionLoader.TryGet(device.DefinitionId, out var definition) || definition is null)
+                return BadRequest(new { message = $"Device definition '{device.DefinitionId}' not found." });
 
-            // Prefer definition-driven write when DefinitionId is configured
-            if (!string.IsNullOrEmpty(device.DefinitionId) &&
-                definitionLoader.TryGet(device.DefinitionId, out var definition) && definition is not null)
-            {
-                result = await genericPollingClient.WriteEntityAsync(
-                    device, definition, parameterKey, request.RawValue, cancellationToken);
-            }
-            else
-            {
-                // Fallback to legacy profile-based write
-                var profile = _configuration.DeviceProfiles.FirstOrDefault(p =>
-                    string.Equals(p.ProfileId, device.ProfileId, StringComparison.OrdinalIgnoreCase));
-
-                if (profile is null)
-                    return BadRequest(new { message = $"Profile '{device.ProfileId}' not found." });
-
-                result = await rs485PollingClient.WriteConfigRegisterAsync(
-                    device, profile, parameterKey, request.RawValue, cancellationToken);
-            }
+            var result = await genericPollingClient.WriteEntityAsync(
+                device, definition, parameterKey, request.RawValue, cancellationToken);
 
             pollTrigger.Signal();
             return Ok(result);
@@ -198,7 +181,7 @@ public sealed class DevicesController(
                 string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase)
                     ? new DeviceConfiguration
                     {
-                        DeviceId = d.DeviceId, DisplayName = d.DisplayName, ProfileId = d.ProfileId,
+                        DeviceId = d.DeviceId, DisplayName = d.DisplayName,
                         DefinitionId = d.DefinitionId, TransportPortName = d.TransportPortName,
                         DatabaseName = d.DatabaseName,
                         Address = d.Address, IsMaster = d.IsMaster,
@@ -270,7 +253,7 @@ public sealed class DevicesController(
                 string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase)
                     ? new DeviceConfiguration
                     {
-                        DeviceId = d.DeviceId, DisplayName = d.DisplayName, ProfileId = d.ProfileId,
+                        DeviceId = d.DeviceId, DisplayName = d.DisplayName,
                         DefinitionId = d.DefinitionId, TransportPortName = d.TransportPortName,
                         DatabaseName = d.DatabaseName,
                         Address = d.Address, IsMaster = d.IsMaster,

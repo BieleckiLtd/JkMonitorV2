@@ -6,7 +6,7 @@
     "id": "jk-inverter-bms",
     "name": "JK Inverter BMS",
     "manufacturer": "JK",
-    "model": "B2A8S20P",
+    "model": "JK-PB2A16S20P",
     "category": "energy-storage",
     "description": "JK Inverter BMS with RS485 Modbus RTU interface for LiFePO4 battery packs. Supports up to 32 cells, charge/discharge/balance control, and comprehensive protection.",
     "icon": "battery",

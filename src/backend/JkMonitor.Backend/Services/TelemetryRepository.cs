@@ -513,8 +513,8 @@ DO UPDATE SET
         command.Parameters.AddWithValue("sampled_at", sample.Snapshot.CollectedAt);
         command.Parameters.AddWithValue("device_id", device.DeviceId);
         command.Parameters.AddWithValue("display_name", device.DisplayName);
-        command.Parameters.AddWithValue("protocol", device.ProfileId);
-        command.Parameters.AddWithValue("register_profile", device.ProfileId);
+        command.Parameters.AddWithValue("protocol", device.DefinitionId);
+        command.Parameters.AddWithValue("register_profile", device.DefinitionId);
         command.Parameters.AddWithValue("raw_frame_hex", sample.RawFrameHex);
         command.Parameters.Add(new NpgsqlParameter("snapshot", NpgsqlDbType.Jsonb) { Value = JsonSerializer.Serialize(sample.Snapshot) });
         command.Parameters.Add(new NpgsqlParameter("raw_registers", NpgsqlDbType.Jsonb) { Value = JsonSerializer.Serialize(sample.RawRegisters) });

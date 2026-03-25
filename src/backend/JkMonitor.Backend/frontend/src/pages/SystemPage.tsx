@@ -13,7 +13,6 @@ type DeviceTelemetrySnapshot = {
 type DeviceRuntimeState = {
   deviceId: string;
   displayName: string;
-  profileId: string;
   protocolHandler?: string | null;
   enabled: boolean;
   isMaster: boolean;

@@ -69,8 +69,7 @@ const defaultPrecision: DisplayPrecision = { voltage: 2, cellVoltage: 3, current
 type DeviceRuntimeState = {
   deviceId: string;
   displayName: string;
-  profileId: string;
-  definitionId?: string | null;
+  definitionId: string;
   protocolHandler?: string | null;
   enabled: boolean;
   isMaster: boolean;
@@ -221,7 +220,7 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
               </span>
             </div>
             <div className='mt-1 text-xs font-mono text-muted-foreground'>
-              {device.deviceId} &bull; {device.protocolHandler ?? device.profileId} &bull; {device.pollIntervalMilliseconds}ms
+              {device.deviceId} &bull; {device.protocolHandler ?? device.definitionId} &bull; {device.pollIntervalMilliseconds}ms
             </div>
           </div>
         </div>
@@ -256,13 +255,11 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
 
       {telemetry && (
         <>
-          {/* Hero metrics — driven by definition when available */}
+          {/* Hero metrics — driven by definition */}
           {monitorSections ? (
             renderDefinitionSections(monitorSections, paramByKey, telemetry, dp, cells, selectedCellIndices, setSelectedCellIndices, device.deviceId, definition)
           ) : (
             <>
-              <LegacyHeroMetrics telemetry={telemetry} dp={dp} />
-
               {cells.length > 0 && (
                 <CellVoltageChart cells={cells} minV={telemetry.minCellVoltageVolts} maxV={telemetry.maxCellVoltageVolts} avgV={telemetry.averageCellVoltageVolts} selectedCellIndices={selectedCellIndices} onCellClick={(idx) => setSelectedCellIndices(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx])} />
               )}
@@ -531,20 +528,6 @@ function ParameterCategoryCard({ category, params, deviceId }: { category: strin
   );
 }
 
-/** Renders hero metrics from the legacy hardcoded layout (no definition available). */
-function LegacyHeroMetrics({ telemetry, dp }: { telemetry: DeviceTelemetrySnapshot; dp: DisplayPrecision }) {
-  return (
-    <div className='grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4'>
-      <HeroMetric icon={Zap} label='Voltage' value={fmt(telemetry.totalVoltageVolts, dp.voltage)} unit='V' accent='text-sky-400' />
-      <HeroMetric icon={Activity} label='Current' value={fmt(telemetry.currentAmps, dp.current)} unit='A'
-        accent={telemetry.currentAmps != null && telemetry.currentAmps > 0 ? 'text-emerald-400' : telemetry.currentAmps != null && telemetry.currentAmps < 0 ? 'text-amber-400' : 'text-muted-foreground'} />
-      <HeroMetric icon={Zap} label='Power' value={fmt(telemetry.powerWatts, dp.power)} unit='W' accent='text-purple-400' />
-      <HeroMetric icon={BatteryCharging} label='SoC' value={fmt(telemetry.stateOfChargePercent, dp.soc)} unit='%'
-        accent={telemetry.stateOfChargePercent != null && telemetry.stateOfChargePercent > 50 ? 'text-emerald-400' : telemetry.stateOfChargePercent != null && telemetry.stateOfChargePercent > 20 ? 'text-amber-400' : 'text-rose-400'} />
-    </div>
-  );
-}
-
 /** Renders all definition-driven monitor page sections in order. */
 function renderDefinitionSections(
   sections: UiSectionDefinition[],
@@ -745,16 +728,8 @@ function getSortedCategories(grouped: Map<string, DeviceParameter[]>, definition
     return ordered;
   }
 
-  // Legacy hardcoded order
-  const legacyOrder = ['Pack Status', 'Cell Summary', 'Cell Voltages', 'Temperatures', 'Status',
-    'Cell Protection', 'Current Protection', 'Thermal Protection', 'Charging', 'Discharging',
-    'Balance Settings', 'SOC Settings', 'System', 'Device Info',
-    'Protection Settings', 'Settings', 'Calibration'];
-  return [...grouped.keys()].sort((a, b) => {
-    const aIdx = legacyOrder.indexOf(a);
-    const bIdx = legacyOrder.indexOf(b);
-    return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
-  });
+  // Fallback: alphabetical order when no definition
+  return [...grouped.keys()].sort((a, b) => a.localeCompare(b));
 }
 
 function CategoryIcon({ category }: { category: string }) {

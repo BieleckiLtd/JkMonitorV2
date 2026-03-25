@@ -17,8 +17,9 @@ namespace JkMonitor.Backend.Services;
 /// </summary>
 public sealed class GenericModbusPollingClient(
     ExpressionEvaluator expressionEvaluator,
+    DeviceDefinitionLoader definitionLoader,
     IOptions<MonitorConfiguration> configuration,
-    ILogger<GenericModbusPollingClient> logger) : IDisposable
+    ILogger<GenericModbusPollingClient> logger) : IDevicePollingClient, IDisposable
 {
     private readonly MonitorConfiguration _configuration = configuration.Value;
     private readonly SemaphoreSlim _busLock = new(1, 1);
@@ -27,6 +28,18 @@ public sealed class GenericModbusPollingClient(
 
     // Slow poll group caching: bank ID → (lastRead, rawData)
     private readonly Dictionary<string, (DateTimeOffset LastRead, byte[] Data)> _bankCache = new(StringComparer.OrdinalIgnoreCase);
+
+    public Task<DevicePollResult> PollAsync(DeviceConfiguration device, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(device.DefinitionId) ||
+            !definitionLoader.TryGet(device.DefinitionId, out var definition) || definition is null)
+        {
+            throw new InvalidOperationException(
+                $"Device '{device.DeviceId}' has no valid DefinitionId ('{device.DefinitionId}').");
+        }
+
+        return PollAsync(device, definition, cancellationToken);
+    }
 
     public async Task<DevicePollResult> PollAsync(
         DeviceConfiguration device,

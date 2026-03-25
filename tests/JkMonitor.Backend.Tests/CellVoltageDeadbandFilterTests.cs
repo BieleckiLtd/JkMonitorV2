@@ -14,7 +14,7 @@ public class CellVoltageSmoothingFilterTests
     {
         DeviceId = deviceId,
         DisplayName = "Test Device",
-        ProfileId = "test-profile",
+        DefinitionId = "test-profile",
         CellVoltageSmoothingFactor = smoothingFactor,
         CellVoltageSmoothingBreakoutMillivolts = breakoutMillivolts,
     };

@@ -7,8 +7,7 @@ import { useDeviceDefinitions } from '../hooks/useDeviceDefinition';
 type DeviceConfiguration = {
   deviceId: string;
   displayName: string;
-  profileId: string;
-  definitionId?: string | null;
+  definitionId: string;
   transportPortName?: string | null;
   databaseName?: string | null;
   address: number;
@@ -59,11 +58,10 @@ type SchemaValidation = {
   isEmpty: boolean;
 };
 
-const defaultDevice = (index: number): DeviceConfiguration => ({
+const defaultDevice = (index: number, definitionId: string): DeviceConfiguration => ({
   deviceId: `device-${index}`,
   displayName: `Battery ${index}`,
-  profileId: 'jk-inverter-bms',
-  definitionId: 'jk-inverter-bms',
+  definitionId,
   transportPortName: '',
   databaseName: '',
   address: index,
@@ -73,7 +71,7 @@ const defaultDevice = (index: number): DeviceConfiguration => ({
 });
 
 function needsSerialPort(device: DeviceConfiguration, definitions: DeviceDefinitionSummary[]): boolean {
-  if (!device.definitionId) return true; // legacy profile — assume serial
+  if (!device.definitionId) return true;
   const def = definitions.find(d => d.id === device.definitionId);
   return !def || def.transportType === 'serial';
 }
@@ -208,6 +206,24 @@ export function DevicesPage() {
     }
   }, [devices, dbSuggestions, loadDbSuggestion]);
 
+  useEffect(() => {
+    if (availableDefinitions.length === 0) {
+      return;
+    }
+
+    const defaultDefinition = availableDefinitions[0];
+    setDevices((currentDevices) => currentDevices.map((device) => {
+      if (device.definitionId) {
+        return device;
+      }
+
+      return {
+        ...device,
+        definitionId: defaultDefinition.id,
+      };
+    }));
+  }, [availableDefinitions]);
+
   const updateDevice = <K extends keyof DeviceConfiguration>(index: number, key: K, value: DeviceConfiguration[K]) => {
     setDevices((currentDevices) => currentDevices.map((device, currentIndex) => {
       if (currentIndex !== index) {
@@ -222,7 +238,8 @@ export function DevicesPage() {
   };
 
   const addDevice = () => {
-    setDevices((currentDevices) => [...currentDevices, defaultDevice(currentDevices.length + 1)]);
+    const defId = availableDefinitions[0]?.id ?? 'jk-inverter-bms';
+    setDevices((currentDevices) => [...currentDevices, defaultDevice(currentDevices.length + 1, defId)]);
     setSaveMessage(null);
   };
 
@@ -412,19 +429,14 @@ export function DevicesPage() {
                     <Input value={device.displayName} onChange={(event) => updateDevice(index, 'displayName', event.target.value)} />
                   </label>
                   <label className='space-y-2 text-sm text-foreground'>
-                    <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device Profile</span>
-                    <Input value={device.profileId} onChange={(event) => updateDevice(index, 'profileId', event.target.value)} />
-                  </label>
-                  <label className='space-y-2 text-sm text-foreground'>
                     <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device Definition</span>
                     <select
                       className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
-                      value={device.definitionId ?? ''}
-                      onChange={(event) => updateDevice(index, 'definitionId', event.target.value || null)}
+                      value={device.definitionId ?? availableDefinitions[0]?.id ?? ''}
+                      onChange={(event) => updateDevice(index, 'definitionId', event.target.value)}
                     >
-                      <option value=''>None (legacy profile)</option>
                       {availableDefinitions.map(d => (
-                        <option key={d.id} value={d.id}>{d.name} ({d.manufacturer} {d.model})</option>
+                        <option key={d.id} value={d.id}>{d.name} ({d.model})</option>
                       ))}
                     </select>
                   </label>

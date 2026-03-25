@@ -13,8 +13,6 @@ public sealed class MonitorConfiguration
     public string DeviceDefinitionsPath { get; init; } = "devices";
 
     public required IReadOnlyList<DeviceConfiguration> Devices { get; init; }
-
-    public IReadOnlyList<DeviceProfileConfiguration> DeviceProfiles { get; init; } = [];
 }
 
 public sealed class SerialBusConfiguration
@@ -84,14 +82,11 @@ public sealed class DeviceConfiguration
 
     public required string DisplayName { get; init; }
 
-    public required string ProfileId { get; init; }
-
     /// <summary>
     /// ID of the device definition JSON (maps to device.id in the JSON file).
-    /// When set, the definition-driven generic polling client is used instead of
-    /// the legacy profile-based client.
+    /// Drives polling, rendering, and storage via the definition-driven pipeline.
     /// </summary>
-    public string? DefinitionId { get; init; }
+    public required string DefinitionId { get; init; }
 
     /// <summary>
     /// Override the serial port for this device (e.g. "/dev/ttyUSB0").

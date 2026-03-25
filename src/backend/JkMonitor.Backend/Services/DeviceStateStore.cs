@@ -37,12 +37,6 @@ public sealed class DeviceStateStore
     {
         string? protocolHandler = null;
 
-        var profileLookup = _configuration.DeviceProfiles.ToDictionary(p => p.ProfileId, StringComparer.OrdinalIgnoreCase);
-        if (profileLookup.TryGetValue(device.ProfileId, out var profile))
-        {
-            protocolHandler = profile.ProtocolHandler;
-        }
-
         if (!string.IsNullOrEmpty(device.DefinitionId) &&
             definitionLoader.TryGet(device.DefinitionId, out var definition) && definition is not null)
         {
@@ -53,7 +47,6 @@ public sealed class DeviceStateStore
         {
             DeviceId = device.DeviceId,
             DisplayName = device.DisplayName,
-            ProfileId = device.ProfileId,
             DefinitionId = device.DefinitionId,
             ProtocolHandler = protocolHandler,
             Enabled = device.Enabled,
@@ -163,7 +156,7 @@ public sealed class DeviceStateStore
         {
             DeviceId = device.DeviceId,
             DisplayName = device.DisplayName,
-            ProfileId = device.ProfileId,
+            DefinitionId = device.DefinitionId,
             Enabled = device.Enabled,
             IsMaster = device.IsMaster,
             PollIntervalMilliseconds = device.PollIntervalMilliseconds,

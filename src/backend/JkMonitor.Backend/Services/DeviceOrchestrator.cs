@@ -180,7 +180,6 @@ public sealed class DeviceOrchestrator(
     private static bool DeviceConfigChanged(DeviceConfiguration a, DeviceConfiguration b)
     {
         return a.DefinitionId != b.DefinitionId
-            || a.ProfileId != b.ProfileId
             || a.TransportPortName != b.TransportPortName
             || a.Address != b.Address
             || a.PollIntervalMilliseconds != b.PollIntervalMilliseconds
