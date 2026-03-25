@@ -23,34 +23,54 @@ public sealed class DeviceStateStore
         _hostSystemMonitoringService = hostSystemMonitoringService;
         _buildMetadataProvider = buildMetadataProvider;
 
-        var profileLookup = _configuration.DeviceProfiles.ToDictionary(p => p.ProfileId, StringComparer.OrdinalIgnoreCase);
-
         foreach (var device in _configuration.Devices)
         {
-            profileLookup.TryGetValue(device.ProfileId, out var profile);
-
-            // Use definition protocol type when available, fall back to legacy profile handler
-            string? protocolHandler = profile?.ProtocolHandler;
-            if (!string.IsNullOrEmpty(device.DefinitionId) &&
-                definitionLoader.TryGet(device.DefinitionId, out var definition) && definition is not null)
-            {
-                protocolHandler = definition.Connection.Protocol.Type;
-            }
-
-            _states[device.DeviceId] = new DeviceRuntimeState
-            {
-                DeviceId = device.DeviceId,
-                DisplayName = device.DisplayName,
-                ProfileId = device.ProfileId,
-                DefinitionId = device.DefinitionId,
-                ProtocolHandler = protocolHandler,
-                Enabled = device.Enabled,
-                IsMaster = device.IsMaster,
-                PollIntervalMilliseconds = device.PollIntervalMilliseconds,
-                DisplayPrecision = device.DisplayPrecision,
-                LastOutcome = "NotStarted"
-            };
+            RegisterDevice(device, definitionLoader);
         }
+    }
+
+    /// <summary>
+    /// Register (or re-register) a device in the runtime state store.
+    /// Called by the <see cref="DeviceOrchestrator"/> when devices are added or updated live.
+    /// </summary>
+    public void RegisterDevice(DeviceConfiguration device, DeviceDefinitionLoader definitionLoader)
+    {
+        string? protocolHandler = null;
+
+        var profileLookup = _configuration.DeviceProfiles.ToDictionary(p => p.ProfileId, StringComparer.OrdinalIgnoreCase);
+        if (profileLookup.TryGetValue(device.ProfileId, out var profile))
+        {
+            protocolHandler = profile.ProtocolHandler;
+        }
+
+        if (!string.IsNullOrEmpty(device.DefinitionId) &&
+            definitionLoader.TryGet(device.DefinitionId, out var definition) && definition is not null)
+        {
+            protocolHandler = definition.Connection.Protocol.Type;
+        }
+
+        _states[device.DeviceId] = new DeviceRuntimeState
+        {
+            DeviceId = device.DeviceId,
+            DisplayName = device.DisplayName,
+            ProfileId = device.ProfileId,
+            DefinitionId = device.DefinitionId,
+            ProtocolHandler = protocolHandler,
+            Enabled = device.Enabled,
+            IsMaster = device.IsMaster,
+            PollIntervalMilliseconds = device.PollIntervalMilliseconds,
+            DisplayPrecision = device.DisplayPrecision,
+            LastOutcome = "NotStarted"
+        };
+    }
+
+    /// <summary>
+    /// Remove a device from the runtime state store.
+    /// Called by the <see cref="DeviceOrchestrator"/> when a device is removed live.
+    /// </summary>
+    public void UnregisterDevice(string deviceId)
+    {
+        _states.TryRemove(deviceId, out _);
     }
 
     public MonitorRuntimeStatus GetStatus(string environmentName)
@@ -67,8 +87,8 @@ public sealed class DeviceStateStore
             StartupMode = "Hardware",
             StartedAt = _startedAt,
             ReportedAt = DateTimeOffset.UtcNow,
-            ConfiguredDeviceCount = _configuration.Devices.Count,
-            EnabledDeviceCount = _configuration.Devices.Count(device => device.Enabled),
+            ConfiguredDeviceCount = _states.Count,
+            EnabledDeviceCount = _states.Values.Count(device => device.Enabled),
             Build = _buildMetadataProvider.GetBuildInfo(),
             SystemMetrics = _hostSystemMonitoringService.GetMetrics(),
             Devices = devices

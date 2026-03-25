@@ -11,6 +11,7 @@ namespace JkMonitor.Backend.Controllers;
 public sealed class DevicesController(
     IHostEnvironment environment,
     DeviceStateStore stateStore,
+    DeviceOrchestrator orchestrator,
     SetupConfigurationService setupConfigurationService,
     GenericModbusPollingClient genericPollingClient,
     DeviceDefinitionLoader definitionLoader,
@@ -35,11 +36,18 @@ public sealed class DevicesController(
     }
 
     [HttpPut("config")]
-    public ActionResult<DeviceConfigurationStateResponse> SaveConfig([FromBody] SaveDeviceConfigurationRequest request)
+    public async Task<ActionResult<DeviceConfigurationStateResponse>> SaveConfig(
+        [FromBody] SaveDeviceConfigurationRequest request,
+        CancellationToken cancellationToken)
     {
         try
         {
-            return Ok(setupConfigurationService.SaveDevices(request));
+            var result = setupConfigurationService.SaveDevices(request);
+
+            // Apply live — starts/stops device polling loops without restart
+            await orchestrator.ApplyConfigurationAsync(result.Devices, cancellationToken);
+
+            return Ok(result);
         }
         catch (InvalidOperationException exception)
         {

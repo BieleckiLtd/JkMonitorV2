@@ -1,7 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAppStore } from '../store/useAppStore';
-import { Cable, Settings, Puzzle, Menu, Activity, Monitor, Gauge, X } from 'lucide-react';
+import { Bell, Cable, Settings, Puzzle, Menu, Activity, Monitor, Gauge, X } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -17,7 +17,8 @@ export function Sidebar() {
   const navItems = [
     { name: 'System', path: '/', icon: Monitor },
     { name: 'Monitor', path: '/monitor', icon: Gauge },
-    { name: 'Devices Structure', path: '/devices', icon: Cable },
+    { name: 'Devices', path: '/devices', icon: Cable },
+    { name: 'Notifications', path: '/notifications', icon: Bell },
     { name: 'Community Hub', path: '/hub', icon: Puzzle },
     { name: 'Settings', path: '/settings', icon: Settings },
   ];

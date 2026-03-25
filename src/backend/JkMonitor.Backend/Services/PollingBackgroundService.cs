@@ -5,11 +5,7 @@ namespace JkMonitor.Backend.Services;
 
 public sealed class PollingBackgroundService(
     IOptions<MonitorConfiguration> configuration,
-    IDevicePollingClient pollingClient,
-    ITelemetryRepository telemetryRepository,
-    DeviceStateStore stateStore,
-    PollTrigger pollTrigger,
-    CellVoltageSmoothingFilter smoothingFilter,
+    DeviceOrchestrator orchestrator,
     ILogger<PollingBackgroundService> logger) : BackgroundService
 {
     private readonly MonitorConfiguration _configuration = configuration.Value;
@@ -18,68 +14,19 @@ public sealed class PollingBackgroundService(
     {
         logger.LogInformation("Polling background service started with {DeviceCount} configured devices.", _configuration.Devices.Count);
 
-        var tasks = _configuration.Devices
-            .Where(device => device.Enabled)
-            .Select(device => RunDeviceLoopAsync(device, stoppingToken))
-            .ToArray();
+        await orchestrator.ApplyConfigurationAsync(_configuration.Devices, stoppingToken);
 
-        await Task.WhenAll(tasks);
-    }
-
-    private async Task RunDeviceLoopAsync(DeviceConfiguration device, CancellationToken cancellationToken)
-    {
-        using var timer = new PeriodicTimer(TimeSpan.FromMilliseconds(device.PollIntervalMilliseconds));
-
-        while (!cancellationToken.IsCancellationRequested)
+        // Keep running until the application shuts down
+        try
         {
-            var startedAt = DateTimeOffset.UtcNow;
-            stateStore.MarkPollStarted(device, startedAt);
-
-            try
-            {
-                logger.LogDebug("Polling device {DeviceId} using profile {ProfileId}.", device.DeviceId, device.ProfileId);
-
-                var rawSample = await pollingClient.PollAsync(device, cancellationToken);
-                var filteredSnapshot = smoothingFilter.Apply(device, rawSample.Snapshot);
-                var sample = rawSample with { Snapshot = filteredSnapshot };
-                DateTimeOffset? persistedAt = null;
-                var outcome = "Succeeded";
-                string? persistenceError = null;
-
-                try
-                {
-                    await telemetryRepository.PersistAsync(device, sample, cancellationToken);
-                    persistedAt = DateTimeOffset.UtcNow;
-                }
-                catch (Exception exception)
-                {
-                    outcome = "PersistFailed";
-                    persistenceError = exception.Message;
-                    logger.LogError(exception, "Telemetry persistence failed for device {DeviceId}.", device.DeviceId);
-                }
-
-                stateStore.MarkPollCompleted(device, startedAt, DateTimeOffset.UtcNow, sample.Snapshot, persistedAt, outcome, persistenceError);
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                break;
-            }
-            catch (Exception exception)
-            {
-                stateStore.MarkPollFailed(device, startedAt, exception);
-                logger.LogError(exception, "Polling failed for device {DeviceId}.", device.DeviceId);
-            }
-
-            try
-            {
-                await Task.WhenAny(
-                    timer.WaitForNextTickAsync(cancellationToken).AsTask(),
-                    Task.Delay(Timeout.Infinite, pollTrigger.GetToken()));
-            }
-            catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
-            {
-                // PollTrigger signalled – run next poll immediately.
-            }
+            await Task.Delay(Timeout.Infinite, stoppingToken);
         }
+        catch (OperationCanceledException)
+        {
+            // Expected on shutdown
+        }
+
+        await orchestrator.StopAllAsync();
+        logger.LogInformation("Polling background service stopped.");
     }
 }

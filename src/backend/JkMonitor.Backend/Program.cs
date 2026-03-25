@@ -31,6 +31,17 @@ builder.Services.AddSingleton<JkMonitor.Backend.Services.JkRs485PollingClient>()
 builder.Services.AddSingleton<JkMonitor.Backend.Services.GenericModbusPollingClient>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.IDevicePollingClient, JkMonitor.Backend.Services.ConfiguredPollingClient>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.SetupConfigurationService>();
+builder.Services.AddSingleton<JkMonitor.Backend.Services.DeviceOrchestrator>();
+
+// Notification system
+builder.Services.AddHttpClient();
+builder.Services.AddSingleton(sp => new JkMonitor.Backend.Services.NotificationConfigStore(
+    sp.GetRequiredService<IHostEnvironment>().ContentRootPath,
+    sp.GetRequiredService<ILogger<JkMonitor.Backend.Services.NotificationConfigStore>>()));
+builder.Services.AddSingleton<JkMonitor.Backend.Services.INotificationChannelSender, JkMonitor.Backend.Services.NtfyChannelSender>();
+builder.Services.AddSingleton<JkMonitor.Backend.Services.INotificationChannelSender, JkMonitor.Backend.Services.EmailChannelSender>();
+builder.Services.AddSingleton<JkMonitor.Backend.Services.NotificationDispatcher>();
+builder.Services.AddSingleton<JkMonitor.Backend.Services.NotificationEvaluator>();
 
 // Device definition loader
 var definitionsPath = monitorSection.GetValue<string>("DeviceDefinitionsPath") ?? "devices";

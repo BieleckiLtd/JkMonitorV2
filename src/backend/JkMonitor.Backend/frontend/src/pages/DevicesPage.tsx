@@ -128,7 +128,7 @@ export function DevicesPage() {
       const data = payload as DeviceConfigurationResponse;
       setDevices(data.devices);
       setConfigurationFile(data.configurationFile);
-      setSaveMessage(`Saved to ${data.configurationFile}. Restart the application to apply device topology changes.`);
+      setSaveMessage('Configuration applied. Device changes are live — no restart required.');
     } catch (error) {
       setSaveMessage(error instanceof Error ? error.message : 'Unable to save device configuration.');
     } finally {
@@ -159,7 +159,7 @@ export function DevicesPage() {
           <div>
             <div className='text-sm font-semibold text-foreground'>JSON-backed device editor</div>
             <div className='mt-1 text-sm text-muted-foreground'>
-              Changes are written to the environment-specific local appsettings file and take effect after restart.
+              Changes are applied live when you save — no restart required.
             </div>
           </div>
         </div>
