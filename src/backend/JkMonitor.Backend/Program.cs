@@ -1,3 +1,7 @@
+using JkMonitor.Backend.Configuration;
+using JkMonitor.Backend.Services;
+using Serilog;
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Configuration
@@ -6,6 +10,10 @@ builder.Configuration
 
 var monitorSection = builder.Configuration.GetSection("Monitor");
 var storageProvider = monitorSection.GetValue<string>("Storage:Provider");
+var logStorageOptions = builder.Configuration.GetSection("Monitor:LogStorage").Get<LogStorageOptions>() ?? new LogStorageOptions();
+var logStore = new PostgresLogStore(logStorageOptions);
+
+await logStore.InitializeAsync(CancellationToken.None);
 
 builder.Services
     .AddOptions<JkMonitor.Contracts.Configuration.MonitorConfiguration>()
@@ -15,10 +23,14 @@ builder.Services
 
 builder.Services.AddControllers();
 builder.Services.AddOpenApi();
-
-var logStore = new JkMonitor.Backend.Services.InMemoryLogStore();
 builder.Services.AddSingleton(logStore);
-builder.Logging.AddProvider(new JkMonitor.Backend.Services.InMemoryLoggerProvider(logStore));
+builder.Services.AddSingleton<ILogQueryService>(logStore);
+
+builder.Host.UseSerilog((context, services, loggerConfiguration) => loggerConfiguration
+    .ReadFrom.Configuration(context.Configuration)
+    .Enrich.FromLogContext()
+    .WriteTo.Console()
+    .WriteTo.Sink(new PersistentLogSink(logStore)));
 
 builder.Services.AddSingleton<JkMonitor.Backend.Services.HostSystemMonitoringService>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.IBuildMetadataProvider, JkMonitor.Backend.Services.AssemblyBuildMetadataProvider>();
@@ -32,6 +44,7 @@ builder.Services.AddSingleton<JkMonitor.Backend.Services.JkRs485PollingClient>()
 builder.Services.AddSingleton<JkMonitor.Backend.Services.GenericModbusPollingClient>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.IDevicePollingClient, JkMonitor.Backend.Services.ConfiguredPollingClient>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.SetupConfigurationService>();
+builder.Services.AddSingleton<JkMonitor.Backend.Services.DeviceDatabaseService>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.DeviceOrchestrator>();
 
 // Notification system
@@ -86,4 +99,11 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapFallbackToFile("index.html");
 
-app.Run();
+try
+{
+    await app.RunAsync();
+}
+finally
+{
+    Log.CloseAndFlush();
+}

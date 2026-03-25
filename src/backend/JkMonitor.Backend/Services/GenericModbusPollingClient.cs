@@ -6,6 +6,7 @@ using JkMonitor.Backend.Protocol;
 using JkMonitor.Contracts.Configuration;
 using JkMonitor.Contracts.DeviceDefinition;
 using JkMonitor.Contracts.Status;
+using Microsoft.Extensions.Options;
 
 namespace JkMonitor.Backend.Services;
 
@@ -16,8 +17,10 @@ namespace JkMonitor.Backend.Services;
 /// </summary>
 public sealed class GenericModbusPollingClient(
     ExpressionEvaluator expressionEvaluator,
+    IOptions<MonitorConfiguration> configuration,
     ILogger<GenericModbusPollingClient> logger) : IDisposable
 {
+    private readonly MonitorConfiguration _configuration = configuration.Value;
     private readonly SemaphoreSlim _busLock = new(1, 1);
     private SerialPort? _serialPort;
     private bool _disposed;
@@ -539,7 +542,7 @@ public sealed class GenericModbusPollingClient(
 
         // Allow per-device transport overrides if configured in appsettings
         // For now, use the definition defaults
-        var portName = device.TransportPortName ?? "/dev/ttyUSB0";
+        var portName = device.TransportPortName ?? _configuration.SerialBus.PortName;
 
         if (_serialPort is { IsOpen: true } && _serialPort.PortName == portName)
             return _serialPort;

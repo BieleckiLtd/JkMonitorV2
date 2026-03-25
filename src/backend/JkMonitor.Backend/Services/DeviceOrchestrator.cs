@@ -185,7 +185,8 @@ public sealed class DeviceOrchestrator(
             || a.Address != b.Address
             || a.PollIntervalMilliseconds != b.PollIntervalMilliseconds
             || a.DisplayName != b.DisplayName
-            || a.IsMaster != b.IsMaster;
+            || a.IsMaster != b.IsMaster
+            || a.DatabaseName != b.DatabaseName;
     }
 
     private sealed class DeviceHandle(DeviceConfiguration device, CancellationTokenSource cts)

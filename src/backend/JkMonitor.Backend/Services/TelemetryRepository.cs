@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using JkMonitor.Backend.Models;
 using JkMonitor.Contracts.Configuration;
@@ -72,10 +73,13 @@ public sealed class TimescaleTelemetryRepository(
     IOptions<MonitorConfiguration> configuration,
     ILogger<TimescaleTelemetryRepository> logger) : ITelemetryRepository
 {
+    private readonly MonitorConfiguration _config = configuration.Value;
     private readonly StorageConfiguration _storage = configuration.Value.Storage;
     private readonly RetentionConfiguration _retention = configuration.Value.Storage.Retention;
     private readonly SemaphoreSlim _initializationLock = new(1, 1);
     private volatile bool _initialized;
+    private readonly ConcurrentDictionary<string, bool> _deviceDbInitialized = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, SemaphoreSlim> _deviceDbLocks = new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly string[] RollupTables = ["jk_rollup_1m", "jk_rollup_5m", "jk_rollup_1h"];
 
@@ -175,11 +179,142 @@ END $$;
         }
     }
 
+    private string GetConnectionString(DeviceConfiguration? device)
+    {
+        if (device is not null && !string.IsNullOrWhiteSpace(device.DatabaseName))
+        {
+            var builder = new NpgsqlConnectionStringBuilder(_storage.ConnectionString)
+            {
+                Database = device.DatabaseName
+            };
+            return builder.ToString();
+        }
+
+        return _storage.ConnectionString;
+    }
+
+    private string GetConnectionStringByDeviceId(string deviceId)
+    {
+        var device = _config.Devices.FirstOrDefault(d =>
+            string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase));
+        return GetConnectionString(device);
+    }
+
+    private IReadOnlyList<string> GetAllConnectionStrings()
+    {
+        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { _storage.ConnectionString };
+        foreach (var device in _config.Devices)
+        {
+            if (!string.IsNullOrWhiteSpace(device.DatabaseName))
+                set.Add(GetConnectionString(device));
+        }
+        return set.ToList();
+    }
+
+    private async Task EnsureDeviceDbInitializedAsync(DeviceConfiguration device, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(device.DatabaseName)) return;
+        if (_deviceDbInitialized.ContainsKey(device.DatabaseName)) return;
+
+        var dbLock = _deviceDbLocks.GetOrAdd(device.DatabaseName, _ => new SemaphoreSlim(1, 1));
+        await dbLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_deviceDbInitialized.ContainsKey(device.DatabaseName)) return;
+
+            var connStr = GetConnectionString(device);
+            await using var connection = new NpgsqlConnection(connStr);
+            await connection.OpenAsync(cancellationToken);
+
+            await ExecuteNonQueryAsync(connection, @"
+CREATE EXTENSION IF NOT EXISTS timescaledb;
+
+CREATE TABLE IF NOT EXISTS jk_raw_samples (
+    sampled_at timestamptz NOT NULL,
+    device_id text NOT NULL,
+    display_name text NOT NULL,
+    protocol text NOT NULL,
+    register_profile text NOT NULL,
+    raw_frame_hex text NOT NULL,
+    snapshot jsonb NOT NULL,
+    raw_registers jsonb NOT NULL,
+    total_voltage_volts numeric NULL,
+    current_amps numeric NULL,
+    power_watts numeric NULL,
+    state_of_charge_percent numeric NULL,
+    min_cell_voltage_volts numeric NULL,
+    max_cell_voltage_volts numeric NULL,
+    delta_cell_voltage_volts numeric NULL,
+    mos_temperature_celsius numeric NULL,
+    battery_temperature_celsius numeric NULL,
+    charging_enabled boolean NULL,
+    discharging_enabled boolean NULL,
+    balancing_enabled boolean NULL,
+    battery_online boolean NULL,
+    cell_voltages jsonb NULL
+);
+
+SELECT create_hypertable('jk_raw_samples', by_range('sampled_at'), if_not_exists => TRUE);
+
+CREATE INDEX IF NOT EXISTS ix_jk_raw_samples_device_sampled_at
+    ON jk_raw_samples (device_id, sampled_at DESC);
+", cancellationToken);
+
+            await ExecuteNonQueryAsync(connection, @"
+DO $$ BEGIN
+  ALTER TABLE jk_raw_samples ADD COLUMN IF NOT EXISTS mos_temperature_celsius numeric NULL;
+  ALTER TABLE jk_raw_samples ADD COLUMN IF NOT EXISTS battery_temperature_celsius numeric NULL;
+  ALTER TABLE jk_raw_samples ADD COLUMN IF NOT EXISTS cell_voltages jsonb NULL;
+END $$;
+", cancellationToken);
+
+            foreach (var table in RollupTables)
+            {
+                await ExecuteNonQueryAsync(connection, $@"
+CREATE TABLE IF NOT EXISTS {table} (
+    bucket_start timestamptz NOT NULL,
+    device_id text NOT NULL,
+    sample_count integer NOT NULL,
+    avg_total_voltage_volts numeric NULL,
+    avg_current_amps numeric NULL,
+    avg_power_watts numeric NULL,
+    avg_state_of_charge_percent numeric NULL,
+    min_cell_voltage_volts numeric NULL,
+    max_cell_voltage_volts numeric NULL,
+    avg_delta_cell_voltage_volts numeric NULL,
+    avg_mos_temperature_celsius numeric NULL,
+    avg_battery_temperature_celsius numeric NULL,
+    avg_cell_voltages jsonb NULL,
+    last_sampled_at timestamptz NOT NULL,
+    PRIMARY KEY (bucket_start, device_id)
+);
+
+SELECT create_hypertable('{table}', by_range('bucket_start'), if_not_exists => TRUE);
+
+DO $$ BEGIN
+  ALTER TABLE {table} ADD COLUMN IF NOT EXISTS avg_mos_temperature_celsius numeric NULL;
+  ALTER TABLE {table} ADD COLUMN IF NOT EXISTS avg_battery_temperature_celsius numeric NULL;
+  ALTER TABLE {table} ADD COLUMN IF NOT EXISTS avg_cell_voltages jsonb NULL;
+END $$;
+", cancellationToken);
+            }
+
+            _deviceDbInitialized[device.DatabaseName] = true;
+            logger.LogInformation("Per-device TimescaleDB schema is ready for database '{DatabaseName}'.", device.DatabaseName);
+        }
+        finally
+        {
+            dbLock.Release();
+        }
+    }
+
     public async Task PersistAsync(DeviceConfiguration device, DevicePollResult sample, CancellationToken cancellationToken)
     {
         await InitializeAsync(cancellationToken);
+        await EnsureDeviceDbInitializedAsync(device, cancellationToken);
 
-        await using var connection = new NpgsqlConnection(_storage.ConnectionString);
+        var connectionString = GetConnectionString(device);
+        await using var connection = new NpgsqlConnection(connectionString);
         await connection.OpenAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
@@ -243,7 +378,7 @@ VALUES (
                   "avg_mos_temperature_celsius", "avg_battery_temperature_celsius"),
         };
 
-        await using var connection = new NpgsqlConnection(_storage.ConnectionString);
+        await using var connection = new NpgsqlConnection(GetConnectionStringByDeviceId(deviceId));
         await connection.OpenAsync(cancellationToken);
 
         // ROUND rollup averages to 10 dp so values fit in System.Decimal (max 28-29 digits).
@@ -285,18 +420,29 @@ LIMIT 2000;
     /// <summary>Delete samples older than the configured retention windows.</summary>
     public async Task ApplyRetentionAsync(CancellationToken cancellationToken)
     {
-        await using var connection = new NpgsqlConnection(_storage.ConnectionString);
-        await connection.OpenAsync(cancellationToken);
-
+        var connectionStrings = GetAllConnectionStrings();
         var now = DateTimeOffset.UtcNow;
 
-        await DeleteOlderThan(connection, "jk_raw_samples", "sampled_at", now.AddMinutes(-_retention.RawSecondsWindowMinutes), cancellationToken);
-        await DeleteOlderThan(connection, "jk_rollup_1m", "bucket_start", now.AddHours(-_retention.OneMinuteWindowHours), cancellationToken);
-        await DeleteOlderThan(connection, "jk_rollup_5m", "bucket_start", now.AddDays(-_retention.FiveMinuteWindowDays), cancellationToken);
-
-        if (_retention.OneHourWindowDays > 0)
+        foreach (var connStr in connectionStrings)
         {
-            await DeleteOlderThan(connection, "jk_rollup_1h", "bucket_start", now.AddDays(-_retention.OneHourWindowDays), cancellationToken);
+            try
+            {
+                await using var connection = new NpgsqlConnection(connStr);
+                await connection.OpenAsync(cancellationToken);
+
+                await DeleteOlderThan(connection, "jk_raw_samples", "sampled_at", now.AddMinutes(-_retention.RawSecondsWindowMinutes), cancellationToken);
+                await DeleteOlderThan(connection, "jk_rollup_1m", "bucket_start", now.AddHours(-_retention.OneMinuteWindowHours), cancellationToken);
+                await DeleteOlderThan(connection, "jk_rollup_5m", "bucket_start", now.AddDays(-_retention.FiveMinuteWindowDays), cancellationToken);
+
+                if (_retention.OneHourWindowDays > 0)
+                {
+                    await DeleteOlderThan(connection, "jk_rollup_1h", "bucket_start", now.AddDays(-_retention.OneHourWindowDays), cancellationToken);
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Retention sweep failed for a device database.");
+            }
         }
 
         logger.LogDebug("Retention sweep completed.");
@@ -424,7 +570,7 @@ DO UPDATE SET
             _ => ("jk_rollup_5m", "bucket_start", $"ROUND((avg_cell_voltages->>'{cellKey}')::numeric, 10)"),
         };
 
-        await using var connection = new NpgsqlConnection(_storage.ConnectionString);
+        await using var connection = new NpgsqlConnection(GetConnectionStringByDeviceId(deviceId));
         await connection.OpenAsync(cancellationToken);
 
         await using var command = connection.CreateCommand();

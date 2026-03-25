@@ -801,6 +801,10 @@
   },
 
   "storage": {
+    "database": {
+      "provider": "timescaledb",
+      "defaultNamePattern": "jkmonitor_{deviceId}"
+    },
     "timeSeries": [
       { "entity": "total_voltage",      "aggregate": "avg", "column": "total_voltage_v" },
       { "entity": "current",            "aggregate": "avg", "column": "current_a" },

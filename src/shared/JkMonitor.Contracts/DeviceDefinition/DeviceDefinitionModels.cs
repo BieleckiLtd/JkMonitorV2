@@ -227,11 +227,31 @@ public sealed class AlarmBitDefinition
 
 public sealed class StorageDefinition
 {
+    /// <summary>
+    /// Database requirements for this device type.
+    /// When present, the device needs its own dedicated database.
+    /// </summary>
+    public DatabaseRequirement? Database { get; init; }
+
     public IReadOnlyList<TimeSeriesMapping> TimeSeries { get; init; } = [];
 
     public CellVoltageStorageMapping? CellVoltages { get; init; }
 
     public IReadOnlyDictionary<string, RetentionWindow>? Retention { get; init; }
+}
+
+public sealed class DatabaseRequirement
+{
+    /// <summary>
+    /// The storage provider required: "timescaledb", "postgres", or "both".
+    /// </summary>
+    public required string Provider { get; init; }
+
+    /// <summary>
+    /// A suggested default database name pattern.
+    /// The placeholder {deviceId} is replaced with the actual device ID.
+    /// </summary>
+    public string DefaultNamePattern { get; init; } = "jkmonitor_{deviceId}";
 }
 
 public sealed class TimeSeriesMapping

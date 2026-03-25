@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Net.Http.Json;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 
 namespace JkMonitor.Backend.Services;
@@ -197,16 +196,34 @@ public sealed class SystemUpdateService(
         var releaseInfoPath = Path.Combine(Directory.GetParent(installRoot)?.FullName ?? installRoot, "release-info.env");
         if (!File.Exists(releaseInfoPath)) return null;
 
-        foreach (var line in File.ReadLines(releaseInfoPath))
+        return ParseReleaseChecksum(File.ReadLines(releaseInfoPath));
+    }
+
+    private static string? ParseReleaseChecksum(IEnumerable<string> lines)
+    {
+        foreach (var line in lines)
         {
-            if (line.StartsWith("RELEASE_SHA256=", StringComparison.OrdinalIgnoreCase))
+            if (TryParseReleaseInfoValue(line, "JKMONITOR_RELEASE_SHA256", out var checksum) ||
+                TryParseReleaseInfoValue(line, "RELEASE_SHA256", out checksum))
             {
-                var value = line["RELEASE_SHA256=".Length..].Trim().Trim('"', '\'');
-                if (!string.IsNullOrWhiteSpace(value)) return value;
+                return checksum;
             }
         }
 
         return null;
+    }
+
+    private static bool TryParseReleaseInfoValue(string line, string key, out string? value)
+    {
+        var prefix = key + "=";
+        if (line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+        {
+            value = line[prefix.Length..].Trim().Trim('"', '\'');
+            return !string.IsNullOrWhiteSpace(value);
+        }
+
+        value = null;
+        return false;
     }
 
     private string? GetInstallRoot()

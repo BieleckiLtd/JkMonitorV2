@@ -99,6 +99,13 @@ public sealed class DeviceConfiguration
     /// </summary>
     public string? TransportPortName { get; init; }
 
+    /// <summary>
+    /// Per-device database name. When set, the device stores telemetry in
+    /// its own database instead of the global application database.
+    /// Created automatically on first use when the definition requires storage.
+    /// </summary>
+    public string? DatabaseName { get; init; }
+
     public byte Address { get; init; }
 
     public bool IsMaster { get; init; }

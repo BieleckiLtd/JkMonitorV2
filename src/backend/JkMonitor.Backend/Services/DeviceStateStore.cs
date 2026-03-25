@@ -73,6 +73,11 @@ public sealed class DeviceStateStore
         _states.TryRemove(deviceId, out _);
     }
 
+    public DeviceRuntimeState? GetDeviceState(string deviceId)
+    {
+        return _states.TryGetValue(deviceId, out var state) ? state : null;
+    }
+
     public MonitorRuntimeStatus GetStatus(string environmentName)
     {
         var devices = _states.Values

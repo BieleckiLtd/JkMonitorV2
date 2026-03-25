@@ -1,3 +1,4 @@
+using System.IO.Ports;
 using JkMonitor.Backend.Models;
 using JkMonitor.Backend.Services;
 using JkMonitor.Contracts.Configuration;
@@ -13,6 +14,7 @@ public sealed class DevicesController(
     DeviceStateStore stateStore,
     DeviceOrchestrator orchestrator,
     SetupConfigurationService setupConfigurationService,
+    DeviceDatabaseService deviceDatabaseService,
     GenericModbusPollingClient genericPollingClient,
     DeviceDefinitionLoader definitionLoader,
     JkRs485PollingClient rs485PollingClient,
@@ -163,6 +165,191 @@ public sealed class DevicesController(
             return BadRequest(new { message = ex.Message });
         }
     }
+
+    [HttpGet("ports")]
+    public IActionResult GetAvailablePorts()
+    {
+        try
+        {
+            var ports = SerialPort.GetPortNames().OrderBy(p => p).ToArray();
+            var defaultPort = _configuration.SerialBus.PortName;
+            return Ok(new { ports, defaultPort });
+        }
+        catch (Exception ex)
+        {
+            return Ok(new { ports = Array.Empty<string>(), defaultPort = _configuration.SerialBus.PortName, error = ex.Message });
+        }
+    }
+
+    [HttpPost("{deviceId}/start")]
+    public async Task<IActionResult> StartDevice(string deviceId, CancellationToken cancellationToken)
+    {
+        // Enable the device in persisted config
+        var configState = setupConfigurationService.GetDeviceConfiguration();
+        var device = configState.Devices.FirstOrDefault(d =>
+            string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase));
+
+        if (device is null)
+            return NotFound(new { message = $"Device '{deviceId}' not found in configuration." });
+
+        if (!device.Enabled)
+        {
+            var updatedDevices = configState.Devices.Select(d =>
+                string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase)
+                    ? new DeviceConfiguration
+                    {
+                        DeviceId = d.DeviceId, DisplayName = d.DisplayName, ProfileId = d.ProfileId,
+                        DefinitionId = d.DefinitionId, TransportPortName = d.TransportPortName,
+                        DatabaseName = d.DatabaseName,
+                        Address = d.Address, IsMaster = d.IsMaster,
+                        PollIntervalMilliseconds = d.PollIntervalMilliseconds, Enabled = true,
+                        CellVoltageSmoothingFactor = d.CellVoltageSmoothingFactor,
+                        CellVoltageSmoothingBreakoutMillivolts = d.CellVoltageSmoothingBreakoutMillivolts,
+                        DisplayPrecision = d.DisplayPrecision
+                    }
+                    : d).ToList();
+
+            setupConfigurationService.SaveDevices(new SaveDeviceConfigurationRequest { Devices = updatedDevices });
+            device = updatedDevices.First(d => string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase));
+        }
+
+        // Apply configuration (starts the device polling loop)
+        var allDevices = setupConfigurationService.GetDeviceConfiguration().Devices;
+        await orchestrator.ApplyConfigurationAsync(allDevices, cancellationToken);
+
+        // Wait for the first poll result (up to ~8 seconds)
+        const int maxWaitMs = 8000;
+        const int pollIntervalMs = 200;
+        var waited = 0;
+
+        while (waited < maxWaitMs)
+        {
+            await Task.Delay(pollIntervalMs, cancellationToken);
+            waited += pollIntervalMs;
+
+            var state = stateStore.GetDeviceState(deviceId);
+            if (state is not null && state.LastOutcome is not "NotStarted")
+            {
+                return Ok(new
+                {
+                    deviceId,
+                    started = true,
+                    outcome = state.LastOutcome,
+                    error = state.LastError,
+                    message = state.LastOutcome == "Succeeded"
+                        ? "Device started and responding."
+                        : $"Device started but first poll failed: {state.LastError}"
+                });
+            }
+        }
+
+        return Ok(new
+        {
+            deviceId,
+            started = true,
+            outcome = "Timeout",
+            error = "No poll result within timeout.",
+            message = "Device started but no response received within 8 seconds. Check serial port and address."
+        });
+    }
+
+    [HttpPost("{deviceId}/stop")]
+    public async Task<IActionResult> StopDevice(string deviceId, CancellationToken cancellationToken)
+    {
+        // Disable the device in persisted config
+        var configState = setupConfigurationService.GetDeviceConfiguration();
+        var device = configState.Devices.FirstOrDefault(d =>
+            string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase));
+
+        if (device is null)
+            return NotFound(new { message = $"Device '{deviceId}' not found in configuration." });
+
+        if (device.Enabled)
+        {
+            var updatedDevices = configState.Devices.Select(d =>
+                string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase)
+                    ? new DeviceConfiguration
+                    {
+                        DeviceId = d.DeviceId, DisplayName = d.DisplayName, ProfileId = d.ProfileId,
+                        DefinitionId = d.DefinitionId, TransportPortName = d.TransportPortName,
+                        DatabaseName = d.DatabaseName,
+                        Address = d.Address, IsMaster = d.IsMaster,
+                        PollIntervalMilliseconds = d.PollIntervalMilliseconds, Enabled = false,
+                        CellVoltageSmoothingFactor = d.CellVoltageSmoothingFactor,
+                        CellVoltageSmoothingBreakoutMillivolts = d.CellVoltageSmoothingBreakoutMillivolts,
+                        DisplayPrecision = d.DisplayPrecision
+                    }
+                    : d).ToList();
+
+            setupConfigurationService.SaveDevices(new SaveDeviceConfigurationRequest { Devices = updatedDevices });
+        }
+
+        // Apply configuration (stops the device polling loop)
+        var allDevices = setupConfigurationService.GetDeviceConfiguration().Devices;
+        await orchestrator.ApplyConfigurationAsync(allDevices, cancellationToken);
+
+        return Ok(new { deviceId, stopped = true, message = "Device stopped." });
+    }
+
+    [HttpGet("databases")]
+    public async Task<IActionResult> ListDatabases(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var databases = await deviceDatabaseService.ListDatabasesAsync(cancellationToken);
+            return Ok(new { databases });
+        }
+        catch (Exception ex)
+        {
+            return Ok(new { databases = Array.Empty<string>(), error = ex.Message });
+        }
+    }
+
+    [HttpPost("databases/create")]
+    public async Task<IActionResult> CreateDatabase(
+        [FromBody] CreateDatabaseRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.DatabaseName))
+            return BadRequest(new { message = "Database name is required." });
+
+        var result = await deviceDatabaseService.CreateDatabaseAsync(
+            request.DatabaseName.Trim(), request.Provider ?? "timescaledb", cancellationToken);
+
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpPost("databases/validate")]
+    public async Task<IActionResult> ValidateDatabase(
+        [FromBody] ValidateDatabaseRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.DatabaseName))
+            return BadRequest(new { message = "Database name is required." });
+
+        var result = await deviceDatabaseService.ValidateSchemaAsync(request.DatabaseName.Trim(), cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpGet("databases/suggest/{deviceId}")]
+    public IActionResult SuggestDatabaseName(string deviceId)
+    {
+        var device = _configuration.Devices.FirstOrDefault(d =>
+            string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase));
+
+        Contracts.DeviceDefinition.DeviceDefinition? definition = null;
+        var defId = device?.DefinitionId;
+        if (!string.IsNullOrEmpty(defId))
+            definitionLoader.TryGet(defId, out definition);
+
+        var suggested = deviceDatabaseService.SuggestDatabaseName(deviceId, definition?.Storage?.Database?.DefaultNamePattern);
+        var requiresDatabase = definition?.Storage?.Database is not null;
+        var provider = definition?.Storage?.Database?.Provider ?? "timescaledb";
+
+        return Ok(new { suggested, requiresDatabase, provider });
+    }
 }
 
 public sealed record WriteParameterRequest(uint RawValue);
+public sealed record CreateDatabaseRequest(string DatabaseName, string? Provider);
+public sealed record ValidateDatabaseRequest(string DatabaseName);

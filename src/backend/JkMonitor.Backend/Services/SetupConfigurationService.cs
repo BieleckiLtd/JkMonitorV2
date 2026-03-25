@@ -329,10 +329,16 @@ public sealed class SetupConfigurationService(
                 DeviceId = RequireValue(device.DeviceId, nameof(DeviceConfiguration.DeviceId), index),
                 DisplayName = RequireValue(device.DisplayName, nameof(DeviceConfiguration.DisplayName), index),
                 ProfileId = RequireValue(device.ProfileId, nameof(DeviceConfiguration.ProfileId), index),
+                DefinitionId = device.DefinitionId,
+                TransportPortName = device.TransportPortName,
+                DatabaseName = device.DatabaseName,
                 Address = device.Address,
                 IsMaster = device.IsMaster,
                 PollIntervalMilliseconds = device.PollIntervalMilliseconds,
-                Enabled = device.Enabled
+                Enabled = device.Enabled,
+                CellVoltageSmoothingFactor = device.CellVoltageSmoothingFactor,
+                CellVoltageSmoothingBreakoutMillivolts = device.CellVoltageSmoothingBreakoutMillivolts,
+                DisplayPrecision = device.DisplayPrecision
             };
 
             if (normalizedDevice.PollIntervalMilliseconds <= 0)
@@ -367,10 +373,16 @@ public sealed class SetupConfigurationService(
             DeviceId = device.DeviceId,
             DisplayName = device.DisplayName,
             ProfileId = device.ProfileId,
+            DefinitionId = device.DefinitionId,
+            TransportPortName = device.TransportPortName,
+            DatabaseName = device.DatabaseName,
             Address = device.Address,
             IsMaster = device.IsMaster,
             PollIntervalMilliseconds = device.PollIntervalMilliseconds,
-            Enabled = device.Enabled
+            Enabled = device.Enabled,
+            CellVoltageSmoothingFactor = device.CellVoltageSmoothingFactor,
+            CellVoltageSmoothingBreakoutMillivolts = device.CellVoltageSmoothingBreakoutMillivolts,
+            DisplayPrecision = device.DisplayPrecision
         };
     }
 

@@ -3,7 +3,7 @@ using JkMonitor.Contracts.Status;
 
 namespace JkMonitor.Backend.Services;
 
-public sealed class InMemoryLogStore
+public sealed class InMemoryLogStore : ILogQueryService
 {
     private const int MaxEntries = 50_000;
 
@@ -76,4 +76,14 @@ public sealed class InMemoryLogStore
             Entries = filtered.Skip(skip).Take(take).ToList()
         };
     }
+
+    public Task<LogQueryResponse> QueryAsync(
+        IReadOnlyList<string>? levels,
+        DateTimeOffset? from,
+        DateTimeOffset? to,
+        string? search,
+        int skip,
+        int take,
+        CancellationToken cancellationToken)
+        => Task.FromResult(Query(levels, from, to, search, skip, take));
 }
