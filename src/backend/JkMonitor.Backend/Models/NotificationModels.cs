@@ -11,7 +11,7 @@ public sealed class NotificationConfig
 public sealed class NotificationChannelConfig
 {
     public required string Id { get; set; }
-    public required string Type { get; set; } // "ntfy" | "email"
+    public required string Type { get; set; } // "ntfy" | "email" | "whatsapp"
     public required string Name { get; set; }
     public bool Enabled { get; set; } = true;
     public Dictionary<string, object?> Settings { get; set; } = [];

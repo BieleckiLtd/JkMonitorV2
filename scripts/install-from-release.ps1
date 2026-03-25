@@ -65,6 +65,7 @@ function Copy-IfExists([string]$Source, [string]$Target) {
 
 function Preserve-ExistingState([string]$SourceRoot, [string]$PreserveRoot) {
     Copy-IfExists (Join-Path $SourceRoot '.dotnet') (Join-Path $PreserveRoot '.dotnet')
+    Copy-IfExists (Join-Path $SourceRoot 'app\notifications.json') (Join-Path $PreserveRoot 'app\notifications.json')
 
     foreach ($fileName in 'appsettings.Local.json', 'appsettings.Development.Local.json', 'appsettings.Production.Local.json') {
         Copy-IfExists (Join-Path $SourceRoot "app\$fileName") (Join-Path $PreserveRoot "app\$fileName")
@@ -79,6 +80,12 @@ function Restore-PreservedState([string]$PreserveRoot, [string]$DestinationRoot)
     if (Test-Path (Join-Path $PreserveRoot '.dotnet')) {
         Remove-Item -Path (Join-Path $DestinationRoot '.dotnet') -Recurse -Force -ErrorAction SilentlyContinue
         Copy-Item -Path (Join-Path $PreserveRoot '.dotnet') -Destination (Join-Path $DestinationRoot '.dotnet') -Recurse -Force
+    }
+
+    $notificationsPath = Join-Path $PreserveRoot 'app\notifications.json'
+    if (Test-Path $notificationsPath) {
+        New-Item -ItemType Directory -Path (Join-Path $DestinationRoot 'app') -Force | Out-Null
+        Copy-Item -Path $notificationsPath -Destination (Join-Path $DestinationRoot 'app\notifications.json') -Force
     }
 
     foreach ($fileName in 'appsettings.Local.json', 'appsettings.Development.Local.json', 'appsettings.Production.Local.json') {

@@ -48,11 +48,10 @@ builder.Services.AddSingleton<JkMonitor.Backend.Services.DeviceOrchestrator>();
 
 // Notification system
 builder.Services.AddHttpClient();
-builder.Services.AddSingleton(sp => new JkMonitor.Backend.Services.NotificationConfigStore(
-    sp.GetRequiredService<IHostEnvironment>().ContentRootPath,
-    sp.GetRequiredService<ILogger<JkMonitor.Backend.Services.NotificationConfigStore>>()));
+builder.Services.AddSingleton<JkMonitor.Backend.Services.NotificationConfigStore>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.INotificationChannelSender, JkMonitor.Backend.Services.NtfyChannelSender>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.INotificationChannelSender, JkMonitor.Backend.Services.EmailChannelSender>();
+builder.Services.AddSingleton<JkMonitor.Backend.Services.INotificationChannelSender, JkMonitor.Backend.Services.WhatsAppChannelSender>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.NotificationDispatcher>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.NotificationEvaluator>();
 
@@ -86,6 +85,9 @@ using (var scope = app.Services.CreateScope())
 {
     var repository = scope.ServiceProvider.GetRequiredService<JkMonitor.Backend.Services.ITelemetryRepository>();
     await repository.InitializeAsync(CancellationToken.None);
+
+    var notificationConfigStore = scope.ServiceProvider.GetRequiredService<JkMonitor.Backend.Services.NotificationConfigStore>();
+    await notificationConfigStore.InitializeAsync(CancellationToken.None);
 
     var definitionLoader = scope.ServiceProvider.GetRequiredService<JkMonitor.Backend.Services.DeviceDefinitionLoader>();
     definitionLoader.LoadAll();

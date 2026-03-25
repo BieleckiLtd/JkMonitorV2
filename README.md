@@ -10,7 +10,7 @@ The project goal is to poll one or more BMS devices, persist telemetry to a time
 - Frontend: browser UI, likely React
 - Storage: PostgreSQL with TimescaleDB as the leading option
 - Application logs: Serilog with a dedicated PostgreSQL database via `Monitor:LogStorage`
-- Notifications: in-app alerts and ntfy
+- Notifications: in-app alerts plus ntfy, email, and WhatsApp channels
 - Remote access: authenticated internet exposure via Cloudflare Tunnel or equivalent
 - Configuration: JSON-driven protocol, polling, alerting, and retention settings
 

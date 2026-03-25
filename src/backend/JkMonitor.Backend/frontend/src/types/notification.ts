@@ -1,6 +1,8 @@
+export type NotificationChannelType = 'ntfy' | 'email' | 'whatsapp';
+
 export type NotificationChannelConfig = {
   id: string;
-  type: 'ntfy' | 'email';
+  type: NotificationChannelType;
   name: string;
   enabled: boolean;
   settings: Record<string, unknown>;
@@ -22,6 +24,14 @@ export type EmailSettings = {
   fromAddress: string;
   fromName?: string;
   toAddresses: string[];
+};
+
+export type WhatsAppSettings = {
+  apiVersion: string;
+  phoneNumberId: string;
+  recipientNumber: string;
+  accessToken: string;
+  previewUrl: boolean;
 };
 
 export type NotificationRuleConfig = {

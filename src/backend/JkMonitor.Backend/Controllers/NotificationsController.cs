@@ -14,8 +14,9 @@ public sealed class NotificationsController(
     IHostEnvironment environment) : ControllerBase
 {
     [HttpGet]
-    public ActionResult<NotificationConfigResponse> GetConfig()
+    public async Task<ActionResult<NotificationConfigResponse>> GetConfig(CancellationToken cancellationToken)
     {
+        await configStore.InitializeAsync(cancellationToken);
         var config = configStore.GetConfig();
         return Ok(new NotificationConfigResponse
         {
@@ -25,9 +26,11 @@ public sealed class NotificationsController(
     }
 
     [HttpPut("channels")]
-    public ActionResult<NotificationConfigResponse> SaveChannels([FromBody] SaveNotificationChannelsRequest request)
+    public async Task<ActionResult<NotificationConfigResponse>> SaveChannels(
+        [FromBody] SaveNotificationChannelsRequest request,
+        CancellationToken cancellationToken)
     {
-        configStore.SaveChannels(request.Channels);
+        await configStore.SaveChannelsAsync(request.Channels, cancellationToken);
         var config = configStore.GetConfig();
         return Ok(new NotificationConfigResponse
         {
@@ -37,9 +40,11 @@ public sealed class NotificationsController(
     }
 
     [HttpPut("rules")]
-    public ActionResult<NotificationConfigResponse> SaveRules([FromBody] SaveNotificationRulesRequest request)
+    public async Task<ActionResult<NotificationConfigResponse>> SaveRules(
+        [FromBody] SaveNotificationRulesRequest request,
+        CancellationToken cancellationToken)
     {
-        configStore.SaveRules(request.Rules);
+        await configStore.SaveRulesAsync(request.Rules, cancellationToken);
         var config = configStore.GetConfig();
         return Ok(new NotificationConfigResponse
         {

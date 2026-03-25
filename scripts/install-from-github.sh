@@ -44,6 +44,7 @@ preserve_existing_state() {
   local preserve_root="$2"
 
   copy_if_exists "$source_root/.dotnet" "$preserve_root/.dotnet"
+  copy_if_exists "$source_root/src/backend/JkMonitor.Backend/notifications.json" "$preserve_root/src/backend/JkMonitor.Backend/notifications.json"
   copy_if_exists "$source_root/src/backend/JkMonitor.Backend/appsettings.Local.json" "$preserve_root/src/backend/JkMonitor.Backend/appsettings.Local.json"
   copy_if_exists "$source_root/src/backend/JkMonitor.Backend/appsettings.Development.Local.json" "$preserve_root/src/backend/JkMonitor.Backend/appsettings.Development.Local.json"
   copy_if_exists "$source_root/src/backend/JkMonitor.Backend/appsettings.Production.Local.json" "$preserve_root/src/backend/JkMonitor.Backend/appsettings.Production.Local.json"
@@ -60,6 +61,11 @@ restore_preserved_state() {
   if [ -d "$preserve_root/.dotnet" ]; then
     rm -rf "$destination_root/.dotnet"
     cp -R "$preserve_root/.dotnet" "$destination_root/.dotnet"
+  fi
+
+  if [ -f "$preserve_root/src/backend/JkMonitor.Backend/notifications.json" ]; then
+    mkdir -p "$destination_root/src/backend/JkMonitor.Backend"
+    cp "$preserve_root/src/backend/JkMonitor.Backend/notifications.json" "$destination_root/src/backend/JkMonitor.Backend/notifications.json"
   fi
 
   for file in \

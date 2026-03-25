@@ -45,6 +45,7 @@ function Copy-IfExists([string]$Source, [string]$Target) {
 function Preserve-ExistingState([string]$SourceRoot, [string]$PreserveRoot) {
     $itemsToPreserve = @(
         '.dotnet',
+        'src\backend\JkMonitor.Backend\notifications.json',
         'src\backend\JkMonitor.Backend\appsettings.Local.json',
         'src\backend\JkMonitor.Backend\appsettings.Development.Local.json',
         'src\backend\JkMonitor.Backend\appsettings.Production.Local.json'

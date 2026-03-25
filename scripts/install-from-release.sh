@@ -212,6 +212,7 @@ preserve_existing_state() {
 
   copy_if_exists "$source_root/.dotnet" "$preserve_root/.dotnet"
   copy_if_exists "$source_root/jkmonitor.env" "$preserve_root/jkmonitor.env"
+  copy_if_exists "$source_root/app/notifications.json" "$preserve_root/app/notifications.json"
 
   for file_name in \
     appsettings.Local.json \
@@ -237,6 +238,11 @@ restore_preserved_state() {
 
   if [ -f "$preserve_root/jkmonitor.env" ]; then
     cp "$preserve_root/jkmonitor.env" "$destination_root/jkmonitor.env"
+  fi
+
+  if [ -f "$preserve_root/app/notifications.json" ]; then
+    mkdir -p "$destination_root/app"
+    cp "$preserve_root/app/notifications.json" "$destination_root/app/notifications.json"
   fi
 
   for file_name in \

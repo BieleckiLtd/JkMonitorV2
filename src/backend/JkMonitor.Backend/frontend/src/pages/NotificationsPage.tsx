@@ -1,12 +1,12 @@
 import { useState } from 'react';
-import { Bell, Hash, LoaderCircle, Mail, Megaphone, Play, Plus, Save, Send, Trash2, X } from 'lucide-react';
+import { Bell, Hash, LoaderCircle, Mail, Megaphone, MessageCircle, Play, Plus, Save, Send, Trash2, X } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Switch } from '../components/ui/switch';
 import { Badge } from '../components/ui/badge';
 import { cn } from '../lib/utils';
 import { useNotificationConfig, useNotificationLog, useNotificationMetadata } from '../hooks/useNotifications';
-import type { NotificationChannelConfig, NotificationRuleConfig, NtfySettings, EmailSettings } from '../types/notification';
+import type { NotificationChannelConfig, NotificationRuleConfig, NtfySettings, EmailSettings, WhatsAppSettings } from '../types/notification';
 
 // ── helpers ──
 
@@ -39,6 +39,20 @@ const defaultEmailChannel = (): NotificationChannelConfig => ({
   } satisfies EmailSettings as unknown as Record<string, unknown>,
 });
 
+const defaultWhatsAppChannel = (): NotificationChannelConfig => ({
+  id: generateId(),
+  type: 'whatsapp',
+  name: 'New WhatsApp channel',
+  enabled: true,
+  settings: {
+    apiVersion: 'v22.0',
+    phoneNumberId: '',
+    recipientNumber: '',
+    accessToken: '',
+    previewUrl: false,
+  } satisfies WhatsAppSettings as unknown as Record<string, unknown>,
+});
+
 const defaultRule = (): NotificationRuleConfig => ({
   id: generateId(),
   name: 'New rule',
@@ -51,6 +65,17 @@ const defaultRule = (): NotificationRuleConfig => ({
   severity: 'info',
   cooldownMinutes: 15,
 });
+
+function getChannelAppearance(type: NotificationChannelConfig['type']) {
+  switch (type) {
+    case 'ntfy':
+      return { icon: Send, accentClass: 'bg-blue-500/10 text-blue-500' };
+    case 'email':
+      return { icon: Mail, accentClass: 'bg-sky-500/10 text-sky-600' };
+    case 'whatsapp':
+      return { icon: MessageCircle, accentClass: 'bg-emerald-500/10 text-emerald-600' };
+  }
+}
 
 // ── tab button ──
 
@@ -107,8 +132,11 @@ export function NotificationsPage() {
     setSaveMsg(null);
   };
 
-  const addChannel = (type: 'ntfy' | 'email') => {
-    setChannels((prev) => [...prev, type === 'ntfy' ? defaultNtfyChannel() : defaultEmailChannel()]);
+  const addChannel = (type: NotificationChannelConfig['type']) => {
+    setChannels((prev) => [
+      ...prev,
+      type === 'ntfy' ? defaultNtfyChannel() : type === 'email' ? defaultEmailChannel() : defaultWhatsAppChannel(),
+    ]);
     setSaveMsg(null);
   };
 
@@ -228,6 +256,9 @@ export function NotificationsPage() {
             <Button variant='outline' onClick={() => addChannel('email')}>
               <Plus className='h-4 w-4' /> Add email channel
             </Button>
+            <Button variant='outline' onClick={() => addChannel('whatsapp')}>
+              <Plus className='h-4 w-4' /> Add WhatsApp channel
+            </Button>
             <Button onClick={handleSaveChannels} disabled={isSaving}>
               {isSaving ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Save className='h-4 w-4' />}
               Save channels
@@ -238,23 +269,21 @@ export function NotificationsPage() {
             <div className='rounded-2xl border border-dashed border-border bg-card/40 px-6 py-12 text-center'>
               <Megaphone className='mx-auto h-10 w-10 text-muted-foreground/50' />
               <div className='mt-4 text-lg font-semibold text-foreground'>No channels configured</div>
-              <p className='mt-2 text-sm text-muted-foreground'>Add an ntfy or email channel to start sending notifications.</p>
+              <p className='mt-2 text-sm text-muted-foreground'>Add an ntfy, email, or WhatsApp channel to start sending notifications.</p>
             </div>
           ) : null}
 
-          {channels.map((channel, index) => (
+          {channels.map((channel, index) => {
+            const appearance = getChannelAppearance(channel.type);
+            const Icon = appearance.icon;
+
+            return (
             <section key={channel.id} className='rounded-2xl border border-border bg-card/70 p-5 shadow-sm'>
               <div className='mb-4 flex items-center justify-between border-b border-border pb-3'>
                 <div className='flex items-center gap-3'>
-                  {channel.type === 'ntfy' ? (
-                    <div className='flex h-9 w-9 items-center justify-center rounded-lg bg-blue-500/10 text-blue-500'>
-                      <Send className='h-4 w-4' />
-                    </div>
-                  ) : (
-                    <div className='flex h-9 w-9 items-center justify-center rounded-lg bg-purple-500/10 text-purple-500'>
-                      <Mail className='h-4 w-4' />
-                    </div>
-                  )}
+                  <div className={cn('flex h-9 w-9 items-center justify-center rounded-lg', appearance.accentClass)}>
+                    <Icon className='h-4 w-4' />
+                  </div>
                   <div>
                     <div className='text-sm font-semibold text-foreground'>{channel.name || 'Unnamed channel'}</div>
                     <Badge variant='outline' className='mt-0.5 text-[10px]'>
@@ -287,12 +316,15 @@ export function NotificationsPage() {
 
                 {channel.type === 'ntfy' ? (
                   <NtfyChannelFields channel={channel} index={index} onUpdate={updateChannelSetting} />
-                ) : (
+                ) : channel.type === 'email' ? (
                   <EmailChannelFields channel={channel} index={index} onUpdate={updateChannelSetting} />
+                ) : (
+                  <WhatsAppChannelFields channel={channel} index={index} onUpdate={updateChannelSetting} />
                 )}
               </div>
             </section>
-          ))}
+            );
+          })}
         </div>
       ) : null}
 
@@ -440,6 +472,7 @@ export function NotificationsPage() {
                     ) : null}
                     {channels.map((ch) => {
                       const selected = rule.channelIds.includes(ch.id);
+                      const ChannelIcon = getChannelAppearance(ch.type).icon;
                       return (
                         <button
                           key={ch.id}
@@ -452,7 +485,7 @@ export function NotificationsPage() {
                               : 'border-border text-muted-foreground hover:bg-muted',
                           )}
                         >
-                          {ch.type === 'ntfy' ? <Send className='mr-1 inline h-3 w-3' /> : <Mail className='mr-1 inline h-3 w-3' />}
+                          <ChannelIcon className='mr-1 inline h-3 w-3' />
                           {ch.name}
                         </button>
                       );
@@ -631,6 +664,51 @@ function EmailChannelFields({
               </button>
             </span>
           ))}
+        </div>
+      </div>
+    </>
+  );
+}
+
+function WhatsAppChannelFields({
+  channel,
+  index,
+  onUpdate,
+}: {
+  channel: NotificationChannelConfig;
+  index: number;
+  onUpdate: (index: number, key: string, value: unknown) => void;
+}) {
+  const s = channel.settings as unknown as WhatsAppSettings;
+
+  return (
+    <>
+      <div className='rounded-xl border border-border bg-muted/40 px-4 py-3 md:col-span-2 xl:col-span-3'>
+        <div className='text-xs font-medium uppercase tracking-widest text-muted-foreground'>Meta WhatsApp Cloud API</div>
+        <div className='mt-2 text-sm text-muted-foreground'>Use a phone number ID and access token from your Meta app. Create one channel per recipient number.</div>
+      </div>
+      <label className='space-y-1.5'>
+        <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>API Version</span>
+        <Input value={s.apiVersion ?? 'v22.0'} onChange={(e) => onUpdate(index, 'apiVersion', e.target.value)} placeholder='v22.0' />
+      </label>
+      <label className='space-y-1.5'>
+        <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Phone Number ID</span>
+        <Input value={s.phoneNumberId ?? ''} onChange={(e) => onUpdate(index, 'phoneNumberId', e.target.value)} placeholder='123456789012345' />
+      </label>
+      <label className='space-y-1.5'>
+        <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Recipient Number</span>
+        <Input value={s.recipientNumber ?? ''} onChange={(e) => onUpdate(index, 'recipientNumber', e.target.value)} placeholder='+447700900123' />
+        <span className='block text-[11px] text-muted-foreground'>Enter the destination number in international format. Spaces and punctuation are ignored on send.</span>
+      </label>
+      <label className='space-y-1.5 md:col-span-2 xl:col-span-2'>
+        <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Access Token</span>
+        <Input type='password' value={s.accessToken ?? ''} onChange={(e) => onUpdate(index, 'accessToken', e.target.value)} />
+      </label>
+      <div className='rounded-xl border border-border bg-muted/40 px-4 py-3'>
+        <div className='text-xs font-medium uppercase tracking-widest text-muted-foreground'>Preview URL</div>
+        <div className='mt-2 flex items-center justify-between'>
+          <span className='text-sm text-foreground'>Enable WhatsApp link previews</span>
+          <Switch checked={s.previewUrl ?? false} onCheckedChange={(checked) => onUpdate(index, 'previewUrl', checked)} />
         </div>
       </div>
     </>
