@@ -82,6 +82,8 @@ public sealed class TimescaleTelemetryRepository(
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _deviceDbLocks = new(StringComparer.OrdinalIgnoreCase);
 
     private static readonly string[] RollupTables = ["jk_rollup_1m", "jk_rollup_5m", "jk_rollup_1h"];
+    private const int RetentionDeleteBatchSize = 5_000;
+    private const int RetentionDeleteCommandTimeoutSeconds = 120;
 
     public async Task InitializeAsync(CancellationToken cancellationToken)
     {
@@ -430,13 +432,13 @@ LIMIT 2000;
                 await using var connection = new NpgsqlConnection(connStr);
                 await connection.OpenAsync(cancellationToken);
 
-                await DeleteOlderThan(connection, "jk_raw_samples", "sampled_at", now.AddMinutes(-_retention.RawSecondsWindowMinutes), cancellationToken);
-                await DeleteOlderThan(connection, "jk_rollup_1m", "bucket_start", now.AddHours(-_retention.OneMinuteWindowHours), cancellationToken);
-                await DeleteOlderThan(connection, "jk_rollup_5m", "bucket_start", now.AddDays(-_retention.FiveMinuteWindowDays), cancellationToken);
+                await DeleteOlderThanAsync(connection, "jk_raw_samples", "sampled_at", now.AddMinutes(-_retention.RawSecondsWindowMinutes), cancellationToken);
+                await DeleteOlderThanAsync(connection, "jk_rollup_1m", "bucket_start", now.AddHours(-_retention.OneMinuteWindowHours), cancellationToken);
+                await DeleteOlderThanAsync(connection, "jk_rollup_5m", "bucket_start", now.AddDays(-_retention.FiveMinuteWindowDays), cancellationToken);
 
                 if (_retention.OneHourWindowDays > 0)
                 {
-                    await DeleteOlderThan(connection, "jk_rollup_1h", "bucket_start", now.AddDays(-_retention.OneHourWindowDays), cancellationToken);
+                    await DeleteOlderThanAsync(connection, "jk_rollup_1h", "bucket_start", now.AddDays(-_retention.OneHourWindowDays), cancellationToken);
                 }
             }
             catch (Exception ex)
@@ -540,12 +542,57 @@ DO UPDATE SET
         return new DateTimeOffset(ticks, TimeSpan.Zero);
     }
 
-    private static async Task DeleteOlderThan(NpgsqlConnection connection, string table, string column, DateTimeOffset cutoff, CancellationToken ct)
+    private async Task DeleteOlderThanAsync(NpgsqlConnection connection, string table, string column, DateTimeOffset cutoff, CancellationToken ct)
     {
-        await using var cmd = connection.CreateCommand();
-        cmd.CommandText = $"DELETE FROM {table} WHERE {column} < @cutoff;";
-        cmd.Parameters.AddWithValue("cutoff", cutoff);
-        await cmd.ExecuteNonQueryAsync(ct);
+        var totalDeleted = 0;
+        var batches = 0;
+
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+
+            await using var cmd = connection.CreateCommand();
+            cmd.CommandTimeout = RetentionDeleteCommandTimeoutSeconds;
+            cmd.CommandText = $@"
+WITH batch AS (
+    SELECT tableoid, ctid
+    FROM {table}
+    WHERE {column} < @cutoff
+    ORDER BY {column}
+    LIMIT @batch_size
+)
+DELETE FROM {table} AS target
+USING batch
+WHERE target.tableoid = batch.tableoid
+  AND target.ctid = batch.ctid;
+";
+            cmd.Parameters.AddWithValue("cutoff", cutoff);
+            cmd.Parameters.AddWithValue("batch_size", NpgsqlDbType.Integer, RetentionDeleteBatchSize);
+
+            var deleted = await cmd.ExecuteNonQueryAsync(ct);
+            if (deleted == 0)
+            {
+                break;
+            }
+
+            totalDeleted += deleted;
+            batches++;
+
+            if (deleted < RetentionDeleteBatchSize)
+            {
+                break;
+            }
+        }
+
+        if (totalDeleted > 0)
+        {
+            logger.LogInformation(
+                "Retention deleted {DeletedRows} rows from {Table} older than {Cutoff} in {BatchCount} batches.",
+                totalDeleted,
+                table,
+                cutoff,
+                batches);
+        }
     }
 
     private static async Task ExecuteNonQueryAsync(NpgsqlConnection connection, string sql, CancellationToken cancellationToken)
