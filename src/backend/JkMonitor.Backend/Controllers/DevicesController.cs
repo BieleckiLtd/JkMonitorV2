@@ -12,6 +12,8 @@ public sealed class DevicesController(
     IHostEnvironment environment,
     DeviceStateStore stateStore,
     SetupConfigurationService setupConfigurationService,
+    GenericModbusPollingClient genericPollingClient,
+    DeviceDefinitionLoader definitionLoader,
     JkRs485PollingClient rs485PollingClient,
     ITelemetryRepository telemetryRepository,
     PollTrigger pollTrigger,
@@ -113,19 +115,31 @@ public sealed class DevicesController(
         if (device is null)
             return NotFound(new { message = $"Device '{deviceId}' not found." });
 
-        var profile = _configuration.DeviceProfiles.FirstOrDefault(p =>
-            string.Equals(p.ProfileId, device.ProfileId, StringComparison.OrdinalIgnoreCase));
-
-        if (profile is null)
-            return BadRequest(new { message = $"Profile '{device.ProfileId}' not found." });
-
         try
         {
-            var result = await rs485PollingClient.WriteConfigRegisterAsync(
-                device, profile, parameterKey, request.RawValue, cancellationToken);
+            WriteRegisterResult result;
+
+            // Prefer definition-driven write when DefinitionId is configured
+            if (!string.IsNullOrEmpty(device.DefinitionId) &&
+                definitionLoader.TryGet(device.DefinitionId, out var definition) && definition is not null)
+            {
+                result = await genericPollingClient.WriteEntityAsync(
+                    device, definition, parameterKey, request.RawValue, cancellationToken);
+            }
+            else
+            {
+                // Fallback to legacy profile-based write
+                var profile = _configuration.DeviceProfiles.FirstOrDefault(p =>
+                    string.Equals(p.ProfileId, device.ProfileId, StringComparison.OrdinalIgnoreCase));
+
+                if (profile is null)
+                    return BadRequest(new { message = $"Profile '{device.ProfileId}' not found." });
+
+                result = await rs485PollingClient.WriteConfigRegisterAsync(
+                    device, profile, parameterKey, request.RawValue, cancellationToken);
+            }
 
             pollTrigger.Signal();
-
             return Ok(result);
         }
         catch (ArgumentException ex)

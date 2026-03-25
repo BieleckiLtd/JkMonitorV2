@@ -5,6 +5,8 @@ using Microsoft.Extensions.Options;
 namespace JkMonitor.Backend.Services;
 
 public sealed class ConfiguredPollingClient(
+    GenericModbusPollingClient genericPollingClient,
+    DeviceDefinitionLoader definitionLoader,
     JkRs485PollingClient rs485PollingClient,
     IOptions<MonitorConfiguration> configuration) : IDevicePollingClient
 {
@@ -13,6 +15,13 @@ public sealed class ConfiguredPollingClient(
 
     public Task<DevicePollResult> PollAsync(DeviceConfiguration device, CancellationToken cancellationToken)
     {
+        // Prefer definition-driven polling when DefinitionId is configured
+        if (!string.IsNullOrEmpty(device.DefinitionId) && definitionLoader.TryGet(device.DefinitionId, out var definition) && definition is not null)
+        {
+            return genericPollingClient.PollAsync(device, definition, cancellationToken);
+        }
+
+        // Fallback to legacy profile-based polling
         if (!_profiles.TryGetValue(device.ProfileId, out var profile))
         {
             throw new InvalidOperationException($"Device profile '{device.ProfileId}' is not defined in configuration.");

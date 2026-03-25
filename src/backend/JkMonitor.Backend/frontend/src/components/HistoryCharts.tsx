@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { cn } from '../lib/utils';
 import { computeEnergyData, computeEnergyGradientStops, formatEnergyValue, type Resolution } from '../lib/energyUtils';
 import { TrendingUp } from 'lucide-react';
+import type { DeviceDefinition, UiChartDefinition } from '../types/deviceDefinition';
 
 type HistoryPoint = {
   timestamp: string;
@@ -81,8 +82,36 @@ const cellColorPalette = [
   '#2dd4bf', '#facc15', '#f97316', '#64748b',
 ];
 
-export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClearCellSelection }: {
+/** Maps definition color names to hex values used by Recharts. */
+const definitionColorMap: Record<string, string> = {
+  emerald: '#34d399', green: '#34d399', blue: '#38bdf8', sky: '#38bdf8',
+  amber: '#fbbf24', yellow: '#fbbf24', red: '#f87171', rose: '#f87171',
+  purple: '#a78bfa', violet: '#a78bfa', teal: '#2dd4bf', orange: '#fb923c',
+};
+
+function resolveChartColor(name: string): string {
+  return definitionColorMap[name.toLowerCase()] ?? name;
+}
+
+/** Converts definition chart declarations into LineSpec arrays keyed by the snapshot field names.
+ *  Entity IDs are mapped to the snake_case→camelCase naming the backend uses for the history response. */
+const entityToHistoryKey: Record<string, string> = {
+  total_voltage: 'totalVoltageVolts',
+  current: 'currentAmps',
+  power: 'powerWatts',
+  state_of_charge: 'stateOfChargePercent',
+  min_cell_voltage: 'minCellVoltageVolts',
+  max_cell_voltage: 'maxCellVoltageVolts',
+  avg_cell_voltage: 'avgCellVoltageVolts',
+  delta_cell_voltage: 'deltaCellVoltageVolts',
+  mos_temperature: 'mosTemperatureCelsius',
+  battery_temp_1: 'batteryTemperatureCelsius',
+  battery_temp_2: 'batteryTemperatureCelsius',
+};
+
+export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClearCellSelection, definition }: {
   deviceId: string; precision: DisplayPrecision; selectedCellIndices?: number[]; onClearCellSelection?: () => void;
+  definition?: DeviceDefinition;
 }) {
   const [resolution, setResolution] = useState<Resolution | null>('1m');
   const [data, setData] = useState<HistoryPoint[]>([]);
@@ -97,6 +126,9 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
 
   const selectedCells = selectedCellIndices ?? [];
   const cellKey = selectedCells.join(',');
+
+  // Extract chart definitions from device definition (if available)
+  const definitionCharts = definition?.ui?.pages?.history?.charts;
 
   // Per-resolution data cache — survives resolution switches so toggling back is instant
   const historyCacheRef = useRef(new Map<string, HistoryPoint[]>());
@@ -342,12 +374,14 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
                 onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
                 todayXTicks={todayXTicks} />
             )}
-            <EnergyChartSection data={chartData} resolution={effectiveResolution}
-              hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
-              onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
-              todayXTicks={todayXTicks} />
-            <ChartSection title='State of Charge' unit='%' data={chartData} precision={precision}
-              lines={[{ key: 'stateOfChargePercent', color: '#fbbf24', name: 'SOC' }]}
+            {definitionCharts ? renderDefinitionCharts(definitionCharts, chartData, precision, effectiveResolution, sharedHoveredTime, sharedSelectedTime, setSharedHoveredTime, setSharedSelectedTime, todayXTicks) : (
+              <>
+                <EnergyChartSection data={chartData} resolution={effectiveResolution}
+                  hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
+                  onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
+                  todayXTicks={todayXTicks} />
+                <ChartSection title='State of Charge' unit='%' data={chartData} precision={precision}
+                  lines={[{ key: 'stateOfChargePercent', color: '#fbbf24', name: 'SOC' }]}
               domain={[0, 100]}
               hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
               onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
@@ -368,6 +402,8 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
               hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
               onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
               todayXTicks={todayXTicks} />
+              </>
+            )}
           </>
         )}
       </CardContent>
@@ -380,6 +416,59 @@ type ChartInteractionState = {
   activeTooltipIndex?: number;
   activeIndex?: number;
 };
+
+/** Renders history charts from the device definition's chart declarations. */
+function renderDefinitionCharts(
+  charts: UiChartDefinition[],
+  chartData: Record<string, unknown>[],
+  precision: DisplayPrecision,
+  resolution: Resolution,
+  hoveredTime: string | null,
+  selectedTime: string | null,
+  onHover: (time: string | null) => void,
+  onSelect: (time: string | null) => void,
+  todayXTicks?: string[],
+): React.ReactNode {
+  return charts.filter(c => c.type !== 'multi-cell-chart').map((chart, i) => {
+    if (chart.type === 'area-chart' && chart.showEnergyTotals) {
+      return (
+        <EnergyChartSection
+          key={`def-chart-${i}`}
+          data={chartData}
+          resolution={resolution}
+          hoveredTime={hoveredTime}
+          selectedTime={selectedTime}
+          onHover={onHover}
+          onSelect={onSelect}
+          todayXTicks={todayXTicks}
+        />
+      );
+    }
+
+    const lines: LineSpec[] = (chart.traces ?? []).map(t => ({
+      key: entityToHistoryKey[t.entity] ?? t.entity,
+      color: resolveChartColor(t.color),
+      name: t.label ?? t.entity,
+    }));
+
+    return (
+      <ChartSection
+        key={`def-chart-${i}`}
+        title={chart.title}
+        unit={chart.yAxis?.unit ?? ''}
+        data={chartData}
+        precision={precision}
+        lines={lines}
+        domain={chart.yAxis?.domain}
+        hoveredTime={hoveredTime}
+        selectedTime={selectedTime}
+        onHover={onHover}
+        onSelect={onSelect}
+        todayXTicks={todayXTicks}
+      />
+    );
+  });
+}
 
 /** Shared theme-aware style constants for Recharts */
 const xTickStyle = { fontSize: 10, fill: 'var(--muted-foreground)' };

@@ -15,6 +15,7 @@ public sealed class DeviceStateStore
 
     public DeviceStateStore(
         IOptions<MonitorConfiguration> configuration,
+        DeviceDefinitionLoader definitionLoader,
         HostSystemMonitoringService hostSystemMonitoringService,
         IBuildMetadataProvider buildMetadataProvider)
     {
@@ -28,12 +29,21 @@ public sealed class DeviceStateStore
         {
             profileLookup.TryGetValue(device.ProfileId, out var profile);
 
+            // Use definition protocol type when available, fall back to legacy profile handler
+            string? protocolHandler = profile?.ProtocolHandler;
+            if (!string.IsNullOrEmpty(device.DefinitionId) &&
+                definitionLoader.TryGet(device.DefinitionId, out var definition) && definition is not null)
+            {
+                protocolHandler = definition.Connection.Protocol.Type;
+            }
+
             _states[device.DeviceId] = new DeviceRuntimeState
             {
                 DeviceId = device.DeviceId,
                 DisplayName = device.DisplayName,
                 ProfileId = device.ProfileId,
-                ProtocolHandler = profile?.ProtocolHandler,
+                DefinitionId = device.DefinitionId,
+                ProtocolHandler = protocolHandler,
                 Enabled = device.Enabled,
                 IsMaster = device.IsMaster,
                 PollIntervalMilliseconds = device.PollIntervalMilliseconds,

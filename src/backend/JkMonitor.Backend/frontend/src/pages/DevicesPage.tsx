@@ -3,11 +3,14 @@ import { Cable, LoaderCircle, Plus, Save, Trash2 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Switch } from '../components/ui/switch';
+import { useDeviceDefinitions } from '../hooks/useDeviceDefinition';
 
 type DeviceConfiguration = {
   deviceId: string;
   displayName: string;
   profileId: string;
+  definitionId?: string | null;
+  transportPortName?: string | null;
   address: number;
   isMaster: boolean;
   pollIntervalMilliseconds: number;
@@ -23,6 +26,8 @@ const defaultDevice = (index: number): DeviceConfiguration => ({
   deviceId: `device-${index}`,
   displayName: `Battery ${index}`,
   profileId: 'jk-inverter-bms',
+  definitionId: 'jk-inverter-bms',
+  transportPortName: '/dev/ttyUSB0',
   address: index,
   isMaster: index === 1,
   pollIntervalMilliseconds: 1000,
@@ -30,6 +35,7 @@ const defaultDevice = (index: number): DeviceConfiguration => ({
 });
 
 export function DevicesPage() {
+  const availableDefinitions = useDeviceDefinitions();
   const [devices, setDevices] = useState<DeviceConfiguration[]>([]);
   const [configurationFile, setConfigurationFile] = useState('');
   const [isLoading, setIsLoading] = useState(true);
@@ -136,7 +142,7 @@ export function DevicesPage() {
         <div>
           <h2 className='text-3xl font-bold tracking-tight text-foreground'>Device Configuration</h2>
           <p className='mt-2 text-sm text-muted-foreground'>
-            Add or remove any BMS definition and persist the complete device list back to the active JSON configuration file.
+            Add or remove devices and assign a device definition to drive polling, rendering, and storage.
           </p>
         </div>
         <div className='rounded-lg border border-border bg-card/70 px-4 py-3 text-sm text-muted-foreground'>
@@ -213,6 +219,27 @@ export function DevicesPage() {
                 <label className='space-y-2 text-sm text-foreground'>
                   <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device Profile</span>
                   <Input value={device.profileId} onChange={(event) => updateDevice(index, 'profileId', event.target.value)} />
+                </label>
+                <label className='space-y-2 text-sm text-foreground'>
+                  <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device Definition</span>
+                  <select
+                    className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+                    value={device.definitionId ?? ''}
+                    onChange={(event) => updateDevice(index, 'definitionId', event.target.value || null)}
+                  >
+                    <option value=''>None (legacy profile)</option>
+                    {availableDefinitions.map(d => (
+                      <option key={d.id} value={d.id}>{d.name} ({d.manufacturer} {d.model})</option>
+                    ))}
+                  </select>
+                </label>
+                <label className='space-y-2 text-sm text-foreground'>
+                  <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Serial Port</span>
+                  <Input
+                    placeholder='/dev/ttyUSB0'
+                    value={device.transportPortName ?? ''}
+                    onChange={(event) => updateDevice(index, 'transportPortName', event.target.value || null)}
+                  />
                 </label>
                 <label className='space-y-2 text-sm text-foreground'>
                   <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Address</span>

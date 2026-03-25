@@ -77,8 +77,13 @@ public class DeviceStateStoreTests
             NullLogger<HostSystemMonitoringService>.Instance,
             new TestHostEnvironment());
 
+        var definitionLoader = new DeviceDefinitionLoader(
+            "devices",
+            NullLogger<DeviceDefinitionLoader>.Instance);
+
         return new DeviceStateStore(
             Options.Create(configuration ?? CreateDefaultConfiguration()),
+            definitionLoader,
             hostSystemMonitoringService,
             new FakeBuildMetadataProvider(buildInfo));
     }

@@ -1,9 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Activity, AlertTriangle, Battery, BatteryCharging, Check, Edit2, LoaderCircle, Shield, Thermometer, X, Zap } from 'lucide-react';
+import { Activity, AlertTriangle, Battery, BatteryCharging, Check, Edit2, Gauge, LoaderCircle, Shield, Thermometer, X, Zap } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Switch } from '../components/ui/switch';
 import { HistoryCharts } from '../components/HistoryCharts';
 import { cn } from '../lib/utils';
+import { useDeviceDefinition } from '../hooks/useDeviceDefinition';
+import type { DeviceDefinition, UiSectionDefinition } from '../types/deviceDefinition';
 
 type DeviceParameter = {
   key: string;
@@ -68,6 +70,7 @@ type DeviceRuntimeState = {
   deviceId: string;
   displayName: string;
   profileId: string;
+  definitionId?: string | null;
   protocolHandler?: string | null;
   enabled: boolean;
   isMaster: boolean;
@@ -130,7 +133,7 @@ export function MonitorPage() {
           <div>
             <h2 className='text-3xl font-bold tracking-tight text-foreground md:text-4xl'>Device Monitor</h2>
             <p className='mt-2 max-w-2xl text-sm leading-6 text-muted-foreground'>
-              Real-time data from all connected devices. Parameters are driven by the device profile configuration.
+              Real-time data from all connected devices. Layout and parameters are driven by the device definition.
             </p>
           </div>
         </div>
@@ -167,6 +170,7 @@ export function MonitorPage() {
 }
 
 function DevicePanel({ device }: { device: DeviceRuntimeState }) {
+  const definition = useDeviceDefinition(device.definitionId);
   const telemetry = device.latestTelemetry;
   const parameters = telemetry?.parameters ?? [];
   const cells = telemetry?.cells ?? [];
@@ -176,6 +180,12 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
   const dp = device.displayPrecision ?? defaultPrecision;
   const [selectedCellIndices, setSelectedCellIndices] = useState<number[]>([]);
 
+  // Build a fast lookup by entity key for definition-driven rendering
+  const paramByKey = new Map(parameters.map(p => [p.key, p]));
+
+  // Resolve monitor page UI sections from definition (if available)
+  const monitorSections = definition?.ui?.pages?.monitor?.sections;
+
   // Group parameters by category
   const grouped = new Map<string, DeviceParameter[]>();
   for (const param of parameters) {
@@ -184,16 +194,11 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
     grouped.get(cat)!.push(param);
   }
 
-  // Category rendering order
-  const categoryOrder = ['Pack Status', 'Cell Summary', 'Cell Voltages', 'Temperatures', 'Status',
-    'Cell Protection', 'Current Protection', 'Thermal Protection', 'Charging', 'Discharging',
-    'Balance Settings', 'SOC Settings', 'System', 'Device Info',
-    'Protection Settings', 'Balance Settings', 'Settings', 'Calibration'];
-  const sortedCategories = [...grouped.keys()].sort((a, b) => {
-    const aIdx = categoryOrder.indexOf(a);
-    const bIdx = categoryOrder.indexOf(b);
-    return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
-  });
+  // Category rendering order — derived from entity order in definition, fallback to legacy
+  const sortedCategories = getSortedCategories(grouped, definition);
+
+  // Determine which sections to render for parameters
+  const paramTableSections = monitorSections?.filter(s => s.type === 'parameter-table');
 
   return (
     <div className='space-y-3 sm:space-y-4'>
@@ -206,7 +211,7 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
             isFailing ? 'border-rose-500/30 bg-rose-500/10 text-rose-400' :
             'border-border bg-muted/50 text-muted-foreground'
           )}>
-            <Battery className='h-5 w-5' />
+            <DeviceIcon name={definition?.device.icon} className='h-5 w-5' />
           </div>
           <div>
             <div className='flex flex-wrap items-center gap-2'>
@@ -252,69 +257,45 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
 
       {telemetry && (
         <>
-          {/* Hero metrics (highlighted) */}
-          <div className='grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4'>
-            <HeroMetric
-              icon={Zap}
-              label='Voltage'
-              value={fmt(telemetry.totalVoltageVolts, dp.voltage)}
-              unit='V'
-              accent='text-sky-400'
-            />
-            <HeroMetric
-              icon={Activity}
-              label='Current'
-              value={fmt(telemetry.currentAmps, dp.current)}
-              unit='A'
-              accent={telemetry.currentAmps != null && telemetry.currentAmps > 0 ? 'text-emerald-400' : telemetry.currentAmps != null && telemetry.currentAmps < 0 ? 'text-amber-400' : 'text-muted-foreground'}
-            />
-            <HeroMetric
-              icon={Zap}
-              label='Power'
-              value={fmt(telemetry.powerWatts, dp.power)}
-              unit='W'
-              accent='text-purple-400'
-            />
-            <HeroMetric
-              icon={BatteryCharging}
-              label='SoC'
-              value={fmt(telemetry.stateOfChargePercent, dp.soc)}
-              unit='%'
-              accent={telemetry.stateOfChargePercent != null && telemetry.stateOfChargePercent > 50 ? 'text-emerald-400' : telemetry.stateOfChargePercent != null && telemetry.stateOfChargePercent > 20 ? 'text-amber-400' : 'text-rose-400'}
-            />
-          </div>
+          {/* Hero metrics — driven by definition when available */}
+          {monitorSections ? (
+            renderDefinitionSections(monitorSections, paramByKey, telemetry, dp, cells, selectedCellIndices, setSelectedCellIndices, device.deviceId, definition)
+          ) : (
+            <>
+              <LegacyHeroMetrics telemetry={telemetry} dp={dp} />
 
-          {/* Cell voltages visualization */}
-          {cells.length > 0 && (
-            <CellVoltageChart cells={cells} minV={telemetry.minCellVoltageVolts} maxV={telemetry.maxCellVoltageVolts} avgV={telemetry.averageCellVoltageVolts} selectedCellIndices={selectedCellIndices} onCellClick={(idx) => setSelectedCellIndices(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx])} />
+              {cells.length > 0 && (
+                <CellVoltageChart cells={cells} minV={telemetry.minCellVoltageVolts} maxV={telemetry.maxCellVoltageVolts} avgV={telemetry.averageCellVoltageVolts} selectedCellIndices={selectedCellIndices} onCellClick={(idx) => setSelectedCellIndices(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx])} />
+              )}
+
+              <HistoryCharts deviceId={device.deviceId} precision={dp} selectedCellIndices={selectedCellIndices} onClearCellSelection={() => setSelectedCellIndices([])} />
+            </>
           )}
 
-          {/* Time-series history charts */}
-          <HistoryCharts deviceId={device.deviceId} precision={dp} selectedCellIndices={selectedCellIndices} onClearCellSelection={() => setSelectedCellIndices([])} />
-
-          {/* All parameter categories */}
-          <div className='grid gap-3 sm:gap-4 lg:grid-cols-2'>
-            {sortedCategories.filter(c => c !== 'Cell Voltages').map((category) => {
-              const params = grouped.get(category)!;
-              return (
-                <Card key={category} className='border border-border/80 bg-card/85 shadow-sm'>
-                  <CardHeader className='border-b border-border/60 pb-3'>
-                    <CardTitle className='flex items-center gap-2 text-sm'>
-                      <CategoryIcon category={category} />
-                      {category}
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className='pt-3'>
-                    <div className='grid gap-2'>
-                      {params.map((param) => (
-                        <ParameterRow key={param.key} param={param} deviceId={device.deviceId} />
-                      ))}
-                    </div>
-                  </CardContent>
-                </Card>
-              );
-            })}
-          </div>
+          {/* Parameter categories */}
+          {paramTableSections && paramTableSections.length > 0 ? (
+            <div className='grid gap-3 sm:gap-4 lg:grid-cols-2'>
+              {paramTableSections.map((section, idx) => {
+                const params = filterParams(parameters, section);
+                if (params.length === 0) return null;
+                if (section.groupBy === 'category') {
+                  const catGroups = groupByCategory(params);
+                  return Array.from(catGroups.entries()).map(([cat, catParams]) => (
+                    <ParameterCategoryCard key={`${idx}-${cat}`} category={cat} params={catParams} deviceId={device.deviceId} />
+                  ));
+                }
+                return (
+                  <ParameterCategoryCard key={idx} category={section.title ?? 'Parameters'} params={params} deviceId={device.deviceId} />
+                );
+              })}
+            </div>
+          ) : (
+            <div className='grid gap-3 sm:gap-4 lg:grid-cols-2'>
+              {sortedCategories.filter(c => c !== 'Cell Voltages').map((category) => (
+                <ParameterCategoryCard key={category} category={category} params={grouped.get(category)!} deviceId={device.deviceId} />
+              ))}
+            </div>
+          )}
         </>
       )}
     </div>
@@ -529,6 +510,252 @@ function ParameterRow({ param, deviceId }: { param: DeviceParameter; deviceId: s
       )}
     </div>
   );
+}
+
+function ParameterCategoryCard({ category, params, deviceId }: { category: string; params: DeviceParameter[]; deviceId: string }) {
+  return (
+    <Card className='border border-border/80 bg-card/85 shadow-sm'>
+      <CardHeader className='border-b border-border/60 pb-3'>
+        <CardTitle className='flex items-center gap-2 text-sm'>
+          <CategoryIcon category={category} />
+          {category}
+        </CardTitle>
+      </CardHeader>
+      <CardContent className='pt-3'>
+        <div className='grid gap-2'>
+          {params.map((param) => (
+            <ParameterRow key={param.key} param={param} deviceId={deviceId} />
+          ))}
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
+/** Renders hero metrics from the legacy hardcoded layout (no definition available). */
+function LegacyHeroMetrics({ telemetry, dp }: { telemetry: DeviceTelemetrySnapshot; dp: DisplayPrecision }) {
+  return (
+    <div className='grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4'>
+      <HeroMetric icon={Zap} label='Voltage' value={fmt(telemetry.totalVoltageVolts, dp.voltage)} unit='V' accent='text-sky-400' />
+      <HeroMetric icon={Activity} label='Current' value={fmt(telemetry.currentAmps, dp.current)} unit='A'
+        accent={telemetry.currentAmps != null && telemetry.currentAmps > 0 ? 'text-emerald-400' : telemetry.currentAmps != null && telemetry.currentAmps < 0 ? 'text-amber-400' : 'text-muted-foreground'} />
+      <HeroMetric icon={Zap} label='Power' value={fmt(telemetry.powerWatts, dp.power)} unit='W' accent='text-purple-400' />
+      <HeroMetric icon={BatteryCharging} label='SoC' value={fmt(telemetry.stateOfChargePercent, dp.soc)} unit='%'
+        accent={telemetry.stateOfChargePercent != null && telemetry.stateOfChargePercent > 50 ? 'text-emerald-400' : telemetry.stateOfChargePercent != null && telemetry.stateOfChargePercent > 20 ? 'text-amber-400' : 'text-rose-400'} />
+    </div>
+  );
+}
+
+/** Renders all definition-driven monitor page sections in order. */
+function renderDefinitionSections(
+  sections: UiSectionDefinition[],
+  paramByKey: Map<string, DeviceParameter>,
+  telemetry: DeviceTelemetrySnapshot,
+  dp: DisplayPrecision,
+  cells: CellVoltageSnapshot[],
+  selectedCellIndices: number[],
+  setSelectedCellIndices: React.Dispatch<React.SetStateAction<number[]>>,
+  deviceId: string,
+  definition: DeviceDefinition | null,
+) {
+  const elements: React.ReactNode[] = [];
+
+  for (let i = 0; i < sections.length; i++) {
+    const section = sections[i];
+    switch (section.type) {
+      case 'hero-metrics':
+        if (section.metrics) {
+          elements.push(
+            <div key={`section-${i}`} className='grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4'>
+              {section.metrics.map((m) => {
+                const param = paramByKey.get(m.entity);
+                const entity = definition?.entities.find(e => e.id === m.entity) ?? definition?.computedEntities?.find(e => e.id === m.entity);
+                const value = param?.numericValue;
+                const unit = param?.unit ?? (entity && 'source' in entity ? entity.source?.unit : undefined) ?? (entity && 'unit' in entity ? (entity as { unit?: string }).unit : '') ?? '';
+                const prec = entity?.display?.precision ?? 2;
+                return (
+                  <HeroMetric
+                    key={m.entity}
+                    icon={resolveIcon(m.icon)}
+                    label={param?.displayName ?? entity?.name ?? m.entity}
+                    value={fmt(value, prec)}
+                    unit={unit}
+                    accent={resolveColorClass(m.color)}
+                  />
+                );
+              })}
+            </div>
+          );
+        }
+        break;
+
+      case 'status-indicators':
+        if (section.entities) {
+          const indicators = section.entities.map(eid => paramByKey.get(eid)).filter(Boolean) as DeviceParameter[];
+          if (indicators.length > 0) {
+            elements.push(
+              <div key={`section-${i}`} className='flex flex-wrap gap-2'>
+                {indicators.map(p => (
+                  <span key={p.key} className={cn(
+                    'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium',
+                    p.booleanValue ? 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-300' : 'border border-border bg-muted/50 text-muted-foreground'
+                  )}>
+                    {p.booleanValue ? <Check className='h-3 w-3' /> : <X className='h-3 w-3' />}
+                    {p.displayName}
+                  </span>
+                ))}
+              </div>
+            );
+          }
+        }
+        break;
+
+      case 'cell-chart':
+        if (cells.length > 0) {
+          elements.push(
+            <CellVoltageChart
+              key={`section-${i}`}
+              cells={cells}
+              minV={telemetry.minCellVoltageVolts}
+              maxV={telemetry.maxCellVoltageVolts}
+              avgV={telemetry.averageCellVoltageVolts}
+              selectedCellIndices={selectedCellIndices}
+              onCellClick={(idx) => setSelectedCellIndices(prev => prev.includes(idx) ? prev.filter(j => j !== idx) : [...prev, idx])}
+            />
+          );
+          // History charts follow the cell chart
+          elements.push(
+            <HistoryCharts
+              key={`section-${i}-history`}
+              deviceId={deviceId}
+              precision={dp}
+              selectedCellIndices={selectedCellIndices}
+              onClearCellSelection={() => setSelectedCellIndices([])}
+              definition={definition ?? undefined}
+            />
+          );
+        }
+        break;
+
+      // parameter-table sections are handled separately below the main sections
+    }
+  }
+
+  // If no cell-chart section, still show history charts
+  if (!sections.some(s => s.type === 'cell-chart')) {
+    elements.push(
+      <HistoryCharts
+        key='history-fallback'
+        deviceId={deviceId}
+        precision={dp}
+        selectedCellIndices={selectedCellIndices}
+        onClearCellSelection={() => setSelectedCellIndices([])}
+        definition={definition ?? undefined}
+      />
+    );
+  }
+
+  return <>{elements}</>;
+}
+
+/** Maps icon name strings from the device definition to Lucide icon components. */
+const iconLookup: Record<string, typeof Zap> = {
+  zap: Zap,
+  activity: Activity,
+  gauge: Gauge,
+  battery: Battery,
+  'battery-charging': BatteryCharging,
+  thermometer: Thermometer,
+  shield: Shield,
+};
+
+function resolveIcon(name?: string): typeof Zap {
+  if (!name) return Activity;
+  return iconLookup[name.toLowerCase()] ?? Activity;
+}
+
+function DeviceIcon({ name, className }: { name?: string; className?: string }) {
+  const Icon = resolveIcon(name);
+  return <Icon className={className} />;
+}
+
+/** Maps color name strings from the device definition to Tailwind text-color classes. */
+const colorClassLookup: Record<string, string> = {
+  emerald: 'text-emerald-400',
+  green: 'text-emerald-400',
+  blue: 'text-sky-400',
+  sky: 'text-sky-400',
+  amber: 'text-amber-400',
+  yellow: 'text-amber-400',
+  red: 'text-rose-400',
+  rose: 'text-rose-400',
+  purple: 'text-purple-400',
+  violet: 'text-violet-400',
+  teal: 'text-teal-400',
+  orange: 'text-orange-400',
+};
+
+function resolveColorClass(name?: string): string {
+  if (!name) return 'text-primary';
+  return colorClassLookup[name.toLowerCase()] ?? 'text-primary';
+}
+
+/** Filters parameters based on a UI section filter definition. */
+function filterParams(allParams: DeviceParameter[], section: UiSectionDefinition): DeviceParameter[] {
+  let result = allParams;
+  const f = section.filter;
+  if (f?.writable) result = result.filter(p => p.isWritable);
+  if (f?.categories) result = result.filter(p => f.categories!.includes(p.category));
+  return result;
+}
+
+/** Groups parameters into a map keyed by category. */
+function groupByCategory(params: DeviceParameter[]): Map<string, DeviceParameter[]> {
+  const map = new Map<string, DeviceParameter[]>();
+  for (const p of params) {
+    if (!map.has(p.category)) map.set(p.category, []);
+    map.get(p.category)!.push(p);
+  }
+  return map;
+}
+
+/** Returns sorted category names. Uses definition entity order when available, otherwise legacy fallback. */
+function getSortedCategories(grouped: Map<string, DeviceParameter[]>, definition?: DeviceDefinition | null): string[] {
+  if (definition) {
+    // Derive order from entity declaration order
+    const seen = new Set<string>();
+    const ordered: string[] = [];
+    for (const e of definition.entities) {
+      if (!seen.has(e.category) && grouped.has(e.category)) {
+        seen.add(e.category);
+        ordered.push(e.category);
+      }
+    }
+    if (definition.computedEntities) {
+      for (const e of definition.computedEntities) {
+        if (!seen.has(e.category) && grouped.has(e.category)) {
+          seen.add(e.category);
+          ordered.push(e.category);
+        }
+      }
+    }
+    // Append any remaining categories not in the definition
+    for (const cat of grouped.keys()) {
+      if (!seen.has(cat)) ordered.push(cat);
+    }
+    return ordered;
+  }
+
+  // Legacy hardcoded order
+  const legacyOrder = ['Pack Status', 'Cell Summary', 'Cell Voltages', 'Temperatures', 'Status',
+    'Cell Protection', 'Current Protection', 'Thermal Protection', 'Charging', 'Discharging',
+    'Balance Settings', 'SOC Settings', 'System', 'Device Info',
+    'Protection Settings', 'Settings', 'Calibration'];
+  return [...grouped.keys()].sort((a, b) => {
+    const aIdx = legacyOrder.indexOf(a);
+    const bIdx = legacyOrder.indexOf(b);
+    return (aIdx === -1 ? 999 : aIdx) - (bIdx === -1 ? 999 : bIdx);
+  });
 }
 
 function CategoryIcon({ category }: { category: string }) {

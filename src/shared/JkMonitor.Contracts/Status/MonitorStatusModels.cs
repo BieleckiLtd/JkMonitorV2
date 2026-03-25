@@ -10,6 +10,8 @@ public sealed record class DeviceRuntimeState
 
     public required string ProfileId { get; init; }
 
+    public string? DefinitionId { get; init; }
+
     public string? ProtocolHandler { get; init; }
 
     public bool Enabled { get; init; }

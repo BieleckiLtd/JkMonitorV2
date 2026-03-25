@@ -26,9 +26,17 @@ builder.Services.AddSingleton<JkMonitor.Backend.Services.DeviceStateStore>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.ManagedRestartService>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.PollTrigger>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.CellVoltageSmoothingFilter>();
+builder.Services.AddSingleton<JkMonitor.Backend.Services.ExpressionEvaluator>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.JkRs485PollingClient>();
+builder.Services.AddSingleton<JkMonitor.Backend.Services.GenericModbusPollingClient>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.IDevicePollingClient, JkMonitor.Backend.Services.ConfiguredPollingClient>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.SetupConfigurationService>();
+
+// Device definition loader
+var definitionsPath = monitorSection.GetValue<string>("DeviceDefinitionsPath") ?? "devices";
+builder.Services.AddSingleton(sp => new JkMonitor.Backend.Services.DeviceDefinitionLoader(
+    definitionsPath,
+    sp.GetRequiredService<ILogger<JkMonitor.Backend.Services.DeviceDefinitionLoader>>()));
 
 if (string.Equals(storageProvider, "TimescaleDb", StringComparison.OrdinalIgnoreCase))
 {
@@ -59,6 +67,9 @@ using (var scope = app.Services.CreateScope())
 {
     var repository = scope.ServiceProvider.GetRequiredService<JkMonitor.Backend.Services.ITelemetryRepository>();
     await repository.InitializeAsync(CancellationToken.None);
+
+    var definitionLoader = scope.ServiceProvider.GetRequiredService<JkMonitor.Backend.Services.DeviceDefinitionLoader>();
+    definitionLoader.LoadAll();
 }
 
 app.UseDefaultFiles();
