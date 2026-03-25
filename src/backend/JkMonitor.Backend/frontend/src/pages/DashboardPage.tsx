@@ -271,7 +271,6 @@ export function DashboardPage() {
                       <div>
                         <div className='flex flex-wrap items-center gap-2'>
                           <h3 className='text-sm font-semibold text-foreground'>{device.displayName}</h3>
-                          {device.isMaster ? <span className='rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary'>Master</span> : null}
                           {!device.enabled ? <span className='rounded-full border border-border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>Disabled</span> : null}
                         </div>
                         <div className='mt-1 text-xs font-mono text-muted-foreground'>{device.deviceId} • {device.protocol}</div>

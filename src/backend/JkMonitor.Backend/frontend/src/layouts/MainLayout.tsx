@@ -1,7 +1,7 @@
 import { useEffect, type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { useAppStore } from '../store/useAppStore';
-import { Bell, Cable, Settings, Puzzle, Menu, Activity, Monitor, Gauge, X } from 'lucide-react';
+import { Bell, Cable, Settings, Menu, Activity, Monitor, Gauge, X } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 
@@ -19,7 +19,6 @@ export function Sidebar() {
     { name: 'Monitor', path: '/monitor', icon: Gauge },
     { name: 'Devices', path: '/devices', icon: Cable },
     { name: 'Notifications', path: '/notifications', icon: Bell },
-    { name: 'Community Hub', path: '/hub', icon: Puzzle },
     { name: 'Settings', path: '/settings', icon: Settings },
   ];
 
@@ -165,11 +164,9 @@ function SidebarContent({ navItems, isCollapsed, onNavigate }: { navItems: NavIt
       </nav>
 
       <div className='border-t border-border p-4'>
-        {isCollapsed ? (
-          <Puzzle className='mx-auto h-4 w-4 text-muted-foreground/50' />
-        ) : (
-          <div className='text-center font-mono text-xs text-muted-foreground/50'>Open for Extensions</div>
-        )}
+        <div className='text-center font-mono text-xs text-muted-foreground/50'>
+          {isCollapsed ? '·' : 'Open for Extensions'}
+        </div>
       </div>
     </>
   );

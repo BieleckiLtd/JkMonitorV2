@@ -115,6 +115,11 @@ public sealed class JkRs485PollingClient(
         }
         finally
         {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                ClosePort();
+            }
+
             _busLock.Release();
         }
     }
@@ -188,6 +193,11 @@ public sealed class JkRs485PollingClient(
         }
         finally
         {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                ClosePort();
+            }
+
             _busLock.Release();
         }
     }

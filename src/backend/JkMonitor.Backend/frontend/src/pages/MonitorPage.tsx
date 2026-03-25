@@ -216,7 +216,6 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
           <div>
             <div className='flex flex-wrap items-center gap-2'>
               <h3 className='text-lg font-semibold text-foreground'>{device.displayName}</h3>
-              {device.isMaster && <span className='rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary'>Master</span>}
               <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em]', getOutcomeClass(device.lastOutcome))}>
                 {device.lastOutcome}
               </span>

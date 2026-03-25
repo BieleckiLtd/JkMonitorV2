@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Cable, LoaderCircle, Plus, Save, Trash2 } from 'lucide-react';
+import { LoaderCircle, Plus, Save, Trash2 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Switch } from '../components/ui/switch';
@@ -29,7 +29,7 @@ const defaultDevice = (index: number): DeviceConfiguration => ({
   definitionId: 'jk-inverter-bms',
   transportPortName: '/dev/ttyUSB0',
   address: index,
-  isMaster: index === 1,
+  isMaster: false,
   pollIntervalMilliseconds: 1000,
   enabled: true,
 });
@@ -37,7 +37,6 @@ const defaultDevice = (index: number): DeviceConfiguration => ({
 export function DevicesPage() {
   const availableDefinitions = useDeviceDefinitions();
   const [devices, setDevices] = useState<DeviceConfiguration[]>([]);
-  const [configurationFile, setConfigurationFile] = useState('');
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -61,7 +60,6 @@ export function DevicesPage() {
         }
 
         setDevices(data.devices);
-        setConfigurationFile(data.configurationFile);
         setLoadError(null);
       } catch (error) {
         if (!isMounted) {
@@ -127,7 +125,7 @@ export function DevicesPage() {
 
       const data = payload as DeviceConfigurationResponse;
       setDevices(data.devices);
-      setConfigurationFile(data.configurationFile);
+
       setSaveMessage('Configuration applied. Device changes are live — no restart required.');
     } catch (error) {
       setSaveMessage(error instanceof Error ? error.message : 'Unable to save device configuration.');
@@ -140,31 +138,14 @@ export function DevicesPage() {
     <div className='space-y-6 max-w-6xl mx-auto pb-12'>
       <div className='flex flex-col gap-2 border-b border-border pb-4 md:flex-row md:items-end md:justify-between'>
         <div>
-          <h2 className='text-3xl font-bold tracking-tight text-foreground'>Device Configuration</h2>
+          <h2 className='text-3xl font-bold tracking-tight text-foreground'>Devices</h2>
           <p className='mt-2 text-sm text-muted-foreground'>
             Add or remove devices and assign a device definition to drive polling, rendering, and storage.
           </p>
         </div>
-        <div className='rounded-lg border border-border bg-card/70 px-4 py-3 text-sm text-muted-foreground'>
-          <div className='font-medium text-foreground'>Active config</div>
-          <div className='font-mono text-xs'>{configurationFile || 'Loading...'}</div>
-        </div>
       </div>
 
-      <div className='flex flex-col gap-3 rounded-2xl border border-border bg-card/60 p-5 shadow-sm md:flex-row md:items-center md:justify-between'>
-        <div className='flex items-start gap-3'>
-          <div className='flex h-11 w-11 items-center justify-center rounded-xl border border-border bg-primary/10 text-primary'>
-            <Cable className='h-5 w-5' />
-          </div>
-          <div>
-            <div className='text-sm font-semibold text-foreground'>JSON-backed device editor</div>
-            <div className='mt-1 text-sm text-muted-foreground'>
-              Changes are applied live when you save — no restart required.
-            </div>
-          </div>
-        </div>
-
-        <div className='flex flex-wrap gap-3'>
+      <div className='flex flex-wrap gap-3'>
           <Button type='button' variant='outline' size='lg' onClick={addDevice}>
             <Plus className='h-4 w-4' />
             Add device
@@ -174,7 +155,6 @@ export function DevicesPage() {
             Save devices
           </Button>
         </div>
-      </div>
 
       {loadError ? (
         <div className='rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive'>
@@ -260,13 +240,6 @@ export function DevicesPage() {
                     onChange={(event) => updateDevice(index, 'pollIntervalMilliseconds', Number(event.target.value))}
                   />
                 </label>
-                <div className='rounded-xl border border-border bg-muted/40 px-4 py-3'>
-                  <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Master device</div>
-                  <div className='mt-3 flex items-center justify-between gap-3'>
-                    <span className='text-sm text-foreground'>Prioritize this device in status views</span>
-                    <Switch checked={device.isMaster} onCheckedChange={(checked) => updateDevice(index, 'isMaster', checked)} />
-                  </div>
-                </div>
                 <div className='rounded-xl border border-border bg-muted/40 px-4 py-3'>
                   <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Enabled</div>
                   <div className='mt-3 flex items-center justify-between gap-3'>
