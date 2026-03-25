@@ -243,18 +243,42 @@ export function SystemPage() {
       }
       // Poll progress
       const pollProgress = async () => {
+        let installerStarted = false;
         for (let i = 0; i < 120; i++) {
           await new Promise((resolve) => setTimeout(resolve, 2000));
           try {
             const resp = await fetch('/api/system/update/progress', { cache: 'no-store' });
+            if (resp.status === 204) {
+              // Service restarted — in-memory progress is gone, install succeeded.
+              if (installerStarted) {
+                setUpdateProgress({ isRunning: false, stage: 'Update installed successfully.', success: true });
+                await checkForUpdate();
+              }
+              return;
+            }
             if (resp.ok) {
               const progress = await resp.json() as UpdateProgress;
               setUpdateProgress(progress);
-              if (!progress.isRunning) return;
+              if (!progress.isRunning) {
+                if (progress.success === true) await checkForUpdate();
+                return;
+              }
+              installerStarted = true;
             }
           } catch {
-            // Service might be restarting
-            setUpdateProgress({ isRunning: false, stage: 'Service restarting — refresh the page in a moment.', success: true });
+            // Service is restarting — wait for it to come back.
+            setUpdateProgress({ isRunning: false, stage: 'Service restarting…', success: true });
+            for (let j = 0; j < 30; j++) {
+              await new Promise((resolve) => setTimeout(resolve, 2000));
+              try {
+                await fetch('/api/system/update/progress', { cache: 'no-store' });
+                setUpdateProgress({ isRunning: false, stage: 'Update installed successfully.', success: true });
+                await checkForUpdate();
+                return;
+              } catch {
+                // Still restarting.
+              }
+            }
             return;
           }
         }
@@ -446,7 +470,7 @@ export function SystemPage() {
                       <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
                         Update check failed: {updateCheck.checkError}
                       </div>
-                    ) : updateCheck.updateAvailable ? (
+                    ) : updateCheck.updateAvailable && updateProgress?.success !== true ? (
                       <div className='rounded-xl border border-primary/20 bg-primary/10 px-3 py-2 text-sm text-primary'>
                         <div className='flex items-center gap-2'>
                           <Download className='h-4 w-4' />
@@ -471,13 +495,20 @@ export function SystemPage() {
 
                     {updateProgress ? (
                       <div className={cn(
-                        'rounded-xl border px-3 py-2 text-xs flex items-center gap-2',
+                        'rounded-xl border px-3 py-2 text-xs',
                         updateProgress.success === true ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
                           : updateProgress.success === false ? 'border-rose-500/20 bg-rose-500/10 text-rose-200'
                           : 'border-primary/20 bg-primary/10 text-primary'
                       )}>
-                        {updateProgress.isRunning ? <LoaderCircle className='h-3.5 w-3.5 animate-spin' /> : updateProgress.success ? <CheckCircle2 className='h-3.5 w-3.5' /> : <XCircle className='h-3.5 w-3.5' />}
-                        {updateProgress.stage}
+                        <div className='flex items-center gap-2'>
+                          {updateProgress.isRunning ? <LoaderCircle className='h-3.5 w-3.5 animate-spin shrink-0' /> : updateProgress.success ? <CheckCircle2 className='h-3.5 w-3.5 shrink-0' /> : <XCircle className='h-3.5 w-3.5 shrink-0' />}
+                          {updateProgress.stage}
+                        </div>
+                        {updateProgress.isRunning && (
+                          <div className='mt-1.5 text-primary/70'>
+                            Do not turn off the device while the update is in progress.
+                          </div>
+                        )}
                       </div>
                     ) : null}
                   </>

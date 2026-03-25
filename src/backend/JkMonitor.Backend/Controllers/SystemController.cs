@@ -31,7 +31,8 @@ public sealed class SystemController(SystemUpdateService updateService) : Contro
     public ActionResult<UpdateProgress> GetUpdateProgress()
     {
         var progress = updateService.GetProgress();
-        return Ok(progress ?? new UpdateProgress { IsRunning = false, Stage = "No update in progress." });
+        if (progress is null) return NoContent();
+        return Ok(progress);
     }
 
     [HttpGet("interfaces")]

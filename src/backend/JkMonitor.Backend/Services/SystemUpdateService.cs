@@ -18,6 +18,20 @@ public sealed class SystemUpdateService(
     private const string InstallerScriptUrl = $"https://raw.githubusercontent.com/{Repository}/dev/scripts/install-from-release.sh";
     private const string ReleaseApiUrl = $"https://api.github.com/repos/{Repository}/releases/tags/{ReleaseTag}";
 
+    private static readonly Dictionary<string, string> SectionProgressMap = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["JK Monitor release bootstrap"]         = "Starting installer…",
+        ["Downloading release artifact"]          = "Downloading update…",
+        ["Verifying release artifact"]            = "Verifying checksum…",
+        ["Extracting release artifact"]           = "Extracting update…",
+        ["Preparing installation folder"]         = "Preparing installation…",
+        ["Checking ASP.NET Core runtime"]         = "Checking runtime…",
+        ["Installing local ASP.NET Core runtime"] = "Installing runtime…",
+        ["Configuring startup mode"]              = "Configuring application…",
+        ["Installing systemd service"]            = "Installing service…",
+        ["Starting JK Monitor"]                   = "Starting service…",
+    };
+
     private UpdateProgress? _currentProgress;
     private readonly Lock _lock = new();
 
@@ -107,7 +121,7 @@ public sealed class SystemUpdateService(
     {
         try
         {
-            SetProgress("Downloading installer script…");
+            SetProgress("Starting update…");
 
             var installRoot = GetInstallRoot();
             if (installRoot is null)
@@ -118,7 +132,7 @@ public sealed class SystemUpdateService(
 
             var destination = Directory.GetParent(installRoot)?.FullName ?? installRoot;
 
-            SetProgress("Running install-from-release…");
+            SetProgress("Downloading installer script…");
 
             var env = new Dictionary<string, string>
             {
@@ -150,9 +164,37 @@ public sealed class SystemUpdateService(
                 return;
             }
 
-            var output = await process.StandardOutput.ReadToEndAsync();
-            var errors = await process.StandardError.ReadToEndAsync();
+            var outputLines = new List<string>();
+            var errorLines = new List<string>();
+
+            var stdoutTask = Task.Run(async () =>
+            {
+                string? line;
+                while ((line = await process.StandardOutput.ReadLineAsync()) is not null)
+                {
+                    outputLines.Add(line);
+                    var trimmed = line.Trim();
+                    if (SectionProgressMap.TryGetValue(trimmed, out var friendlyMessage))
+                    {
+                        SetProgress(friendlyMessage);
+                    }
+                }
+            });
+
+            var stderrTask = Task.Run(async () =>
+            {
+                string? line;
+                while ((line = await process.StandardError.ReadLineAsync()) is not null)
+                {
+                    errorLines.Add(line);
+                }
+            });
+
+            await Task.WhenAll(stdoutTask, stderrTask);
             await process.WaitForExitAsync();
+
+            var output = string.Join('\n', outputLines);
+            var errors = string.Join('\n', errorLines);
 
             if (process.ExitCode != 0)
             {
