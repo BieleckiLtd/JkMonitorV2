@@ -324,8 +324,9 @@ function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndices, onCell
   const absMin = Math.min(...voltages);
   const absMax = Math.max(...voltages);
   const spread = Math.max(absMax - absMin, 0.001);
-  // Split-axis: bottom ~55% covers 0V to (absMin - margin), top ~45% covers the detail zone.
-  // This keeps visual origin at 0V while magnifying millivolt-level differences at the top.
+  // Split-axis: bottom portion covers 0V to just below the data range,
+  // top portion uses a power curve (exponent 3) so 1mV near the top produces
+  // a much larger visual difference than 1mV near the bottom of the detail zone.
   const basePct = 55;
   const detailPct = 100 - basePct;
   const detailFloor = Math.max(absMin - spread * 2, 0);
@@ -334,7 +335,8 @@ function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndices, onCell
 
   function barPct(v: number): number {
     if (v <= detailFloor) return Math.max((v / Math.max(detailFloor, 0.001)) * basePct, 4);
-    return basePct + ((v - detailFloor) / detailRange) * detailPct;
+    const t = (v - detailFloor) / detailRange;          // 0..1 linear
+    return basePct + Math.pow(t, 3) * detailPct;        // cubic: top mV differences are largest
   }
 
   return (
