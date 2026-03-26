@@ -323,9 +323,19 @@ function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndices, onCell
   const voltages = sorted.map(c => c.voltageVolts);
   const absMin = Math.min(...voltages);
   const absMax = Math.max(...voltages);
-  // Logarithmic height: log(1+v)/log(1+max) maps [0,max]->[0,1].
-  // This compresses the lower range and expands small differences at the top.
-  const logMax = Math.log(1 + absMax);
+  const spread = Math.max(absMax - absMin, 0.001);
+  // Split-axis: bottom ~55% covers 0V to (absMin - margin), top ~45% covers the detail zone.
+  // This keeps visual origin at 0V while magnifying millivolt-level differences at the top.
+  const basePct = 55;
+  const detailPct = 100 - basePct;
+  const detailFloor = Math.max(absMin - spread * 2, 0);
+  const detailCeil = absMax + spread * 0.5;
+  const detailRange = Math.max(detailCeil - detailFloor, 0.001);
+
+  function barPct(v: number): number {
+    if (v <= detailFloor) return Math.max((v / Math.max(detailFloor, 0.001)) * basePct, 4);
+    return basePct + ((v - detailFloor) / detailRange) * detailPct;
+  }
 
   return (
     <Card className='bg-card/85 shadow-sm'>
@@ -352,7 +362,7 @@ function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndices, onCell
             style={{ height: '164px', gridTemplateColumns: `repeat(${sorted.length}, minmax(0, 1fr))` }}
           >
           {sorted.map((cell) => {
-            const pct = logMax > 0 ? Math.max((Math.log(1 + cell.voltageVolts) / logMax) * 100, 4) : 4;
+            const pct = barPct(cell.voltageVolts);
             const isMin = cell.voltageVolts === absMin && absMin !== absMax;
             const isMax = cell.voltageVolts === absMax && absMin !== absMax;
             const isSelected = selectedCellIndices?.includes(cell.index) ?? false;

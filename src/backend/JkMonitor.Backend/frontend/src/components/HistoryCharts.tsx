@@ -545,7 +545,7 @@ function ChartSection({ title, data, lines, domain, precision, hoveredTime, sele
   }, [precision]);
 
   const activePoint = getActivePoint(data, hoveredTime, selectedTime);
-  const activeValueText = formatActiveValues(activePoint, lines, precision);
+  const activeValueText = lines.length === 1 ? formatActiveValues(activePoint, lines, precision) : null;
 
   const handleChartMove = useCallback((state: unknown) => {
     const idx = extractActiveIndex(state);
@@ -577,9 +577,11 @@ function ChartSection({ title, data, lines, domain, precision, hoveredTime, sele
           {subtitle && <div className='mt-1'>{subtitle}</div>}
         </div>
         <div className='text-right'>
-          <div className='text-[11px] font-medium text-foreground'>
-            {activeValueText ?? 'No data'}
-          </div>
+          {lines.length === 1 && (
+            <div className='text-[11px] font-medium text-foreground'>
+              {activeValueText ?? 'No data'}
+            </div>
+          )}
           {selectedTime != null && (
             <button
               onClick={() => onSelect(null)}
@@ -941,5 +943,13 @@ function getActivePoint(data: Record<string, unknown>[], hoveredTime: string | n
     return data.find(p => p.timestamp === ts) ?? data.at(-1) ?? null;
   }
 
-  return data.at(-1) ?? null;
+  // Find the last point that has actual data (not just padding with time/timestamp).
+  for (let i = data.length - 1; i >= 0; i--) {
+    const p = data[i];
+    const keys = Object.keys(p);
+    if (keys.some(k => k !== 'time' && k !== 'timestamp' && p[k] != null)) {
+      return p;
+    }
+  }
+  return null;
 }
