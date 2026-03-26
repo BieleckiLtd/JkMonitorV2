@@ -20,9 +20,9 @@ export interface EnergyComputationResult {
 /**
  * Compute signed-power series and running energy totals from raw telemetry.
  *
- * Sign convention (matches JK BMS):
- *   positive current → battery is charging  → signedPowerKw is **negative** (below baseline)
- *   negative current → battery is discharging → signedPowerKw is **positive** (above baseline)
+ * Sign convention (flipped for intuitive display):
+ *   positive current → battery is charging  → signedPowerKw is **positive** (above baseline)
+ *   negative current → battery is discharging → signedPowerKw is **negative** (below baseline)
  *
  * The returned yDomain always keeps at least ±0.5 kW around the zero baseline
  * so the reference line is visible even when all readings are on one side.
@@ -42,7 +42,7 @@ export function computeEnergyData(
     const current = typeof p.currentAmps === 'number' ? p.currentAmps : null;
     if (power == null || current == null) return { ...p, signedPowerKw: null, displayPowerKw: null };
 
-    const signedKw = current >= 0 ? -power / 1000 : power / 1000;
+    const signedKw = current >= 0 ? power / 1000 : -power / 1000;
     const normalKw = signedKw || 0; // normalise -0 to 0
     if (normalKw > dMax) dMax = normalKw;
     if (normalKw < dMin) dMin = normalKw;
@@ -77,9 +77,9 @@ export function computeEnergyData(
 export function formatEnergyValue(kw: number | null): { text: string; label: string; isZero: boolean } {
   if (kw == null) return { text: 'N/D', label: '', isZero: false };
   const abs = Math.abs(kw);
-  if (kw > 0) return { text: `${abs.toFixed(1)} kW`, label: 'Discharged', isZero: false };
-  if (kw < 0) return { text: `${abs.toFixed(1)} kW`, label: 'Charged', isZero: false };
-  return { text: '0.0 kW', label: 'Discharged', isZero: true };
+  if (kw > 0) return { text: `${abs.toFixed(1)} kW`, label: 'Charged', isZero: false };
+  if (kw < 0) return { text: `${abs.toFixed(1)} kW`, label: 'Discharged', isZero: false };
+  return { text: '0.0 kW', label: 'Idle', isZero: true };
 }
 
 export interface GradientStop {
@@ -99,27 +99,28 @@ export interface GradientStop {
 export function computeEnergyGradientStops(
   zeroOffset: number,
   maxOpacity = 0.45,
+  minOpacity = 0.045,
 ): GradientStop[] {
   const z = Math.max(0, Math.min(1, zeroOffset));
 
   if (z <= 0.005) {
-    // Zero at top – only charge data visible
+    // Zero at top – only data below baseline visible
     return [
-      { offset: '0%', opacity: 0 },
+      { offset: '0%', opacity: minOpacity },
       { offset: '100%', opacity: maxOpacity },
     ];
   }
   if (z >= 0.995) {
-    // Zero at bottom – only discharge data visible
+    // Zero at bottom – only data above baseline visible
     return [
       { offset: '0%', opacity: maxOpacity },
-      { offset: '100%', opacity: 0 },
+      { offset: '100%', opacity: minOpacity },
     ];
   }
 
   return [
     { offset: '0%', opacity: maxOpacity },
-    { offset: `${(z * 100).toFixed(1)}%`, opacity: 0 },
+    { offset: `${(z * 100).toFixed(1)}%`, opacity: minOpacity },
     { offset: '100%', opacity: maxOpacity },
   ];
 }

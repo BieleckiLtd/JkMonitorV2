@@ -17,18 +17,18 @@ describe('getIntervalHours', () => {
 // computeEnergyData — sign convention
 // ---------------------------------------------------------------------------
 describe('computeEnergyData sign convention', () => {
-  it('charging (positive current) produces negative signedPowerKw', () => {
+  it('charging (positive current) produces positive signedPowerKw', () => {
     const data = [{ powerWatts: 500, currentAmps: 2, time: '12:00' }];
     const result = computeEnergyData(data, '1m');
 
-    expect(result.energyData[0].signedPowerKw).toBe(-0.5);
+    expect(result.energyData[0].signedPowerKw).toBe(0.5);
   });
 
-  it('discharging (negative current) produces positive signedPowerKw', () => {
+  it('discharging (negative current) produces negative signedPowerKw', () => {
     const data = [{ powerWatts: 1000, currentAmps: -5, time: '12:00' }];
     const result = computeEnergyData(data, '1m');
 
-    expect(result.energyData[0].signedPowerKw).toBe(1.0);
+    expect(result.energyData[0].signedPowerKw).toBe(-1.0);
   });
 
   it('null power or current results in null signedPowerKw and displayPowerKw', () => {
@@ -56,8 +56,8 @@ describe('computeEnergyData sign convention', () => {
     const data = [{ powerWatts: 500, currentAmps: 2, time: '12:00' }];
     const result = computeEnergyData(data, '1m');
 
-    expect(result.energyData[0].signedPowerKw).toBe(-0.5);
-    expect(result.energyData[0].displayPowerKw).toBe(-0.5);
+    expect(result.energyData[0].signedPowerKw).toBe(0.5);
+    expect(result.energyData[0].displayPowerKw).toBe(0.5);
   });
 });
 
@@ -101,8 +101,8 @@ describe('computeEnergyData yDomain', () => {
     const data = [{ powerWatts: 300, currentAmps: 1.5, time: '12:00' }];
     const result = computeEnergyData(data, '1m');
 
-    // signedKw = -0.3  →  dMin = -0.3, dMax = 0
-    // yMin = min(-0.3, -0.5) = -0.5,  yMax = max(0, 0.5) = 0.5
+    // signedKw = +0.3  →  dMax = 0.3, dMin = 0
+    // yMin = min(0, -0.5) = -0.5,  yMax = max(0.3, 0.5) = 0.5
     expect(result.yDomain[0]).toBeLessThanOrEqual(-0.5);
     expect(result.yDomain[1]).toBeGreaterThanOrEqual(0.5);
   });
@@ -111,8 +111,8 @@ describe('computeEnergyData yDomain', () => {
     const data = [{ powerWatts: 200, currentAmps: -1, time: '12:00' }];
     const result = computeEnergyData(data, '1m');
 
-    // signedKw = +0.2,  dMax = 0.2
-    // yMin = min(0, -0.5) = -0.5,  yMax = max(0.2, 0.5) = 0.5
+    // signedKw = -0.2,  dMin = -0.2
+    // yMin = min(-0.2, -0.5) = -0.5,  yMax = max(0, 0.5) = 0.5
     expect(result.yDomain[0]).toBeLessThanOrEqual(-0.5);
     expect(result.yDomain[1]).toBeGreaterThanOrEqual(0.5);
   });
@@ -121,9 +121,9 @@ describe('computeEnergyData yDomain', () => {
     const data = [{ powerWatts: 3000, currentAmps: -10, time: '12:00' }];
     const result = computeEnergyData(data, '1m');
 
-    // signedKw = +3.0 → yMax should be 3.0 (> 0.5)
-    expect(result.yDomain[1]).toBe(3.0);
-    expect(result.yDomain[0]).toBeLessThanOrEqual(-0.5);
+    // signedKw = -3.0 → yMin should be -3.0
+    expect(result.yDomain[0]).toBe(-3.0);
+    expect(result.yDomain[1]).toBeGreaterThanOrEqual(0.5);
   });
 
   it('returns default ±0.5 for empty data', () => {
@@ -138,8 +138,8 @@ describe('computeEnergyData yDomain', () => {
 describe('computeEnergyData zeroOffset (bbox-based)', () => {
   it('is 0.5 when discharge and charge magnitudes are equal', () => {
     const data = [
-      { powerWatts: 1000, currentAmps: -5, time: '12:00' },  // +1kW discharge
-      { powerWatts: 1000, currentAmps: 5, time: '12:01' },   // -1kW charge
+      { powerWatts: 1000, currentAmps: -5, time: '12:00' },  // -1kW discharge
+      { powerWatts: 1000, currentAmps: 5, time: '12:01' },   // +1kW charge
     ];
     const result = computeEnergyData(data, '1m');
 
@@ -147,33 +147,33 @@ describe('computeEnergyData zeroOffset (bbox-based)', () => {
     expect(result.zeroOffset).toBeCloseTo(0.5, 2);
   });
 
-  it('is 0 when all data is charge (zero at top of bbox)', () => {
+  it('is 1 when all data is charge (zero at bottom of bbox)', () => {
     const data = [{ powerWatts: 600, currentAmps: 3, time: '12:00' }];
     const result = computeEnergyData(data, '1m');
 
-    // signedKw = -0.6, dMax = 0, dMin = -0.6
-    // bboxRange = 0.6, zeroOffset = 0 / 0.6 = 0
-    expect(result.zeroOffset).toBe(0);
+    // signedKw = +0.6, dMax = 0.6, dMin = 0
+    // bboxRange = 0.6, zeroOffset = 0.6 / 0.6 = 1
+    expect(result.zeroOffset).toBe(1);
   });
 
-  it('is 1 when all data is discharge (zero at bottom of bbox)', () => {
+  it('is 0 when all data is discharge (zero at top of bbox)', () => {
     const data = [{ powerWatts: 800, currentAmps: -4, time: '12:00' }];
     const result = computeEnergyData(data, '1m');
 
-    // signedKw = +0.8, dMax = 0.8, dMin = 0
-    // bboxRange = 0.8, zeroOffset = 0.8 / 0.8 = 1
-    expect(result.zeroOffset).toBe(1);
+    // signedKw = -0.8, dMax = 0, dMin = -0.8
+    // bboxRange = 0.8, zeroOffset = 0 / 0.8 = 0
+    expect(result.zeroOffset).toBe(0);
   });
 
   it('reflects actual data ratio, not padded yDomain', () => {
     const data = [
-      { powerWatts: 300, currentAmps: -2, time: '12:00' },  // +0.3 kW discharge
-      { powerWatts: 600, currentAmps: 3, time: '12:01' },   // -0.6 kW charge
+      { powerWatts: 300, currentAmps: -2, time: '12:00' },  // -0.3 kW discharge
+      { powerWatts: 600, currentAmps: 3, time: '12:01' },   // +0.6 kW charge
     ];
     const result = computeEnergyData(data, '1m');
 
-    // dMax = 0.3, dMin = -0.6, bboxRange = 0.9
-    expect(result.zeroOffset).toBeCloseTo(0.3 / 0.9, 4);
+    // dMax = 0.6, dMin = -0.3, bboxRange = 0.9
+    expect(result.zeroOffset).toBeCloseTo(0.6 / 0.9, 4);
   });
 
   it('is 0.5 for empty data', () => {
@@ -192,34 +192,34 @@ describe('computeEnergyData zeroOffset (bbox-based)', () => {
 // computeEnergyGradientStops
 // ---------------------------------------------------------------------------
 describe('computeEnergyGradientStops', () => {
-  it('returns 3 stops for mixed data (V-shape)', () => {
+  it('returns 3 stops for mixed data (V-shape) with minOpacity at baseline', () => {
     const stops = computeEnergyGradientStops(0.5);
     expect(stops).toHaveLength(3);
     expect(stops[0]).toEqual({ offset: '0%', opacity: 0.45 });
-    expect(stops[1]).toEqual({ offset: '50.0%', opacity: 0 });
+    expect(stops[1]).toEqual({ offset: '50.0%', opacity: 0.045 });
     expect(stops[2]).toEqual({ offset: '100%', opacity: 0.45 });
   });
 
-  it('returns 2 stops when all charge (zero at top)', () => {
+  it('returns 2 stops when zero at top with minOpacity', () => {
     const stops = computeEnergyGradientStops(0);
     expect(stops).toHaveLength(2);
-    expect(stops[0]).toEqual({ offset: '0%', opacity: 0 });
+    expect(stops[0]).toEqual({ offset: '0%', opacity: 0.045 });
     expect(stops[1]).toEqual({ offset: '100%', opacity: 0.45 });
   });
 
-  it('returns 2 stops when all discharge (zero at bottom)', () => {
+  it('returns 2 stops when zero at bottom with minOpacity', () => {
     const stops = computeEnergyGradientStops(1);
     expect(stops).toHaveLength(2);
     expect(stops[0]).toEqual({ offset: '0%', opacity: 0.45 });
-    expect(stops[1]).toEqual({ offset: '100%', opacity: 0 });
+    expect(stops[1]).toEqual({ offset: '100%', opacity: 0.045 });
   });
 
-  it('opacity is always 0 at the zero line for mixed data', () => {
+  it('baseline opacity is minOpacity (10% of max) for mixed data', () => {
     for (const z of [0.1, 0.25, 0.5, 0.75, 0.9]) {
       const stops = computeEnergyGradientStops(z);
-      const zeroStop = stops.find(s => s.opacity === 0);
-      expect(zeroStop).toBeDefined();
-      expect(zeroStop!.offset).toBe(`${(z * 100).toFixed(1)}%`);
+      const baselineStop = stops.find(s => s.offset === `${(z * 100).toFixed(1)}%`);
+      expect(baselineStop).toBeDefined();
+      expect(baselineStop!.opacity).toBe(0.045);
     }
   });
 
@@ -231,31 +231,31 @@ describe('computeEnergyGradientStops', () => {
     }
   });
 
-  it('respects custom maxOpacity', () => {
-    const stops = computeEnergyGradientStops(0.5, 0.8);
+  it('respects custom maxOpacity and minOpacity', () => {
+    const stops = computeEnergyGradientStops(0.5, 0.8, 0.08);
     expect(stops[0].opacity).toBe(0.8);
     expect(stops[2].opacity).toBe(0.8);
-    expect(stops[1].opacity).toBe(0);
+    expect(stops[1].opacity).toBe(0.08);
   });
 
   it('clamps zeroOffset to [0, 1]', () => {
     const stopsNeg = computeEnergyGradientStops(-0.5);
     expect(stopsNeg).toHaveLength(2); // treated as zero at top
-    expect(stopsNeg[0].opacity).toBe(0);
+    expect(stopsNeg[0].opacity).toBe(0.045);
 
     const stopsOver = computeEnergyGradientStops(1.5);
     expect(stopsOver).toHaveLength(2); // treated as zero at bottom
     expect(stopsOver[0].opacity).toBe(0.45);
-    expect(stopsOver[1].opacity).toBe(0);
+    expect(stopsOver[1].opacity).toBe(0.045);
   });
 
-  it('asymmetric offset positions zero stop correctly', () => {
-    // discharge 0.3, charge 0.6 → zeroOffset ≈ 0.333
-    const z = 0.3 / 0.9;
+  it('asymmetric offset positions baseline stop correctly', () => {
+    // charge 0.6, discharge 0.3 → zeroOffset ≈ 0.667
+    const z = 0.6 / 0.9;
     const stops = computeEnergyGradientStops(z);
     expect(stops).toHaveLength(3);
     expect(stops[1].offset).toBe(`${(z * 100).toFixed(1)}%`);
-    expect(stops[1].opacity).toBe(0);
+    expect(stops[1].opacity).toBe(0.045);
   });
 });
 
@@ -263,24 +263,24 @@ describe('computeEnergyGradientStops', () => {
 // formatEnergyValue — absolute values with labels
 // ---------------------------------------------------------------------------
 describe('formatEnergyValue', () => {
-  it('shows "Discharged" for positive values with isZero false', () => {
+  it('shows "Charged" for positive values (above baseline)', () => {
     const result = formatEnergyValue(2.3);
     expect(result.text).toBe('2.3 kW');
-    expect(result.label).toBe('Discharged');
-    expect(result.isZero).toBe(false);
-  });
-
-  it('shows "Charged" for negative values with absolute magnitude', () => {
-    const result = formatEnergyValue(-4.7);
-    expect(result.text).toBe('4.7 kW');
     expect(result.label).toBe('Charged');
     expect(result.isZero).toBe(false);
   });
 
-  it('shows "Discharged" label for exactly zero and marks isZero', () => {
+  it('shows "Discharged" for negative values (below baseline)', () => {
+    const result = formatEnergyValue(-4.7);
+    expect(result.text).toBe('4.7 kW');
+    expect(result.label).toBe('Discharged');
+    expect(result.isZero).toBe(false);
+  });
+
+  it('shows "Idle" label for exactly zero and marks isZero', () => {
     const result = formatEnergyValue(0);
     expect(result.text).toBe('0.0 kW');
-    expect(result.label).toBe('Discharged');
+    expect(result.label).toBe('Idle');
     expect(result.isZero).toBe(true);
   });
 

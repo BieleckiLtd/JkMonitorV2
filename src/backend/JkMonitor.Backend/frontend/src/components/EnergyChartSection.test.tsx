@@ -65,20 +65,39 @@ describe('EnergyChartSection', () => {
     expect(screen.getByText('Energy')).toBeInTheDocument();
   });
 
-  it('renders discharged and charged kWh labels', () => {
+  it('renders charged and discharged kWh labels', () => {
     const data = [
       makePoint('12:00', isoAt(0), 600, -3), // discharging
       makePoint('12:01', isoAt(1), 400, 2),   // charging
     ];
     const { container } = render(<EnergyChartSection data={data} resolution='1m' />);
 
+    expect(container.textContent).toContain('Charged:');
     expect(container.textContent).toContain('Discharged:');
+  });
+
+  it('shows charged label with ↑ arrow (above baseline)', () => {
+    const data = [
+      makePoint('12:00', isoAt(0), 400, 2), // charging
+    ];
+    const { container } = render(<EnergyChartSection data={data} resolution='1m' />);
+    // The ↑ arrow is before the Charged label
+    expect(container.textContent).toContain('↑');
     expect(container.textContent).toContain('Charged:');
   });
 
-  describe('hour boundary markers', () => {
-    it('renders ReferenceDot for hour boundaries', () => {
-      // Create data spanning 12:00 → 14:00 at 5-min resolution (hour change at 13:00, 14:00)
+  it('shows discharged label with ↓ arrow (below baseline)', () => {
+    const data = [
+      makePoint('12:00', isoAt(0), 600, -3), // discharging
+    ];
+    const { container } = render(<EnergyChartSection data={data} resolution='1m' />);
+    expect(container.textContent).toContain('↓');
+    expect(container.textContent).toContain('Discharged:');
+  });
+
+  describe('baseline markers by resolution', () => {
+    it('renders dots for 5m resolution (24h mode - every hour)', () => {
+      // Create data spanning 12:00 → 14:00 at 5-min resolution
       const data = Array.from({ length: 25 }, (_, i) => {
         const ts = isoAt(i * 5);
         const d = new Date(ts);
@@ -89,6 +108,52 @@ describe('EnergyChartSection', () => {
 
       const dots = screen.getAllByTestId('ref-dot');
       expect(dots.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('renders dots for 1s resolution (10-min mode - every minute)', () => {
+      // Create data for 3 minutes with 1s resolution
+      const data = Array.from({ length: 180 }, (_, i) => {
+        const ts = isoAt(i / 60); // every second
+        const d = new Date(ts);
+        const time = `${d.getUTCHours().toString().padStart(2, '0')}:${d.getUTCMinutes().toString().padStart(2, '0')}:${d.getUTCSeconds().toString().padStart(2, '0')}`;
+        return makePoint(time, ts, 100, -1);
+      });
+      render(<EnergyChartSection data={data} resolution='1s' />);
+
+      const dots = screen.getAllByTestId('ref-dot');
+      // Should have dots for each minute boundary
+      expect(dots.length).toBeGreaterThanOrEqual(1);
+    });
+
+    it('renders dots for 1m resolution (1h mode - every 10 minutes)', () => {
+      // Create data for 30 minutes at 1-min resolution
+      const data = Array.from({ length: 30 }, (_, i) => {
+        const ts = isoAt(i);
+        const d = new Date(ts);
+        const time = `${d.getUTCHours().toString().padStart(2, '0')}:${d.getUTCMinutes().toString().padStart(2, '0')}`;
+        return makePoint(time, ts, 100, -1);
+      });
+      render(<EnergyChartSection data={data} resolution='1m' />);
+
+      const dots = screen.getAllByTestId('ref-dot');
+      // Should have roughly 3 dots (one per 10-min slot: :00, :10, :20)
+      expect(dots.length).toBeGreaterThanOrEqual(2);
+    });
+
+    it('renders major (larger) dots at 6h boundaries for 1h resolution', () => {
+      // Create data spanning multiple 6h boundaries
+      const data = Array.from({ length: 13 }, (_, i) => {
+        const ts = new Date('2026-03-23T00:00:00Z');
+        ts.setHours(i);
+        const time = `${ts.getUTCHours().toString().padStart(2, '0')}:00`;
+        return makePoint(time, ts.toISOString(), 100, -1);
+      });
+      render(<EnergyChartSection data={data} resolution='1h' />);
+
+      const dots = screen.getAllByTestId('ref-dot');
+      // 6h boundaries at 0:00, 6:00, 12:00 should be larger (r=3)
+      const majorDots = dots.filter(d => d.getAttribute('data-r') === '3');
+      expect(majorDots.length).toBeGreaterThanOrEqual(1);
     });
   });
 

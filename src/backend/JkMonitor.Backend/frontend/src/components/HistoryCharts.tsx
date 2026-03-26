@@ -6,6 +6,7 @@ import {
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { cn } from '../lib/utils';
 import { computeEnergyData, computeEnergyGradientStops, formatEnergyValue, type Resolution } from '../lib/energyUtils';
+import { computeBatteryStatus } from '../lib/batteryStatus';
 import { TrendingUp } from 'lucide-react';
 import type { DeviceDefinition, UiChartDefinition } from '../types/deviceDefinition';
 
@@ -113,11 +114,11 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
   deviceId: string; precision: DisplayPrecision; selectedCellIndices?: number[]; onClearCellSelection?: () => void;
   definition?: DeviceDefinition;
 }) {
-  const [resolution, setResolution] = useState<Resolution | null>('1m');
+  const [resolution, setResolution] = useState<Resolution | null>(null);
   const [data, setData] = useState<HistoryPoint[]>([]);
   const [multiCellData, setMultiCellData] = useState<Record<string, unknown>[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [timeRange, setTimeRange] = useState<'default' | 'today'>('default');
+  const [timeRange, setTimeRange] = useState<'default' | 'today'>('today');
   // Shared hover/selection state across all chart sections (synchronised by timestamp)
   const [sharedHoveredTime, setSharedHoveredTime] = useState<string | null>(null);
   const [sharedSelectedTime, setSharedSelectedTime] = useState<string | null>(null);
@@ -294,6 +295,19 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
     return ticks;
   }, [todayRange, effectiveResolution]);
 
+  const batteryStatus = useMemo(() => computeBatteryStatus(chartData), [chartData]);
+
+  const batteryStatusSubtitle = useMemo(() => {
+    const colorClass = batteryStatus.state === 'CHARGING' ? 'text-sky-400'
+      : batteryStatus.state === 'DISCHARGING' ? 'text-amber-400'
+      : 'text-muted-foreground';
+    return (
+      <span className={cn('text-[11px] font-medium', colorClass)}>
+        {batteryStatus.label}
+      </span>
+    );
+  }, [batteryStatus]);
+
   const handleTodayClick = () => {
     if (timeRange === 'today') {
       setTimeRange('default');
@@ -374,7 +388,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
                 onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
                 todayXTicks={todayXTicks} />
             )}
-            {definitionCharts ? renderDefinitionCharts(definitionCharts, chartData, precision, effectiveResolution, sharedHoveredTime, sharedSelectedTime, setSharedHoveredTime, setSharedSelectedTime, todayXTicks) : (
+            {definitionCharts ? renderDefinitionCharts(definitionCharts, chartData, precision, effectiveResolution, sharedHoveredTime, sharedSelectedTime, setSharedHoveredTime, setSharedSelectedTime, todayXTicks, batteryStatusSubtitle) : (
               <>
                 <EnergyChartSection data={chartData} resolution={effectiveResolution}
                   hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
@@ -385,7 +399,8 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
               domain={[0, 100]}
               hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
               onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
-              todayXTicks={todayXTicks} />
+              todayXTicks={todayXTicks}
+              subtitle={batteryStatusSubtitle} />
             <ChartSection title='Cell Voltage Spread' unit='V' data={chartData} precision={precision}
               lines={[
                 { key: 'minCellVoltageVolts', color: '#f87171', name: 'Min Cell' },
@@ -428,6 +443,7 @@ function renderDefinitionCharts(
   onHover: (time: string | null) => void,
   onSelect: (time: string | null) => void,
   todayXTicks?: string[],
+  batteryStatusSubtitle?: React.ReactNode,
 ): React.ReactNode {
   return charts.filter(c => c.type !== 'multi-cell-chart').map((chart, i) => {
     if (chart.type === 'area-chart' && chart.showEnergyTotals) {
@@ -451,6 +467,8 @@ function renderDefinitionCharts(
       name: t.label ?? t.entity,
     }));
 
+    const isSocChart = chart.traces?.some(t => t.entity === 'state_of_charge');
+
     return (
       <ChartSection
         key={`def-chart-${i}`}
@@ -465,6 +483,7 @@ function renderDefinitionCharts(
         onHover={onHover}
         onSelect={onSelect}
         todayXTicks={todayXTicks}
+        subtitle={isSocChart ? batteryStatusSubtitle : undefined}
       />
     );
   });
@@ -477,12 +496,13 @@ const tooltipContentStyle = { backgroundColor: 'var(--card)', border: '1px solid
 const tooltipLabelStyle = { color: 'var(--muted-foreground)' };
 const legendStyle = { fontSize: 11, paddingTop: 4, color: 'var(--muted-foreground)' };
 
-function ChartSection({ title, data, lines, domain, precision, hoveredTime, selectedTime, onHover, onSelect, todayXTicks }: {
+function ChartSection({ title, data, lines, domain, precision, hoveredTime, selectedTime, onHover, onSelect, todayXTicks, subtitle }: {
   title: string; unit: string; data: Record<string, unknown>[]; lines: LineSpec[];
   domain?: [number, number]; precision: DisplayPrecision;
   hoveredTime: string | null; selectedTime: string | null;
   onHover: (time: string | null) => void; onSelect: (time: string | null) => void;
   todayXTicks?: string[];
+  subtitle?: React.ReactNode;
 }) {
   // Build a formatter that rounds tooltip values based on precision config.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -525,7 +545,10 @@ function ChartSection({ title, data, lines, domain, precision, hoveredTime, sele
   return (
     <div>
       <div className='mb-2 flex items-start justify-between gap-3 px-2 sm:px-0'>
-        <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{title}</div>
+        <div>
+          <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{title}</div>
+          {subtitle && <div className='mt-1'>{subtitle}</div>}
+        </div>
         <div className='text-right'>
           <div className='text-[11px] font-medium text-foreground'>
             {isShowingLatest ? 'Latest' : activeTime ?? 'No data'}
@@ -588,20 +611,59 @@ export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime
     [data, resolution],
   );
 
-  const hourBoundaries = useMemo(() => {
-    const result: { time: string; is6h: boolean }[] = [];
-    let lastHour = -1;
-    for (const p of energyData) {
-      const ts = typeof p.timestamp === 'string' ? new Date(p.timestamp as string) : null;
-      if (!ts || isNaN(ts.getTime())) continue;
-      const hour = ts.getHours();
-      if (hour !== lastHour) {
-        result.push({ time: String(p.time), is6h: hour % 6 === 0 });
-        lastHour = hour;
+  const baselineMarkers = useMemo(() => {
+    const result: { time: string; isMajor: boolean }[] = [];
+    if (resolution === '1s') {
+      // 10-minute mode: small dot every minute
+      let lastMin = -1;
+      for (const p of energyData) {
+        const ts = typeof p.timestamp === 'string' ? new Date(p.timestamp as string) : null;
+        if (!ts || isNaN(ts.getTime())) continue;
+        const min = ts.getMinutes();
+        if (min !== lastMin) {
+          result.push({ time: String(p.time), isMajor: false });
+          lastMin = min;
+        }
+      }
+    } else if (resolution === '1m') {
+      // 1h mode: small dot every 10 minutes
+      let lastSlot = -1;
+      for (const p of energyData) {
+        const ts = typeof p.timestamp === 'string' ? new Date(p.timestamp as string) : null;
+        if (!ts || isNaN(ts.getTime())) continue;
+        const slot = Math.floor(ts.getMinutes() / 10);
+        if (slot !== lastSlot) {
+          result.push({ time: String(p.time), isMajor: false });
+          lastSlot = slot;
+        }
+      }
+    } else if (resolution === '5m') {
+      // 24h mode: small dot every 1h
+      let lastHour = -1;
+      for (const p of energyData) {
+        const ts = typeof p.timestamp === 'string' ? new Date(p.timestamp as string) : null;
+        if (!ts || isNaN(ts.getTime())) continue;
+        const hour = ts.getHours();
+        if (hour !== lastHour) {
+          result.push({ time: String(p.time), isMajor: false });
+          lastHour = hour;
+        }
+      }
+    } else {
+      // today / 7d (1h resolution): small dot every 1h, bigger dot at 6h boundaries
+      let lastHour = -1;
+      for (const p of energyData) {
+        const ts = typeof p.timestamp === 'string' ? new Date(p.timestamp as string) : null;
+        if (!ts || isNaN(ts.getTime())) continue;
+        const hour = ts.getHours();
+        if (hour !== lastHour) {
+          result.push({ time: String(p.time), isMajor: hour % 6 === 0 });
+          lastHour = hour;
+        }
       }
     }
     return result;
-  }, [energyData]);
+  }, [energyData, resolution]);
 
   const activePoint = getActivePoint(energyData, hoveredTime, selectedTime);
   const activeTime = activePoint != null ? formatSummaryTime(activePoint.timestamp) : null;
@@ -642,11 +704,11 @@ export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime
         <div>
           <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Energy</div>
           <div className='mt-1.5 flex flex-wrap gap-x-3 gap-y-1'>
-            <span className='flex items-center gap-1 text-xs text-emerald-400'>
-              <span className='text-[10px]'>↑</span> Discharged: <span className='font-semibold'>{dischargedKwh.toFixed(1)} kWh</span>
-            </span>
             <span className='flex items-center gap-1 text-xs text-sky-400'>
-              <span className='text-[10px]'>↓</span> Charged: <span className='font-semibold'>{chargedKwh.toFixed(1)} kWh</span>
+              <span className='text-[10px]'>↑</span> Charged: <span className='font-semibold'>{chargedKwh.toFixed(1)} kWh</span>
+            </span>
+            <span className='flex items-center gap-1 text-xs text-emerald-400'>
+              <span className='text-[10px]'>↓</span> Discharged: <span className='font-semibold'>{dischargedKwh.toFixed(1)} kWh</span>
             </span>
           </div>
         </div>
@@ -688,8 +750,8 @@ export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime
             itemStyle={{ color: 'var(--foreground)' }}
             formatter={tooltipFormatter}
           />
-          {hourBoundaries.map(({ time, is6h }, i) => (
-            <ReferenceDot key={`hb-${i}`} x={time} y={0} r={is6h ? 3 : 1.5} fill={is6h ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.2)'} stroke='none' />
+          {baselineMarkers.map(({ time, isMajor }, i) => (
+            <ReferenceDot key={`bm-${i}`} x={time} y={0} r={isMajor ? 3 : 1.5} fill={isMajor ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.2)'} stroke='none' />
           ))}
           <Area type='monotone' dataKey='signedPowerKw' stroke='#34d399' fill='url(#energyGradient)' strokeWidth={1.5} dot={false} isAnimationActive={false} baseValue={0} />
         </AreaChart>

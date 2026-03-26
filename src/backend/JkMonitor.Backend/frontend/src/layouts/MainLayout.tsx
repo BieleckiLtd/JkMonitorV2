@@ -109,11 +109,11 @@ export function MainLayout({ children }: { children: ReactNode }) {
   }, [isMobileSidebarOpen]);
 
   return (
-    <div className="flex h-dvh w-full overflow-hidden bg-background font-sans text-foreground">
+    <div className="flex h-dvh w-full overflow-hidden bg-background font-sans text-foreground" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}>
       <Sidebar />
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <Header />
-        <main className="flex-1 w-full overflow-y-auto px-1 py-2 sm:p-4 md:p-6">
+        <main className="flex-1 w-full overflow-y-auto px-1 py-2 sm:p-4 md:p-6 pb-[max(0.5rem,env(safe-area-inset-bottom))]">
           <div className="mx-auto w-full max-w-7xl">
             {children}
           </div>

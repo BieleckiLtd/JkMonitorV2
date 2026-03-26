@@ -874,14 +874,6 @@
         ],
         "charts": [
           {
-            "title": "Pack Voltage",
-            "type": "line-chart",
-            "traces": [
-              { "entity": "total_voltage", "label": "Voltage", "color": "emerald" }
-            ],
-            "yAxis": { "unit": "V", "label": "Voltage" }
-          },
-          {
             "title": "Current",
             "type": "line-chart",
             "traces": [
@@ -922,8 +914,7 @@
             "traces": [
               { "entity": "min_cell_voltage",   "label": "Min",   "color": "red" },
               { "entity": "max_cell_voltage",   "label": "Max",   "color": "emerald" },
-              { "entity": "avg_cell_voltage",   "label": "Avg",   "color": "blue", "dashed": true },
-              { "entity": "delta_cell_voltage", "label": "Delta", "color": "amber", "secondaryAxis": true }
+              { "entity": "avg_cell_voltage",   "label": "Avg",   "color": "blue", "dashed": true }
             ],
             "yAxis": { "unit": "V", "label": "Cell Voltage" }
           },
