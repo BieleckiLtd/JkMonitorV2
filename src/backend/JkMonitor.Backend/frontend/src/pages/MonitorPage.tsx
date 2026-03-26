@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import { Activity, AlertTriangle, Battery, BatteryCharging, Check, Edit2, Gauge, LoaderCircle, Pause, Play, Shield, Thermometer, X, Zap } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
-import { Switch } from '../components/ui/switch';
 import { HistoryCharts } from '../components/HistoryCharts';
 import { cn } from '../lib/utils';
 import { getBatteryStateFromCurrent } from '../lib/batteryStatus';
@@ -86,7 +85,6 @@ type DeviceRuntimeState = {
 
 const refreshIntervalMs = 2000;
 const nd = 'N/D';
-type CellVoltageChartMode = 'absolute' | 'delta';
 
 export function MonitorPage() {
   const [devices, setDevices] = useState<DeviceRuntimeState[]>([]);
@@ -321,17 +319,13 @@ function HeroMetric({ icon: Icon, label, value, unit, accent, subtitle }: { icon
 }
 
 function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndices, onCellClick }: { cells: CellVoltageSnapshot[]; minV?: number | null; maxV?: number | null; avgV?: number | null; selectedCellIndices?: number[]; onCellClick?: (index: number) => void }) {
-  const [mode, setMode] = useState<CellVoltageChartMode>('delta');
   const sorted = [...cells].sort((a, b) => a.index - b.index);
   const voltages = sorted.map(c => c.voltageVolts);
   const absMin = Math.min(...voltages);
   const absMax = Math.max(...voltages);
-  const spread = Math.max(absMax - absMin, 0.001);
-  const rangeMin = mode === 'delta' ? absMin - spread * 0.5 : 0;
-  const rangeMax = mode === 'delta' ? absMax + spread * 0.5 : Math.max(absMax * 1.02, 0.1);
-  const toggleTitle = mode === 'delta'
-    ? 'Delta view enabled. Bars are zoomed around the cell spread to make balancing differences clearer. Toggle to switch to absolute 0V scale.'
-    : 'Absolute view enabled. Bars start at 0V so each cell shows full height. Toggle to switch to delta zoom.';
+  // Logarithmic height: log(1+v)/log(1+max) maps [0,max]->[0,1].
+  // This compresses the lower range and expands small differences at the top.
+  const logMax = Math.log(1 + absMax);
 
   return (
     <Card className='bg-card/85 shadow-sm'>
@@ -341,20 +335,6 @@ function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndices, onCell
             <div className='flex items-center gap-2' title='Cell voltages are smoothed using an Exponential Moving Average (EMA) with output hysteresis. The EMA dampens ±2mV measurement noise while tracking real trends. Hysteresis holds the reported millivolt value until the smoothed average has moved at least 1mV, preventing rounding oscillation at millivolt boundaries. A breakout threshold snaps to raw readings when sudden genuine voltage changes exceed 5mV.'>
               <Battery className='h-4 w-4 text-muted-foreground' />
               Cell Voltages
-            </div>
-            <div
-              className='flex items-center gap-1.5 rounded-full border border-border/70 bg-background/50 px-2 py-1'
-              title={toggleTitle}
-            >
-              <span className={cn('text-[9px] font-medium', mode === 'absolute' ? 'text-foreground' : 'text-muted-foreground/60')}>Total</span>
-              <Switch
-                size='sm'
-                checked={mode === 'delta'}
-                onCheckedChange={(checked) => setMode(checked ? 'delta' : 'absolute')}
-                aria-label='Toggle between delta and absolute cell voltage view'
-                title={toggleTitle}
-              />
-              <span className={cn('text-[9px] font-medium', mode === 'delta' ? 'text-foreground' : 'text-muted-foreground/60')}>Δ</span>
             </div>
           </div>
           <div className='flex flex-wrap gap-x-4 gap-y-1 text-xs font-normal text-muted-foreground'>
@@ -372,7 +352,7 @@ function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndices, onCell
             style={{ height: '164px', gridTemplateColumns: `repeat(${sorted.length}, minmax(0, 1fr))` }}
           >
           {sorted.map((cell) => {
-            const pct = Math.max(((cell.voltageVolts - rangeMin) / (rangeMax - rangeMin)) * 100, mode === 'delta' ? 8 : 4);
+            const pct = logMax > 0 ? Math.max((Math.log(1 + cell.voltageVolts) / logMax) * 100, 4) : 4;
             const isMin = cell.voltageVolts === absMin && absMin !== absMax;
             const isMax = cell.voltageVolts === absMax && absMin !== absMax;
             const isSelected = selectedCellIndices?.includes(cell.index) ?? false;

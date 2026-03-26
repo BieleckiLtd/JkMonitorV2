@@ -77,6 +77,34 @@ const keyPrecisionMap: Record<string, keyof DisplayPrecision> = {
   batteryTemperatureCelsius: 'temperature',
 };
 
+const keyUnitSuffix: Record<string, string> = {
+  totalVoltageVolts: 'V',
+  currentAmps: 'A',
+  powerWatts: 'W',
+  stateOfChargePercent: '%',
+  minCellVoltageVolts: 'V',
+  maxCellVoltageVolts: 'V',
+  deltaCellVoltageVolts: 'V',
+  mosTemperatureCelsius: '°C',
+  batteryTemperatureCelsius: '°C',
+};
+
+function formatActiveValues(point: Record<string, unknown> | null, lines: LineSpec[], precision: DisplayPrecision): string | null {
+  if (!point) return null;
+  const parts: string[] = [];
+  for (const l of lines) {
+    const raw = point[l.key];
+    if (raw == null) continue;
+    const num = typeof raw === 'number' ? raw : Number(raw);
+    if (Number.isNaN(num)) continue;
+    const precKey = keyPrecisionMap[l.key];
+    const decimals = precKey != null ? precision[precKey] : 2;
+    const unit = keyUnitSuffix[l.key] ?? '';
+    parts.push(`${num.toFixed(decimals)}${unit}`);
+  }
+  return parts.length > 0 ? parts.join(' · ') : null;
+}
+
 const cellColorPalette = [
   '#a78bfa', '#34d399', '#f87171', '#38bdf8', '#fbbf24', '#fb923c',
   '#ec4899', '#818cf8', '#22d3ee', '#a3e635', '#f472b6', '#c084fc',
@@ -517,7 +545,7 @@ function ChartSection({ title, data, lines, domain, precision, hoveredTime, sele
   }, [precision]);
 
   const activePoint = getActivePoint(data, hoveredTime, selectedTime);
-  const activeTime = activePoint != null ? formatSummaryTime(activePoint.timestamp) : null;
+  const activeValueText = formatActiveValues(activePoint, lines, precision);
 
   const handleChartMove = useCallback((state: unknown) => {
     const idx = extractActiveIndex(state);
@@ -550,7 +578,7 @@ function ChartSection({ title, data, lines, domain, precision, hoveredTime, sele
         </div>
         <div className='text-right'>
           <div className='text-[11px] font-medium text-foreground'>
-            {activeTime ?? 'No data'}
+            {activeValueText ?? 'No data'}
           </div>
           {selectedTime != null && (
             <button
@@ -665,7 +693,15 @@ export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime
   }, [energyData, resolution]);
 
   const activePoint = getActivePoint(energyData, hoveredTime, selectedTime);
-  const activeTime = activePoint != null ? formatSummaryTime(activePoint.timestamp) : null;
+  const activeEnergyText = useMemo(() => {
+    if (!activePoint) return null;
+    const raw = activePoint.displayPowerKw;
+    if (raw == null) return null;
+    const num = typeof raw === 'number' ? raw : Number(raw);
+    if (Number.isNaN(num)) return null;
+    const fmt = formatEnergyValue(num);
+    return fmt.isZero ? '0 W' : `${fmt.text} ${fmt.label}`;
+  }, [activePoint]);
 
   const handleChartMove = useCallback((state: unknown) => {
     const idx = extractActiveIndex(state);
@@ -712,7 +748,7 @@ export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime
         </div>
         <div className='text-right'>
           <div className='text-[11px] font-medium text-foreground'>
-            {activeTime ?? 'No data'}
+            {activeEnergyText ?? 'No data'}
           </div>
           {selectedTime != null && (
             <button
@@ -782,7 +818,18 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hove
   }, [precision.cellVoltage]);
 
   const activePoint = getActivePoint(data, hoveredTime, selectedTime);
-  const activeTime = activePoint != null ? formatSummaryTime(activePoint.timestamp) : null;
+  const activeCellText = useMemo(() => {
+    if (!activePoint) return null;
+    const parts: string[] = [];
+    for (const l of cellLines) {
+      const raw = activePoint[l.key];
+      if (raw == null) continue;
+      const num = typeof raw === 'number' ? raw : Number(raw);
+      if (Number.isNaN(num)) continue;
+      parts.push(`${num.toFixed(precision.cellVoltage)}V`);
+    }
+    return parts.length > 0 ? parts.join(' · ') : null;
+  }, [activePoint, cellLines, precision.cellVoltage]);
 
   const handleChartMove = useCallback((state: unknown) => {
     const idx = extractActiveIndex(state);
@@ -820,7 +867,7 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hove
         </div>
         <div className='text-right'>
           <div className='text-[11px] font-medium text-foreground'>
-            {activeTime ?? 'No data'}
+            {activeCellText ?? 'No data'}
           </div>
           {selectedTime != null && (
             <button
@@ -895,23 +942,4 @@ function getActivePoint(data: Record<string, unknown>[], hoveredTime: string | n
   }
 
   return data.at(-1) ?? null;
-}
-
-function formatSummaryTime(value: unknown) {
-  if (typeof value !== 'string') {
-    return 'Latest sample';
-  }
-
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.getTime())) {
-    return 'Latest sample';
-  }
-
-  return parsed.toLocaleString([], {
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
 }

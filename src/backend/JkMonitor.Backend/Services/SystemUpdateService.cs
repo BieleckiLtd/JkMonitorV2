@@ -80,6 +80,31 @@ public sealed class SystemUpdateService(
                 result.UpdateAvailable = remoteChecksum is not null
                     && localChecksum is not null
                     && !string.Equals(remoteChecksum, localChecksum, StringComparison.OrdinalIgnoreCase);
+
+                // Fetch commit list between installed and latest when update is available.
+                if (result.UpdateAvailable && !string.IsNullOrEmpty(result.CurrentSourceRevision))
+                {
+                    try
+                    {
+                        var compareUrl = $"https://api.github.com/repos/{Repository}/compare/{result.CurrentSourceRevision}...dev";
+                        var comparison = await client.GetFromJsonAsync<GitHubComparison>(compareUrl, cancellationToken);
+                        if (comparison?.Commits is { Count: > 0 })
+                        {
+                            result.Commits = comparison.Commits
+                                .Select(c => new CommitInfo
+                                {
+                                    Sha = c.Sha?[..Math.Min(c.Sha.Length, 7)],
+                                    Message = c.Commit?.Message?.Split('\n', 2)[0],
+                                    Date = c.Commit?.Author?.Date
+                                })
+                                .ToList();
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogDebug(ex, "Failed to fetch commit comparison from GitHub.");
+                    }
+                }
             }
         }
         catch (Exception ex)
@@ -288,6 +313,14 @@ public sealed class UpdateCheckResult
     public string? RemoteChecksum { get; set; }
     public string? LocalChecksum { get; set; }
     public string? CheckError { get; set; }
+    public List<CommitInfo>? Commits { get; set; }
+}
+
+public sealed class CommitInfo
+{
+    public string? Sha { get; set; }
+    public string? Message { get; set; }
+    public string? Date { get; set; }
 }
 
 public sealed class UpdateProgress
@@ -322,4 +355,34 @@ file sealed class GitHubAsset
 
     [JsonPropertyName("updated_at")]
     public string? UpdatedAt { get; set; }
+}
+
+file sealed class GitHubComparison
+{
+    [JsonPropertyName("commits")]
+    public List<GitHubCommit>? Commits { get; set; }
+}
+
+file sealed class GitHubCommit
+{
+    [JsonPropertyName("sha")]
+    public string? Sha { get; set; }
+
+    [JsonPropertyName("commit")]
+    public GitHubCommitDetail? Commit { get; set; }
+}
+
+file sealed class GitHubCommitDetail
+{
+    [JsonPropertyName("message")]
+    public string? Message { get; set; }
+
+    [JsonPropertyName("author")]
+    public GitHubCommitAuthor? Author { get; set; }
+}
+
+file sealed class GitHubCommitAuthor
+{
+    [JsonPropertyName("date")]
+    public string? Date { get; set; }
 }

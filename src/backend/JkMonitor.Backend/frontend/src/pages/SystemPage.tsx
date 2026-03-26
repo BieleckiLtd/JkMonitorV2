@@ -78,6 +78,12 @@ type DatabaseSizeInfo = {
   tables: TableSizeInfo[];
 };
 
+type CommitInfo = {
+  sha?: string | null;
+  message?: string | null;
+  date?: string | null;
+};
+
 type UpdateCheckResult = {
   currentReleaseTag?: string | null;
   currentSourceRevision?: string | null;
@@ -89,6 +95,7 @@ type UpdateCheckResult = {
   remoteChecksum?: string | null;
   localChecksum?: string | null;
   checkError?: string | null;
+  commits?: CommitInfo[] | null;
 };
 
 type UpdateProgress = {
@@ -478,6 +485,19 @@ export function SystemPage() {
                         </div>
                         {updateCheck.remoteReleasePublishedAt ? (
                           <div className='mt-1 text-xs text-primary/80'>Built {formatTimestamp(updateCheck.remoteReleasePublishedAt)}</div>
+                        ) : null}
+                        {updateCheck.commits && updateCheck.commits.length > 0 ? (
+                          <div className='mt-2 space-y-1'>
+                            <div className='text-[10px] font-medium uppercase tracking-[0.16em] text-primary/60'>Changes</div>
+                            <ul className='space-y-0.5 text-xs text-primary/80'>
+                              {updateCheck.commits.map((c, i) => (
+                                <li key={i} className='flex gap-1.5'>
+                                  <span className='shrink-0 font-mono text-[10px] text-primary/50'>{c.sha ?? ''}</span>
+                                  <span>{c.message ?? ''}</span>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
                         ) : null}
                       </div>
                     ) : updateCheck.localChecksum && updateCheck.remoteChecksum ? (
