@@ -3,33 +3,33 @@
   "version": "1",
 
   "device": {
-    "id": "jk-inverter-bms",
-    "name": "JK Inverter BMS",
+    "id": "jk-inverter-bms-ble",
+    "name": "JK Inverter BMS (BLE)",
     "manufacturer": "JK",
     "model": "JK-PB2A16S20P",
     "category": "energy-storage",
-    "description": "JK Inverter BMS with RS485 Modbus RTU interface for LiFePO4 battery packs. Supports up to 32 cells, charge/discharge/balance control, and comprehensive protection.",
+    "description": "JK Inverter BMS with Bluetooth Low Energy interface for LiFePO4 battery packs. Supports up to 32 cells, charge/discharge/balance control, and comprehensive protection. Connects wirelessly via BLE GATT service 0xFFE0.",
     "icon": "battery",
     "documentationUrl": "https://github.com/BieleckiLtd/JkMonitorV2"
   },
 
   "connection": {
     "transport": {
-      "type": "serial",
+      "type": "ble",
       "defaults": {
-        "baudRate": 115200,
-        "dataBits": 8,
-        "parity": "none",
-        "stopBits": 1,
-        "readTimeoutMs": 1000,
-        "writeTimeoutMs": 1000
+        "serviceUuid": "0000ffe0-0000-1000-8000-00805f9b34fb",
+        "notifyCharacteristicUuid": "0000ffe1-0000-1000-8000-00805f9b34fb",
+        "writeCharacteristicUuid": "0000ffe1-0000-1000-8000-00805f9b34fb",
+        "connectionTimeoutMs": 20000,
+        "reconnectDelayMs": 5000
       }
     },
     "protocol": {
-      "type": "modbus-rtu",
+      "type": "jk-bms-ble",
       "settings": {
-        "defaultSlaveAddress": 1,
-        "interFrameDelayMs": 100,
+        "byteOrder": "little-endian",
+        "responseFrameSize": 300,
+        "checksumType": "sum8",
         "retries": 1
       }
     }
@@ -39,29 +39,25 @@
     {
       "id": "live",
       "name": "Live Data",
-      "address": 4608,
-      "count": 115,
-      "functionCode": 3,
+      "command": 150,
+      "responseFrameType": 2,
+      "headerSize": 6,
       "pollGroup": "fast"
     },
     {
       "id": "config",
       "name": "Configuration",
-      "address": 4096,
-      "count": 115,
-      "functionCode": 3,
-      "pollGroup": "slow",
-      "write": {
-        "functionCode": 16,
-        "registersPerWrite": 2
-      }
+      "command": 150,
+      "responseFrameType": 1,
+      "headerSize": 6,
+      "pollGroup": "slow"
     },
     {
       "id": "info",
       "name": "Device Information",
-      "address": 5120,
-      "count": 123,
-      "functionCode": 3,
+      "command": 151,
+      "responseFrameType": 3,
+      "headerSize": 6,
       "pollGroup": "slow"
     }
   ],

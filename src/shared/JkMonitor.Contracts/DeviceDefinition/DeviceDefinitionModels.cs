@@ -13,7 +13,7 @@ public sealed class DeviceDefinition
 
     public required ConnectionDefinition Connection { get; init; }
 
-    public required IReadOnlyList<RegisterBankDefinition> RegisterBanks { get; init; }
+    public required IReadOnlyList<DataSourceDefinition> DataSources { get; init; }
 
     public required IReadOnlyDictionary<string, PollGroupDefinition> PollGroups { get; init; }
 
@@ -65,6 +65,7 @@ public sealed class TransportDefinition
 
 public sealed class TransportDefaults
 {
+    // Serial transport
     public int BaudRate { get; init; } = 115200;
 
     public int DataBits { get; init; } = 8;
@@ -76,6 +77,17 @@ public sealed class TransportDefaults
     public int ReadTimeoutMs { get; init; } = 1000;
 
     public int WriteTimeoutMs { get; init; } = 1000;
+
+    // BLE transport
+    public string? ServiceUuid { get; init; }
+
+    public string? NotifyCharacteristicUuid { get; init; }
+
+    public string? WriteCharacteristicUuid { get; init; }
+
+    public int ConnectionTimeoutMs { get; init; } = 20000;
+
+    public int ReconnectDelayMs { get; init; } = 5000;
 }
 
 public sealed class ProtocolDefinition
@@ -87,31 +99,50 @@ public sealed class ProtocolDefinition
 
 public sealed class ProtocolSettings
 {
+    // Modbus
     public byte DefaultSlaveAddress { get; init; } = 1;
 
     public int InterFrameDelayMs { get; init; } = 100;
 
     public int Retries { get; init; } = 1;
+
+    /// <summary>Byte order for multi-byte values: "big-endian" (Modbus default) or "little-endian" (BLE).</summary>
+    public string ByteOrder { get; init; } = "big-endian";
+
+    /// <summary>Expected response frame size in bytes (BLE frame protocols).</summary>
+    public int ResponseFrameSize { get; init; }
+
+    /// <summary>Checksum algorithm: "crc16" (Modbus), "sum8" (JK BMS BLE), or "none".</summary>
+    public string ChecksumType { get; init; } = "crc16";
 }
 
-public sealed class RegisterBankDefinition
+public sealed class DataSourceDefinition
 {
     public required string Id { get; init; }
 
     public required string Name { get; init; }
 
-    public required ushort Address { get; init; }
+    public required string PollGroup { get; init; }
 
-    public required ushort Count { get; init; }
+    // Modbus: register address and count
+    public ushort Address { get; init; }
+
+    public ushort Count { get; init; }
 
     public byte FunctionCode { get; init; } = 3;
 
-    public required string PollGroup { get; init; }
+    public DataSourceWriteDefinition? Write { get; init; }
 
-    public RegisterBankWriteDefinition? Write { get; init; }
+    // BLE frame protocol: command byte and expected response frame type
+    public byte Command { get; init; }
+
+    public byte ResponseFrameType { get; init; }
+
+    /// <summary>Number of header bytes to skip before entity payload (e.g. 6 for JK BMS BLE preamble+type+counter).</summary>
+    public int HeaderSize { get; init; }
 }
 
-public sealed class RegisterBankWriteDefinition
+public sealed class DataSourceWriteDefinition
 {
     public byte FunctionCode { get; init; } = 16;
 

@@ -48,7 +48,7 @@ public sealed class GenericModbusPollingClient(
         var slaveAddress = device.Address != 0 ? device.Address : protocolSettings.DefaultSlaveAddress;
         var readTimeout = transport.Defaults?.ReadTimeoutMs ?? 1000;
         var interFrameDelay = protocolSettings.InterFrameDelayMs;
-        var overallTimeoutMs = readTimeout * (definition.RegisterBanks.Count + 1) * 3;
+        var overallTimeoutMs = readTimeout * (definition.DataSources.Count + 1) * 3;
 
         using var pollCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         pollCts.CancelAfter(overallTimeoutMs);
@@ -65,7 +65,7 @@ public sealed class GenericModbusPollingClient(
             var bankData = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
             var now = DateTimeOffset.UtcNow;
 
-            foreach (var bank in definition.RegisterBanks)
+            foreach (var bank in definition.DataSources)
             {
                 var pollGroup = definition.PollGroups.GetValueOrDefault(bank.PollGroup);
                 var intervalMs = pollGroup?.IntervalMs ?? 1000;
@@ -130,7 +130,7 @@ public sealed class GenericModbusPollingClient(
         if (entity is null)
             throw new ArgumentException($"Writable entity '{entityId}' not found in definition '{definition.Device.Id}'.");
 
-        var bank = definition.RegisterBanks.FirstOrDefault(b =>
+        var bank = definition.DataSources.FirstOrDefault(b =>
             string.Equals(b.Id, entity.Source.Bank, StringComparison.OrdinalIgnoreCase));
         if (bank?.Write is null)
             throw new InvalidOperationException($"Register bank '{entity.Source.Bank}' does not support writes.");

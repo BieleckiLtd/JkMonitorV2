@@ -4,7 +4,7 @@ export type DeviceDefinition = {
   version: string;
   device: DeviceMetadata;
   connection: ConnectionDefinition;
-  registerBanks: RegisterBankDefinition[];
+  dataSources: DataSourceDefinition[];
   pollGroups: Record<string, PollGroupDefinition>;
   entities: EntityDefinition[];
   computedEntities?: ComputedEntityDefinition[];
@@ -36,12 +36,19 @@ export type TransportDefinition = {
 };
 
 export type TransportDefaults = {
-  baudRate: number;
-  dataBits: number;
-  parity: string;
-  stopBits: number;
-  readTimeoutMs: number;
-  writeTimeoutMs: number;
+  // Serial transport
+  baudRate?: number;
+  dataBits?: number;
+  parity?: string;
+  stopBits?: number;
+  readTimeoutMs?: number;
+  writeTimeoutMs?: number;
+  // BLE transport
+  serviceUuid?: string;
+  notifyCharacteristicUuid?: string;
+  writeCharacteristicUuid?: string;
+  connectionTimeoutMs?: number;
+  reconnectDelayMs?: number;
 };
 
 export type ProtocolDefinition = {
@@ -50,22 +57,32 @@ export type ProtocolDefinition = {
 };
 
 export type ProtocolSettings = {
-  defaultSlaveAddress: number;
-  interFrameDelayMs: number;
-  retries: number;
+  // Modbus
+  defaultSlaveAddress?: number;
+  interFrameDelayMs?: number;
+  retries?: number;
+  // Universal
+  byteOrder?: 'big-endian' | 'little-endian';
+  responseFrameSize?: number;
+  checksumType?: string;
 };
 
-export type RegisterBankDefinition = {
+export type DataSourceDefinition = {
   id: string;
   name: string;
-  address: number;
-  count: number;
-  functionCode: number;
   pollGroup: string;
-  write?: RegisterBankWriteDefinition;
+  // Modbus
+  address?: number;
+  count?: number;
+  functionCode?: number;
+  write?: DataSourceWriteDefinition;
+  // BLE frame protocol
+  command?: number;
+  responseFrameType?: number;
+  headerSize?: number;
 };
 
-export type RegisterBankWriteDefinition = {
+export type DataSourceWriteDefinition = {
   functionCode: number;
   registersPerWrite: number;
 };
@@ -249,5 +266,5 @@ export type DeviceDefinitionSummary = {
   protocolType: string;
   transportType: string;
   entityCount: number;
-  registerBankCount: number;
+  dataSourceCount: number;
 };

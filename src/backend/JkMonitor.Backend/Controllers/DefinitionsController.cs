@@ -24,7 +24,7 @@ public sealed class DefinitionsController(DeviceDefinitionLoader definitionLoade
             ProtocolType = d.Connection.Protocol.Type,
             TransportType = d.Connection.Transport.Type,
             EntityCount = d.Entities.Count,
-            RegisterBankCount = d.RegisterBanks.Count
+            DataSourceCount = d.DataSources.Count
         });
         return Ok(summaries);
     }
@@ -77,7 +77,7 @@ public sealed class DefinitionsController(DeviceDefinitionLoader definitionLoade
                 ProtocolType = definition.Connection.Protocol.Type,
                 TransportType = definition.Connection.Transport.Type,
                 EntityCount = definition.Entities.Count,
-                RegisterBankCount = definition.RegisterBanks.Count
+                DataSourceCount = definition.DataSources.Count
             });
         }
         catch (JsonException ex)
