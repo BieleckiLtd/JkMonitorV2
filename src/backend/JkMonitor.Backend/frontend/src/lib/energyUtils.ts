@@ -85,6 +85,7 @@ export function formatEnergyValue(kw: number | null): { text: string; label: str
 export interface GradientStop {
   offset: string;
   opacity: number;
+  color: string;
 }
 
 /**
@@ -93,34 +94,41 @@ export interface GradientStop {
  * The gradient maps to the Area element's objectBoundingBox (SVG default),
  * so `zeroOffset` must represent where y=0 sits within that bbox (0 = top, 1 = bottom).
  *
- * The result is a simple V-shaped opacity profile: transparent at the zero line,
- * linearly increasing to `maxOpacity` at the extremes (top / bottom of bbox).
+ * Above baseline: `positiveColor` (green by default — charging).
+ * Below baseline: `negativeColor` (red by default — discharging).
+ *
+ * Opacity: V-shaped profile with `minOpacity` at the zero line ramping
+ * to `maxOpacity` at the extremes.
  */
 export function computeEnergyGradientStops(
   zeroOffset: number,
   maxOpacity = 0.45,
-  minOpacity = 0.045,
+  minOpacity = 0.09,
+  positiveColor = '#34d399',
+  negativeColor = '#f87171',
 ): GradientStop[] {
   const z = Math.max(0, Math.min(1, zeroOffset));
 
   if (z <= 0.005) {
     // Zero at top – only data below baseline visible
     return [
-      { offset: '0%', opacity: minOpacity },
-      { offset: '100%', opacity: maxOpacity },
+      { offset: '0%', opacity: minOpacity, color: negativeColor },
+      { offset: '100%', opacity: maxOpacity, color: negativeColor },
     ];
   }
   if (z >= 0.995) {
     // Zero at bottom – only data above baseline visible
     return [
-      { offset: '0%', opacity: maxOpacity },
-      { offset: '100%', opacity: minOpacity },
+      { offset: '0%', opacity: maxOpacity, color: positiveColor },
+      { offset: '100%', opacity: minOpacity, color: positiveColor },
     ];
   }
 
+  const zPct = `${(z * 100).toFixed(1)}%`;
   return [
-    { offset: '0%', opacity: maxOpacity },
-    { offset: `${(z * 100).toFixed(1)}%`, opacity: minOpacity },
-    { offset: '100%', opacity: maxOpacity },
+    { offset: '0%', opacity: maxOpacity, color: positiveColor },
+    { offset: zPct, opacity: minOpacity, color: positiveColor },
+    { offset: zPct, opacity: minOpacity, color: negativeColor },
+    { offset: '100%', opacity: maxOpacity, color: negativeColor },
   ];
 }

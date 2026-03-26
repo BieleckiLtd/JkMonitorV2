@@ -638,14 +638,14 @@ export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime
         }
       }
     } else if (resolution === '5m') {
-      // 24h mode: small dot every 1h
+      // 24h / today mode: small dot every 1h, bigger dot at 6h boundaries
       let lastHour = -1;
       for (const p of energyData) {
         const ts = typeof p.timestamp === 'string' ? new Date(p.timestamp as string) : null;
         if (!ts || isNaN(ts.getTime())) continue;
         const hour = ts.getHours();
         if (hour !== lastHour) {
-          result.push({ time: String(p.time), isMajor: false });
+          result.push({ time: String(p.time), isMajor: hour % 6 === 0 });
           lastHour = hour;
         }
       }
@@ -737,7 +737,12 @@ export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime
           <defs>
             <linearGradient id='energyGradient' x1='0' y1='0' x2='0' y2='1'>
               {computeEnergyGradientStops(zeroOffset).map((s, i) => (
-                <stop key={i} offset={s.offset} stopColor='#34d399' stopOpacity={s.opacity} />
+                <stop key={i} offset={s.offset} stopColor={s.color} stopOpacity={s.opacity} />
+              ))}
+            </linearGradient>
+            <linearGradient id='energyStrokeGradient' x1='0' y1='0' x2='0' y2='1'>
+              {computeEnergyGradientStops(zeroOffset, 1, 1).map((s, i) => (
+                <stop key={i} offset={s.offset} stopColor={s.color} />
               ))}
             </linearGradient>
           </defs>
@@ -753,7 +758,7 @@ export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime
           {baselineMarkers.map(({ time, isMajor }, i) => (
             <ReferenceDot key={`bm-${i}`} x={time} y={0} r={isMajor ? 3 : 1.5} fill={isMajor ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.2)'} stroke='none' />
           ))}
-          <Area type='monotone' dataKey='signedPowerKw' stroke='#34d399' fill='url(#energyGradient)' strokeWidth={1.5} dot={false} isAnimationActive={false} baseValue={0} />
+          <Area type='monotone' dataKey='signedPowerKw' stroke='url(#energyStrokeGradient)' fill='url(#energyGradient)' strokeWidth={1.5} dot={false} isAnimationActive={false} baseValue={0} />
         </AreaChart>
       </ResponsiveContainer>
     </div>

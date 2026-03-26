@@ -155,6 +155,12 @@
     touch-action: pan-x pan-y;
   }
 
+  /* Safe-area bottom padding for devices with home indicator (iPhone) */
+  .safe-area-bottom {
+    padding-bottom: 0.5rem;
+    padding-bottom: max(0.5rem, env(safe-area-inset-bottom, 0px));
+  }
+
   #root {
     @apply h-full;
   }

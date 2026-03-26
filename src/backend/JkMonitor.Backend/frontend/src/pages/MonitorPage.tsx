@@ -4,6 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card'
 import { Switch } from '../components/ui/switch';
 import { HistoryCharts } from '../components/HistoryCharts';
 import { cn } from '../lib/utils';
+import { getBatteryStateFromCurrent } from '../lib/batteryStatus';
 import { useDeviceDefinition } from '../hooks/useDeviceDefinition';
 import type { DeviceDefinition, UiSectionDefinition } from '../types/deviceDefinition';
 
@@ -298,7 +299,7 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
   );
 }
 
-function HeroMetric({ icon: Icon, label, value, unit, accent }: { icon: typeof Zap; label: string; value: string; unit: string; accent: string }) {
+function HeroMetric({ icon: Icon, label, value, unit, accent, subtitle }: { icon: typeof Zap; label: string; value: string; unit: string; accent: string; subtitle?: React.ReactNode }) {
   return (
     <div className='rounded-2xl border border-border/80 bg-card/85 p-3 shadow-sm sm:p-5'>
       <div className='flex items-start justify-between'>
@@ -307,6 +308,7 @@ function HeroMetric({ icon: Icon, label, value, unit, accent }: { icon: typeof Z
           <div className={cn('mt-1.5 text-[1.35rem] font-bold tracking-tight sm:mt-2 sm:text-3xl', accent)}>
             {value}<span className='ml-1 text-base font-medium text-muted-foreground'>{unit}</span>
           </div>
+          {subtitle && <div className='mt-1'>{subtitle}</div>}
         </div>
         <div className='rounded-xl border border-border/70 bg-background/60 p-1.5 sm:p-2.5'>
           <Icon className='h-4 w-4 text-muted-foreground' />
@@ -555,6 +557,15 @@ function renderDefinitionSections(
                 const value = param?.numericValue;
                 const unit = param?.unit ?? (entity && 'source' in entity ? entity.source?.unit : undefined) ?? (entity && 'unit' in entity ? (entity as { unit?: string }).unit : '') ?? '';
                 const prec = entity?.display?.precision ?? 2;
+                const isSoc = m.entity === 'state_of_charge';
+                let heroSubtitle: React.ReactNode | undefined;
+                if (isSoc) {
+                  const state = getBatteryStateFromCurrent(telemetry.currentAmps);
+                  const colorCls = state === 'CHARGING' ? 'text-sky-400'
+                    : state === 'DISCHARGING' ? 'text-amber-400'
+                    : 'text-muted-foreground';
+                  heroSubtitle = <span className={cn('text-[11px] font-medium', colorCls)}>{state}</span>;
+                }
                 return (
                   <HeroMetric
                     key={m.entity}
@@ -563,6 +574,7 @@ function renderDefinitionSections(
                     value={fmt(value, prec)}
                     unit={unit}
                     accent={resolveColorClass(m.color)}
+                    subtitle={heroSubtitle}
                   />
                 );
               })}

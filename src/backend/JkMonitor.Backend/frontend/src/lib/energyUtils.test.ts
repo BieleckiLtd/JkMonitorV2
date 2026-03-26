@@ -192,34 +192,36 @@ describe('computeEnergyData zeroOffset (bbox-based)', () => {
 // computeEnergyGradientStops
 // ---------------------------------------------------------------------------
 describe('computeEnergyGradientStops', () => {
-  it('returns 3 stops for mixed data (V-shape) with minOpacity at baseline', () => {
+  it('returns 4 stops for mixed data with green above / red below baseline', () => {
     const stops = computeEnergyGradientStops(0.5);
-    expect(stops).toHaveLength(3);
-    expect(stops[0]).toEqual({ offset: '0%', opacity: 0.45 });
-    expect(stops[1]).toEqual({ offset: '50.0%', opacity: 0.045 });
-    expect(stops[2]).toEqual({ offset: '100%', opacity: 0.45 });
+    expect(stops).toHaveLength(4);
+    expect(stops[0]).toEqual({ offset: '0%', opacity: 0.45, color: '#34d399' });
+    expect(stops[1]).toEqual({ offset: '50.0%', opacity: 0.09, color: '#34d399' });
+    expect(stops[2]).toEqual({ offset: '50.0%', opacity: 0.09, color: '#f87171' });
+    expect(stops[3]).toEqual({ offset: '100%', opacity: 0.45, color: '#f87171' });
   });
 
-  it('returns 2 stops when zero at top with minOpacity', () => {
+  it('returns 2 stops when zero at top (only discharge, red)', () => {
     const stops = computeEnergyGradientStops(0);
     expect(stops).toHaveLength(2);
-    expect(stops[0]).toEqual({ offset: '0%', opacity: 0.045 });
-    expect(stops[1]).toEqual({ offset: '100%', opacity: 0.45 });
+    expect(stops[0]).toEqual({ offset: '0%', opacity: 0.09, color: '#f87171' });
+    expect(stops[1]).toEqual({ offset: '100%', opacity: 0.45, color: '#f87171' });
   });
 
-  it('returns 2 stops when zero at bottom with minOpacity', () => {
+  it('returns 2 stops when zero at bottom (only charge, green)', () => {
     const stops = computeEnergyGradientStops(1);
     expect(stops).toHaveLength(2);
-    expect(stops[0]).toEqual({ offset: '0%', opacity: 0.45 });
-    expect(stops[1]).toEqual({ offset: '100%', opacity: 0.045 });
+    expect(stops[0]).toEqual({ offset: '0%', opacity: 0.45, color: '#34d399' });
+    expect(stops[1]).toEqual({ offset: '100%', opacity: 0.09, color: '#34d399' });
   });
 
-  it('baseline opacity is minOpacity (10% of max) for mixed data', () => {
+  it('baseline opacity is minOpacity (20% of max) for mixed data', () => {
     for (const z of [0.1, 0.25, 0.5, 0.75, 0.9]) {
       const stops = computeEnergyGradientStops(z);
-      const baselineStop = stops.find(s => s.offset === `${(z * 100).toFixed(1)}%`);
-      expect(baselineStop).toBeDefined();
-      expect(baselineStop!.opacity).toBe(0.045);
+      const zPct = `${(z * 100).toFixed(1)}%`;
+      const baselineStops = stops.filter(s => s.offset === zPct);
+      expect(baselineStops).toHaveLength(2); // green + red at the boundary
+      baselineStops.forEach(s => expect(s.opacity).toBe(0.09));
     }
   });
 
@@ -234,28 +236,42 @@ describe('computeEnergyGradientStops', () => {
   it('respects custom maxOpacity and minOpacity', () => {
     const stops = computeEnergyGradientStops(0.5, 0.8, 0.08);
     expect(stops[0].opacity).toBe(0.8);
-    expect(stops[2].opacity).toBe(0.8);
+    expect(stops[3].opacity).toBe(0.8);
     expect(stops[1].opacity).toBe(0.08);
+    expect(stops[2].opacity).toBe(0.08);
+  });
+
+  it('uses custom colors', () => {
+    const stops = computeEnergyGradientStops(0.5, 0.45, 0.09, '#00ff00', '#ff0000');
+    expect(stops[0].color).toBe('#00ff00');
+    expect(stops[1].color).toBe('#00ff00');
+    expect(stops[2].color).toBe('#ff0000');
+    expect(stops[3].color).toBe('#ff0000');
   });
 
   it('clamps zeroOffset to [0, 1]', () => {
     const stopsNeg = computeEnergyGradientStops(-0.5);
     expect(stopsNeg).toHaveLength(2); // treated as zero at top
-    expect(stopsNeg[0].opacity).toBe(0.045);
+    expect(stopsNeg[0].opacity).toBe(0.09);
 
     const stopsOver = computeEnergyGradientStops(1.5);
     expect(stopsOver).toHaveLength(2); // treated as zero at bottom
     expect(stopsOver[0].opacity).toBe(0.45);
-    expect(stopsOver[1].opacity).toBe(0.045);
+    expect(stopsOver[1].opacity).toBe(0.09);
   });
 
-  it('asymmetric offset positions baseline stop correctly', () => {
+  it('asymmetric offset positions baseline stops correctly', () => {
     // charge 0.6, discharge 0.3 → zeroOffset ≈ 0.667
     const z = 0.6 / 0.9;
     const stops = computeEnergyGradientStops(z);
-    expect(stops).toHaveLength(3);
-    expect(stops[1].offset).toBe(`${(z * 100).toFixed(1)}%`);
-    expect(stops[1].opacity).toBe(0.045);
+    expect(stops).toHaveLength(4);
+    const zPct = `${(z * 100).toFixed(1)}%`;
+    expect(stops[1].offset).toBe(zPct);
+    expect(stops[1].opacity).toBe(0.09);
+    expect(stops[1].color).toBe('#34d399');
+    expect(stops[2].offset).toBe(zPct);
+    expect(stops[2].opacity).toBe(0.09);
+    expect(stops[2].color).toBe('#f87171');
   });
 });
 
