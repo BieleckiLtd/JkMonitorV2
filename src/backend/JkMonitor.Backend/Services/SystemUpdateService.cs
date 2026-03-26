@@ -74,7 +74,7 @@ public sealed class SystemUpdateService(
 
                 var localChecksum = GetLocalChecksum();
 
-                result.RemoteReleasePublishedAt = release.PublishedAt;
+                result.RemoteReleasePublishedAt = checksumAsset?.UpdatedAt ?? release.PublishedAt;
                 result.RemoteChecksum = remoteChecksum;
                 result.LocalChecksum = localChecksum;
                 result.UpdateAvailable = remoteChecksum is not null
@@ -319,4 +319,7 @@ file sealed class GitHubAsset
 
     [JsonPropertyName("size")]
     public long Size { get; set; }
+
+    [JsonPropertyName("updated_at")]
+    public string? UpdatedAt { get; set; }
 }

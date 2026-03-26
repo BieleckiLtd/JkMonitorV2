@@ -477,7 +477,7 @@ export function SystemPage() {
                           A new version is available.
                         </div>
                         {updateCheck.remoteReleasePublishedAt ? (
-                          <div className='mt-1 text-xs text-primary/80'>Published {formatTimestamp(updateCheck.remoteReleasePublishedAt)}</div>
+                          <div className='mt-1 text-xs text-primary/80'>Built {formatTimestamp(updateCheck.remoteReleasePublishedAt)}</div>
                         ) : null}
                       </div>
                     ) : updateCheck.localChecksum && updateCheck.remoteChecksum ? (

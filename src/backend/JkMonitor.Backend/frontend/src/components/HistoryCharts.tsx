@@ -110,9 +110,9 @@ const entityToHistoryKey: Record<string, string> = {
   battery_temp_2: 'batteryTemperatureCelsius',
 };
 
-export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClearCellSelection, definition }: {
+export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClearCellSelection, definition, capacityAh }: {
   deviceId: string; precision: DisplayPrecision; selectedCellIndices?: number[]; onClearCellSelection?: () => void;
-  definition?: DeviceDefinition;
+  definition?: DeviceDefinition; capacityAh?: number | null;
 }) {
   const [resolution, setResolution] = useState<Resolution | null>(null);
   const [data, setData] = useState<HistoryPoint[]>([]);
@@ -295,7 +295,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
     return ticks;
   }, [todayRange, effectiveResolution]);
 
-  const batteryStatus = useMemo(() => computeBatteryStatus(chartData), [chartData]);
+  const batteryStatus = useMemo(() => computeBatteryStatus(chartData, capacityAh), [chartData, capacityAh]);
 
   const batteryStatusSubtitle = useMemo(() => {
     const colorClass = batteryStatus.state === 'CHARGING' ? 'text-sky-400'
@@ -551,7 +551,7 @@ function ChartSection({ title, data, lines, domain, precision, hoveredTime, sele
         </div>
         <div className='text-right'>
           <div className='text-[11px] font-medium text-foreground'>
-            {isShowingLatest ? 'Latest' : activeTime ?? 'No data'}
+            {activeTime ?? 'No data'}
           </div>
           {selectedTime != null && (
             <button
@@ -704,17 +704,17 @@ export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime
         <div>
           <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Energy</div>
           <div className='mt-1.5 flex flex-wrap gap-x-3 gap-y-1'>
-            <span className='flex items-center gap-1 text-xs text-sky-400'>
+            <span className='flex items-center gap-1 text-xs text-emerald-400'>
               <span className='text-[10px]'>↑</span> Charged: <span className='font-semibold'>{chargedKwh.toFixed(1)} kWh</span>
             </span>
-            <span className='flex items-center gap-1 text-xs text-emerald-400'>
+            <span className='flex items-center gap-1 text-xs text-rose-400'>
               <span className='text-[10px]'>↓</span> Discharged: <span className='font-semibold'>{dischargedKwh.toFixed(1)} kWh</span>
             </span>
           </div>
         </div>
         <div className='text-right'>
           <div className='text-[11px] font-medium text-foreground'>
-            {isShowingLatest ? 'Latest' : activeTime ?? 'No data'}
+            {activeTime ?? 'No data'}
           </div>
           {selectedTime != null && (
             <button
@@ -823,7 +823,7 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hove
         </div>
         <div className='text-right'>
           <div className='text-[11px] font-medium text-foreground'>
-            {isShowingLatest ? 'Latest' : activeTime ?? 'No data'}
+            {activeTime ?? 'No data'}
           </div>
           {selectedTime != null && (
             <button

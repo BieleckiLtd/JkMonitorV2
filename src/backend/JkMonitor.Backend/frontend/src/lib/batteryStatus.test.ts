@@ -72,9 +72,9 @@ describe('computeBatteryStatus', () => {
       expect(computeBatteryStatus(data).state).toBe('DISCHARGING');
     });
 
-    it('returns IDLE when |current| < 0.5A (fallback threshold)', () => {
+    it('returns IDLE when |current| < 0.2A (fallback threshold)', () => {
       const data = [
-        { currentAmps: 0.4, stateOfChargePercent: 50, timestamp: '2026-03-23T12:00:00Z' },
+        { currentAmps: 0.15, stateOfChargePercent: 50, timestamp: '2026-03-23T12:00:00Z' },
       ];
       expect(computeBatteryStatus(data).state).toBe('IDLE');
     });
@@ -145,8 +145,8 @@ describe('getBatteryStateFromCurrent', () => {
   });
 
   it('returns IDLE for small current', () => {
-    expect(getBatteryStateFromCurrent(0.3)).toBe('IDLE');
-    expect(getBatteryStateFromCurrent(-0.4)).toBe('IDLE');
+    expect(getBatteryStateFromCurrent(0.1)).toBe('IDLE');
+    expect(getBatteryStateFromCurrent(-0.15)).toBe('IDLE');
   });
 
   it('returns CHARGING for positive current above threshold', () => {

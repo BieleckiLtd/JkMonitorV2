@@ -10,7 +10,7 @@ export interface BatteryStatusResult {
 const RATE_IDLE_THRESHOLD = 0.3;
 
 /** Current (A) threshold for the fallback when SoC rate is unavailable. */
-const CURRENT_IDLE_THRESHOLD = 0.5;
+const CURRENT_IDLE_THRESHOLD = 0.2;
 
 /**
  * Compute the current battery state and SoC change rate from recent telemetry.
@@ -23,6 +23,7 @@ const CURRENT_IDLE_THRESHOLD = 0.5;
  */
 export function computeBatteryStatus(
   data: Record<string, unknown>[],
+  capacityAh?: number | null,
 ): BatteryStatusResult {
   // Find the last point with valid current (for fallback / display)
   let lastCurrent: number | null = null;
@@ -34,10 +35,28 @@ export function computeBatteryStatus(
     }
   }
 
-  // Compute rate: find two points with valid SoC and timestamps far enough apart
+  // Primary: compute rate from current / capacity when available — this is the most
+  // accurate method because SoC delta over short windows is quantised and noisy.
+  if (capacityAh != null && capacityAh > 0 && lastCurrent != null) {
+    const rate = (lastCurrent / capacityAh) * 100;
+    let state: BatteryState;
+    if (Math.abs(lastCurrent) < CURRENT_IDLE_THRESHOLD) {
+      state = 'IDLE';
+    } else if (lastCurrent > 0) {
+      state = 'CHARGING';
+    } else {
+      state = 'DISCHARGING';
+    }
+    if (state === 'IDLE') {
+      return { state, ratePerHour: rate, label: 'IDLE' };
+    }
+    const sign = rate >= 0 ? '+' : '';
+    return { state, ratePerHour: rate, label: `${state} ${sign}${rate.toFixed(1)} %/h` };
+  }
+
+  // Fallback: SoC delta-based rate when capacity is unavailable
   const rate = computeSocRate(data);
 
-  // Primary: determine state from SoC rate when available
   if (rate != null) {
     let state: BatteryState;
     if (Math.abs(rate) < RATE_IDLE_THRESHOLD) {

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Activity, AlertTriangle, Battery, BatteryCharging, Check, Edit2, Gauge, LoaderCircle, Shield, Thermometer, X, Zap } from 'lucide-react';
+import { Activity, AlertTriangle, Battery, BatteryCharging, Check, Edit2, Gauge, LoaderCircle, Pause, Play, Shield, Thermometer, X, Zap } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Switch } from '../components/ui/switch';
 import { HistoryCharts } from '../components/HistoryCharts';
@@ -305,10 +305,12 @@ function HeroMetric({ icon: Icon, label, value, unit, accent, subtitle }: { icon
       <div className='flex items-start justify-between'>
         <div>
           <div className='text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground'>{label}</div>
-          <div className={cn('mt-1.5 text-[1.35rem] font-bold tracking-tight sm:mt-2 sm:text-3xl', accent)}>
-            {value}<span className='ml-1 text-base font-medium text-muted-foreground'>{unit}</span>
+          <div className='mt-1.5 flex flex-wrap items-baseline gap-x-2 sm:mt-2'>
+            <span className={cn('text-[1.35rem] font-bold tracking-tight sm:text-3xl', accent)}>
+              {value}<span className='ml-1 text-base font-medium text-muted-foreground'>{unit}</span>
+            </span>
+            {subtitle}
           </div>
-          {subtitle && <div className='mt-1'>{subtitle}</div>}
         </div>
         <div className='rounded-xl border border-border/70 bg-background/60 p-1.5 sm:p-2.5'>
           <Icon className='h-4 w-4 text-muted-foreground' />
@@ -462,7 +464,14 @@ function ParameterRow({ param, deviceId }: { param: DeviceParameter; deviceId: s
   return (
     <div className='rounded-lg border border-border/50 bg-background/40 px-3 py-2'>
       <div className='flex items-center justify-between'>
-        <span className='text-xs text-muted-foreground'>{param.displayName}</span>
+        <span className='flex items-center gap-1.5 text-xs text-muted-foreground'>
+          {param.booleanValue != null && (
+            param.booleanValue
+              ? <Play className='h-3 w-3 text-emerald-400' />
+              : <Pause className='h-3 w-3 text-muted-foreground/60' />
+          )}
+          {param.displayName}
+        </span>
         <div className='flex items-center gap-2'>
           {isEditing ? (
             <div className='flex items-center gap-1'>
@@ -543,12 +552,15 @@ function renderDefinitionSections(
   definition: DeviceDefinition | null,
 ) {
   const elements: React.ReactNode[] = [];
+  const capacityAh = paramByKey.get('nominal_battery_capacity')?.numericValue;
 
   for (let i = 0; i < sections.length; i++) {
     const section = sections[i];
     switch (section.type) {
       case 'hero-metrics':
         if (section.metrics) {
+          const capacityAh = paramByKey.get('nominal_battery_capacity')?.numericValue;
+          const chargeState = getBatteryStateFromCurrent(telemetry.currentAmps);
           elements.push(
             <div key={`section-${i}`} className='grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4'>
               {section.metrics.map((m) => {
@@ -558,13 +570,39 @@ function renderDefinitionSections(
                 const unit = param?.unit ?? (entity && 'source' in entity ? entity.source?.unit : undefined) ?? (entity && 'unit' in entity ? (entity as { unit?: string }).unit : '') ?? '';
                 const prec = entity?.display?.precision ?? 2;
                 const isSoc = m.entity === 'state_of_charge';
+                const isCurrent = m.entity === 'current';
+                const isPower = m.entity === 'power';
+                const isVoltage = m.entity === 'total_voltage';
+
+                // Dynamic accent colors for current/power based on charge state, blue for voltage
+                let accent: string;
+                if (isCurrent || isPower) {
+                  accent = chargeState === 'CHARGING' ? 'text-emerald-400'
+                    : chargeState === 'DISCHARGING' ? 'text-rose-400'
+                    : resolveColorClass(m.color);
+                } else if (isVoltage) {
+                  accent = 'text-sky-400';
+                } else {
+                  accent = resolveColorClass(m.color);
+                }
+
+                // SoC tile: inline state + rate
                 let heroSubtitle: React.ReactNode | undefined;
                 if (isSoc) {
-                  const state = getBatteryStateFromCurrent(telemetry.currentAmps);
-                  const colorCls = state === 'CHARGING' ? 'text-sky-400'
-                    : state === 'DISCHARGING' ? 'text-amber-400'
+                  const stateColorCls = chargeState === 'CHARGING' ? 'text-emerald-400'
+                    : chargeState === 'DISCHARGING' ? 'text-rose-400'
                     : 'text-muted-foreground';
-                  heroSubtitle = <span className={cn('text-[11px] font-medium', colorCls)}>{state}</span>;
+                  let rateStr = '';
+                  if (capacityAh && capacityAh > 0 && telemetry.currentAmps != null) {
+                    const rate = (telemetry.currentAmps / capacityAh) * 100;
+                    const sign = rate >= 0 ? '+' : '';
+                    rateStr = ` ${sign}${rate.toFixed(0)} %/h`;
+                  }
+                  heroSubtitle = (
+                    <span className={cn('text-[11px] font-semibold', stateColorCls)}>
+                      {chargeState}{rateStr}
+                    </span>
+                  );
                 }
                 return (
                   <HeroMetric
@@ -573,7 +611,7 @@ function renderDefinitionSections(
                     label={param?.displayName ?? entity?.name ?? m.entity}
                     value={fmt(value, prec)}
                     unit={unit}
-                    accent={resolveColorClass(m.color)}
+                    accent={accent}
                     subtitle={heroSubtitle}
                   />
                 );
@@ -584,24 +622,8 @@ function renderDefinitionSections(
         break;
 
       case 'status-indicators':
-        if (section.entities) {
-          const indicators = section.entities.map(eid => paramByKey.get(eid)).filter(Boolean) as DeviceParameter[];
-          if (indicators.length > 0) {
-            elements.push(
-              <div key={`section-${i}`} className='flex flex-wrap gap-2'>
-                {indicators.map(p => (
-                  <span key={p.key} className={cn(
-                    'inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium',
-                    p.booleanValue ? 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-300' : 'border border-border bg-muted/50 text-muted-foreground'
-                  )}>
-                    {p.booleanValue ? <Check className='h-3 w-3' /> : <X className='h-3 w-3' />}
-                    {p.displayName}
-                  </span>
-                ))}
-              </div>
-            );
-          }
-        }
+        // Status indicator pills removed — charging/discharging/balancing state
+        // is shown via play/pause icons on parameter rows in the System category.
         break;
 
       case 'cell-chart':
@@ -626,6 +648,7 @@ function renderDefinitionSections(
               selectedCellIndices={selectedCellIndices}
               onClearCellSelection={() => setSelectedCellIndices([])}
               definition={definition ?? undefined}
+              capacityAh={capacityAh}
             />
           );
         }
@@ -645,6 +668,7 @@ function renderDefinitionSections(
         selectedCellIndices={selectedCellIndices}
         onClearCellSelection={() => setSelectedCellIndices([])}
         definition={definition ?? undefined}
+        capacityAh={capacityAh}
       />
     );
   }
