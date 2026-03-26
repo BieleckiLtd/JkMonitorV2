@@ -1,29 +1,26 @@
 using System.Collections.Concurrent;
 using JkMonitor.Contracts.Configuration;
 using JkMonitor.Contracts.Status;
-using Microsoft.Extensions.Options;
 
 namespace JkMonitor.Backend.Services;
 
 public sealed class DeviceStateStore
 {
     private readonly ConcurrentDictionary<string, DeviceRuntimeState> _states = new(StringComparer.OrdinalIgnoreCase);
-    private readonly MonitorConfiguration _configuration;
     private readonly DateTimeOffset _startedAt = DateTimeOffset.UtcNow;
     private readonly HostSystemMonitoringService _hostSystemMonitoringService;
     private readonly IBuildMetadataProvider _buildMetadataProvider;
 
     public DeviceStateStore(
-        IOptions<MonitorConfiguration> configuration,
+        DeviceConfigStore deviceConfigStore,
         DeviceDefinitionLoader definitionLoader,
         HostSystemMonitoringService hostSystemMonitoringService,
         IBuildMetadataProvider buildMetadataProvider)
     {
-        _configuration = configuration.Value;
         _hostSystemMonitoringService = hostSystemMonitoringService;
         _buildMetadataProvider = buildMetadataProvider;
 
-        foreach (var device in _configuration.Devices)
+        foreach (var device in deviceConfigStore.GetDevices())
         {
             RegisterDevice(device, definitionLoader);
         }

@@ -34,6 +34,7 @@ builder.Host.UseSerilog((context, services, loggerConfiguration) => loggerConfig
 
 builder.Services.AddSingleton<JkMonitor.Backend.Services.HostSystemMonitoringService>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.IBuildMetadataProvider, JkMonitor.Backend.Services.AssemblyBuildMetadataProvider>();
+builder.Services.AddSingleton<JkMonitor.Backend.Services.DeviceConfigStore>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.DeviceStateStore>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.ManagedRestartService>();
 builder.Services.AddSingleton<JkMonitor.Backend.Services.SystemUpdateService>();
@@ -88,6 +89,9 @@ using (var scope = app.Services.CreateScope())
 
     var notificationConfigStore = scope.ServiceProvider.GetRequiredService<JkMonitor.Backend.Services.NotificationConfigStore>();
     await notificationConfigStore.InitializeAsync(CancellationToken.None);
+
+    var deviceConfigStore = scope.ServiceProvider.GetRequiredService<JkMonitor.Backend.Services.DeviceConfigStore>();
+    await deviceConfigStore.InitializeAsync(CancellationToken.None);
 
     var definitionLoader = scope.ServiceProvider.GetRequiredService<JkMonitor.Backend.Services.DeviceDefinitionLoader>();
     definitionLoader.LoadAll();

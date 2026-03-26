@@ -17,13 +17,11 @@ type DeviceConfiguration = {
 };
 
 type DeviceConfigurationResponse = {
-  configurationFile: string;
   devices: DeviceConfiguration[];
 };
 
 type PortsResponse = {
   ports: string[];
-  defaultPort: string;
   error?: string;
 };
 
@@ -84,7 +82,6 @@ export function DevicesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [ports, setPorts] = useState<string[]>([]);
-  const [defaultPort, setDefaultPort] = useState('');
   const [deviceActions, setDeviceActions] = useState<Record<string, { loading: boolean; result?: StartStopResult }>>({});
   const [databases, setDatabases] = useState<string[]>([]);
   const [dbSuggestions, setDbSuggestions] = useState<Record<string, DatabaseSuggestion>>({});
@@ -110,7 +107,6 @@ export function DevicesPage() {
       if (!resp.ok) return;
       const data = (await resp.json()) as PortsResponse;
       setPorts(data.ports);
-      setDefaultPort(data.defaultPort);
     } catch { /* ignore */ }
   }, []);
 
@@ -515,7 +511,7 @@ export function DevicesPage() {
                         disabled={isRunning}
                         onChange={(event) => updateDevice(index, 'transportPortName', event.target.value || null)}
                       >
-                        <option value=''>Default ({defaultPort || 'auto'})</option>
+                        <option value=''>Select port…</option>
                         {ports.map(p => (
                           <option key={p} value={p}>{p}</option>
                         ))}

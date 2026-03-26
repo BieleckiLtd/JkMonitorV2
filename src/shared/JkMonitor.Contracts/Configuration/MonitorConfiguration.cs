@@ -2,34 +2,17 @@ namespace JkMonitor.Contracts.Configuration;
 
 public sealed class MonitorConfiguration
 {
-    public required SerialBusConfiguration SerialBus { get; init; }
-
     public required StorageConfiguration Storage { get; init; }
-
-    public required AlertingConfiguration Alerting { get; init; }
 
     public required ApiSecurityConfiguration ApiSecurity { get; init; }
 
     public string DeviceDefinitionsPath { get; init; } = "devices";
 
-    public required IReadOnlyList<DeviceConfiguration> Devices { get; init; }
-}
-
-public sealed class SerialBusConfiguration
-{
-    public required string PortName { get; init; }
-
-    public int BaudRate { get; init; } = 115200;
-
-    public int DataBits { get; init; } = 8;
-
-    public string Parity { get; init; } = "None";
-
-    public string StopBits { get; init; } = "One";
-
-    public int ReadTimeoutMilliseconds { get; init; } = 1000;
-
-    public int WriteTimeoutMilliseconds { get; init; } = 1000;
+    /// <summary>
+    /// Legacy seed list – only used on first run to import into the database.
+    /// After migration the array in appsettings can be removed.
+    /// </summary>
+    public IReadOnlyList<DeviceConfiguration> Devices { get; init; } = [];
 }
 
 public sealed class StorageConfiguration
@@ -53,22 +36,6 @@ public sealed class RetentionConfiguration
     public int OneHourWindowDays { get; init; } = 0;
 }
 
-public sealed class AlertingConfiguration
-{
-    public bool UiEnabled { get; init; } = true;
-
-    public NtfyConfiguration? Ntfy { get; init; }
-}
-
-public sealed class NtfyConfiguration
-{
-    public required string BaseUrl { get; init; }
-
-    public required string Topic { get; init; }
-
-    public string? AccessToken { get; init; }
-}
-
 public sealed class ApiSecurityConfiguration
 {
     public bool RequireAuthentication { get; init; } = true;
@@ -89,8 +56,8 @@ public sealed class DeviceConfiguration
     public required string DefinitionId { get; init; }
 
     /// <summary>
-    /// Override the serial port for this device (e.g. "/dev/ttyUSB0").
-    /// Falls back to SerialBus.PortName from global config.
+    /// Serial port for this device (e.g. "/dev/ttyUSB0").
+    /// Required for serial transport devices.
     /// </summary>
     public string? TransportPortName { get; init; }
 

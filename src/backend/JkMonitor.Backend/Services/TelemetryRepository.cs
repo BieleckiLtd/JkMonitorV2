@@ -71,9 +71,9 @@ public sealed class NoOpTelemetryRepository : ITelemetryRepository
 
 public sealed class TimescaleTelemetryRepository(
     IOptions<MonitorConfiguration> configuration,
+    DeviceConfigStore deviceConfigStore,
     ILogger<TimescaleTelemetryRepository> logger) : ITelemetryRepository
 {
-    private readonly MonitorConfiguration _config = configuration.Value;
     private readonly StorageConfiguration _storage = configuration.Value.Storage;
     private readonly RetentionConfiguration _retention = configuration.Value.Storage.Retention;
     private readonly SemaphoreSlim _initializationLock = new(1, 1);
@@ -197,7 +197,7 @@ END $$;
 
     private string GetConnectionStringByDeviceId(string deviceId)
     {
-        var device = _config.Devices.FirstOrDefault(d =>
+        var device = deviceConfigStore.GetDevices().FirstOrDefault(d =>
             string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase));
         return GetConnectionString(device);
     }
@@ -205,7 +205,7 @@ END $$;
     private IReadOnlyList<string> GetAllConnectionStrings()
     {
         var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { _storage.ConnectionString };
-        foreach (var device in _config.Devices)
+        foreach (var device in deviceConfigStore.GetDevices())
         {
             if (!string.IsNullOrWhiteSpace(device.DatabaseName))
                 set.Add(GetConnectionString(device));

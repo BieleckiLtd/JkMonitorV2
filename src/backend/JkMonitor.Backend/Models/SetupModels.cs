@@ -43,13 +43,6 @@ public sealed record class ApplySetupResponse
     public required string Message { get; init; }
 }
 
-public sealed record class DeviceConfigurationStateResponse
-{
-    public required string ConfigurationFile { get; init; }
-
-    public required IReadOnlyList<DeviceConfiguration> Devices { get; init; }
-}
-
 public sealed record class SaveDeviceConfigurationRequest
 {
     public IReadOnlyList<DeviceConfiguration> Devices { get; init; } = [];

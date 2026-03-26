@@ -3,7 +3,6 @@ using JkMonitor.Backend.Models;
 using JkMonitor.Backend.Services;
 using JkMonitor.Contracts.Configuration;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Options;
 
 namespace JkMonitor.Backend.Controllers;
 
@@ -13,15 +12,13 @@ public sealed class DevicesController(
     IHostEnvironment environment,
     DeviceStateStore stateStore,
     DeviceOrchestrator orchestrator,
-    SetupConfigurationService setupConfigurationService,
+    DeviceConfigStore deviceConfigStore,
     DeviceDatabaseService deviceDatabaseService,
     GenericModbusPollingClient genericPollingClient,
     DeviceDefinitionLoader definitionLoader,
     ITelemetryRepository telemetryRepository,
-    PollTrigger pollTrigger,
-    IOptions<MonitorConfiguration> configuration) : ControllerBase
+    PollTrigger pollTrigger) : ControllerBase
 {
-    private readonly MonitorConfiguration _configuration = configuration.Value;
 
     [HttpGet("current")]
     public IActionResult GetCurrent()
@@ -31,24 +28,24 @@ public sealed class DevicesController(
     }
 
     [HttpGet("config")]
-    public ActionResult<DeviceConfigurationStateResponse> GetConfig()
+    public IActionResult GetConfig()
     {
-        return Ok(setupConfigurationService.GetDeviceConfiguration());
+        return Ok(new { devices = deviceConfigStore.GetDevices() });
     }
 
     [HttpPut("config")]
-    public async Task<ActionResult<DeviceConfigurationStateResponse>> SaveConfig(
+    public async Task<ActionResult> SaveConfig(
         [FromBody] SaveDeviceConfigurationRequest request,
         CancellationToken cancellationToken)
     {
         try
         {
-            var result = setupConfigurationService.SaveDevices(request);
+            var devices = await deviceConfigStore.SaveDevicesAsync(request.Devices, cancellationToken);
 
             // Apply live — starts/stops device polling loops without restart
-            await orchestrator.ApplyConfigurationAsync(result.Devices, cancellationToken);
+            await orchestrator.ApplyConfigurationAsync(devices, cancellationToken);
 
-            return Ok(result);
+            return Ok(new { devices });
         }
         catch (InvalidOperationException exception)
         {
@@ -118,7 +115,7 @@ public sealed class DevicesController(
         [FromBody] WriteParameterRequest request,
         CancellationToken cancellationToken)
     {
-        var device = _configuration.Devices.FirstOrDefault(d =>
+        var device = deviceConfigStore.GetDevices().FirstOrDefault(d =>
             string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase));
 
         if (device is null)
@@ -155,31 +152,27 @@ public sealed class DevicesController(
         try
         {
             var ports = SerialPort.GetPortNames().OrderBy(p => p).ToArray();
-            var defaultPort = _configuration.SerialBus.PortName;
-            return Ok(new { ports, defaultPort });
+            return Ok(new { ports });
         }
         catch (Exception ex)
         {
-            return Ok(new { ports = Array.Empty<string>(), defaultPort = _configuration.SerialBus.PortName, error = ex.Message });
+            return Ok(new { ports = Array.Empty<string>(), error = ex.Message });
         }
     }
 
     [HttpPost("{deviceId}/start")]
     public async Task<IActionResult> StartDevice(string deviceId, CancellationToken cancellationToken)
     {
-        // Enable the device in persisted config
-        var configState = setupConfigurationService.GetDeviceConfiguration();
-        var device = configState.Devices.FirstOrDefault(d =>
+        var allDevices = deviceConfigStore.GetDevices();
+        var device = allDevices.FirstOrDefault(d =>
             string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase));
 
         if (device is null)
             return NotFound(new { message = $"Device '{deviceId}' not found in configuration." });
 
-        IReadOnlyList<DeviceConfiguration> allDevices;
-
         if (!device.Enabled)
         {
-            var updatedDevices = configState.Devices.Select(d =>
+            var updatedDevices = allDevices.Select(d =>
                 string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase)
                     ? new DeviceConfiguration
                     {
@@ -194,12 +187,7 @@ public sealed class DevicesController(
                     }
                     : d).ToList();
 
-            setupConfigurationService.SaveDevices(new SaveDeviceConfigurationRequest { Devices = updatedDevices });
-            allDevices = updatedDevices;
-        }
-        else
-        {
-            allDevices = configState.Devices;
+            allDevices = await deviceConfigStore.SaveDevicesAsync(updatedDevices, cancellationToken);
         }
 
         // Apply using the in-memory device list (avoids config file-watcher race)
@@ -244,19 +232,16 @@ public sealed class DevicesController(
     [HttpPost("{deviceId}/stop")]
     public async Task<IActionResult> StopDevice(string deviceId, CancellationToken cancellationToken)
     {
-        // Disable the device in persisted config
-        var configState = setupConfigurationService.GetDeviceConfiguration();
-        var device = configState.Devices.FirstOrDefault(d =>
+        var allDevices = deviceConfigStore.GetDevices();
+        var device = allDevices.FirstOrDefault(d =>
             string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase));
 
         if (device is null)
             return NotFound(new { message = $"Device '{deviceId}' not found in configuration." });
 
-        IReadOnlyList<DeviceConfiguration> allDevices;
-
         if (device.Enabled)
         {
-            var updatedDevices = configState.Devices.Select(d =>
+            var updatedDevices = allDevices.Select(d =>
                 string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase)
                     ? new DeviceConfiguration
                     {
@@ -271,12 +256,7 @@ public sealed class DevicesController(
                     }
                     : d).ToList();
 
-            setupConfigurationService.SaveDevices(new SaveDeviceConfigurationRequest { Devices = updatedDevices });
-            allDevices = updatedDevices;
-        }
-        else
-        {
-            allDevices = configState.Devices;
+            allDevices = await deviceConfigStore.SaveDevicesAsync(updatedDevices, cancellationToken);
         }
 
         // Apply using the in-memory device list (avoids config file-watcher race)
@@ -328,7 +308,7 @@ public sealed class DevicesController(
     [HttpGet("databases/suggest/{deviceId}")]
     public IActionResult SuggestDatabaseName(string deviceId)
     {
-        var device = _configuration.Devices.FirstOrDefault(d =>
+        var device = deviceConfigStore.GetDevices().FirstOrDefault(d =>
             string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase));
 
         Contracts.DeviceDefinition.DeviceDefinition? definition = null;

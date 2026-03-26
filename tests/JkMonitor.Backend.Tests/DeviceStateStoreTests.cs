@@ -40,17 +40,12 @@ public class DeviceStateStoreTests
             new BuildRuntimeInfo(),
             new MonitorConfiguration
             {
-                SerialBus = new SerialBusConfiguration
-                {
-                    PortName = "/dev/ttyUSB0"
-                },
                 Storage = new StorageConfiguration
                 {
                     Provider = "None",
                     ConnectionString = string.Empty,
                     Retention = new RetentionConfiguration()
                 },
-                Alerting = new AlertingConfiguration(),
                 ApiSecurity = new ApiSecurityConfiguration
                 {
                     TunnelProvider = "None"
@@ -81,8 +76,15 @@ public class DeviceStateStoreTests
             "devices",
             NullLogger<DeviceDefinitionLoader>.Instance);
 
+        var config = configuration ?? CreateDefaultConfiguration();
+        var deviceConfigStore = new DeviceConfigStore(
+            Options.Create(config),
+            NullLogger<DeviceConfigStore>.Instance);
+        // Manually initialize synchronously for tests (no DB, uses seed devices)
+        deviceConfigStore.InitializeAsync(CancellationToken.None).GetAwaiter().GetResult();
+
         return new DeviceStateStore(
-            Options.Create(configuration ?? CreateDefaultConfiguration()),
+            deviceConfigStore,
             definitionLoader,
             hostSystemMonitoringService,
             new FakeBuildMetadataProvider(buildInfo));
@@ -92,17 +94,12 @@ public class DeviceStateStoreTests
     {
         return new MonitorConfiguration
         {
-            SerialBus = new SerialBusConfiguration
-            {
-                PortName = "/dev/ttyUSB0"
-            },
             Storage = new StorageConfiguration
             {
                 Provider = "None",
                 ConnectionString = string.Empty,
                 Retention = new RetentionConfiguration()
             },
-            Alerting = new AlertingConfiguration(),
             ApiSecurity = new ApiSecurityConfiguration
             {
                 TunnelProvider = "None"

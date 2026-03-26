@@ -1,20 +1,16 @@
-using JkMonitor.Contracts.Configuration;
-using Microsoft.Extensions.Options;
-
 namespace JkMonitor.Backend.Services;
 
 public sealed class PollingBackgroundService(
-    IOptions<MonitorConfiguration> configuration,
+    DeviceConfigStore deviceConfigStore,
     DeviceOrchestrator orchestrator,
     ILogger<PollingBackgroundService> logger) : BackgroundService
 {
-    private readonly MonitorConfiguration _configuration = configuration.Value;
-
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        logger.LogInformation("Polling background service started with {DeviceCount} configured devices.", _configuration.Devices.Count);
+        var devices = deviceConfigStore.GetDevices();
+        logger.LogInformation("Polling background service started with {DeviceCount} configured devices.", devices.Count);
 
-        await orchestrator.ApplyConfigurationAsync(_configuration.Devices, stoppingToken);
+        await orchestrator.ApplyConfigurationAsync(devices, stoppingToken);
 
         // Keep running until the application shuts down
         try

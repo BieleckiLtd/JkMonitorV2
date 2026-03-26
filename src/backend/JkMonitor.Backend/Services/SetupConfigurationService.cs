@@ -24,52 +24,17 @@ public sealed class SetupConfigurationService(
     public SetupStateResponse GetState()
     {
         var configuration = GetMonitorConfiguration();
-        var startupMode = GetStartupMode(configuration.SerialBus.PortName);
-        var serialPort = startupMode == "Hardware" ? configuration.SerialBus.PortName : null;
 
         return new SetupStateResponse
         {
-            CurrentStartupMode = startupMode,
+            CurrentStartupMode = "Hardware",
             EnvironmentName = environment.EnvironmentName,
             UseDatabase = string.Equals(configuration.Storage.Provider, "TimescaleDb", StringComparison.OrdinalIgnoreCase),
             ConnectionString = configuration.Storage.ConnectionString,
-            SerialPort = serialPort,
+            SerialPort = null,
             SerialPorts = GetSerialPorts(),
             CanAutoRestart = managedRestartService.CanAutoRestart,
             ApplyMessage = managedRestartService.GetApplyMessage()
-        };
-    }
-
-    public DeviceConfigurationStateResponse GetDeviceConfiguration()
-    {
-        var configuration = GetMonitorConfiguration();
-        var path = GetEnvironmentLocalSettingsPath(environment.EnvironmentName);
-
-        return new DeviceConfigurationStateResponse
-        {
-            ConfigurationFile = Path.GetFileName(path),
-            Devices = configuration.Devices.Select(CloneDevice).ToArray()
-        };
-    }
-
-    public DeviceConfigurationStateResponse SaveDevices(SaveDeviceConfigurationRequest request)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-
-        var devices = NormalizeDevices(request.Devices);
-        var path = GetEnvironmentLocalSettingsPath(environment.EnvironmentName);
-
-        UpdateJson(path, monitor =>
-        {
-            monitor["Devices"] = JsonSerializer.SerializeToNode(devices, JsonOptions) ?? new JsonArray();
-        });
-
-        logger.LogInformation("Saved {DeviceCount} device definitions to {ConfigurationFile}.", devices.Count, Path.GetFileName(path));
-
-        return new DeviceConfigurationStateResponse
-        {
-            ConfigurationFile = Path.GetFileName(path),
-            Devices = devices
         };
     }
 
@@ -106,11 +71,6 @@ public sealed class SetupConfigurationService(
         {
             UpdateJson(GetEnvironmentLocalSettingsPath("Production"), monitor =>
             {
-                UpsertObject(monitor, "SerialBus", serialBus =>
-                {
-                    serialBus["PortName"] = request.SerialPort!.Trim();
-                });
-
                 UpsertObject(monitor, "Storage", storage =>
                 {
                     storage["Provider"] = useDatabase ? "TimescaleDb" : "None";
@@ -238,7 +198,7 @@ public sealed class SetupConfigurationService(
         File.WriteAllLines(environmentFilePath, lines);
     }
 
-    private static string GetStartupMode(string portName)
+    private static string GetStartupMode()
     {
         return "Hardware";
     }
@@ -312,76 +272,6 @@ public sealed class SetupConfigurationService(
     {
         var child = GetOrCreateObject(parent, propertyName);
         updateChild(child);
-    }
-
-    private static IReadOnlyList<DeviceConfiguration> NormalizeDevices(IReadOnlyList<DeviceConfiguration> devices)
-    {
-        ArgumentNullException.ThrowIfNull(devices);
-
-        var normalized = new List<DeviceConfiguration>(devices.Count);
-        var deviceIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        for (var index = 0; index < devices.Count; index++)
-        {
-            var device = devices[index] ?? throw new InvalidOperationException($"Device at index {index} is missing.");
-            var normalizedDevice = new DeviceConfiguration
-            {
-                DeviceId = RequireValue(device.DeviceId, nameof(DeviceConfiguration.DeviceId), index),
-                DisplayName = RequireValue(device.DisplayName, nameof(DeviceConfiguration.DisplayName), index),
-                DefinitionId = RequireValue(device.DefinitionId, nameof(DeviceConfiguration.DefinitionId), index),
-                TransportPortName = device.TransportPortName,
-                DatabaseName = device.DatabaseName,
-                Address = device.Address,
-                IsMaster = device.IsMaster,
-                PollIntervalMilliseconds = device.PollIntervalMilliseconds,
-                Enabled = device.Enabled,
-                CellVoltageSmoothingFactor = device.CellVoltageSmoothingFactor,
-                CellVoltageSmoothingBreakoutMillivolts = device.CellVoltageSmoothingBreakoutMillivolts,
-                DisplayPrecision = device.DisplayPrecision
-            };
-
-            if (normalizedDevice.PollIntervalMilliseconds <= 0)
-            {
-                throw new InvalidOperationException($"Device '{normalizedDevice.DeviceId}' must use a positive poll interval.");
-            }
-
-            if (!deviceIds.Add(normalizedDevice.DeviceId))
-            {
-                throw new InvalidOperationException($"Device id '{normalizedDevice.DeviceId}' is duplicated.");
-            }
-
-            normalized.Add(normalizedDevice);
-        }
-
-        return normalized;
-    }
-
-    private static string RequireValue(string? value, string propertyName, int index)
-    {
-        var trimmed = value?.Trim();
-
-        return string.IsNullOrWhiteSpace(trimmed)
-            ? throw new InvalidOperationException($"Device at index {index} is missing {propertyName}.")
-            : trimmed;
-    }
-
-    private static DeviceConfiguration CloneDevice(DeviceConfiguration device)
-    {
-        return new DeviceConfiguration
-        {
-            DeviceId = device.DeviceId,
-            DisplayName = device.DisplayName,
-            DefinitionId = device.DefinitionId,
-            TransportPortName = device.TransportPortName,
-            DatabaseName = device.DatabaseName,
-            Address = device.Address,
-            IsMaster = device.IsMaster,
-            PollIntervalMilliseconds = device.PollIntervalMilliseconds,
-            Enabled = device.Enabled,
-            CellVoltageSmoothingFactor = device.CellVoltageSmoothingFactor,
-            CellVoltageSmoothingBreakoutMillivolts = device.CellVoltageSmoothingBreakoutMillivolts,
-            DisplayPrecision = device.DisplayPrecision
-        };
     }
 
     private static void WriteJson(string path, JsonNode value)
