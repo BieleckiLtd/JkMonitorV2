@@ -520,12 +520,20 @@ export function NotificationsPage() {
                     {entry.severity}
                   </Badge>
                   <span className='text-sm font-medium text-foreground'>{entry.ruleName}</span>
+                  {entry.ruleId.startsWith('system:') ? (
+                    <Badge variant='outline' className='text-[10px]'>system</Badge>
+                  ) : null}
                 </div>
                 <span className='text-xs text-muted-foreground'>
                   {new Date(entry.firedAt).toLocaleString()}
                 </span>
               </div>
               <div className='mt-2 text-sm text-muted-foreground'>{entry.message}</div>
+              {entry.value != null ? (
+                <div className='mt-1 text-xs text-muted-foreground'>
+                  value={entry.value}{entry.previousValue != null ? `, prev=${entry.previousValue}` : ''}
+                </div>
+              ) : null}
               <div className='mt-2 flex flex-wrap gap-1'>
                 {entry.channelResults.map((r, ci) => (
                   <span key={ci} className='rounded-md bg-muted px-2 py-0.5 text-[11px] text-muted-foreground'>{r}</span>

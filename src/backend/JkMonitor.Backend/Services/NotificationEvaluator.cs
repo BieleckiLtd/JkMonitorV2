@@ -20,6 +20,12 @@ public sealed class NotificationEvaluator(
     // ruleId → last triggered timestamp (for cooldown)
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastTriggered = new(StringComparer.OrdinalIgnoreCase);
 
+    // ruleId → whether the expression was true on the previous evaluation (edge triggering)
+    private readonly ConcurrentDictionary<string, bool> _previouslyTriggered = new(StringComparer.OrdinalIgnoreCase);
+
+    // deviceId → whether the device is currently in a communication-failure state
+    private readonly ConcurrentDictionary<string, bool> _deviceCommFailed = new(StringComparer.OrdinalIgnoreCase);
+
     // Recent notification log (ring buffer, last 100)
     private readonly ConcurrentQueue<NotificationLogEntry> _log = new();
     private const int MaxLogEntries = 100;
@@ -29,9 +35,55 @@ public sealed class NotificationEvaluator(
         return [.. _log];
     }
 
+    /// <summary>
+    /// Record a poll failure for a device so communication loss is visible in the notification log.
+    /// Only logs the first failure after a successful poll (not every consecutive failure).
+    /// </summary>
+    public void RecordPollFailure(string deviceId, string deviceName, string errorMessage)
+    {
+        // Only log the transition from healthy → failed (not every failed poll).
+        if (!_deviceCommFailed.TryAdd(deviceId, true))
+        {
+            if (_deviceCommFailed.TryGetValue(deviceId, out var already) && already)
+                return; // already in failed state
+            _deviceCommFailed[deviceId] = true;
+        }
+
+        logger.LogWarning("Communication lost with device {DeviceId} ({DeviceName}): {Error}", deviceId, deviceName, errorMessage);
+
+        AppendLogEntry(new NotificationLogEntry
+        {
+            RuleId = "system:comm-lost",
+            RuleName = "Communication",
+            DeviceId = deviceId,
+            EntityId = string.Empty,
+            FiredAt = DateTimeOffset.UtcNow,
+            Message = $"Communication lost with {deviceName}: {errorMessage}",
+            Severity = "warning",
+        });
+    }
+
     public async Task EvaluateAsync(string deviceId, string deviceName, DeviceTelemetrySnapshot? snapshot, CancellationToken cancellationToken)
     {
         if (snapshot is null) return;
+
+        // Detect communication recovery: was failed, now succeeding.
+        if (_deviceCommFailed.TryGetValue(deviceId, out var wasFailed) && wasFailed)
+        {
+            _deviceCommFailed[deviceId] = false;
+            logger.LogInformation("Communication restored with device {DeviceId} ({DeviceName}).", deviceId, deviceName);
+
+            AppendLogEntry(new NotificationLogEntry
+            {
+                RuleId = "system:comm-restored",
+                RuleName = "Communication",
+                DeviceId = deviceId,
+                EntityId = string.Empty,
+                FiredAt = DateTimeOffset.UtcNow,
+                Message = $"Communication restored with {deviceName}.",
+                Severity = "info",
+            });
+        }
 
         var rules = configStore.GetRules();
         var matchingRules = rules.Where(r =>
@@ -71,13 +123,6 @@ public sealed class NotificationEvaluator(
         // Update for next evaluation
         _previousValues[cacheKey] = currentValue.Value;
 
-        // Check cooldown
-        if (_lastTriggered.TryGetValue(rule.Id, out var lastTriggered) &&
-            DateTimeOffset.UtcNow - lastTriggered < TimeSpan.FromMinutes(rule.CooldownMinutes))
-        {
-            return;
-        }
-
         // Evaluate the NCalc expression
         bool triggered;
         try
@@ -101,7 +146,19 @@ public sealed class NotificationEvaluator(
             return;
         }
 
-        if (!triggered) return;
+        // Edge triggering: only fire on the rising edge (false → true).
+        // This prevents repeated notifications when an expression stays true across multiple polls.
+        var wasTriggeredBefore = _previouslyTriggered.GetValueOrDefault(rule.Id, false);
+        _previouslyTriggered[rule.Id] = triggered;
+
+        if (!triggered || wasTriggeredBefore) return;
+
+        // Check cooldown (still applied to prevent rapid re-triggers on flapping values)
+        if (_lastTriggered.TryGetValue(rule.Id, out var lastTriggered) &&
+            DateTimeOffset.UtcNow - lastTriggered < TimeSpan.FromMinutes(rule.CooldownMinutes))
+        {
+            return;
+        }
 
         // Fire notification
         _lastTriggered[rule.Id] = DateTimeOffset.UtcNow;
@@ -109,12 +166,13 @@ public sealed class NotificationEvaluator(
         var message = RenderTemplate(rule.MessageTemplate, rule, deviceId, deviceName, currentValue.Value, previousValue);
         var subject = rule.Name;
 
-        logger.LogInformation("Notification rule '{RuleId}' triggered for device {DeviceId}: {Message}", rule.Id, deviceId, message);
+        logger.LogInformation("Notification rule '{RuleId}' triggered for device {DeviceId}: {Message} (value={Value}, prev={Prev})",
+            rule.Id, deviceId, message, currentValue.Value, previousValue);
 
         var channelResults = await dispatcher.DispatchAsync(rule.ChannelIds, subject, message, rule.Severity, cancellationToken);
 
         // Log the event
-        var logEntry = new NotificationLogEntry
+        AppendLogEntry(new NotificationLogEntry
         {
             RuleId = rule.Id,
             RuleName = rule.Name,
@@ -123,10 +181,15 @@ public sealed class NotificationEvaluator(
             FiredAt = DateTimeOffset.UtcNow,
             Message = message,
             Severity = rule.Severity,
+            Value = currentValue.Value,
+            PreviousValue = previousValue,
             ChannelResults = channelResults
-        };
+        });
+    }
 
-        _log.Enqueue(logEntry);
+    private void AppendLogEntry(NotificationLogEntry entry)
+    {
+        _log.Enqueue(entry);
         while (_log.Count > MaxLogEntries)
         {
             _log.TryDequeue(out _);

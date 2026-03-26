@@ -162,6 +162,16 @@ public sealed class DeviceOrchestrator(
             {
                 stateStore.MarkPollFailed(device, startedAt, exception);
                 logger.LogError(exception, "Polling failed for device {DeviceId}.", device.DeviceId);
+
+                // Record communication failure so it appears in the notification history log.
+                try
+                {
+                    notificationEvaluator.RecordPollFailure(device.DeviceId, device.DisplayName, exception.Message);
+                }
+                catch (Exception nfEx)
+                {
+                    logger.LogWarning(nfEx, "Failed to record poll failure event for device {DeviceId}.", device.DeviceId);
+                }
             }
 
             try

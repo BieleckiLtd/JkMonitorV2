@@ -65,6 +65,8 @@ export type NotificationLogEntry = {
   firedAt: string;
   message: string;
   severity: string;
+  value?: number | null;
+  previousValue?: number | null;
   channelResults: string[];
 };
 

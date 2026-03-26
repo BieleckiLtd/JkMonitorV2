@@ -69,5 +69,7 @@ public sealed class NotificationLogEntry
     public required DateTimeOffset FiredAt { get; init; }
     public required string Message { get; init; }
     public required string Severity { get; init; }
+    public double? Value { get; init; }
+    public double? PreviousValue { get; init; }
     public IReadOnlyList<string> ChannelResults { get; init; } = [];
 }
