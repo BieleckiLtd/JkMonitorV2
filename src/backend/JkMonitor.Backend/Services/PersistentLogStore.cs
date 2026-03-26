@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Globalization;
 using JkMonitor.Backend.Configuration;
 using JkMonitor.Contracts.Status;
@@ -35,8 +36,22 @@ public sealed class PostgresLogStore : ILogQueryService, IDisposable, IAsyncDisp
     private readonly SemaphoreSlim _initializationLock = new(1, 1);
     private readonly NpgsqlDataSource? _dataSource;
     private readonly string _qualifiedTableName;
+    private readonly ConcurrentQueue<PendingLogEntry> _pendingEntries = new();
+    private readonly Timer? _flushTimer;
+    private int _pendingCount;
+    private int _flushing;
     private volatile bool _initialized;
     private volatile bool _postgresAvailable;
+
+    private const int MaxPendingEntries = 100_000;
+    private static readonly TimeSpan FlushInterval = TimeSpan.FromSeconds(2);
+
+    private sealed record PendingLogEntry(
+        DateTime TimestampUtc,
+        string Level,
+        string Category,
+        string Message,
+        string? Exception);
 
     public PostgresLogStore(LogStorageOptions options)
     {
@@ -46,6 +61,7 @@ public sealed class PostgresLogStore : ILogQueryService, IDisposable, IAsyncDisp
         if (_options.Enabled && !string.IsNullOrWhiteSpace(_options.ConnectionString))
         {
             _dataSource = NpgsqlDataSource.Create(_options.ConnectionString);
+            _flushTimer = new Timer(FlushCallback, null, FlushInterval, FlushInterval);
         }
     }
 
@@ -116,40 +132,134 @@ CREATE INDEX IF NOT EXISTS {QuoteIdentifier($"ix_{_options.TableName}_level_time
 
         _fallbackStore.Add(timestamp, ParseLevel(level), category, message, exception);
 
-        if (!_postgresAvailable || _dataSource is null)
+        if (_dataSource is null)
+        {
+            return;
+        }
+
+        if (Interlocked.Increment(ref _pendingCount) > MaxPendingEntries)
+        {
+            if (_pendingEntries.TryDequeue(out _))
+            {
+                Interlocked.Decrement(ref _pendingCount);
+            }
+        }
+
+        _pendingEntries.Enqueue(new PendingLogEntry(
+            timestamp.UtcDateTime, level, category, message, exception));
+    }
+
+    private async void FlushCallback(object? state)
+    {
+        if (Interlocked.CompareExchange(ref _flushing, 1, 0) != 0)
         {
             return;
         }
 
         try
         {
-            using var connection = _dataSource.OpenConnection();
-            using var command = connection.CreateCommand();
-            command.CommandText = $@"
-INSERT INTO {_qualifiedTableName} (
-    timestamp_utc,
-    level,
-    category,
-    message,
-    exception)
-VALUES (
-    @timestamp_utc,
-    @level,
-    @category,
-    @message,
-    @exception);
-";
+            if (!_postgresAvailable)
+            {
+                if (!_initialized)
+                {
+                    await InitializeAsync(CancellationToken.None);
+                }
+                else
+                {
+                    await TryRecoverConnectionAsync();
+                }
+            }
 
-            command.Parameters.AddWithValue("timestamp_utc", timestamp.UtcDateTime);
-            command.Parameters.AddWithValue("level", level);
-            command.Parameters.AddWithValue("category", category);
-            command.Parameters.AddWithValue("message", message);
-            command.Parameters.AddWithValue("exception", (object?)exception ?? DBNull.Value);
-            command.ExecuteNonQuery();
+            if (_postgresAvailable && !_pendingEntries.IsEmpty)
+            {
+                await FlushPendingEntriesAsync();
+            }
         }
         catch (Exception ex)
         {
-            WriteDiagnostic("Persistent log write failed", ex);
+            WriteDiagnostic("Background log flush failed", ex);
+        }
+        finally
+        {
+            Interlocked.Exchange(ref _flushing, 0);
+        }
+    }
+
+    private async Task FlushPendingEntriesAsync()
+    {
+        if (_dataSource is null || _pendingEntries.IsEmpty)
+        {
+            return;
+        }
+
+        const int batchSize = 500;
+        var entries = new List<PendingLogEntry>(batchSize);
+
+        while (entries.Count < batchSize && _pendingEntries.TryDequeue(out var entry))
+        {
+            entries.Add(entry);
+            Interlocked.Decrement(ref _pendingCount);
+        }
+
+        if (entries.Count == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            await using var connection = await _dataSource.OpenConnectionAsync();
+            await using var transaction = await connection.BeginTransactionAsync();
+
+            foreach (var entry in entries)
+            {
+                await using var command = new NpgsqlCommand(
+                    $"INSERT INTO {_qualifiedTableName} (timestamp_utc, level, category, message, exception) VALUES (@ts, @lv, @cat, @msg, @ex);",
+                    connection,
+                    transaction);
+
+                command.Parameters.AddWithValue("ts", entry.TimestampUtc);
+                command.Parameters.AddWithValue("lv", entry.Level);
+                command.Parameters.AddWithValue("cat", entry.Category);
+                command.Parameters.AddWithValue("msg", entry.Message);
+                command.Parameters.AddWithValue("ex", (object?)entry.Exception ?? DBNull.Value);
+
+                await command.ExecuteNonQueryAsync();
+            }
+
+            await transaction.CommitAsync();
+        }
+        catch (Exception ex)
+        {
+            _postgresAvailable = false;
+            WriteDiagnostic("Failed to flush log entries to PostgreSQL", ex);
+
+            foreach (var entry in entries)
+            {
+                _pendingEntries.Enqueue(entry);
+                Interlocked.Increment(ref _pendingCount);
+            }
+        }
+    }
+
+    private async Task TryRecoverConnectionAsync()
+    {
+        if (_dataSource is null)
+        {
+            return;
+        }
+
+        try
+        {
+            await using var connection = await _dataSource.OpenConnectionAsync();
+            await using var command = connection.CreateCommand();
+            command.CommandText = "SELECT 1;";
+            await command.ExecuteScalarAsync();
+            _postgresAvailable = true;
+        }
+        catch
+        {
+            // Still unavailable
         }
     }
 
@@ -167,6 +277,11 @@ VALUES (
         if (!_postgresAvailable || _dataSource is null)
         {
             return await _fallbackStore.QueryAsync(levels, from, to, search, skip, take, cancellationToken);
+        }
+
+        if (!_pendingEntries.IsEmpty)
+        {
+            await FlushPendingEntriesAsync();
         }
 
         await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
@@ -373,12 +488,23 @@ LIMIT @take;
 
     public void Dispose()
     {
+        _flushTimer?.Dispose();
+        try { FlushPendingEntriesAsync().GetAwaiter().GetResult(); }
+        catch { /* Best-effort final flush */ }
         _initializationLock.Dispose();
         _dataSource?.Dispose();
     }
 
     public async ValueTask DisposeAsync()
     {
+        if (_flushTimer is not null)
+        {
+            await _flushTimer.DisposeAsync();
+        }
+
+        try { await FlushPendingEntriesAsync(); }
+        catch { /* Best-effort final flush */ }
+
         _initializationLock.Dispose();
 
         if (_dataSource is not null)
