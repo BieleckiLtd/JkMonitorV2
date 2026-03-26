@@ -36,7 +36,9 @@ public sealed class NotificationConfigStore(
 
         if (string.IsNullOrWhiteSpace(_connectionString))
         {
-            throw new InvalidOperationException("Monitor:Storage:ConnectionString is required for notification storage.");
+            logger.LogWarning("No database connection string configured — notification storage is disabled.");
+            _initialized = true;
+            return;
         }
 
         await _initializationLock.WaitAsync(cancellationToken);
