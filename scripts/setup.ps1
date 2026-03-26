@@ -1,11 +1,11 @@
-$ErrorActionPreference = 'Stop'
+﻿$ErrorActionPreference = 'Stop'
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptRoot
-$backendPath = Join-Path $repoRoot 'src\backend\JkMonitor.Backend'
+$backendPath = Join-Path $repoRoot 'src\backend\FluxMonitor.Backend'
 $localDotnetRoot = Join-Path $repoRoot '.dotnet'
 $localDotnet = Join-Path $localDotnetRoot 'dotnet.exe'
-$installScript = Join-Path $env:TEMP 'dotnet-install-jkmonitor.ps1'
+$installScript = Join-Path $env:TEMP 'dotnet-install-FluxMonitor.ps1'
 $appUrl = 'http://localhost:5074'
 $healthUrl = "$appUrl/api/health"
 
@@ -172,7 +172,7 @@ function Select-SerialPort {
     }
 }
 
-Write-Section 'JK Monitor setup'
+Write-Section 'Flux Monitor setup'
 Write-Host 'This script will prepare a local toolchain if needed, guide the startup mode, and launch the app.' -ForegroundColor DarkGray
 
 $dotnet = Get-DotnetCommand
@@ -249,7 +249,7 @@ else {
 $targetConfig = Join-Path $backendPath "appsettings.$environment.Local.json"
 Set-Content -Path $targetConfig -Value (New-Json $config) -Encoding UTF8
 
-Write-Section 'Starting JK Monitor'
+Write-Section 'Starting Flux Monitor'
 Write-Host "Environment: $environment" -ForegroundColor Green
 Write-Host "Opening browser at $appUrl after the backend is ready." -ForegroundColor DarkGray
 
@@ -258,7 +258,7 @@ $browserJob = Start-BrowserWhenReady -TargetUrl $appUrl -ProbeUrl $healthUrl
 Push-Location $repoRoot
 try {
     $env:ASPNETCORE_ENVIRONMENT = $environment
-    & $dotnet run --project '.\src\backend\JkMonitor.Backend' --launch-profile http
+    & $dotnet run --project '.\src\backend\FluxMonitor.Backend' --launch-profile http
 }
 finally {
     if ($browserJob) {

@@ -1,0 +1,115 @@
+﻿using FluxMonitor.Backend.Configuration;
+using FluxMonitor.Backend.Services;
+using Serilog;
+
+var builder = WebApplication.CreateBuilder(args);
+
+builder.Configuration
+    .AddJsonFile("appsettings.Local.json", optional: true, reloadOnChange: true)
+    .AddJsonFile($"appsettings.{builder.Environment.EnvironmentName}.Local.json", optional: true, reloadOnChange: true);
+
+var monitorSection = builder.Configuration.GetSection("Monitor");
+var storageProvider = monitorSection.GetValue<string>("Storage:Provider");
+var logStorageOptions = builder.Configuration.GetSection("Monitor:LogStorage").Get<LogStorageOptions>() ?? new LogStorageOptions();
+var logStore = new PostgresLogStore(logStorageOptions);
+
+await logStore.InitializeAsync(CancellationToken.None);
+
+builder.Services
+    .AddOptions<FluxMonitor.Contracts.Configuration.MonitorConfiguration>()
+    .Bind(monitorSection)
+    .ValidateDataAnnotations()
+    .ValidateOnStart();
+
+builder.Services.AddControllers();
+builder.Services.AddOpenApi();
+builder.Services.AddSingleton(logStore);
+builder.Services.AddSingleton<ILogQueryService>(logStore);
+
+builder.Host.UseSerilog((context, services, loggerConfiguration) => loggerConfiguration
+    .ReadFrom.Configuration(context.Configuration)
+    .Enrich.FromLogContext()
+    .WriteTo.Console()
+    .WriteTo.Sink(new PersistentLogSink(logStore)));
+
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.HostSystemMonitoringService>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.IBuildMetadataProvider, FluxMonitor.Backend.Services.AssemblyBuildMetadataProvider>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.DeviceConfigStore>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.DeviceStateStore>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.ManagedRestartService>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.SystemUpdateService>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.PollTrigger>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.CellVoltageSmoothingFilter>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.ExpressionEvaluator>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.GenericModbusPollingClient>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.IDevicePollingClient, FluxMonitor.Backend.Services.PollingClientDispatcher>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.SetupConfigurationService>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.DeviceDatabaseService>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.DeviceOrchestrator>();
+
+// Notification system
+builder.Services.AddHttpClient();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.NotificationConfigStore>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.INotificationChannelSender, FluxMonitor.Backend.Services.NtfyChannelSender>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.INotificationChannelSender, FluxMonitor.Backend.Services.EmailChannelSender>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.INotificationChannelSender, FluxMonitor.Backend.Services.BrevoChannelSender>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.INotificationChannelSender, FluxMonitor.Backend.Services.TelegramChannelSender>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.NotificationDispatcher>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.NotificationEvaluator>();
+
+// Device definition loader
+var definitionsPath = monitorSection.GetValue<string>("DeviceDefinitionsPath") ?? "devices";
+builder.Services.AddSingleton(sp => new FluxMonitor.Backend.Services.DeviceDefinitionLoader(
+    definitionsPath,
+    sp.GetRequiredService<ILogger<FluxMonitor.Backend.Services.DeviceDefinitionLoader>>()));
+
+if (string.Equals(storageProvider, "TimescaleDb", StringComparison.OrdinalIgnoreCase))
+{
+    builder.Services.AddSingleton<FluxMonitor.Backend.Services.TimescaleTelemetryRepository>();
+    builder.Services.AddSingleton<FluxMonitor.Backend.Services.ITelemetryRepository>(sp => sp.GetRequiredService<FluxMonitor.Backend.Services.TimescaleTelemetryRepository>());
+}
+else
+{
+    builder.Services.AddSingleton<FluxMonitor.Backend.Services.ITelemetryRepository, FluxMonitor.Backend.Services.NoOpTelemetryRepository>();
+}
+
+builder.Services.AddHostedService<FluxMonitor.Backend.Services.PollingBackgroundService>();
+builder.Services.AddHostedService<FluxMonitor.Backend.Services.RetentionBackgroundService>();
+
+var app = builder.Build();
+
+if (app.Environment.IsDevelopment())
+{
+    app.MapOpenApi();
+}
+
+using (var scope = app.Services.CreateScope())
+{
+    var repository = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.ITelemetryRepository>();
+    await repository.InitializeAsync(CancellationToken.None);
+
+    var notificationConfigStore = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.NotificationConfigStore>();
+    await notificationConfigStore.InitializeAsync(CancellationToken.None);
+
+    var deviceConfigStore = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.DeviceConfigStore>();
+    await deviceConfigStore.InitializeAsync(CancellationToken.None);
+
+    var definitionLoader = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.DeviceDefinitionLoader>();
+    definitionLoader.LoadAll();
+}
+
+app.UseDefaultFiles();
+app.UseStaticFiles();
+
+app.UseAuthorization();
+app.MapControllers();
+app.MapFallbackToFile("index.html");
+
+try
+{
+    await app.RunAsync();
+}
+finally
+{
+    Log.CloseAndFlush();
+}

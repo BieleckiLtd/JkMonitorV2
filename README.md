@@ -1,6 +1,6 @@
-# JK Monitor V2
+﻿# Flux Monitor V2
 
-JK Monitor V2 is a local-first monitoring platform for JK inverter BMS devices connected over RS485.
+Flux Monitor V2 is a local-first monitoring platform for JK inverter BMS devices connected over RS485.
 
 The project goal is to poll one or more BMS devices, persist telemetry to a time-series store, expose a secured HTTP API, and provide a browser UI for live status, trends, configuration, and alerts.
 
@@ -10,7 +10,7 @@ The project goal is to poll one or more BMS devices, persist telemetry to a time
 - Frontend: browser UI, likely React
 - Storage: PostgreSQL with TimescaleDB as the leading option
 - Application logs: Serilog with a dedicated PostgreSQL database via `Monitor:LogStorage`
-- Notifications: in-app alerts plus ntfy, email, and WhatsApp channels
+- Notifications: in-app alerts plus ntfy, email, Brevo, and Telegram channels
 - Remote access: authenticated internet exposure via Cloudflare Tunnel or equivalent
 - Configuration: JSON-driven protocol, polling, alerting, and retention settings
 
@@ -36,7 +36,7 @@ wget -qO- https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/
 - New install on Windows x64 from the published GitHub release:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -Command "& { $tmp = Join-Path $env:TEMP 'jkmonitor-release-install.ps1'; Invoke-WebRequest 'https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-release.ps1' -OutFile $tmp; & powershell -ExecutionPolicy Bypass -File $tmp -Repository 'https://github.com/BieleckiLtd/JkMonitorV2' -ReleaseTag 'dev-latest' }"
+powershell -ExecutionPolicy Bypass -Command "& { $tmp = Join-Path $env:TEMP 'FluxMonitor-release-install.ps1'; Invoke-WebRequest 'https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-release.ps1' -OutFile $tmp; & powershell -ExecutionPolicy Bypass -File $tmp -Repository 'https://github.com/BieleckiLtd/JkMonitorV2' -ReleaseTag 'dev-latest' }"
 ```
 
 - Developer install from source on Linux or macOS:

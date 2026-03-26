@@ -1,8 +1,8 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 set -euo pipefail
 
-DESTINATION="${1:-$HOME/jkmonitor}"
-SERVICE_NAME='jkmonitor.service'
+DESTINATION="${1:-$HOME/fluxmonitor}"
+SERVICE_NAME='fluxmonitor.service'
 SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
 
 run_elevated() {
@@ -14,7 +14,7 @@ run_elevated() {
 }
 
 echo
-echo 'Uninstalling JK Monitor release deployment'
+echo 'Uninstalling Flux Monitor release deployment'
 echo "Destination: $DESTINATION"
 
 if command -v systemctl >/dev/null 2>&1; then
@@ -28,4 +28,4 @@ fi
 
 rm -rf "$DESTINATION"
 
-echo 'JK Monitor release deployment removed.'
+echo 'Flux Monitor release deployment removed.'

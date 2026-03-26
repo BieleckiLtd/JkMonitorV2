@@ -1,12 +1,12 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 set -euo pipefail
 
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_ROOT/.." && pwd)"
-BACKEND_PATH="$REPO_ROOT/src/backend/JkMonitor.Backend"
+BACKEND_PATH="$REPO_ROOT/src/backend/FluxMonitor.Backend"
 LOCAL_DOTNET_ROOT="$REPO_ROOT/.dotnet"
 LOCAL_DOTNET="$LOCAL_DOTNET_ROOT/dotnet"
-INSTALL_SCRIPT="${TMPDIR:-/tmp}/dotnet-install-jkmonitor.sh"
+INSTALL_SCRIPT="${TMPDIR:-/tmp}/dotnet-install-FluxMonitor.sh"
 APP_URL='http://localhost:5074'
 HEALTH_URL="$APP_URL/api/health"
 
@@ -112,7 +112,7 @@ open_browser_when_ready() {
   BROWSER_PID=$!
 }
 
-section "JK Monitor setup"
+section "Flux Monitor setup"
 echo "This script prepares a local toolchain if needed, guides the startup mode, and launches the app."
 
 DOTNET_CMD="$(get_dotnet)"
@@ -198,7 +198,7 @@ else
 EOF
 fi
 
-section "Starting JK Monitor"
+section "Starting Flux Monitor"
 echo "Environment: $ENVIRONMENT"
 echo "Opening $APP_URL after the backend is ready."
 
@@ -207,4 +207,4 @@ open_browser_when_ready
 
 cd "$REPO_ROOT"
 trap 'if [ -n "${BROWSER_PID:-}" ]; then kill "$BROWSER_PID" >/dev/null 2>&1 || true; fi' EXIT
-ASPNETCORE_ENVIRONMENT="$ENVIRONMENT" "$DOTNET_CMD" run --project ./src/backend/JkMonitor.Backend --launch-profile http
+ASPNETCORE_ENVIRONMENT="$ENVIRONMENT" "$DOTNET_CMD" run --project ./src/backend/FluxMonitor.Backend --launch-profile http

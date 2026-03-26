@@ -1,9 +1,9 @@
-param(
+﻿param(
     [string]$Repository = 'https://github.com/BieleckiLtd/JkMonitorV2',
 
     [string]$Branch = 'dev',
 
-    [string]$Destination = (Join-Path $HOME 'jkmonitor')
+    [string]$Destination = (Join-Path $HOME 'FluxMonitor')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -45,10 +45,10 @@ function Copy-IfExists([string]$Source, [string]$Target) {
 function Preserve-ExistingState([string]$SourceRoot, [string]$PreserveRoot) {
     $itemsToPreserve = @(
         '.dotnet',
-        'src\backend\JkMonitor.Backend\notifications.json',
-        'src\backend\JkMonitor.Backend\appsettings.Local.json',
-        'src\backend\JkMonitor.Backend\appsettings.Development.Local.json',
-        'src\backend\JkMonitor.Backend\appsettings.Production.Local.json'
+        'src\backend\FluxMonitor.Backend\notifications.json',
+        'src\backend\FluxMonitor.Backend\appsettings.Local.json',
+        'src\backend\FluxMonitor.Backend\appsettings.Development.Local.json',
+        'src\backend\FluxMonitor.Backend\appsettings.Production.Local.json'
     )
 
     foreach ($relativePath in $itemsToPreserve) {
@@ -75,13 +75,13 @@ function Get-RepositoryZipUrl([string]$Repo, [string]$Ref) {
 
 $normalizedRepository = Get-NormalizedRepository -RepositoryInput $Repository
 
-Write-Section 'JK Monitor GitHub bootstrap'
+Write-Section 'Flux Monitor GitHub bootstrap'
 Write-Host "Repository: $normalizedRepository" -ForegroundColor DarkGray
 Write-Host "Branch: $Branch" -ForegroundColor DarkGray
 Write-Host "Destination: $Destination" -ForegroundColor DarkGray
 
 $zipUrl = Get-RepositoryZipUrl -Repo $normalizedRepository -Ref $Branch
-$tempRoot = Join-Path $env:TEMP ("jkmonitor-install-" + [guid]::NewGuid().ToString('N'))
+$tempRoot = Join-Path $env:TEMP ("FluxMonitor-install-" + [guid]::NewGuid().ToString('N'))
 $zipPath = Join-Path $tempRoot 'repo.zip'
 $extractPath = Join-Path $tempRoot 'extract'
 $preservePath = Join-Path $tempRoot 'preserve'

@@ -1,4 +1,4 @@
-# Publish Skill
+﻿# Publish Skill
 
 Use this skill when the user asks to publish, deploy, release, push and update the device, or otherwise ship the current repository state.
 
@@ -38,11 +38,11 @@ The release installer is also the update path. Do not branch to a separate sourc
 Run on the Raspberry Pi:
 
 ```bash
-sudo systemctl is-active jkmonitor.service
+sudo systemctl is-active fluxmonitor.service
 curl -fsS http://127.0.0.1:5074/api/health
 ```
 
-The publish flow should also confirm that `~/jkmonitor/release-info.env` contains the same SHA-256 checksum as the GitHub release artifact that was observed after the push.
+The publish flow should also confirm that `~/FluxMonitor/release-info.env` contains the same SHA-256 checksum as the GitHub release artifact that was observed after the push.
 The runtime health payload should expose build metadata so publish can confirm the restarted app is serving the expected release tag and source revision.
 
 ## Notes

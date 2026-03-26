@@ -1,9 +1,9 @@
-param(
+﻿param(
     [string]$Repository = 'https://github.com/BieleckiLtd/JkMonitorV2',
 
     [string]$ReleaseTag = 'dev-latest',
 
-    [string]$Destination = (Join-Path $HOME 'jkmonitor')
+    [string]$Destination = (Join-Path $HOME 'FluxMonitor')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -14,10 +14,10 @@ $localDotnet = Join-Path $localDotnetRoot 'dotnet.exe'
 $appPort = 5074
 $appBindUrl = "http://0.0.0.0:$appPort"
 $appLocalUrl = "http://127.0.0.1:$appPort"
-$assetName = 'jkmonitor-backend-win-x64.zip'
-$installScript = Join-Path $env:TEMP 'dotnet-install-jkmonitor-runtime.ps1'
-$envPath = Join-Path $Destination 'jkmonitor.env'
-$taskName = 'JK Monitor'
+$assetName = 'fluxmonitor-backend-win-x64.zip'
+$installScript = Join-Path $env:TEMP 'dotnet-install-fluxmonitor-runtime.ps1'
+$envPath = Join-Path $Destination 'fluxmonitor.env'
+$taskName = 'Flux Monitor'
 
 function Write-Section([string]$Text) {
     Write-Host ''
@@ -175,7 +175,7 @@ $ErrorActionPreference = 'Stop'
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $appRoot = Join-Path $scriptRoot 'app'
 $localDotnet = Join-Path $scriptRoot '.dotnet\dotnet.exe'
-$envPath = Join-Path $scriptRoot 'jkmonitor.env'
+$envPath = Join-Path $scriptRoot 'fluxmonitor.env'
 $appEnvironment = 'Production'
 $appUrls = 'http://0.0.0.0:5074'
 
@@ -216,7 +216,7 @@ Push-Location $appRoot
 try {
     $env:ASPNETCORE_ENVIRONMENT = $appEnvironment
     $env:ASPNETCORE_URLS = $appUrls
-    & $dotnetCommand '.\JkMonitor.Backend.dll'
+    & $dotnetCommand '.\FluxMonitor.Backend.dll'
 }
 finally {
     Pop-Location
@@ -247,14 +247,14 @@ function Register-Autostart {
     return 'Windows auto-start is configured for your user sign-in. Run the terminal as Administrator if you want startup before sign-in.'
 }
 
-function Stop-ExistingJkMonitor {
+function Stop-ExistingFluxMonitor {
     try {
         $listeners = Get-NetTCPConnection -State Listen -LocalPort $appPort -ErrorAction SilentlyContinue |
             Select-Object -ExpandProperty OwningProcess -Unique
 
         foreach ($processId in $listeners) {
             $processInfo = Get-CimInstance Win32_Process -Filter "ProcessId = $processId" -ErrorAction SilentlyContinue
-            if ($processInfo -and $processInfo.CommandLine -match 'JkMonitor\.Backend') {
+            if ($processInfo -and $processInfo.CommandLine -match 'FluxMonitor\.Backend') {
                 Stop-Process -Id $processId -Force -ErrorAction SilentlyContinue
             }
         }
@@ -263,14 +263,14 @@ function Stop-ExistingJkMonitor {
     }
 }
 
-function Start-JkMonitorNow {
+function Start-FluxMonitorNow {
     $startScriptPath = Join-Path $Destination 'start.ps1'
     Start-Process -FilePath 'powershell.exe' -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$startScriptPath`"" -WindowStyle Hidden | Out-Null
 }
 
 $normalizedRepository = Get-NormalizedRepository $Repository
 $assetUrl = "https://github.com/$normalizedRepository/releases/download/$ReleaseTag/$assetName"
-$tempRoot = Join-Path $env:TEMP ("jkmonitor-release-install-{0}" -f ([Guid]::NewGuid().ToString('N')))
+$tempRoot = Join-Path $env:TEMP ("FluxMonitor-release-install-{0}" -f ([Guid]::NewGuid().ToString('N')))
 $archivePath = Join-Path $tempRoot $assetName
 $extractPath = Join-Path $tempRoot 'extract'
 $preservePath = Join-Path $tempRoot 'preserve'
@@ -279,7 +279,7 @@ $accessUrl = Get-AccessUrl
 New-Item -ItemType Directory -Path $tempRoot, $extractPath, $preservePath -Force | Out-Null
 
 try {
-    Write-Section 'JK Monitor release bootstrap'
+    Write-Section 'Flux Monitor release bootstrap'
     Write-Muted "Repository: $normalizedRepository"
     Write-Muted "Release tag: $ReleaseTag"
     Write-Muted "Destination: $Destination"
@@ -296,7 +296,7 @@ try {
     if (Test-Path $Destination) {
         Write-WarningText 'Existing installation found. Preserving local config and cached runtime.'
         Preserve-ExistingState -SourceRoot $Destination -PreserveRoot $preservePath
-        Stop-ExistingJkMonitor
+        Stop-ExistingFluxMonitor
         Start-Sleep -Milliseconds 500
         Remove-Item -Path $Destination -Recurse -Force
     }
@@ -335,8 +335,8 @@ try {
     $autostartMessage = Register-Autostart
     Write-Muted $autostartMessage
 
-    Write-Section 'Starting JK Monitor'
-    Start-JkMonitorNow
+    Write-Section 'Starting Flux Monitor'
+    Start-FluxMonitorNow
     Write-Success "Local access URL: $appLocalUrl"
     Write-Success "LAN access URL: $accessUrl"
     Write-Muted 'Tip: Ctrl+Click usually opens the URL directly from Windows Terminal.'

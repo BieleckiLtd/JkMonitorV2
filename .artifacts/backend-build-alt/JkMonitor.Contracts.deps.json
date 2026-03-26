@@ -1,4 +1,4 @@
-{
+﻿{
   "runtimeTarget": {
     "name": ".NETCoreApp,Version=v10.0",
     "signature": ""
@@ -6,15 +6,15 @@
   "compilationOptions": {},
   "targets": {
     ".NETCoreApp,Version=v10.0": {
-      "JkMonitor.Contracts/1.0.0": {
+      "FluxMonitor.Contracts/1.0.0": {
         "runtime": {
-          "JkMonitor.Contracts.dll": {}
+          "FluxMonitor.Contracts.dll": {}
         }
       }
     }
   },
   "libraries": {
-    "JkMonitor.Contracts/1.0.0": {
+    "FluxMonitor.Contracts/1.0.0": {
       "type": "project",
       "serviceable": false,
       "sha512": ""

@@ -1,4 +1,4 @@
-{
+﻿{
   "runtimeTarget": {
     "name": ".NETCoreApp,Version=v10.0",
     "signature": ""
@@ -6,15 +6,15 @@
   "compilationOptions": {},
   "targets": {
     ".NETCoreApp,Version=v10.0": {
-      "JkMonitor.Backend/1.0.0": {
+      "FluxMonitor.Backend/1.0.0": {
         "dependencies": {
-          "JkMonitor.Contracts": "1.0.0",
+          "FluxMonitor.Contracts": "1.0.0",
           "Microsoft.AspNetCore.OpenApi": "10.0.4",
           "Npgsql": "9.0.4",
           "System.IO.Ports": "10.0.0"
         },
         "runtime": {
-          "JkMonitor.Backend.dll": {}
+          "FluxMonitor.Backend.dll": {}
         }
       },
       "Microsoft.AspNetCore.OpenApi/10.0.4": {
@@ -233,9 +233,9 @@
           }
         }
       },
-      "JkMonitor.Contracts/1.0.0": {
+      "FluxMonitor.Contracts/1.0.0": {
         "runtime": {
-          "JkMonitor.Contracts.dll": {
+          "FluxMonitor.Contracts.dll": {
             "assemblyVersion": "1.0.0.0",
             "fileVersion": "1.0.0.0"
           }
@@ -244,7 +244,7 @@
     }
   },
   "libraries": {
-    "JkMonitor.Backend/1.0.0": {
+    "FluxMonitor.Backend/1.0.0": {
       "type": "project",
       "serviceable": false,
       "sha512": ""
@@ -396,7 +396,7 @@
       "path": "system.io.ports/10.0.0",
       "hashPath": "system.io.ports.10.0.0.nupkg.sha512"
     },
-    "JkMonitor.Contracts/1.0.0": {
+    "FluxMonitor.Contracts/1.0.0": {
       "type": "project",
       "serviceable": false,
       "sha512": ""

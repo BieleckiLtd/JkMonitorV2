@@ -1,9 +1,9 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 set -euo pipefail
 
 REPOSITORY="${1:-https://github.com/BieleckiLtd/JkMonitorV2}"
 BRANCH="${2:-dev}"
-DESTINATION="${3:-$HOME/jkmonitor}"
+DESTINATION="${3:-$HOME/fluxmonitor}"
 
 section() {
   echo
@@ -44,10 +44,10 @@ preserve_existing_state() {
   local preserve_root="$2"
 
   copy_if_exists "$source_root/.dotnet" "$preserve_root/.dotnet"
-  copy_if_exists "$source_root/src/backend/JkMonitor.Backend/notifications.json" "$preserve_root/src/backend/JkMonitor.Backend/notifications.json"
-  copy_if_exists "$source_root/src/backend/JkMonitor.Backend/appsettings.Local.json" "$preserve_root/src/backend/JkMonitor.Backend/appsettings.Local.json"
-  copy_if_exists "$source_root/src/backend/JkMonitor.Backend/appsettings.Development.Local.json" "$preserve_root/src/backend/JkMonitor.Backend/appsettings.Development.Local.json"
-  copy_if_exists "$source_root/src/backend/JkMonitor.Backend/appsettings.Production.Local.json" "$preserve_root/src/backend/JkMonitor.Backend/appsettings.Production.Local.json"
+  copy_if_exists "$source_root/src/backend/FluxMonitor.Backend/notifications.json" "$preserve_root/src/backend/FluxMonitor.Backend/notifications.json"
+  copy_if_exists "$source_root/src/backend/FluxMonitor.Backend/appsettings.Local.json" "$preserve_root/src/backend/FluxMonitor.Backend/appsettings.Local.json"
+  copy_if_exists "$source_root/src/backend/FluxMonitor.Backend/appsettings.Development.Local.json" "$preserve_root/src/backend/FluxMonitor.Backend/appsettings.Development.Local.json"
+  copy_if_exists "$source_root/src/backend/FluxMonitor.Backend/appsettings.Production.Local.json" "$preserve_root/src/backend/FluxMonitor.Backend/appsettings.Production.Local.json"
 }
 
 restore_preserved_state() {
@@ -63,15 +63,15 @@ restore_preserved_state() {
     cp -R "$preserve_root/.dotnet" "$destination_root/.dotnet"
   fi
 
-  if [ -f "$preserve_root/src/backend/JkMonitor.Backend/notifications.json" ]; then
-    mkdir -p "$destination_root/src/backend/JkMonitor.Backend"
-    cp "$preserve_root/src/backend/JkMonitor.Backend/notifications.json" "$destination_root/src/backend/JkMonitor.Backend/notifications.json"
+  if [ -f "$preserve_root/src/backend/FluxMonitor.Backend/notifications.json" ]; then
+    mkdir -p "$destination_root/src/backend/FluxMonitor.Backend"
+    cp "$preserve_root/src/backend/FluxMonitor.Backend/notifications.json" "$destination_root/src/backend/FluxMonitor.Backend/notifications.json"
   fi
 
   for file in \
-    "$preserve_root/src/backend/JkMonitor.Backend/appsettings.Local.json" \
-    "$preserve_root/src/backend/JkMonitor.Backend/appsettings.Development.Local.json" \
-    "$preserve_root/src/backend/JkMonitor.Backend/appsettings.Production.Local.json"
+    "$preserve_root/src/backend/FluxMonitor.Backend/appsettings.Local.json" \
+    "$preserve_root/src/backend/FluxMonitor.Backend/appsettings.Development.Local.json" \
+    "$preserve_root/src/backend/FluxMonitor.Backend/appsettings.Production.Local.json"
   do
     if [ -f "$file" ]; then
       local relative_path="${file#"$preserve_root"/}"
@@ -84,7 +84,7 @@ restore_preserved_state() {
 NORMALIZED_REPOSITORY="$(normalize_repository "$REPOSITORY")"
 
 ZIP_URL="https://github.com/$NORMALIZED_REPOSITORY/archive/refs/heads/$BRANCH.zip"
-TEMP_ROOT="${TMPDIR:-/tmp}/jkmonitor-install-$(date +%s)-$$"
+TEMP_ROOT="${TMPDIR:-/tmp}/FluxMonitor-install-$(date +%s)-$$"
 ZIP_PATH="$TEMP_ROOT/repo.zip"
 EXTRACT_PATH="$TEMP_ROOT/extract"
 PRESERVE_PATH="$TEMP_ROOT/preserve"
@@ -97,7 +97,7 @@ cleanup() {
 
 trap cleanup EXIT
 
-section "JK Monitor GitHub bootstrap"
+section "Flux Monitor GitHub bootstrap"
 echo "Repository: $NORMALIZED_REPOSITORY"
 echo "Branch: $BRANCH"
 echo "Destination: $DESTINATION"

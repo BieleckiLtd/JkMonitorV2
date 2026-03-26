@@ -1,5 +1,5 @@
-{
-  "$schema": "https://jkmonitor.local/schemas/device-definition-v1.json",
+﻿{
+  "$schema": "https://FluxMonitor.local/schemas/device-definition-v1.json",
   "version": "1",
 
   "device": {
@@ -799,7 +799,7 @@
   "storage": {
     "database": {
       "provider": "timescaledb",
-      "defaultNamePattern": "jkmonitor_{deviceId}"
+      "defaultNamePattern": "FluxMonitor_{deviceId}"
     },
     "timeSeries": [
       { "entity": "total_voltage",      "aggregate": "avg", "column": "total_voltage_v" },

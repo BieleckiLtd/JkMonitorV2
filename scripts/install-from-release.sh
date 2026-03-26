@@ -1,9 +1,9 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 set -euo pipefail
 
 REPOSITORY="${1:-https://github.com/BieleckiLtd/JkMonitorV2}"
 RELEASE_TAG="${2:-dev-latest}"
-DESTINATION="${3:-$HOME/jkmonitor}"
+DESTINATION="${3:-$HOME/fluxmonitor}"
 APP_ROOT="$DESTINATION/app"
 LOCAL_DOTNET_ROOT="$DESTINATION/.dotnet"
 LOCAL_DOTNET="$LOCAL_DOTNET_ROOT/dotnet"
@@ -11,21 +11,21 @@ APP_PORT='5074'
 APP_BIND_URL="http://0.0.0.0:$APP_PORT"
 APP_LOCAL_URL="http://127.0.0.1:$APP_PORT"
 HEALTH_URL="$APP_LOCAL_URL/api/health"
-ASSET_NAME='jkmonitor-backend-linux-arm64.tar.gz'
+ASSET_NAME='fluxmonitor-backend-linux-arm64.tar.gz'
 CHECKSUM_ASSET_NAME="$ASSET_NAME.sha256"
-INSTALL_SCRIPT="${TMPDIR:-/tmp}/dotnet-install-jkmonitor-runtime.sh"
-SERVICE_NAME='jkmonitor.service'
+INSTALL_SCRIPT="${TMPDIR:-/tmp}/dotnet-install-fluxmonitor-runtime.sh"
+SERVICE_NAME='fluxmonitor.service'
 SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
-ENV_PATH="$DESTINATION/jkmonitor.env"
+ENV_PATH="$DESTINATION/fluxmonitor.env"
 RELEASE_INFO_PATH="$DESTINATION/release-info.env"
-NONINTERACTIVE_MODE="${JKMONITOR_MODE:-}"
-NONINTERACTIVE_USE_DB="${JKMONITOR_USE_DB:-}"
-NONINTERACTIVE_CONNECTION_STRING="${JKMONITOR_CONNECTION_STRING:-}"
-NONINTERACTIVE_SERIAL_PORT="${JKMONITOR_SERIAL_PORT:-}"
-NONINTERACTIVE_INSTALL_RUNTIME="${JKMONITOR_INSTALL_RUNTIME:-}"
-NONINTERACTIVE_INSTALL_SERVICE="${JKMONITOR_INSTALL_SERVICE:-}"
-NONINTERACTIVE_REUSE_EXISTING_CONFIGURATION="${JKMONITOR_REUSE_EXISTING_CONFIGURATION:-}"
-EXPECTED_RELEASE_SHA256="${JKMONITOR_EXPECTED_RELEASE_SHA256:-}"
+NONINTERACTIVE_MODE="${FLUXMONITOR_MODE:-}"
+NONINTERACTIVE_USE_DB="${FLUXMONITOR_USE_DB:-}"
+NONINTERACTIVE_CONNECTION_STRING="${FLUXMONITOR_CONNECTION_STRING:-}"
+NONINTERACTIVE_SERIAL_PORT="${FLUXMONITOR_SERIAL_PORT:-}"
+NONINTERACTIVE_INSTALL_RUNTIME="${FLUXMONITOR_INSTALL_RUNTIME:-}"
+NONINTERACTIVE_INSTALL_SERVICE="${FLUXMONITOR_INSTALL_SERVICE:-}"
+NONINTERACTIVE_REUSE_EXISTING_CONFIGURATION="${FLUXMONITOR_REUSE_EXISTING_CONFIGURATION:-}"
+EXPECTED_RELEASE_SHA256="${FLUXMONITOR_EXPECTED_RELEASE_SHA256:-}"
 CONFIGURE_SCRIPT_PATH="$DESTINATION/configure.sh"
 
 if [ -t 1 ]; then
@@ -187,10 +187,10 @@ write_release_info() {
   local checksum="$1"
 
   cat > "$RELEASE_INFO_PATH" <<EOF
-JKMONITOR_RELEASE_REPOSITORY=$NORMALIZED_REPOSITORY
-JKMONITOR_RELEASE_TAG=$RELEASE_TAG
-JKMONITOR_RELEASE_ASSET_NAME=$ASSET_NAME
-JKMONITOR_RELEASE_SHA256=$checksum
+FLUXMONITOR_RELEASE_REPOSITORY=$NORMALIZED_REPOSITORY
+FLUXMONITOR_RELEASE_TAG=$RELEASE_TAG
+FLUXMONITOR_RELEASE_ASSET_NAME=$ASSET_NAME
+FLUXMONITOR_RELEASE_SHA256=$checksum
 EOF
 }
 
@@ -211,7 +211,7 @@ preserve_existing_state() {
   local preserve_root="$2"
 
   copy_if_exists "$source_root/.dotnet" "$preserve_root/.dotnet"
-  copy_if_exists "$source_root/jkmonitor.env" "$preserve_root/jkmonitor.env"
+  copy_if_exists "$source_root/fluxmonitor.env" "$preserve_root/fluxmonitor.env"
   copy_if_exists "$source_root/app/notifications.json" "$preserve_root/app/notifications.json"
 
   for file_name in \
@@ -236,8 +236,8 @@ restore_preserved_state() {
     cp -R "$preserve_root/.dotnet" "$destination_root/.dotnet"
   fi
 
-  if [ -f "$preserve_root/jkmonitor.env" ]; then
-    cp "$preserve_root/jkmonitor.env" "$destination_root/jkmonitor.env"
+  if [ -f "$preserve_root/fluxmonitor.env" ]; then
+    cp "$preserve_root/fluxmonitor.env" "$destination_root/fluxmonitor.env"
   fi
 
   if [ -f "$preserve_root/app/notifications.json" ]; then
@@ -473,8 +473,8 @@ set -euo pipefail
 
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ROOT="$SCRIPT_ROOT/app"
-ENV_PATH="$SCRIPT_ROOT/jkmonitor.env"
-SERVICE_NAME='jkmonitor.service'
+ENV_PATH="$SCRIPT_ROOT/fluxmonitor.env"
+SERVICE_NAME='fluxmonitor.service'
 APP_PORT='5074'
 
 get_primary_ip() {
@@ -518,7 +518,7 @@ get_access_url() {
 writable_config="$APP_ROOT/appsettings.Production.Local.json"
 
 echo
-echo 'JK Monitor hardware configuration'
+echo 'Flux Monitor hardware configuration'
 echo 'This switches the install from simulator preview mode to your real RS485 setup.'
 
 read -r -p 'RS485 serial port (example: /dev/ttyUSB0): ' serial_port
@@ -579,10 +579,10 @@ if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files | grep -q '
     sudo systemctl restart "$SERVICE_NAME"
   fi
   echo
-  echo 'JK Monitor was reconfigured and the service was restarted.'
+  echo 'Flux Monitor was reconfigured and the service was restarted.'
 else
   echo
-  echo 'Configuration saved. Start JK Monitor again with ~/jkmonitor/start.sh.'
+  echo 'Configuration saved. Start Flux Monitor again with ~/FluxMonitor/start.sh.'
 fi
 
 echo "Open $(get_access_url) from your PC once the service is running."
@@ -599,7 +599,7 @@ set -euo pipefail
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_ROOT="$SCRIPT_ROOT/app"
 LOCAL_DOTNET="$SCRIPT_ROOT/.dotnet/dotnet"
-ENV_PATH="$SCRIPT_ROOT/jkmonitor.env"
+ENV_PATH="$SCRIPT_ROOT/fluxmonitor.env"
 
 if command -v dotnet >/dev/null 2>&1 && dotnet --list-runtimes 2>/dev/null | grep -q '^Microsoft.AspNetCore.App 10\.'; then
   DOTNET_CMD="$(command -v dotnet)"
@@ -621,7 +621,7 @@ export ASPNETCORE_ENVIRONMENT="${ASPNETCORE_ENVIRONMENT:-Production}"
 export ASPNETCORE_URLS="${ASPNETCORE_URLS:-http://0.0.0.0:5074}"
 
 cd "$APP_ROOT"
-exec "$DOTNET_CMD" ./JkMonitor.Backend.dll
+exec "$DOTNET_CMD" ./FluxMonitor.Backend.dll
 EOF
 
   chmod +x "$DESTINATION/start.sh"
@@ -642,7 +642,7 @@ install_systemd_service() {
 
   run_elevated tee "$SERVICE_PATH" >/dev/null <<EOF
 [Unit]
-Description=JK Monitor Backend
+Description=Flux Monitor Backend
 After=network-online.target
 Wants=network-online.target
 
@@ -701,7 +701,7 @@ open_browser_when_ready() {
 }
 
 NORMALIZED_REPOSITORY="$(normalize_repository "$REPOSITORY")"
-TEMP_ROOT="${TMPDIR:-/tmp}/jkmonitor-release-install-$(date +%s)-$$"
+TEMP_ROOT="${TMPDIR:-/tmp}/FluxMonitor-release-install-$(date +%s)-$$"
 ARCHIVE_PATH="$TEMP_ROOT/$ASSET_NAME"
 CHECKSUM_PATH="$TEMP_ROOT/$CHECKSUM_ASSET_NAME"
 EXTRACT_PATH="$TEMP_ROOT/extract"
@@ -715,7 +715,7 @@ cleanup() {
 
 trap cleanup EXIT
 
-section 'JK Monitor release bootstrap'
+section 'Flux Monitor release bootstrap'
 muted "Repository: $NORMALIZED_REPOSITORY"
 muted "Release tag: $RELEASE_TAG"
 muted "Destination: $DESTINATION"
@@ -724,12 +724,12 @@ fetch_release_json() {
   local url="https://api.github.com/repos/$NORMALIZED_REPOSITORY/releases/tags/$RELEASE_TAG"
 
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: JkMonitorV2-install-script' "$url"
+    curl -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: FluxMonitorV2-install-script' "$url"
     return
   fi
 
   if command -v wget >/dev/null 2>&1; then
-    wget -qO- --header='Accept: application/vnd.github+json' --header='User-Agent: JkMonitorV2-install-script' "$url"
+    wget -qO- --header='Accept: application/vnd.github+json' --header='User-Agent: FluxMonitorV2-install-script' "$url"
     return
   fi
 
@@ -742,7 +742,7 @@ request = urllib.request.Request(
     sys.argv[1],
     headers={
         "Accept": "application/vnd.github+json",
-        "User-Agent": "JkMonitorV2-install-script",
+        "User-Agent": "FluxMonitorV2-install-script",
     },
 )
 with urllib.request.urlopen(request) as response:
@@ -791,7 +791,7 @@ download_release_asset() {
   if command -v curl >/dev/null 2>&1; then
     curl -fsSL \
       -H 'Accept: application/octet-stream' \
-      -H 'User-Agent: JkMonitorV2-install-script' \
+      -H 'User-Agent: FluxMonitorV2-install-script' \
       "$asset_api_url" \
       -o "$target"
     return
@@ -800,7 +800,7 @@ download_release_asset() {
   if command -v wget >/dev/null 2>&1; then
     wget -qO "$target" \
       --header='Accept: application/octet-stream' \
-      --header='User-Agent: JkMonitorV2-install-script' \
+      --header='User-Agent: FluxMonitorV2-install-script' \
       "$asset_api_url"
     return
   fi
@@ -814,7 +814,7 @@ request = urllib.request.Request(
     sys.argv[1],
     headers={
         "Accept": "application/octet-stream",
-        "User-Agent": "JkMonitorV2-install-script",
+        "User-Agent": "FluxMonitorV2-install-script",
     },
 )
 with urllib.request.urlopen(request) as response, open(sys.argv[2], "wb") as output:
@@ -942,7 +942,7 @@ elif [ "$reused_existing_configuration" = 'false' ]; then
     SERIAL_PORT="$(read_required_value 'RS485 serial port (example: /dev/ttyUSB0): ')"
   fi
   if [ -z "$SERIAL_PORT" ]; then
-    echo 'A serial port is required for hardware mode, so JK Monitor was not started and no access URL is available yet.' >&2
+    echo 'A serial port is required for hardware mode, so Flux Monitor was not started and no access URL is available yet.' >&2
     exit 1
   fi
 
@@ -998,7 +998,7 @@ if command -v systemctl >/dev/null 2>&1; then
   fi
 fi
 
-section 'Starting JK Monitor'
+section 'Starting Flux Monitor'
 info "Environment: $ENVIRONMENT"
 muted "Installed app root: $APP_ROOT"
 muted "Reusable launch command: $DESTINATION/start.sh"
@@ -1012,7 +1012,7 @@ if [ "${INSTALL_SERVICE,,}" = 'y' ]; then
   install_systemd_service
 
   if wait_for_health; then
-    success "JK Monitor is running under systemd. Open $ACCESS_URL from your PC."
+    success "Flux Monitor is running under systemd. Open $ACCESS_URL from your PC."
   else
     echo 'The systemd service was installed, but the health endpoint did not become ready in time.' >&2
     echo "Inspect service logs with: sudo journalctl -u $SERVICE_NAME -n 200 --no-pager" >&2
@@ -1031,4 +1031,4 @@ open_browser_when_ready
 
 cd "$APP_ROOT"
 trap 'if [ -n "${BROWSER_PID:-}" ]; then kill "$BROWSER_PID" >/dev/null 2>&1 || true; fi' EXIT
-ASPNETCORE_ENVIRONMENT="$ENVIRONMENT" ASPNETCORE_URLS="$APP_BIND_URL" "$DOTNET_CMD" ./JkMonitor.Backend.dll
+ASPNETCORE_ENVIRONMENT="$ENVIRONMENT" ASPNETCORE_URLS="$APP_BIND_URL" "$DOTNET_CMD" ./FluxMonitor.Backend.dll

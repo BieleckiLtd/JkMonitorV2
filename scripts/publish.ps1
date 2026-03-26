@@ -1,4 +1,4 @@
-[CmdletBinding()]
+﻿[CmdletBinding()]
 param(
     [string]$CommitMessage,
 
@@ -27,7 +27,7 @@ $ErrorActionPreference = 'Stop'
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
 Set-Location $repoRoot
-$linuxAssetName = 'jkmonitor-backend-linux-arm64.tar.gz'
+$linuxAssetName = 'fluxmonitor-backend-linux-arm64.tar.gz'
 
 function Write-Step([string]$Text) {
     Write-Host ''
@@ -108,7 +108,7 @@ function Get-DefaultCommitMessage([string[]]$ChangedFiles) {
         return 'chore: refine publish automation'
     }
 
-    if (($normalizedFiles | Where-Object { $_ -notmatch '^src/backend/JkMonitor\.Backend/frontend/' }).Count -eq 0) {
+    if (($normalizedFiles | Where-Object { $_ -notmatch '^src/backend/FluxMonitor\.Backend/frontend/' }).Count -eq 0) {
         return 'feat: update frontend'
     }
 
@@ -122,7 +122,7 @@ function Get-DefaultCommitMessage([string[]]$ChangedFiles) {
 function Invoke-GitHubApi([string]$RepositorySlug, [string]$Path) {
     $headers = @{
         Accept = 'application/vnd.github+json'
-        'User-Agent' = 'JkMonitorV2-publish-script'
+        'User-Agent' = 'FluxMonitorV2-publish-script'
     }
 
     return Invoke-RestMethod -Uri "https://api.github.com/repos/$RepositorySlug$Path" -Headers $headers
@@ -165,7 +165,7 @@ function Try-Get-ReleaseAssetFingerprint([string]$RepositorySlug, [string]$Tag, 
 function Get-ReleaseChecksum([string]$RepositorySlug, [string]$Tag, [string]$AssetName) {
     $headers = @{
         Accept = 'application/octet-stream'
-        'User-Agent' = 'JkMonitorV2-publish-script'
+        'User-Agent' = 'FluxMonitorV2-publish-script'
     }
 
     $checksumAsset = Get-ReleaseAsset -RepositorySlug $RepositorySlug -Tag $Tag -AssetName "$AssetName.sha256"
@@ -299,7 +299,7 @@ if ($pushedChanges) {
         Wait-ForReleaseAsset `
             -RepositorySlug $repositorySlug `
             -Tag $ReleaseTag `
-            -AssetName 'jkmonitor-backend-linux-arm64.tar.gz' `
+            -AssetName 'fluxmonitor-backend-linux-arm64.tar.gz' `
             -PreviousFingerprint $previousReleaseAssetFingerprint `
             -TimeoutSeconds $ArtifactTimeoutSeconds `
             -PollIntervalSeconds $PollSeconds
@@ -334,26 +334,26 @@ release_tag='$ReleaseTag'
 asset_name='$linuxAssetName'
 expected_source_revision_id='$currentCommit'
 
-export JKMONITOR_EXPECTED_RELEASE_SHA256="\$expected_sha256"
-export JKMONITOR_INSTALL_RUNTIME='y'
-export JKMONITOR_INSTALL_SERVICE='y'
-export JKMONITOR_REUSE_EXISTING_CONFIGURATION='1'
+export FluxMonitor_EXPECTED_RELEASE_SHA256="\$expected_sha256"
+export FluxMonitor_INSTALL_RUNTIME='y'
+export FluxMonitor_INSTALL_SERVICE='y'
+export FluxMonitor_REUSE_EXISTING_CONFIGURATION='1'
 wget -qO- https://raw.githubusercontent.com/$repositorySlug/dev/scripts/install-from-release.sh | bash -s -- https://github.com/$repositorySlug \$release_tag
-if [ ! -f "\$HOME/jkmonitor/release-info.env" ]; then
+if [ ! -f "\$HOME/fluxmonitor/release-info.env" ]; then
   echo 'The installer did not persist release-info.env.' >&2
   exit 1
 fi
 
 set -a
-. "\$HOME/jkmonitor/release-info.env"
+. "\$HOME/fluxmonitor/release-info.env"
 set +a
 
-if [[ "\${JKMONITOR_RELEASE_SHA256,,}" != "\$expected_sha256" ]]; then
-  echo "Installed checksum mismatch on device. Expected \$expected_sha256 but installer recorded \${JKMONITOR_RELEASE_SHA256:-missing}." >&2
+if [[ "\${FluxMonitor_RELEASE_SHA256,,}" != "\$expected_sha256" ]]; then
+  echo "Installed checksum mismatch on device. Expected \$expected_sha256 but installer recorded \${FluxMonitor_RELEASE_SHA256:-missing}." >&2
   exit 1
 fi
 sleep 5
-sudo systemctl is-active jkmonitor.service
+sudo systemctl is-active fluxmonitor.service
 health_json="\$(curl -fsS http://127.0.0.1:5074/api/health)"
 
 if command -v python3 >/dev/null 2>&1; then

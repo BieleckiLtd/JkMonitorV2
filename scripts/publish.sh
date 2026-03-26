@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+﻿#!/usr/bin/env bash
 set -euo pipefail
 
 COMMIT_MSG=${1:-}
@@ -11,7 +11,7 @@ WAIT_SECONDS=${WAIT_SECONDS:-0}
 ARTIFACT_TIMEOUT_SECONDS=${ARTIFACT_TIMEOUT_SECONDS:-600}
 POLL_SECONDS=${POLL_SECONDS:-30}
 REPO_DIR=$(cd "$(dirname "$0")/.." && pwd)
-LINUX_ASSET_NAME='jkmonitor-backend-linux-arm64.tar.gz'
+LINUX_ASSET_NAME='fluxmonitor-backend-linux-arm64.tar.gz'
 
 cd "$REPO_DIR"
 
@@ -76,7 +76,7 @@ default_commit_message() {
   fi
 
   if printf '%s\n' "$staged" | grep -Ev '^(AGENTS\.md|README\.md|skills/.*|scripts/.*)$' >/dev/null 2>&1; then
-    if printf '%s\n' "$staged" | grep -Ev '^src/backend/JkMonitor\.Backend/frontend/' >/dev/null 2>&1; then
+    if printf '%s\n' "$staged" | grep -Ev '^src/backend/FluxMonitor\.Backend/frontend/' >/dev/null 2>&1; then
       if printf '%s\n' "$staged" | grep -Ev '^tests/' >/dev/null 2>&1; then
         printf '%s\n' 'chore: publish current changes'
       else
@@ -96,12 +96,12 @@ fetch_release_json() {
   local url="https://api.github.com/repos/$repository_slug/releases/tags/$tag"
 
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: JkMonitorV2-publish-script' "$url"
+    curl -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: FluxMonitorV2-publish-script' "$url"
     return
   fi
 
   if command -v wget >/dev/null 2>&1; then
-    wget -qO- --header='Accept: application/vnd.github+json' --header='User-Agent: JkMonitorV2-publish-script' "$url"
+    wget -qO- --header='Accept: application/vnd.github+json' --header='User-Agent: FluxMonitorV2-publish-script' "$url"
     return
   fi
 
@@ -154,9 +154,9 @@ PY
 )"
 
   if command -v curl >/dev/null 2>&1; then
-    payload="$(curl -fsSL -H 'Accept: application/octet-stream' -H 'User-Agent: JkMonitorV2-publish-script' "$checksum_asset_url")"
+    payload="$(curl -fsSL -H 'Accept: application/octet-stream' -H 'User-Agent: FluxMonitorV2-publish-script' "$checksum_asset_url")"
   elif command -v wget >/dev/null 2>&1; then
-    payload="$(wget -qO- --header='Accept: application/octet-stream' --header='User-Agent: JkMonitorV2-publish-script' "$checksum_asset_url")"
+    payload="$(wget -qO- --header='Accept: application/octet-stream' --header='User-Agent: FluxMonitorV2-publish-script' "$checksum_asset_url")"
   else
     echo 'curl or wget is required to download the published checksum file.' >&2
     exit 1
@@ -246,7 +246,7 @@ PY
     return $?
   fi
 
-  printf '%s\n' "$json" | grep -q 'jkmonitor-backend-linux-arm64.tar.gz'
+  printf '%s\n' "$json" | grep -q 'fluxmonitor-backend-linux-arm64.tar.gz'
 }
 
 assert_release_asset_exists() {
@@ -256,8 +256,8 @@ assert_release_asset_exists() {
 
   json="$(fetch_release_json "$repository_slug" "$tag")"
 
-  if ! printf '%s\n' "$json" | grep -q 'jkmonitor-backend-linux-arm64.tar.gz'; then
-    echo "Release tag '$tag' does not contain asset 'jkmonitor-backend-linux-arm64.tar.gz'." >&2
+  if ! printf '%s\n' "$json" | grep -q 'fluxmonitor-backend-linux-arm64.tar.gz'; then
+    echo "Release tag '$tag' does not contain asset 'fluxmonitor-backend-linux-arm64.tar.gz'." >&2
     exit 1
   fi
 }
@@ -297,7 +297,7 @@ wait_for_release_asset() {
 
   while true; do
     if json="$(fetch_release_json "$repository_slug" "$tag" 2>/dev/null)"; then
-      if release_asset_ready "$json" 'jkmonitor-backend-linux-arm64.tar.gz' "$previous_fingerprint"; then
+      if release_asset_ready "$json" 'fluxmonitor-backend-linux-arm64.tar.gz' "$previous_fingerprint"; then
         log "Release asset '$LINUX_ASSET_NAME' is ready."
         return
       fi
@@ -391,26 +391,26 @@ release_tag='$RELEASE_TAG'
 asset_name='$LINUX_ASSET_NAME'
 expected_source_revision_id='$CURRENT_COMMIT'
 
-export JKMONITOR_EXPECTED_RELEASE_SHA256="\$expected_sha256"
-export JKMONITOR_INSTALL_RUNTIME='y'
-export JKMONITOR_INSTALL_SERVICE='y'
-export JKMONITOR_REUSE_EXISTING_CONFIGURATION='1'
+export FluxMonitor_EXPECTED_RELEASE_SHA256="\$expected_sha256"
+export FluxMonitor_INSTALL_RUNTIME='y'
+export FluxMonitor_INSTALL_SERVICE='y'
+export FluxMonitor_REUSE_EXISTING_CONFIGURATION='1'
 wget -qO- https://raw.githubusercontent.com/$REPOSITORY_SLUG/dev/scripts/install-from-release.sh | bash -s -- https://github.com/$REPOSITORY_SLUG "\$release_tag"
-if [ ! -f "\$HOME/jkmonitor/release-info.env" ]; then
+if [ ! -f "\$HOME/fluxmonitor/release-info.env" ]; then
   echo 'The installer did not persist release-info.env.' >&2
   exit 1
 fi
 
 set -a
-. "\$HOME/jkmonitor/release-info.env"
+. "\$HOME/fluxmonitor/release-info.env"
 set +a
 
-if [[ "\${JKMONITOR_RELEASE_SHA256,,}" != "\$expected_sha256" ]]; then
-  echo "Installed checksum mismatch on device. Expected \$expected_sha256 but installer recorded \${JKMONITOR_RELEASE_SHA256:-missing}." >&2
+if [[ "\${FluxMonitor_RELEASE_SHA256,,}" != "\$expected_sha256" ]]; then
+  echo "Installed checksum mismatch on device. Expected \$expected_sha256 but installer recorded \${FluxMonitor_RELEASE_SHA256:-missing}." >&2
   exit 1
 fi
 sleep 5
-sudo systemctl is-active jkmonitor.service
+sudo systemctl is-active fluxmonitor.service
 health_json="\$(curl -fsS http://127.0.0.1:5074/api/health)"
 
 if command -v python3 >/dev/null 2>&1; then
