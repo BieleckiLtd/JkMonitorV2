@@ -518,7 +518,6 @@ function ChartSection({ title, data, lines, domain, precision, hoveredTime, sele
 
   const activePoint = getActivePoint(data, hoveredTime, selectedTime);
   const activeTime = activePoint != null ? formatSummaryTime(activePoint.timestamp) : null;
-  const isShowingLatest = hoveredTime == null && selectedTime == null;
 
   const handleChartMove = useCallback((state: unknown) => {
     const idx = extractActiveIndex(state);
@@ -667,7 +666,6 @@ export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime
 
   const activePoint = getActivePoint(energyData, hoveredTime, selectedTime);
   const activeTime = activePoint != null ? formatSummaryTime(activePoint.timestamp) : null;
-  const isShowingLatest = hoveredTime == null && selectedTime == null;
 
   const handleChartMove = useCallback((state: unknown) => {
     const idx = extractActiveIndex(state);
@@ -785,7 +783,6 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hove
 
   const activePoint = getActivePoint(data, hoveredTime, selectedTime);
   const activeTime = activePoint != null ? formatSummaryTime(activePoint.timestamp) : null;
-  const isShowingLatest = hoveredTime == null && selectedTime == null;
 
   const handleChartMove = useCallback((state: unknown) => {
     const idx = extractActiveIndex(state);
