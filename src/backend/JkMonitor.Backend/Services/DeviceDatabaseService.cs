@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using Dapper;
 using JkMonitor.Contracts.Configuration;
 using Microsoft.Extensions.Options;
 using Npgsql;
@@ -8,6 +9,7 @@ namespace JkMonitor.Backend.Services;
 public sealed class DeviceDatabaseService(
     IOptions<MonitorConfiguration> configuration,
     ILogger<DeviceDatabaseService> logger)
+    : PostgresStore(configuration.Value.Storage.ConnectionString)
 {
     private readonly StorageConfiguration _storage = configuration.Value.Storage;
 
@@ -26,23 +28,14 @@ public sealed class DeviceDatabaseService(
 
     public async Task<IReadOnlyList<string>> ListDatabasesAsync(CancellationToken cancellationToken)
     {
-        await using var connection = new NpgsqlConnection(BuildMaintenanceConnectionString());
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(BuildMaintenanceConnectionString(), cancellationToken);
 
-        await using var command = connection.CreateCommand();
-        command.CommandText = @"
+        var databases = await connection.QueryAsync<string>(@"
 SELECT datname FROM pg_database
 WHERE datistemplate = false AND datname NOT IN ('postgres', 'template0', 'template1')
-ORDER BY datname;";
+ORDER BY datname;");
 
-        var databases = new List<string>();
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
-        {
-            databases.Add(reader.GetString(0));
-        }
-
-        return databases;
+        return databases.ToList();
     }
 
     public async Task<CreateDatabaseResult> CreateDatabaseAsync(string databaseName, string provider, CancellationToken cancellationToken)
@@ -52,28 +45,19 @@ ORDER BY datname;";
             return new CreateDatabaseResult(false, $"Invalid database name '{databaseName}'. Use lowercase letters, digits, and underscores (max 63 chars, must start with a letter).");
         }
 
-        await using var connection = new NpgsqlConnection(BuildMaintenanceConnectionString());
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(BuildMaintenanceConnectionString(), cancellationToken);
 
         // Check if database already exists
-        await using (var checkCmd = connection.CreateCommand())
+        var exists = await connection.ExecuteScalarAsync<int?>(
+            "SELECT 1 FROM pg_database WHERE datname = @Name;", new { Name = databaseName });
+        if (exists is not null)
         {
-            checkCmd.CommandText = "SELECT 1 FROM pg_database WHERE datname = @name;";
-            checkCmd.Parameters.AddWithValue("name", databaseName);
-            var exists = await checkCmd.ExecuteScalarAsync(cancellationToken);
-            if (exists is not null)
-            {
-                return new CreateDatabaseResult(false, $"Database '{databaseName}' already exists.");
-            }
+            return new CreateDatabaseResult(false, $"Database '{databaseName}' already exists.");
         }
 
-        // CREATE DATABASE cannot run inside a transaction
-        await using (var createCmd = connection.CreateCommand())
-        {
-            // Database name is validated by regex above, safe to interpolate
-            createCmd.CommandText = $"CREATE DATABASE \"{databaseName}\";";
-            await createCmd.ExecuteNonQueryAsync(cancellationToken);
-        }
+        // CREATE DATABASE cannot run inside a transaction or use parameters
+        // Database name is validated by regex above, safe to interpolate
+        await connection.ExecuteAsync($"CREATE DATABASE \"{databaseName}\";");
 
         logger.LogInformation("Created database '{DatabaseName}'.", databaseName);
 
@@ -84,12 +68,9 @@ ORDER BY datname;";
             try
             {
                 var deviceConnStr = BuildConnectionStringForDatabase(databaseName);
-                await using var deviceConn = new NpgsqlConnection(deviceConnStr);
-                await deviceConn.OpenAsync(cancellationToken);
+                await using var deviceConn = await OpenConnectionAsync(deviceConnStr, cancellationToken);
 
-                await using var extCmd = deviceConn.CreateCommand();
-                extCmd.CommandText = "CREATE EXTENSION IF NOT EXISTS timescaledb;";
-                await extCmd.ExecuteNonQueryAsync(cancellationToken);
+                await deviceConn.ExecuteAsync("CREATE EXTENSION IF NOT EXISTS timescaledb;");
 
                 logger.LogInformation("Enabled TimescaleDB extension in '{DatabaseName}'.", databaseName);
             }
@@ -110,33 +91,20 @@ ORDER BY datname;";
 
         try
         {
-            await using var connection = new NpgsqlConnection(connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(connectionString, cancellationToken);
 
             // Check for TimescaleDB extension
-            var hasTimescale = false;
-            await using (var cmd = connection.CreateCommand())
-            {
-                cmd.CommandText = "SELECT 1 FROM pg_extension WHERE extname = 'timescaledb';";
-                hasTimescale = await cmd.ExecuteScalarAsync(cancellationToken) is not null;
-            }
+            var hasTimescale = await connection.ExecuteScalarAsync<int?>(
+                "SELECT 1 FROM pg_extension WHERE extname = 'timescaledb';") is not null;
 
             // Check for expected tables
             var expectedTables = new[] { "jk_raw_samples", "jk_rollup_1m", "jk_rollup_5m", "jk_rollup_1h" };
-            var existingTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
-            await using (var cmd = connection.CreateCommand())
-            {
-                cmd.CommandText = @"
+            var tableNames = await connection.QueryAsync<string>(@"
 SELECT table_name FROM information_schema.tables
-WHERE table_schema = 'public' AND table_type = 'BASE TABLE';";
+WHERE table_schema = 'public' AND table_type = 'BASE TABLE';");
 
-                await using var reader = await cmd.ExecuteReaderAsync(cancellationToken);
-                while (await reader.ReadAsync(cancellationToken))
-                {
-                    existingTables.Add(reader.GetString(0));
-                }
-            }
+            var existingTables = new HashSet<string>(tableNames, StringComparer.OrdinalIgnoreCase);
 
             foreach (var table in expectedTables)
             {

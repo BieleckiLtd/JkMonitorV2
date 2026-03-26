@@ -1,9 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Dapper;
 using JkMonitor.Contracts.Configuration;
 using Microsoft.Extensions.Options;
 using Npgsql;
-using NpgsqlTypes;
 
 namespace JkMonitor.Backend.Services;
 
@@ -16,6 +16,7 @@ namespace JkMonitor.Backend.Services;
 public sealed class DeviceConfigStore(
     IOptions<MonitorConfiguration> configuration,
     ILogger<DeviceConfigStore> logger)
+    : PostgresStore(configuration.Value.Storage.ConnectionString)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -24,7 +25,6 @@ public sealed class DeviceConfigStore(
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    private readonly string _connectionString = configuration.Value.Storage.ConnectionString;
     private readonly IReadOnlyList<DeviceConfiguration> _seedDevices = configuration.Value.Devices;
     private readonly object _cacheLock = new();
     private readonly SemaphoreSlim _initializationLock = new(1, 1);
@@ -40,7 +40,7 @@ public sealed class DeviceConfigStore(
         {
             if (_initialized) return;
 
-            if (string.IsNullOrWhiteSpace(_connectionString))
+            if (!HasDatabase)
             {
                 logger.LogWarning("No database connection string configured — device config will use seed values from appsettings (read-only).");
                 lock (_cacheLock) { _devices = _seedDevices; }
@@ -48,16 +48,15 @@ public sealed class DeviceConfigStore(
                 return;
             }
 
-            await using var connection = new NpgsqlConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
-            await EnsureSchemaAsync(connection, cancellationToken);
+            await EnsureSchemaAsync(connection);
 
-            var existing = await LoadFromDbAsync(connection, cancellationToken);
+            var existing = await LoadFromDbAsync(connection);
             if (existing is null && _seedDevices.Count > 0)
             {
                 logger.LogInformation("Importing {Count} device(s) from appsettings into database.", _seedDevices.Count);
-                await SaveToDbAsync(connection, _seedDevices, cancellationToken);
+                await SaveToDbAsync(connection, _seedDevices);
                 existing = _seedDevices;
             }
 
@@ -83,16 +82,15 @@ public sealed class DeviceConfigStore(
     {
         EnsureInitialized();
 
-        if (string.IsNullOrWhiteSpace(_connectionString))
+        if (!HasDatabase)
         {
             lock (_cacheLock) { _devices = devices; }
             logger.LogInformation("Saved {Count} device(s) in memory (no database).", devices.Count);
             return devices;
         }
 
-        await using var connection = new NpgsqlConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
-        await SaveToDbAsync(connection, devices, cancellationToken);
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await SaveToDbAsync(connection, devices);
 
         lock (_cacheLock) { _devices = devices; }
         logger.LogInformation("Saved {Count} device(s) to database.", devices.Count);
@@ -105,7 +103,7 @@ public sealed class DeviceConfigStore(
             throw new InvalidOperationException("DeviceConfigStore has not been initialized. Call InitializeAsync first.");
     }
 
-    private static async Task EnsureSchemaAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    private static async Task EnsureSchemaAsync(NpgsqlConnection connection)
     {
         const string sql = """
             CREATE TABLE IF NOT EXISTS device_config (
@@ -116,38 +114,30 @@ public sealed class DeviceConfigStore(
             );
             """;
 
-        await using var cmd = new NpgsqlCommand(sql, connection);
-        await cmd.ExecuteNonQueryAsync(cancellationToken);
+        await connection.ExecuteAsync(sql);
     }
 
-    private static async Task<IReadOnlyList<DeviceConfiguration>?> LoadFromDbAsync(
-        NpgsqlConnection connection, CancellationToken cancellationToken)
+    private static async Task<IReadOnlyList<DeviceConfiguration>?> LoadFromDbAsync(NpgsqlConnection connection)
     {
         const string sql = "SELECT devices_json FROM device_config WHERE id = 1;";
 
-        await using var cmd = new NpgsqlCommand(sql, connection);
-        var result = await cmd.ExecuteScalarAsync(cancellationToken);
+        var result = await connection.ExecuteScalarAsync<string?>(sql);
 
-        if (result is null or DBNull)
+        if (result is null)
             return null;
 
-        var json = result.ToString()!;
-        return JsonSerializer.Deserialize<List<DeviceConfiguration>>(json, JsonOptions) ?? [];
+        return JsonSerializer.Deserialize<List<DeviceConfiguration>>(result, JsonOptions) ?? [];
     }
 
-    private static async Task SaveToDbAsync(
-        NpgsqlConnection connection, IReadOnlyList<DeviceConfiguration> devices, CancellationToken cancellationToken)
+    private static async Task SaveToDbAsync(NpgsqlConnection connection, IReadOnlyList<DeviceConfiguration> devices)
     {
         const string sql = """
             INSERT INTO device_config (id, devices_json, updated_at)
-            VALUES (1, @json, NOW())
-            ON CONFLICT (id) DO UPDATE SET devices_json = @json, updated_at = NOW();
+            VALUES (1, @Json::jsonb, NOW())
+            ON CONFLICT (id) DO UPDATE SET devices_json = @Json::jsonb, updated_at = NOW();
             """;
 
         var json = JsonSerializer.Serialize(devices, JsonOptions);
-
-        await using var cmd = new NpgsqlCommand(sql, connection);
-        cmd.Parameters.Add(new NpgsqlParameter("@json", NpgsqlDbType.Jsonb) { Value = json });
-        await cmd.ExecuteNonQueryAsync(cancellationToken);
+        await connection.ExecuteAsync(sql, new { Json = json });
     }
 }

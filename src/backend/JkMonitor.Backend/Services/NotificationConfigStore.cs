@@ -1,10 +1,10 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Dapper;
 using JkMonitor.Backend.Models;
 using JkMonitor.Contracts.Configuration;
 using Microsoft.Extensions.Options;
 using Npgsql;
-using NpgsqlTypes;
 
 namespace JkMonitor.Backend.Services;
 
@@ -12,6 +12,7 @@ public sealed class NotificationConfigStore(
     IOptions<MonitorConfiguration> configuration,
     IHostEnvironment environment,
     ILogger<NotificationConfigStore> logger)
+    : PostgresStore(configuration.Value.Storage.ConnectionString)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -20,7 +21,6 @@ public sealed class NotificationConfigStore(
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
     };
 
-    private readonly string _connectionString = configuration.Value.Storage.ConnectionString;
     private readonly string _legacyFilePath = Path.Combine(environment.ContentRootPath, "notifications.json");
     private readonly SemaphoreSlim _initializationLock = new(1, 1);
     private readonly object _cacheLock = new();
@@ -34,7 +34,7 @@ public sealed class NotificationConfigStore(
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(_connectionString))
+        if (!HasDatabase)
         {
             logger.LogWarning("No database connection string configured — notification storage is disabled.");
             _initialized = true;
@@ -50,8 +50,7 @@ public sealed class NotificationConfigStore(
                 return;
             }
 
-            await using var connection = new NpgsqlConnection(_connectionString);
-            await connection.OpenAsync(cancellationToken);
+            await using var connection = await OpenConnectionAsync(cancellationToken);
 
             await EnsureSchemaAsync(connection, cancellationToken);
             await ImportLegacyConfigIfNeededAsync(connection, cancellationToken);
@@ -123,8 +122,7 @@ public sealed class NotificationConfigStore(
 
         var clonedChannels = channels.Select(CloneChannel).ToList();
 
-        await using var connection = new NpgsqlConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
         await PersistChannelsAsync(connection, transaction, clonedChannels, cancellationToken);
@@ -146,8 +144,7 @@ public sealed class NotificationConfigStore(
 
         var clonedRules = rules.Select(CloneRule).ToList();
 
-        await using var connection = new NpgsqlConnection(_connectionString);
-        await connection.OpenAsync(cancellationToken);
+        await using var connection = await OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
         await PersistRulesAsync(connection, transaction, clonedRules, cancellationToken);
@@ -189,7 +186,7 @@ public sealed class NotificationConfigStore(
 
     private async Task EnsureSchemaAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
     {
-        await ExecuteNonQueryAsync(connection, @"
+        await connection.ExecuteAsync(@"
 CREATE TABLE IF NOT EXISTS notification_channels (
     id text PRIMARY KEY,
     type text NOT NULL,
@@ -217,14 +214,14 @@ CREATE TABLE IF NOT EXISTS notification_rules (
 
 CREATE INDEX IF NOT EXISTS ix_notification_rules_device_id
     ON notification_rules (device_id);
-", cancellationToken);
+");
 
-        await ExecuteNonQueryAsync(connection, @"
+        await connection.ExecuteAsync(@"
 DO $$ BEGIN
   ALTER TABLE notification_channels ADD COLUMN IF NOT EXISTS sort_order integer NOT NULL DEFAULT 0;
   ALTER TABLE notification_rules ADD COLUMN IF NOT EXISTS sort_order integer NOT NULL DEFAULT 0;
 END $$;
-", cancellationToken);
+");
     }
 
     private async Task ImportLegacyConfigIfNeededAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
@@ -283,20 +280,17 @@ END $$;
 
     private static async Task<bool> HasStoredConfigAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
     {
-        await using var command = connection.CreateCommand();
-        command.CommandText = @"
+        var result = await connection.ExecuteScalarAsync<bool>(@"
 SELECT EXISTS (SELECT 1 FROM notification_channels)
     OR EXISTS (SELECT 1 FROM notification_rules);
-";
-
-        var result = await command.ExecuteScalarAsync(cancellationToken);
-        return result is true;
+");
+        return result;
     }
 
     private static async Task<NotificationConfig> LoadConfigAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
     {
-        var channels = await LoadChannelsAsync(connection, cancellationToken);
-        var rules = await LoadRulesAsync(connection, cancellationToken);
+        var channels = await LoadChannelsAsync(connection);
+        var rules = await LoadRulesAsync(connection);
 
         return new NotificationConfig
         {
@@ -305,63 +299,45 @@ SELECT EXISTS (SELECT 1 FROM notification_channels)
         };
     }
 
-    private static async Task<List<NotificationChannelConfig>> LoadChannelsAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    private static async Task<List<NotificationChannelConfig>> LoadChannelsAsync(NpgsqlConnection connection)
     {
-        var channels = new List<NotificationChannelConfig>();
-
-        await using var command = connection.CreateCommand();
-        command.CommandText = @"
+        var rows = await connection.QueryAsync<(string id, string type, string name, bool enabled, string settings)>(@"
 SELECT id, type, name, enabled, settings::text
 FROM notification_channels
 ORDER BY sort_order, id;
-";
+");
 
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        return rows.Select(r => new NotificationChannelConfig
         {
-            channels.Add(new NotificationChannelConfig
-            {
-                Id = reader.GetString(0),
-                Type = reader.GetString(1),
-                Name = reader.GetString(2),
-                Enabled = reader.GetBoolean(3),
-                Settings = DeserializeDictionary(reader.IsDBNull(4) ? "{}" : reader.GetString(4))
-            });
-        }
-
-        return channels;
+            Id = r.id,
+            Type = r.type,
+            Name = r.name,
+            Enabled = r.enabled,
+            Settings = DeserializeDictionary(r.settings ?? "{}")
+        }).ToList();
     }
 
-    private static async Task<List<NotificationRuleConfig>> LoadRulesAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    private static async Task<List<NotificationRuleConfig>> LoadRulesAsync(NpgsqlConnection connection)
     {
-        var rules = new List<NotificationRuleConfig>();
-
-        await using var command = connection.CreateCommand();
-        command.CommandText = @"
+        var rows = await connection.QueryAsync<(string id, string name, bool enabled, string device_id, string entity_id, string expression, string channel_ids, string message_template, string severity, int cooldown_minutes)>(@"
 SELECT id, name, enabled, device_id, entity_id, expression, channel_ids::text, message_template, severity, cooldown_minutes
 FROM notification_rules
 ORDER BY sort_order, id;
-";
+");
 
-        await using var reader = await command.ExecuteReaderAsync(cancellationToken);
-        while (await reader.ReadAsync(cancellationToken))
+        return rows.Select(r => new NotificationRuleConfig
         {
-            rules.Add(new NotificationRuleConfig
-            {
-                Id = reader.GetString(0),
-                Name = reader.GetString(1),
-                Enabled = reader.GetBoolean(2),
-                DeviceId = reader.GetString(3),
-                EntityId = reader.GetString(4),
-                Expression = reader.GetString(5),
-                ChannelIds = DeserializeStringList(reader.IsDBNull(6) ? "[]" : reader.GetString(6)),
-                MessageTemplate = reader.GetString(7),
-                Severity = reader.GetString(8),
-                CooldownMinutes = reader.GetInt32(9)
-            });
-        }
-
-        return rules;
+            Id = r.id,
+            Name = r.name,
+            Enabled = r.enabled,
+            DeviceId = r.device_id,
+            EntityId = r.entity_id,
+            Expression = r.expression,
+            ChannelIds = DeserializeStringList(r.channel_ids ?? "[]"),
+            MessageTemplate = r.message_template,
+            Severity = r.severity,
+            CooldownMinutes = r.cooldown_minutes
+        }).ToList();
     }
 
     private static async Task PersistChannelsAsync(
@@ -370,17 +346,14 @@ ORDER BY sort_order, id;
         IReadOnlyList<NotificationChannelConfig> channels,
         CancellationToken cancellationToken)
     {
-        await DeleteMissingRowsAsync(connection, transaction, "notification_channels", channels.Select(c => c.Id).ToArray(), cancellationToken);
+        await DeleteMissingRowsAsync(connection, transaction, "notification_channels", channels.Select(c => c.Id).ToArray());
 
         for (var index = 0; index < channels.Count; index++)
         {
             var channel = channels[index];
-
-            await using var command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText = @"
+            await connection.ExecuteAsync(@"
 INSERT INTO notification_channels (id, type, name, enabled, settings, sort_order, updated_at)
-VALUES (@id, @type, @name, @enabled, @settings, @sort_order, NOW())
+VALUES (@Id, @Type, @Name, @Enabled, @Settings::jsonb, @SortOrder, NOW())
 ON CONFLICT (id)
 DO UPDATE SET
     type = EXCLUDED.type,
@@ -389,17 +362,15 @@ DO UPDATE SET
     settings = EXCLUDED.settings,
     sort_order = EXCLUDED.sort_order,
     updated_at = NOW();
-";
-            command.Parameters.AddWithValue("id", channel.Id);
-            command.Parameters.AddWithValue("type", channel.Type);
-            command.Parameters.AddWithValue("name", channel.Name);
-            command.Parameters.AddWithValue("enabled", channel.Enabled);
-            command.Parameters.Add(new NpgsqlParameter("settings", NpgsqlDbType.Jsonb)
+", new
             {
-                Value = JsonSerializer.Serialize(channel.Settings, JsonOptions)
-            });
-            command.Parameters.AddWithValue("sort_order", index);
-            await command.ExecuteNonQueryAsync(cancellationToken);
+                channel.Id,
+                channel.Type,
+                channel.Name,
+                channel.Enabled,
+                Settings = JsonSerializer.Serialize(channel.Settings, JsonOptions),
+                SortOrder = index
+            }, transaction);
         }
     }
 
@@ -409,21 +380,18 @@ DO UPDATE SET
         IReadOnlyList<NotificationRuleConfig> rules,
         CancellationToken cancellationToken)
     {
-        await DeleteMissingRowsAsync(connection, transaction, "notification_rules", rules.Select(r => r.Id).ToArray(), cancellationToken);
+        await DeleteMissingRowsAsync(connection, transaction, "notification_rules", rules.Select(r => r.Id).ToArray());
 
         for (var index = 0; index < rules.Count; index++)
         {
             var rule = rules[index];
-
-            await using var command = connection.CreateCommand();
-            command.Transaction = transaction;
-            command.CommandText = @"
+            await connection.ExecuteAsync(@"
 INSERT INTO notification_rules (
     id, name, enabled, device_id, entity_id, expression, channel_ids,
     message_template, severity, cooldown_minutes, sort_order, updated_at)
 VALUES (
-    @id, @name, @enabled, @device_id, @entity_id, @expression, @channel_ids,
-    @message_template, @severity, @cooldown_minutes, @sort_order, NOW())
+    @Id, @Name, @Enabled, @DeviceId, @EntityId, @Expression, @ChannelIds::jsonb,
+    @MessageTemplate, @Severity, @CooldownMinutes, @SortOrder, NOW())
 ON CONFLICT (id)
 DO UPDATE SET
     name = EXCLUDED.name,
@@ -437,22 +405,20 @@ DO UPDATE SET
     cooldown_minutes = EXCLUDED.cooldown_minutes,
     sort_order = EXCLUDED.sort_order,
     updated_at = NOW();
-";
-            command.Parameters.AddWithValue("id", rule.Id);
-            command.Parameters.AddWithValue("name", rule.Name);
-            command.Parameters.AddWithValue("enabled", rule.Enabled);
-            command.Parameters.AddWithValue("device_id", rule.DeviceId);
-            command.Parameters.AddWithValue("entity_id", rule.EntityId);
-            command.Parameters.AddWithValue("expression", rule.Expression);
-            command.Parameters.Add(new NpgsqlParameter("channel_ids", NpgsqlDbType.Jsonb)
+", new
             {
-                Value = JsonSerializer.Serialize(rule.ChannelIds, JsonOptions)
-            });
-            command.Parameters.AddWithValue("message_template", rule.MessageTemplate);
-            command.Parameters.AddWithValue("severity", rule.Severity);
-            command.Parameters.AddWithValue("cooldown_minutes", rule.CooldownMinutes);
-            command.Parameters.AddWithValue("sort_order", index);
-            await command.ExecuteNonQueryAsync(cancellationToken);
+                rule.Id,
+                rule.Name,
+                rule.Enabled,
+                rule.DeviceId,
+                rule.EntityId,
+                rule.Expression,
+                ChannelIds = JsonSerializer.Serialize(rule.ChannelIds, JsonOptions),
+                rule.MessageTemplate,
+                rule.Severity,
+                rule.CooldownMinutes,
+                SortOrder = index
+            }, transaction);
         }
     }
 
@@ -460,23 +426,16 @@ DO UPDATE SET
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
         string tableName,
-        string[] ids,
-        CancellationToken cancellationToken)
+        string[] ids)
     {
-        await using var command = connection.CreateCommand();
-        command.Transaction = transaction;
-
         if (ids.Length == 0)
         {
-            command.CommandText = $"DELETE FROM {tableName};";
+            await connection.ExecuteAsync($"DELETE FROM {tableName};", transaction: transaction);
         }
         else
         {
-            command.CommandText = $"DELETE FROM {tableName} WHERE NOT (id = ANY(@ids));";
-            command.Parameters.AddWithValue("ids", ids);
+            await connection.ExecuteAsync($"DELETE FROM {tableName} WHERE NOT (id = ANY(@Ids));", new { Ids = ids }, transaction);
         }
-
-        await command.ExecuteNonQueryAsync(cancellationToken);
     }
 
     private static NotificationConfig CloneConfig(NotificationConfig config)
@@ -522,11 +481,4 @@ DO UPDATE SET
 
     private static List<string> DeserializeStringList(string json)
         => JsonSerializer.Deserialize<List<string>>(json, JsonOptions) ?? [];
-
-    private static async Task ExecuteNonQueryAsync(NpgsqlConnection connection, string sql, CancellationToken cancellationToken)
-    {
-        await using var command = connection.CreateCommand();
-        command.CommandText = sql;
-        await command.ExecuteNonQueryAsync(cancellationToken);
-    }
 }
