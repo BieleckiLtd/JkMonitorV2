@@ -15,6 +15,7 @@ public sealed class DevicesController(
     DeviceConfigStore deviceConfigStore,
     DeviceDatabaseService deviceDatabaseService,
     GenericModbusPollingClient genericPollingClient,
+    GenericBlePollingClient genericBlePollingClient,
     PollingClientDispatcher pollingClientDispatcher,
     DeviceDefinitionLoader definitionLoader,
     ITelemetryRepository telemetryRepository,
@@ -158,6 +159,52 @@ public sealed class DevicesController(
         catch (Exception ex)
         {
             return Ok(new { ports = Array.Empty<string>(), error = ex.Message });
+        }
+    }
+
+    [HttpGet("ble/scan")]
+    public async Task<IActionResult> ScanBleDevices(
+        [FromQuery] string? definitionId = null,
+        [FromQuery] int? timeoutMs = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            Contracts.DeviceDefinition.DeviceDefinition? definition = null;
+            if (!string.IsNullOrWhiteSpace(definitionId) &&
+                (!definitionLoader.TryGet(definitionId.Trim(), out definition) || definition is null))
+            {
+                return Ok(new
+                {
+                    devices = Array.Empty<object>(),
+                    error = $"Device definition '{definitionId}' not found."
+                });
+            }
+
+            if (definition is not null &&
+                !string.Equals(definition.Connection.Transport.Type, "ble", StringComparison.OrdinalIgnoreCase))
+            {
+                return Ok(new
+                {
+                    devices = Array.Empty<object>(),
+                    error = $"Device definition '{definition.Device.Id}' does not use BLE transport."
+                });
+            }
+
+            var timeout = timeoutMs.HasValue
+                ? TimeSpan.FromMilliseconds(Math.Clamp(timeoutMs.Value, 1000, 15000))
+                : (TimeSpan?)null;
+
+            var devices = await genericBlePollingClient.DiscoverDevicesAsync(definition, timeout, cancellationToken);
+            return Ok(new { devices });
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return Ok(new { devices = Array.Empty<object>(), error = ex.Message });
         }
     }
 

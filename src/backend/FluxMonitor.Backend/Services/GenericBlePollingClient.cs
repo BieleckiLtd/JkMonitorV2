@@ -90,6 +90,70 @@ public sealed class GenericBlePollingClient(
         }
     }
 
+    public async Task<IReadOnlyList<BleDiscoveredDevice>> DiscoverDevicesAsync(
+        DeviceDefinition? definition,
+        TimeSpan? timeout,
+        CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsLinux())
+            throw new PlatformNotSupportedException("BLE discovery is supported on Linux/BlueZ only.");
+
+        if (definition is not null &&
+            !string.Equals(definition.Connection.Transport.Type, "ble", StringComparison.OrdinalIgnoreCase))
+        {
+            return [];
+        }
+
+        var discoveryWindow = timeout ?? TimeSpan.FromSeconds(6);
+        if (discoveryWindow < TimeSpan.FromSeconds(1))
+            discoveryWindow = TimeSpan.FromSeconds(1);
+
+        var adapter = (await BlueZManager.GetAdaptersAsync()).FirstOrDefault()
+            ?? throw new InvalidOperationException("No Bluetooth adapter was found.");
+
+        if (!await adapter.GetAsync<bool>("Powered"))
+            await adapter.SetAsync("Powered", true);
+
+        var devices = new ConcurrentDictionary<string, Device>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var device in await adapter.GetDevicesAsync())
+        {
+            var key = await GetDiscoveryKeyAsync(device);
+            if (!string.IsNullOrWhiteSpace(key))
+                devices[key] = device;
+        }
+
+        async Task OnDeviceFoundAsync(Adapter _, DeviceFoundEventArgs args)
+        {
+            var key = await GetDiscoveryKeyAsync(args.Device);
+            if (!string.IsNullOrWhiteSpace(key))
+                devices[key] = args.Device;
+        }
+
+        adapter.DeviceFound += OnDeviceFoundAsync;
+        try
+        {
+            await adapter.StartDiscoveryAsync();
+            await Task.Delay(discoveryWindow, cancellationToken);
+        }
+        finally
+        {
+            adapter.DeviceFound -= OnDeviceFoundAsync;
+            try { await adapter.StopDiscoveryAsync(); } catch { /* best effort */ }
+        }
+
+        var discovered = new List<BleDiscoveredDevice>(devices.Count);
+        foreach (var device in devices.Values)
+            discovered.Add(await MapDiscoveredDeviceAsync(device));
+
+        return discovered
+            .OrderByDescending(device => device.IsConnected)
+            .ThenBy(device => string.IsNullOrWhiteSpace(device.DisplayName) ? 1 : 0)
+            .ThenBy(device => device.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(device => device.Address, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
     private async Task EnsureConnectedAsync(
         BleSession session,
         DeviceConfiguration device,
@@ -431,6 +495,67 @@ public sealed class GenericBlePollingClient(
                name.Contains(target, StringComparison.OrdinalIgnoreCase);
     }
 
+    private static async Task<string?> GetDiscoveryKeyAsync(Device device)
+    {
+        var address = await SafeGetStringAsync(() => device.GetAddressAsync());
+        if (!string.IsNullOrWhiteSpace(address))
+            return address;
+
+        var name = await SafeGetStringAsync(() => device.GetNameAsync());
+        if (!string.IsNullOrWhiteSpace(name))
+            return name;
+
+        return await SafeGetStringAsync(() => device.GetAliasAsync());
+    }
+
+    private static async Task<BleDiscoveredDevice> MapDiscoveredDeviceAsync(Device device)
+    {
+        var address = await SafeGetStringAsync(() => device.GetAddressAsync()) ?? string.Empty;
+        var alias = await SafeGetStringAsync(() => device.GetAliasAsync());
+        var name = await SafeGetStringAsync(() => device.GetNameAsync());
+        var isConnected = await SafeGetValueAsync(() => device.GetAsync<bool>("Connected"));
+        var isPaired = await SafeGetValueAsync(() => device.GetAsync<bool>("Paired"));
+
+        var displayName = alias;
+        if (string.IsNullOrWhiteSpace(displayName))
+            displayName = name;
+        if (string.IsNullOrWhiteSpace(displayName))
+            displayName = address;
+
+        return new BleDiscoveredDevice(
+            address,
+            string.Equals(alias, name, StringComparison.OrdinalIgnoreCase) ? null : alias,
+            name,
+            displayName ?? "Unknown BLE device",
+            isConnected,
+            isPaired);
+    }
+
+    private static async Task<string?> SafeGetStringAsync(Func<Task<string>> getter)
+    {
+        try
+        {
+            var value = await getter();
+            return string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static async Task<bool> SafeGetValueAsync(Func<Task<bool>> getter)
+    {
+        try
+        {
+            return await getter();
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
     private static async Task ResetSessionAsync(BleSession session)
     {
         TaskCompletionSource<byte[]>? pendingFrame;
@@ -504,3 +629,11 @@ public sealed class GenericBlePollingClient(
         public string LastFrameHex { get; set; } = string.Empty;
     }
 }
+
+public sealed record BleDiscoveredDevice(
+    string Address,
+    string? Alias,
+    string? Name,
+    string DisplayName,
+    bool IsConnected,
+    bool IsPaired);

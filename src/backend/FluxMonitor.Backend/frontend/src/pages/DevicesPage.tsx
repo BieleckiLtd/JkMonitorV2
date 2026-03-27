@@ -25,6 +25,20 @@ type PortsResponse = {
   error?: string;
 };
 
+type BleScanDevice = {
+  address: string;
+  alias?: string | null;
+  name?: string | null;
+  displayName: string;
+  isConnected: boolean;
+  isPaired: boolean;
+};
+
+type BleScanResponse = {
+  devices: BleScanDevice[];
+  error?: string;
+};
+
 type StartStopResult = {
   deviceId: string;
   started?: boolean;
@@ -89,6 +103,9 @@ export function DevicesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [ports, setPorts] = useState<string[]>([]);
+  const [bleScanResults, setBleScanResults] = useState<Record<string, BleScanDevice[]>>({});
+  const [bleScanLoading, setBleScanLoading] = useState<Record<string, boolean>>({});
+  const [bleScanErrors, setBleScanErrors] = useState<Record<string, string | null>>({});
   const [deviceActions, setDeviceActions] = useState<Record<string, { loading: boolean; result?: StartStopResult }>>({});
   const [databases, setDatabases] = useState<string[]>([]);
   const [dbSuggestions, setDbSuggestions] = useState<Record<string, DatabaseSuggestion>>({});
@@ -124,6 +141,32 @@ export function DevicesPage() {
       const data = (await resp.json()) as { databases: string[]; error?: string };
       setDatabases(data.databases);
     } catch { /* ignore */ }
+  }, []);
+
+  const scanBleDevices = useCallback(async (deviceId: string, definitionId: string) => {
+    setBleScanLoading(prev => ({ ...prev, [deviceId]: true }));
+    setBleScanErrors(prev => ({ ...prev, [deviceId]: null }));
+
+    try {
+      const query = new URLSearchParams({ definitionId, timeoutMs: '6000' });
+      const resp = await fetch(`/api/devices/ble/scan?${query.toString()}`);
+      const data = (await resp.json()) as BleScanResponse;
+
+      if (!resp.ok) {
+        throw new Error(data.error ?? 'Unable to scan for BLE devices.');
+      }
+
+      setBleScanResults(prev => ({ ...prev, [deviceId]: data.devices }));
+      setBleScanErrors(prev => ({ ...prev, [deviceId]: data.error ?? null }));
+    } catch (error) {
+      setBleScanResults(prev => ({ ...prev, [deviceId]: [] }));
+      setBleScanErrors(prev => ({
+        ...prev,
+        [deviceId]: error instanceof Error ? error.message : 'Unable to scan for BLE devices.'
+      }));
+    } finally {
+      setBleScanLoading(prev => ({ ...prev, [deviceId]: false }));
+    }
   }, []);
 
   const loadDbSuggestion = useCallback(async (deviceId: string) => {
@@ -447,6 +490,10 @@ export function DevicesPage() {
             const transportType = getTransportType(device, availableDefinitions);
             const requiresTransport = requiresTransportIdentifier(device, availableDefinitions);
             const hasTransportTarget = !requiresTransport || Boolean(device.transportPortName?.trim());
+            const bleDevices = bleScanResults[device.deviceId] ?? [];
+            const bleIsScanning = bleScanLoading[device.deviceId] ?? false;
+            const bleScanError = bleScanErrors[device.deviceId] ?? null;
+            const hasBleScanResults = Object.prototype.hasOwnProperty.call(bleScanResults, device.deviceId);
 
             return (
               <section key={`${device.deviceId}-${index}`} className='rounded-2xl border border-border bg-card/70 p-5 shadow-sm'>
@@ -523,7 +570,7 @@ export function DevicesPage() {
                 {isTransportSupported && requiresTransport && !hasTransportTarget ? (
                   <div className='mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300'>
                     {transportType === 'ble'
-                      ? 'Enter the BLE device MAC address or alias before starting this device.'
+                      ? 'Scan and choose a nearby BLE device, or enter the MAC address or alias before starting this device.'
                       : 'Select the serial port before starting this device.'}
                   </div>
                 ) : null}
@@ -554,15 +601,57 @@ export function DevicesPage() {
                     </label>
                   ) : null}
                   {transportType === 'ble' ? (
-                    <label className='space-y-2 text-sm text-foreground'>
-                      <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>BLE Address</span>
-                      <Input
-                        value={device.transportPortName ?? ''}
-                        disabled={isRunning}
-                        placeholder='AA:BB:CC:DD:EE:FF or device alias'
-                        onChange={(event) => updateDevice(index, 'transportPortName', event.target.value || null)}
-                      />
-                    </label>
+                    <div className='space-y-2 text-sm text-foreground'>
+                      <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>BLE Device</span>
+                      <div className='flex flex-col gap-2 xl:flex-row'>
+                        <Input
+                          className='flex-1'
+                          value={device.transportPortName ?? ''}
+                          disabled={isRunning}
+                          placeholder='AA:BB:CC:DD:EE:FF or device alias'
+                          onChange={(event) => updateDevice(index, 'transportPortName', event.target.value || null)}
+                        />
+                        <Button
+                          type='button'
+                          variant='outline'
+                          className='shrink-0'
+                          disabled={isRunning || bleIsScanning || !device.definitionId}
+                          onClick={() => void scanBleDevices(device.deviceId, device.definitionId)}
+                        >
+                          {bleIsScanning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : null}
+                          {bleIsScanning ? 'Scanning...' : 'Scan nearby'}
+                        </Button>
+                      </div>
+                      <p className='text-xs text-muted-foreground'>
+                        Scan on the Pi and choose a detected device, or enter the address manually.
+                      </p>
+                      {bleDevices.length > 0 ? (
+                        <select
+                          aria-label='Discovered BLE devices'
+                          className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50'
+                          value={bleDevices.some(candidate => candidate.address === device.transportPortName) ? (device.transportPortName ?? '') : ''}
+                          disabled={isRunning || bleIsScanning}
+                          onChange={(event) => updateDevice(index, 'transportPortName', event.target.value || null)}
+                        >
+                          <option value=''>Choose discovered device...</option>
+                          {bleDevices.map(candidate => (
+                            <option key={candidate.address} value={candidate.address}>
+                              {`${candidate.displayName} (${candidate.address})${candidate.isConnected ? ' - connected' : ''}${candidate.isPaired ? ' - paired' : ''}`}
+                            </option>
+                          ))}
+                        </select>
+                      ) : null}
+                      {bleScanError ? (
+                        <div className='rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300'>
+                          {bleScanError}
+                        </div>
+                      ) : null}
+                      {!bleIsScanning && !bleScanError && hasBleScanResults && bleDevices.length === 0 ? (
+                        <div className='rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground'>
+                          No nearby BLE devices were detected.
+                        </div>
+                      ) : null}
+                    </div>
                   ) : null}
                   {transportType !== 'ble' ? (
                     <label className='space-y-2 text-sm text-foreground'>
