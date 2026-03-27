@@ -232,8 +232,8 @@ else {
             @{
                 DeviceId = 'jk-master-01'
                 DisplayName = 'Main Battery Rack'
-                Protocol = 'jk-rs485'
-                RegisterProfile = 'jk-inverter-v15'
+                DefinitionId = 'jk-inverter-bms'
+                TransportPortName = $serialPort
                 Address = 1
                 IsMaster = $true
                 PollIntervalMilliseconds = 1000

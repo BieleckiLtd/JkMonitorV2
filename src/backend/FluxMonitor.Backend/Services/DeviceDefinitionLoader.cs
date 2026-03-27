@@ -29,11 +29,51 @@ public sealed class DeviceDefinitionLoader
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<DeviceDefinitionLoader> _logger;
 
-    public DeviceDefinitionLoader(string definitionsPath, IHttpClientFactory httpClientFactory, ILogger<DeviceDefinitionLoader> logger)
+    public DeviceDefinitionLoader(
+        string definitionsPath,
+        string contentRootPath,
+        IHttpClientFactory httpClientFactory,
+        ILogger<DeviceDefinitionLoader> logger)
     {
-        _definitionsPath = Path.GetFullPath(definitionsPath);
+        var configuredPath = ResolveConfiguredPath(definitionsPath, contentRootPath);
+        _definitionsPath = ResolveDefinitionsPath(definitionsPath, contentRootPath);
         _httpClientFactory = httpClientFactory;
         _logger = logger;
+
+        if (!string.Equals(_definitionsPath, configuredPath, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogWarning(
+                "Configured device definitions path {ConfiguredPath} does not exist. Falling back to bundled definitions at {ResolvedPath}.",
+                configuredPath,
+                _definitionsPath);
+        }
+    }
+
+    internal static string ResolveDefinitionsPath(string? definitionsPath, string? contentRootPath)
+    {
+        var configuredPath = ResolveConfiguredPath(definitionsPath, contentRootPath);
+        if (Directory.Exists(configuredPath))
+        {
+            return configuredPath;
+        }
+
+        var bundledPath = ResolveConfiguredPath("devices", contentRootPath);
+        if (Directory.Exists(bundledPath))
+        {
+            return bundledPath;
+        }
+
+        return configuredPath;
+    }
+
+    internal static string ResolveConfiguredPath(string? definitionsPath, string? contentRootPath)
+    {
+        var configuredPath = string.IsNullOrWhiteSpace(definitionsPath) ? "devices" : definitionsPath;
+        var basePath = string.IsNullOrWhiteSpace(contentRootPath) ? AppContext.BaseDirectory : contentRootPath;
+
+        return Path.IsPathRooted(configuredPath)
+            ? Path.GetFullPath(configuredPath)
+            : Path.GetFullPath(Path.Combine(basePath, configuredPath));
     }
 
     /// <summary>

@@ -279,6 +279,15 @@ function Read-RequiredConnectionString {
     }
 }
 
+function Normalize-ReleaseConfiguration {
+    $developmentLocal = Join-Path $appRoot 'appsettings.Development.Local.json'
+    $productionLocal = Join-Path $appRoot 'appsettings.Production.Local.json'
+
+    if ((Test-Path $developmentLocal) -and -not (Test-Path $productionLocal)) {
+        Copy-Item -Path $developmentLocal -Destination $productionLocal -Force
+    }
+}
+
 $normalizedRepository = Get-NormalizedRepository $Repository
 $assetUrl = "https://github.com/$normalizedRepository/releases/download/$ReleaseTag/$assetName"
 $tempRoot = Join-Path $env:TEMP ("FluxMonitor-release-install-{0}" -f ([Guid]::NewGuid().ToString('N')))
@@ -315,6 +324,7 @@ try {
     New-Item -ItemType Directory -Path $Destination -Force | Out-Null
     Move-Item -Path (Join-Path $extractPath 'win-x64') -Destination $appRoot
     Restore-PreservedState -PreserveRoot $preservePath -DestinationRoot $Destination
+    Normalize-ReleaseConfiguration
     Write-StartScript
 
     Write-Section 'Checking ASP.NET Core runtime'

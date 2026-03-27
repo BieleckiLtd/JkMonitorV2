@@ -380,6 +380,29 @@ get_existing_environment_name() {
   printf '%s\n' ''
 }
 
+normalize_release_runtime_configuration() {
+  local development_local="$APP_ROOT/appsettings.Development.Local.json"
+  local production_local="$APP_ROOT/appsettings.Production.Local.json"
+
+  if [ -f "$development_local" ] && [ ! -f "$production_local" ]; then
+    cp "$development_local" "$production_local"
+    info 'Migrated release-local settings from Development to Production.'
+  fi
+
+  if [ -f "$ENV_PATH" ]; then
+    local app_urls
+    app_urls="$(grep -E '^ASPNETCORE_URLS=' "$ENV_PATH" | tail -n 1 | cut -d= -f2- || true)"
+    if [ -z "$app_urls" ]; then
+      app_urls="$APP_BIND_URL"
+    fi
+
+    cat > "$ENV_PATH" <<EOF
+ASPNETCORE_ENVIRONMENT=Production
+ASPNETCORE_URLS=$app_urls
+EOF
+  fi
+}
+
 read_choice() {
   local prompt="$1"
   local mode="$2"
@@ -638,8 +661,8 @@ cat > "$writable_config" <<JSON
       {
         "DeviceId": "jk-master-01",
         "DisplayName": "Main Battery Rack",
-        "Protocol": "jk-rs485",
-        "RegisterProfile": "jk-inverter-v15",
+        "DefinitionId": "jk-inverter-bms",
+        "TransportPortName": "$serial_port",
         "Address": 1,
         "IsMaster": true,
         "PollIntervalMilliseconds": 1000,
@@ -978,6 +1001,7 @@ fi
 mkdir -p "$DESTINATION"
 mv "$EXTRACT_PATH/linux-arm64" "$APP_ROOT"
 restore_preserved_state "$PRESERVE_PATH" "$DESTINATION"
+normalize_release_runtime_configuration
 write_release_info "$DOWNLOADED_RELEASE_SHA256"
 write_start_script
 write_configure_script
@@ -1002,7 +1026,7 @@ if has_existing_runtime_configuration && { is_truthy "$NONINTERACTIVE_REUSE_EXIS
   reused_existing_configuration='true'
   ENVIRONMENT="$(get_existing_environment_name)"
   if [ -z "$ENVIRONMENT" ]; then
-    ENVIRONMENT='Development'
+    ENVIRONMENT='Production'
   fi
   info "Reusing the existing runtime configuration for $ENVIRONMENT."
 elif has_existing_runtime_configuration; then
@@ -1012,8 +1036,8 @@ else
   info 'Starting in simulator mode for the first run so the web UI is available immediately.'
   muted 'You can switch to real hardware later from the Setup panel in the app.'
 fi
-ENVIRONMENT="${ENVIRONMENT:-Development}"
-TARGET_CONFIG="$APP_ROOT/appsettings.Development.Local.json"
+ENVIRONMENT="${ENVIRONMENT:-Production}"
+TARGET_CONFIG="$APP_ROOT/appsettings.Production.Local.json"
 
 if [ "$reused_existing_configuration" = 'false' ] && [ "$MODE" = '1' ]; then
   CONNECTION_STRING="$(get_required_connection_string)"
@@ -1056,8 +1080,8 @@ elif [ "$reused_existing_configuration" = 'false' ]; then
       {
         "DeviceId": "jk-master-01",
         "DisplayName": "Main Battery Rack",
-        "Protocol": "jk-rs485",
-        "RegisterProfile": "jk-inverter-v15",
+        "DefinitionId": "jk-inverter-bms",
+        "TransportPortName": "$SERIAL_PORT",
         "Address": 1,
         "IsMaster": true,
         "PollIntervalMilliseconds": 1000,

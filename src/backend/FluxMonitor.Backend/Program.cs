@@ -65,6 +65,7 @@ builder.Services.AddSingleton<FluxMonitor.Backend.Services.NotificationEvaluator
 var definitionsPath = monitorSection.GetValue<string>("DeviceDefinitionsPath") ?? "devices";
 builder.Services.AddSingleton(sp => new FluxMonitor.Backend.Services.DeviceDefinitionLoader(
     definitionsPath,
+    builder.Environment.ContentRootPath,
     sp.GetRequiredService<IHttpClientFactory>(),
     sp.GetRequiredService<ILogger<FluxMonitor.Backend.Services.DeviceDefinitionLoader>>()));
 

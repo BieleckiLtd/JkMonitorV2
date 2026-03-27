@@ -76,6 +76,7 @@ public class DeviceStateStoreTests
 
         var definitionLoader = new DeviceDefinitionLoader(
             "devices",
+            Directory.GetCurrentDirectory(),
             new StubHttpClientFactory(),
             NullLogger<DeviceDefinitionLoader>.Instance);
 
