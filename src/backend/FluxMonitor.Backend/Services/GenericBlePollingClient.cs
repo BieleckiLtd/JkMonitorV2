@@ -68,10 +68,22 @@ public sealed class GenericBlePollingClient(
                     continue;
                 }
 
-                var frame = await RequestFrameAsync(session, definition, bank, cancellationToken);
-                var payload = ExtractPayload(frame, bank);
-                bankData[bank.Id] = payload;
-                session.BankCache[bank.Id] = (now, payload);
+                try
+                {
+                    var frame = await RequestFrameAsync(session, definition, bank, cancellationToken);
+                    var payload = ExtractPayload(frame, bank);
+                    bankData[bank.Id] = payload;
+                    session.BankCache[bank.Id] = (now, payload);
+                }
+                catch (TimeoutException ex) when (IsOptionalBank(bank))
+                {
+                    logger.LogWarning(
+                        ex,
+                        "BLE optional bank read timed out for device {DeviceId}. BankId={BankId}, DefinitionId={DefinitionId}.",
+                        device.DeviceId,
+                        bank.Id,
+                        definition.Device.Id);
+                }
             }
 
             return telemetryBuilder.BuildPollResult(
@@ -295,6 +307,7 @@ public sealed class GenericBlePollingClient(
             session.WriteCharacteristic = writeCharacteristic;
             session.NotifyWatcher = await notifyCharacteristic.WatchPropertiesAsync(changes => OnNotifyPropertiesChanged(session, definition, changes));
             await notifyCharacteristic.StartNotifyAsync();
+            await Task.Delay(150, cancellationToken);
 
             logger.LogInformation(
                 "BLE connection established for device {DeviceId}. Target={Target}, ServiceUuid={ServiceUuid}.",
@@ -326,50 +339,80 @@ public sealed class GenericBlePollingClient(
         if (expectedFrameSize < 8)
             throw new InvalidOperationException($"Definition '{definition.Device.Id}' has an invalid BLE response frame size.");
 
-        TaskCompletionSource<byte[]> pendingFrame;
-        lock (session.SyncRoot)
+        var retries = Math.Max(definition.Connection.Protocol.Settings?.Retries ?? 0, 0);
+        var attempts = retries + 1;
+        Exception? lastError = null;
+
+        for (var attempt = 1; attempt <= attempts; attempt++)
         {
-            session.FrameBuffer.Clear();
-            pendingFrame = new(TaskCreationOptions.RunContinuationsAsynchronously);
-            session.PendingFrame = pendingFrame;
-            session.PendingFrameType = bank.ResponseFrameType;
-            session.ExpectedFrameSize = expectedFrameSize;
-        }
-
-        try
-        {
-            var commandFrame = BuildJkBleCommand(bank.Command);
-            var options = new Dictionary<string, object>
-            {
-                ["type"] = await SelectWriteTypeAsync(session.WriteCharacteristic!)
-            };
-
-            logger.LogDebug(
-                "Sending BLE command 0x{Command:X2} expecting frame type 0x{FrameType:X2} for device {DeviceId}.",
-                bank.Command,
-                bank.ResponseFrameType,
-                session.DeviceId);
-
-            await session.WriteCharacteristic!.WriteValueAsync(commandFrame, options);
-
-            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            var timeoutTask = Task.Delay(timeout, timeoutCts.Token);
-            var completed = await Task.WhenAny(pendingFrame.Task, timeoutTask);
-            if (completed != pendingFrame.Task)
-                throw new TimeoutException(
-                    $"Timed out waiting for BLE frame type 0x{bank.ResponseFrameType:X2} from device '{session.DeviceId}'.");
-
-            timeoutCts.Cancel();
-            return await pendingFrame.Task;
-        }
-        finally
-        {
+            TaskCompletionSource<byte[]> pendingFrame;
             lock (session.SyncRoot)
             {
-                session.PendingFrame = null;
-                session.PendingFrameType = null;
+                session.FrameBuffer.Clear();
+                pendingFrame = new(TaskCreationOptions.RunContinuationsAsynchronously);
+                session.PendingFrame = pendingFrame;
+                session.PendingFrameType = bank.ResponseFrameType;
+                session.ExpectedFrameSize = expectedFrameSize;
+            }
+
+            try
+            {
+                var commandFrame = BuildJkBleCommand(bank.Command);
+                var options = new Dictionary<string, object>
+                {
+                    ["type"] = await SelectWriteTypeAsync(session.WriteCharacteristic!)
+                };
+
+                logger.LogDebug(
+                    "Sending BLE command 0x{Command:X2} expecting frame type 0x{FrameType:X2} for device {DeviceId}. Attempt {Attempt}/{Attempts}.",
+                    bank.Command,
+                    bank.ResponseFrameType,
+                    session.DeviceId,
+                    attempt,
+                    attempts);
+
+                await session.WriteCharacteristic!.WriteValueAsync(commandFrame, options);
+
+                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+                var timeoutTask = Task.Delay(timeout, timeoutCts.Token);
+                var completed = await Task.WhenAny(pendingFrame.Task, timeoutTask);
+                if (completed != pendingFrame.Task)
+                {
+                    var suffix = string.IsNullOrWhiteSpace(session.LastFrameHex)
+                        ? string.Empty
+                        : $" Last valid frame={session.LastFrameHex}.";
+                    throw new TimeoutException(
+                        $"Timed out waiting for BLE frame type 0x{bank.ResponseFrameType:X2} from device '{session.DeviceId}'.{suffix}");
+                }
+
+                timeoutCts.Cancel();
+                return await pendingFrame.Task;
+            }
+            catch (Exception ex) when (!cancellationToken.IsCancellationRequested && attempt < attempts)
+            {
+                lastError = ex;
+                logger.LogDebug(
+                    ex,
+                    "BLE command retry scheduled for device {DeviceId}. Command=0x{Command:X2}, FrameType=0x{FrameType:X2}, Attempt={Attempt}/{Attempts}.",
+                    session.DeviceId,
+                    bank.Command,
+                    bank.ResponseFrameType,
+                    attempt,
+                    attempts);
+                await Task.Delay(150, cancellationToken);
+            }
+            finally
+            {
+                lock (session.SyncRoot)
+                {
+                    session.PendingFrame = null;
+                    session.PendingFrameType = null;
+                }
             }
         }
+
+        throw lastError ?? new TimeoutException(
+            $"Timed out waiting for BLE frame type 0x{bank.ResponseFrameType:X2} from device '{session.DeviceId}'.");
     }
 
     private void OnNotifyPropertiesChanged(BleSession session, DeviceDefinition definition, PropertyChanges changes)
@@ -636,11 +679,8 @@ public sealed class GenericBlePollingClient(
         {
             await EnsureConnectedAsync(session, probeConfig, definition, probeCts.Token);
 
-            var infoBank = definition.DataSources.FirstOrDefault(bank =>
-                               string.Equals(bank.Id, "info", StringComparison.OrdinalIgnoreCase))
-                           ?? definition.DataSources.FirstOrDefault();
-
-            if (infoBank is null)
+            var probeBanks = GetProbeBanks(definition).ToArray();
+            if (probeBanks.Length == 0)
             {
                 logger.LogWarning(
                     "BLE probe could not find a readable data source for address {Address} and definition {DefinitionId}.",
@@ -649,22 +689,40 @@ public sealed class GenericBlePollingClient(
                 return new(false, null, "Probe could not find a readable JK data source.");
             }
 
-            var frame = await RequestFrameAsync(session, definition, infoBank, probeCts.Token);
-            var payload = ExtractPayload(frame, infoBank);
+            var failures = new List<string>();
+            foreach (var bank in probeBanks)
+            {
+                try
+                {
+                    var frame = await RequestFrameAsync(session, definition, bank, probeCts.Token);
+                    var payload = ExtractPayload(frame, bank);
 
-            var model = ReadAscii(payload, 0, 16);
-            var deviceName = ReadAscii(payload, 96, 16);
-            var vendor = ReadAscii(payload, 128, 16);
-            var identity = new[] { vendor, model, deviceName }
-                .Where(value => !string.IsNullOrWhiteSpace(value))
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToArray();
+                    if (string.Equals(bank.Id, "info", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var model = ReadAscii(payload, 0, 16);
+                        var deviceName = ReadAscii(payload, 96, 16);
+                        var vendor = ReadAscii(payload, 128, 16);
+                        var identity = new[] { vendor, model, deviceName }
+                            .Where(value => !string.IsNullOrWhiteSpace(value))
+                            .Distinct(StringComparer.OrdinalIgnoreCase)
+                            .ToArray();
 
-            var details = identity.Length > 0
-                ? string.Join(" · ", identity)
-                : "JK BLE protocol responded successfully.";
+                        var details = identity.Length > 0
+                            ? string.Join(" · ", identity)
+                            : "JK BLE device-info frame responded successfully.";
 
-            return new(true, "Verified JK BMS", details);
+                        return new(true, "Verified JK BMS", details);
+                    }
+
+                    return new(true, "Verified JK BMS", $"JK BLE {bank.Name.ToLowerInvariant()} frame responded successfully.");
+                }
+                catch (TimeoutException ex) when (!probeCts.IsCancellationRequested)
+                {
+                    failures.Add($"{bank.Id}: {ex.Message}");
+                }
+            }
+
+            return new(false, null, string.Join(" ", failures));
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -784,6 +842,17 @@ public sealed class GenericBlePollingClient(
             .Select(char.ToUpperInvariant)
             .ToArray());
     }
+
+    private static IEnumerable<DataSourceDefinition> GetProbeBanks(DeviceDefinition definition)
+    {
+        return definition.DataSources
+            .OrderByDescending(bank => string.Equals(bank.Id, "live", StringComparison.OrdinalIgnoreCase))
+            .ThenByDescending(bank => string.Equals(bank.Id, "info", StringComparison.OrdinalIgnoreCase))
+            .DistinctBy(bank => bank.Id, StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static bool IsOptionalBank(DataSourceDefinition bank)
+        => string.Equals(bank.Id, "info", StringComparison.OrdinalIgnoreCase);
 
     private static string[] DescribeStringSequence(object? value)
     {
