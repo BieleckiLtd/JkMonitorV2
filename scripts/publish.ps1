@@ -119,12 +119,34 @@ function Get-DefaultCommitMessage([string[]]$ChangedFiles) {
     return 'chore: publish current changes'
 }
 
-function Invoke-GitHubApi([string]$RepositorySlug, [string]$Path) {
-    $headers = @{
-        Accept = 'application/vnd.github+json'
-        'User-Agent' = 'FluxMonitorV2-publish-script'
+function Get-GitHubToken {
+    if (-not [string]::IsNullOrWhiteSpace($env:GITHUB_TOKEN)) {
+        return $env:GITHUB_TOKEN
     }
 
+    if (-not [string]::IsNullOrWhiteSpace($env:GH_TOKEN)) {
+        return $env:GH_TOKEN
+    }
+
+    return $null
+}
+
+function Get-GitHubHeaders([string]$Accept) {
+    $headers = @{
+        Accept = $Accept
+        'User-Agent' = 'FluxMonitor-publish-script'
+    }
+
+    $githubToken = Get-GitHubToken
+    if (-not [string]::IsNullOrWhiteSpace($githubToken)) {
+        $headers.Authorization = "Bearer $githubToken"
+    }
+
+    return $headers
+}
+
+function Invoke-GitHubApi([string]$RepositorySlug, [string]$Path) {
+    $headers = Get-GitHubHeaders -Accept 'application/vnd.github+json'
     return Invoke-RestMethod -Uri "https://api.github.com/repos/$RepositorySlug$Path" -Headers $headers
 }
 
@@ -163,11 +185,7 @@ function Try-Get-ReleaseAssetFingerprint([string]$RepositorySlug, [string]$Tag, 
 }
 
 function Get-ReleaseChecksum([string]$RepositorySlug, [string]$Tag, [string]$AssetName) {
-    $headers = @{
-        Accept = 'application/octet-stream'
-        'User-Agent' = 'FluxMonitorV2-publish-script'
-    }
-
+    $headers = Get-GitHubHeaders -Accept 'application/octet-stream'
     $checksumAsset = Get-ReleaseAsset -RepositorySlug $RepositorySlug -Tag $Tag -AssetName "$AssetName.sha256"
     $payload = (Invoke-WebRequest -Uri $checksumAsset.url -Headers $headers -UseBasicParsing).Content
     $checksum = ($payload -split '\s+')[0].Trim().ToLowerInvariant()
@@ -242,6 +260,7 @@ Require-Command git
 $repositorySlug = Get-NormalizedRepository -RepositoryInput $Repository -Remote $RemoteName
 $currentBranch = (Invoke-GitCapture @('branch', '--show-current') | Select-Object -First 1).Trim()
 $currentCommit = (Invoke-GitCapture @('rev-parse', 'HEAD') | Select-Object -First 1).Trim()
+$githubToken = Get-GitHubToken
 $expectedReleaseSha256 = $null
 $previousReleaseAssetFingerprint = Try-Get-ReleaseAssetFingerprint -RepositorySlug $repositorySlug -Tag $ReleaseTag -AssetName $linuxAssetName
 
@@ -333,11 +352,15 @@ repository_slug='$repositorySlug'
 release_tag='$ReleaseTag'
 asset_name='$linuxAssetName'
 expected_source_revision_id='$currentCommit'
+github_token='$githubToken'
 
-export FluxMonitor_EXPECTED_RELEASE_SHA256="\$expected_sha256"
-export FluxMonitor_INSTALL_RUNTIME='y'
-export FluxMonitor_INSTALL_SERVICE='y'
-export FluxMonitor_REUSE_EXISTING_CONFIGURATION='1'
+if [ -n "\$github_token" ]; then
+  export GITHUB_TOKEN="\$github_token"
+fi
+export FLUXMONITOR_EXPECTED_RELEASE_SHA256="\$expected_sha256"
+export FLUXMONITOR_INSTALL_RUNTIME='y'
+export FLUXMONITOR_INSTALL_SERVICE='y'
+export FLUXMONITOR_REUSE_EXISTING_CONFIGURATION='1'
 wget -qO- https://raw.githubusercontent.com/$repositorySlug/dev/scripts/install-from-release.sh | bash -s -- https://github.com/$repositorySlug \$release_tag
 if [ ! -f "\$HOME/fluxmonitor/release-info.env" ]; then
   echo 'The installer did not persist release-info.env.' >&2
@@ -348,8 +371,8 @@ set -a
 . "\$HOME/fluxmonitor/release-info.env"
 set +a
 
-if [[ "\${FluxMonitor_RELEASE_SHA256,,}" != "\$expected_sha256" ]]; then
-  echo "Installed checksum mismatch on device. Expected \$expected_sha256 but installer recorded \${FluxMonitor_RELEASE_SHA256:-missing}." >&2
+if [[ "\${FLUXMONITOR_RELEASE_SHA256,,}" != "\$expected_sha256" ]]; then
+  echo "Installed checksum mismatch on device. Expected \$expected_sha256 but installer recorded \${FLUXMONITOR_RELEASE_SHA256:-missing}." >&2
   exit 1
 fi
 sleep 5

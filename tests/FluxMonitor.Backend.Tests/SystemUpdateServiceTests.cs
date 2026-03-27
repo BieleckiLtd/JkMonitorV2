@@ -12,10 +12,10 @@ namespace FluxMonitor.Backend.Tests;
 public class SystemUpdateServiceTests
 {
     [Fact]
-    public async Task CheckForUpdateAsync_UsesInstallerChecksumKey()
+    public async Task CheckForUpdateAsync_UsesFluxMonitorChecksumKey()
     {
         using var releaseInfoScope = TemporaryReleaseInfoScope.Create(
-            "FluxMonitor_RELEASE_SHA256=1111111111111111111111111111111111111111111111111111111111111111");
+            "FLUXMONITOR_RELEASE_SHA256=1111111111111111111111111111111111111111111111111111111111111111");
 
         var service = CreateService(
             new StubHttpClientFactory(new StubHttpMessageHandler(request =>
@@ -52,48 +52,6 @@ public class SystemUpdateServiceTests
         Assert.Equal("2222222222222222222222222222222222222222222222222222222222222222", result.RemoteChecksum);
         Assert.True(result.UpdateAvailable);
         Assert.Null(result.CheckError);
-    }
-
-    [Fact]
-    public async Task CheckForUpdateAsync_AcceptsLegacyChecksumKey()
-    {
-        using var releaseInfoScope = TemporaryReleaseInfoScope.Create(
-            "RELEASE_SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
-
-        var service = CreateService(
-            new StubHttpClientFactory(new StubHttpMessageHandler(request =>
-            {
-                if (request.RequestUri?.AbsoluteUri == "https://api.github.com/repos/BieleckiLtd/JkMonitorV2/releases/tags/dev-latest")
-                {
-                    return CreateJsonResponse("""
-                        {
-                          "published_at": "2026-03-25T10:00:00Z",
-                          "assets": [
-                            {
-                              "name": "fluxmonitor-backend-linux-arm64.tar.gz.sha256",
-                              "browser_download_url": "https://example.test/fluxmonitor-backend-linux-arm64.tar.gz.sha256"
-                            }
-                          ]
-                        }
-                        """);
-                }
-
-                if (request.RequestUri?.AbsoluteUri == "https://example.test/fluxmonitor-backend-linux-arm64.tar.gz.sha256")
-                {
-                    return new HttpResponseMessage(HttpStatusCode.OK)
-                    {
-                        Content = new StringContent("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  fluxmonitor-backend-linux-arm64.tar.gz")
-                    };
-                }
-
-                return new HttpResponseMessage(HttpStatusCode.NotFound);
-            })));
-
-        var result = await service.CheckForUpdateAsync(CancellationToken.None);
-
-        Assert.Equal("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", result.LocalChecksum);
-        Assert.Equal("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", result.RemoteChecksum);
-        Assert.True(result.UpdateAvailable);
     }
 
     private static SystemUpdateService CreateService(IHttpClientFactory httpClientFactory)

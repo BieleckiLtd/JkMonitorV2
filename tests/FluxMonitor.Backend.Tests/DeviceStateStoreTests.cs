@@ -5,6 +5,7 @@ using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using System.Net.Http;
 using Xunit;
 
 namespace FluxMonitor.Backend.Tests;
@@ -74,6 +75,7 @@ public class DeviceStateStoreTests
 
         var definitionLoader = new DeviceDefinitionLoader(
             "devices",
+            new StubHttpClientFactory(),
             NullLogger<DeviceDefinitionLoader>.Instance);
 
         var config = configuration ?? CreateDefaultConfiguration();
@@ -127,5 +129,10 @@ public class DeviceStateStoreTests
         public string ApplicationName { get; set; } = "FluxMonitor.Backend.Tests";
         public string ContentRootPath { get; set; } = Directory.GetCurrentDirectory();
         public IFileProvider ContentRootFileProvider { get; set; } = new NullFileProvider();
+    }
+
+    private sealed class StubHttpClientFactory : IHttpClientFactory
+    {
+        public HttpClient CreateClient(string name) => new();
     }
 }

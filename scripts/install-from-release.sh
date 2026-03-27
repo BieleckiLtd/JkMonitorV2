@@ -26,6 +26,7 @@ NONINTERACTIVE_INSTALL_RUNTIME="${FLUXMONITOR_INSTALL_RUNTIME:-}"
 NONINTERACTIVE_INSTALL_SERVICE="${FLUXMONITOR_INSTALL_SERVICE:-}"
 NONINTERACTIVE_REUSE_EXISTING_CONFIGURATION="${FLUXMONITOR_REUSE_EXISTING_CONFIGURATION:-}"
 EXPECTED_RELEASE_SHA256="${FLUXMONITOR_EXPECTED_RELEASE_SHA256:-}"
+GITHUB_TOKEN_VALUE="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
 CONFIGURE_SCRIPT_PATH="$DESTINATION/configure.sh"
 
 if [ -t 1 ]; then
@@ -740,25 +741,36 @@ fetch_release_json() {
   local url="https://api.github.com/repos/$NORMALIZED_REPOSITORY/releases/tags/$RELEASE_TAG"
 
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: FluxMonitorV2-install-script' "$url"
+    if [ -n "$GITHUB_TOKEN_VALUE" ]; then
+      curl -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: FluxMonitor-install-script' -H "Authorization: Bearer $GITHUB_TOKEN_VALUE" "$url"
+    else
+      curl -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: FluxMonitor-install-script' "$url"
+    fi
     return
   fi
 
   if command -v wget >/dev/null 2>&1; then
-    wget -qO- --header='Accept: application/vnd.github+json' --header='User-Agent: FluxMonitorV2-install-script' "$url"
+    if [ -n "$GITHUB_TOKEN_VALUE" ]; then
+      wget -qO- --header='Accept: application/vnd.github+json' --header='User-Agent: FluxMonitor-install-script' --header="Authorization: Bearer $GITHUB_TOKEN_VALUE" "$url"
+    else
+      wget -qO- --header='Accept: application/vnd.github+json' --header='User-Agent: FluxMonitor-install-script' "$url"
+    fi
     return
   fi
 
   if command -v python3 >/dev/null 2>&1; then
-    python3 - "$url" <<'PY'
+    GITHUB_TOKEN_VALUE="$GITHUB_TOKEN_VALUE" python3 - "$url" <<'PY'
+import os
 import sys
 import urllib.request
 
+token = os.environ.get("GITHUB_TOKEN_VALUE", "")
 request = urllib.request.Request(
     sys.argv[1],
     headers={
         "Accept": "application/vnd.github+json",
-        "User-Agent": "FluxMonitorV2-install-script",
+        "User-Agent": "FluxMonitor-install-script",
+        **({"Authorization": f"Bearer {token}"} if token else {}),
     },
 )
 with urllib.request.urlopen(request) as response:
@@ -805,32 +817,52 @@ download_release_asset() {
   asset_api_url="$(get_release_asset_api_url "$asset_name")"
 
   if command -v curl >/dev/null 2>&1; then
-    curl -fsSL \
-      -H 'Accept: application/octet-stream' \
-      -H 'User-Agent: FluxMonitorV2-install-script' \
-      "$asset_api_url" \
-      -o "$target"
+    if [ -n "$GITHUB_TOKEN_VALUE" ]; then
+      curl -fsSL \
+        -H 'Accept: application/octet-stream' \
+        -H 'User-Agent: FluxMonitor-install-script' \
+        -H "Authorization: Bearer $GITHUB_TOKEN_VALUE" \
+        "$asset_api_url" \
+        -o "$target"
+    else
+      curl -fsSL \
+        -H 'Accept: application/octet-stream' \
+        -H 'User-Agent: FluxMonitor-install-script' \
+        "$asset_api_url" \
+        -o "$target"
+    fi
     return
   fi
 
   if command -v wget >/dev/null 2>&1; then
-    wget -qO "$target" \
-      --header='Accept: application/octet-stream' \
-      --header='User-Agent: FluxMonitorV2-install-script' \
-      "$asset_api_url"
+    if [ -n "$GITHUB_TOKEN_VALUE" ]; then
+      wget -qO "$target" \
+        --header='Accept: application/octet-stream' \
+        --header='User-Agent: FluxMonitor-install-script' \
+        --header="Authorization: Bearer $GITHUB_TOKEN_VALUE" \
+        "$asset_api_url"
+    else
+      wget -qO "$target" \
+        --header='Accept: application/octet-stream' \
+        --header='User-Agent: FluxMonitor-install-script' \
+        "$asset_api_url"
+    fi
     return
   fi
 
   if command -v python3 >/dev/null 2>&1; then
-    python3 - "$asset_api_url" "$target" <<'PY'
+    GITHUB_TOKEN_VALUE="$GITHUB_TOKEN_VALUE" python3 - "$asset_api_url" "$target" <<'PY'
+import os
 import sys
 import urllib.request
 
+token = os.environ.get("GITHUB_TOKEN_VALUE", "")
 request = urllib.request.Request(
     sys.argv[1],
     headers={
         "Accept": "application/octet-stream",
-        "User-Agent": "FluxMonitorV2-install-script",
+        "User-Agent": "FluxMonitor-install-script",
+        **({"Authorization": f"Bearer {token}"} if token else {}),
     },
 )
 with urllib.request.urlopen(request) as response, open(sys.argv[2], "wb") as output:

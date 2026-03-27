@@ -295,9 +295,7 @@ public sealed class SystemUpdateService(
     {
         foreach (var line in lines)
         {
-            if (TryParseReleaseInfoValue(line, "FLUXMONITOR_RELEASE_SHA256", out var checksum) ||
-                TryParseReleaseInfoValue(line, "JKMONITOR_RELEASE_SHA256", out checksum) ||
-                TryParseReleaseInfoValue(line, "RELEASE_SHA256", out checksum))
+            if (TryParseReleaseInfoValue(line, "FLUXMONITOR_RELEASE_SHA256", out var checksum))
             {
                 return checksum;
             }

@@ -18,15 +18,11 @@ public sealed class DeviceDefinitionLoader
         AllowTrailingCommas = true
     };
 
-    private static readonly JsonSerializerOptions GitHubApiOptions = new()
-    {
-        PropertyNameCaseInsensitive = true,
-    };
-
     // Hardwired source of built-in device definitions.
     private const string GitHubRepository = "BieleckiLtd/JkMonitorV2";
     private const string GitHubBranch = "dev";
     private const string GitHubDevicesFolder = "devices";
+    private const string GitHubDevicesManifest = "index.json";
 
     private readonly ConcurrentDictionary<string, DeviceDefinition> _definitions = new(StringComparer.OrdinalIgnoreCase);
     private readonly string _definitionsPath;
@@ -57,6 +53,11 @@ public sealed class DeviceDefinitionLoader
 
         foreach (var file in files)
         {
+            if (string.Equals(Path.GetFileName(file), GitHubDevicesManifest, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
             try
             {
                 var json = File.ReadAllText(file);
@@ -80,38 +81,33 @@ public sealed class DeviceDefinitionLoader
 
     /// <summary>
     /// Fetch built-in device definitions from the canonical GitHub repository.
-    /// Uses the Git Trees API (one authenticated-optional call) then downloads
-    /// each file from raw.githubusercontent.com which has no rate limit.
+    /// Uses a manifest stored on raw.githubusercontent.com so startup does not
+    /// depend on the GitHub REST API rate limit.
     /// Already-loaded definitions (e.g. user-uploaded local files) are not overwritten.
     /// </summary>
     public async Task LoadFromGitHubAsync(CancellationToken cancellationToken = default)
     {
-        var treeUrl = $"https://api.github.com/repos/{GitHubRepository}/git/trees/{GitHubBranch}?recursive=0";
+        var manifestUrl = $"https://raw.githubusercontent.com/{GitHubRepository}/{GitHubBranch}/{GitHubDevicesFolder}/{GitHubDevicesManifest}";
         _logger.LogInformation("Fetching built-in device definitions list from GitHub.");
 
         try
         {
             using var client = _httpClientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", "FluxMonitor-DeviceDefinitionLoader");
-            client.DefaultRequestHeaders.Add("Accept", "application/vnd.github+json");
 
-            var tree = await client.GetFromJsonAsync<GitHubTree>(treeUrl, GitHubApiOptions, cancellationToken);
-            if (tree?.TreeItems is null)
+            var manifest = await client.GetFromJsonAsync<DeviceDefinitionManifest>(manifestUrl, JsonOptions, cancellationToken);
+            if (manifest?.Files is null || manifest.Files.Count == 0)
             {
-                _logger.LogWarning("GitHub tree API returned null.");
+                _logger.LogWarning("GitHub device definition manifest returned no files.");
                 return;
             }
 
-            var jsonItems = tree.TreeItems.Where(e =>
-                string.Equals(e.Type, "blob", StringComparison.OrdinalIgnoreCase) &&
-                e.Path.StartsWith(GitHubDevicesFolder + "/", StringComparison.OrdinalIgnoreCase) &&
-                e.Path.EndsWith(".json", StringComparison.OrdinalIgnoreCase));
-
-            foreach (var item in jsonItems)
+            foreach (var fileName in manifest.Files
+                .Where(fileName => fileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+                .Distinct(StringComparer.OrdinalIgnoreCase))
             {
-                var fileName = Path.GetFileName(item.Path);
-                // Download from raw.githubusercontent.com — no API rate limit.
-                var rawUrl = $"https://raw.githubusercontent.com/{GitHubRepository}/{GitHubBranch}/{item.Path}";
+                var relativePath = $"{GitHubDevicesFolder}/{fileName}";
+                var rawUrl = $"https://raw.githubusercontent.com/{GitHubRepository}/{GitHubBranch}/{relativePath}";
 
                 try
                 {
@@ -145,16 +141,9 @@ public sealed class DeviceDefinitionLoader
         }
     }
 
-    private sealed class GitHubTree
+    private sealed class DeviceDefinitionManifest
     {
-        [System.Text.Json.Serialization.JsonPropertyName("tree")]
-        public List<GitHubTreeItem> TreeItems { get; init; } = [];
-    }
-
-    private sealed class GitHubTreeItem
-    {
-        public string Path { get; init; } = "";
-        public string Type { get; init; } = "";
+        public List<string> Files { get; init; } = [];
     }
 
     /// <summary>
