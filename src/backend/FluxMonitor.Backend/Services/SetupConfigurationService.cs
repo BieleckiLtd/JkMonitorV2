@@ -63,6 +63,17 @@ public sealed class SetupConfigurationService(
                     storage["Provider"] = useDatabase ? "TimescaleDb" : "None";
                     storage["ConnectionString"] = connectionString;
                 });
+
+                if (!useDatabase)
+                {
+                    UpsertObject(monitor, "LogStorage", logStorage =>
+                    {
+                        logStorage["Enabled"] = false;
+                        logStorage["ConnectionString"] = string.Empty;
+                        logStorage["AdminConnectionString"] = string.Empty;
+                        logStorage["AutoCreateDatabase"] = false;
+                    });
+                }
             });
 
             UpdateManagedEnvironmentFile("Development");
@@ -76,6 +87,17 @@ public sealed class SetupConfigurationService(
                     storage["Provider"] = useDatabase ? "TimescaleDb" : "None";
                     storage["ConnectionString"] = connectionString;
                 });
+
+                if (!useDatabase)
+                {
+                    UpsertObject(monitor, "LogStorage", logStorage =>
+                    {
+                        logStorage["Enabled"] = false;
+                        logStorage["ConnectionString"] = string.Empty;
+                        logStorage["AdminConnectionString"] = string.Empty;
+                        logStorage["AutoCreateDatabase"] = false;
+                    });
+                }
             });
 
             UpdateManagedEnvironmentFile("Production");

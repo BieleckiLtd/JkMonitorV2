@@ -28,6 +28,7 @@ public sealed class DeviceDatabaseService(
 
     public async Task<IReadOnlyList<string>> ListDatabasesAsync(CancellationToken cancellationToken)
     {
+        EnsureDatabaseConfigured();
         await using var connection = await OpenConnectionAsync(BuildMaintenanceConnectionString(), cancellationToken);
 
         var databases = await connection.QueryAsync<string>(@"
@@ -40,6 +41,11 @@ ORDER BY datname;");
 
     public async Task<CreateDatabaseResult> CreateDatabaseAsync(string databaseName, string provider, CancellationToken cancellationToken)
     {
+        if (!HasDatabase)
+        {
+            return new CreateDatabaseResult(false, "No database connection string configured.");
+        }
+
         if (!ValidDbName.IsMatch(databaseName))
         {
             return new CreateDatabaseResult(false, $"Invalid database name '{databaseName}'. Use lowercase letters, digits, and underscores (max 63 chars, must start with a letter).");
@@ -86,6 +92,16 @@ ORDER BY datname;");
 
     public async Task<SchemaValidationResult> ValidateSchemaAsync(string databaseName, CancellationToken cancellationToken)
     {
+        if (!HasDatabase)
+        {
+            return new SchemaValidationResult(
+                Compatible: false,
+                HasTimescaleDb: false,
+                ExistingTables: [],
+                Issues: ["No database connection string configured."],
+                IsEmpty: false);
+        }
+
         var issues = new List<string>();
         var connectionString = BuildConnectionStringForDatabase(databaseName);
 
@@ -149,11 +165,20 @@ WHERE table_schema = 'public' AND table_type = 'BASE TABLE';");
 
     private string BuildMaintenanceConnectionString()
     {
+        EnsureDatabaseConfigured();
         var builder = new NpgsqlConnectionStringBuilder(_storage.ConnectionString)
         {
             Database = "postgres"
         };
         return builder.ToString();
+    }
+
+    private void EnsureDatabaseConfigured()
+    {
+        if (!HasDatabase)
+        {
+            throw new InvalidOperationException("No database connection string configured.");
+        }
     }
 }
 
