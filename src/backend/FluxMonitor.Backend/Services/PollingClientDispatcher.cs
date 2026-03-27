@@ -16,6 +16,18 @@ public sealed class PollingClientDispatcher(
     private static readonly HashSet<string> SupportedTransports =
         new(StringComparer.OrdinalIgnoreCase) { "serial" };
 
+    public static bool IsTransportSupported(string? transportType)
+        => !string.IsNullOrWhiteSpace(transportType) && SupportedTransports.Contains(transportType);
+
+    public static string GetUnsupportedTransportMessage(string? transportType)
+    {
+        if (string.IsNullOrWhiteSpace(transportType))
+            return "Transport type is not defined.";
+
+        return $"Transport type '{transportType}' is not supported yet. " +
+               $"This build currently supports: {string.Join(", ", SupportedTransports)}.";
+    }
+
     /// <summary>
     /// Returns true when the device's definition transport is handled by a registered client.
     /// </summary>
@@ -23,7 +35,16 @@ public sealed class PollingClientDispatcher(
     {
         if (!definitionLoader.TryGet(device.DefinitionId, out var definition) || definition is null)
             return false;
-        return SupportedTransports.Contains(definition.Connection.Transport.Type);
+        return IsTransportSupported(definition.Connection.Transport.Type);
+    }
+
+    public string? GetUnsupportedTransportMessage(DeviceConfiguration device)
+    {
+        if (!definitionLoader.TryGet(device.DefinitionId, out var definition) || definition is null)
+            return $"Device definition '{device.DefinitionId}' was not found.";
+
+        var transportType = definition.Connection.Transport.Type;
+        return IsTransportSupported(transportType) ? null : GetUnsupportedTransportMessage(transportType);
     }
 
     public Task<DevicePollResult> PollAsync(DeviceConfiguration device, CancellationToken cancellationToken)

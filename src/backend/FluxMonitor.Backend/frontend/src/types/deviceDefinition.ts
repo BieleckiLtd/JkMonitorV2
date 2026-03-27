@@ -265,6 +265,8 @@ export type DeviceDefinitionSummary = {
   icon?: string;
   protocolType: string;
   transportType: string;
+  isTransportSupported: boolean;
+  unsupportedTransportMessage?: string | null;
   entityCount: number;
   dataSourceCount: number;
 };

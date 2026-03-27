@@ -170,6 +170,22 @@ public sealed class DevicesController(
         if (device is null)
             return NotFound(new { message = $"Device '{deviceId}' not found in configuration." });
 
+        if (!definitionLoader.TryGet(device.DefinitionId, out var definition) || definition is null)
+            return BadRequest(new { message = $"Device definition '{device.DefinitionId}' not found." });
+
+        if (!PollingClientDispatcher.IsTransportSupported(definition.Connection.Transport.Type))
+        {
+            var supportMessage = PollingClientDispatcher.GetUnsupportedTransportMessage(definition.Connection.Transport.Type);
+            return Ok(new
+            {
+                deviceId,
+                started = false,
+                outcome = "UnsupportedTransport",
+                error = supportMessage,
+                message = supportMessage
+            });
+        }
+
         if (!device.Enabled)
         {
             var updatedDevices = allDevices.Select(d =>

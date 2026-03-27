@@ -42,6 +42,8 @@ type DeviceDefinitionSummary = {
   category?: string;
   description?: string;
   transportType: string;
+  isTransportSupported: boolean;
+  unsupportedTransportMessage?: string | null;
 };
 
 type DatabaseSuggestion = {
@@ -248,6 +250,7 @@ export function DevicesPage() {
 
   const addDeviceFromDefinition = (definitionId: string) => {
     const def = availableDefinitions.find(d => d.id === definitionId);
+    if (def && !def.isTransportSupported) return;
     setDevices(currentDevices => [...currentDevices, defaultDevice(currentDevices.length + 1, definitionId, def?.name)]);
     setShowAddPicker(false);
     markDirty();
@@ -363,14 +366,24 @@ export function DevicesPage() {
                   <button
                     key={def.id}
                     type='button'
-                    className='flex flex-col gap-1 rounded-xl border border-border bg-muted/30 p-4 text-left transition hover:border-primary/50 hover:bg-muted/60'
+                    className={`flex flex-col gap-1 rounded-xl border p-4 text-left transition ${
+                      def.isTransportSupported
+                        ? 'border-border bg-muted/30 hover:border-primary/50 hover:bg-muted/60'
+                        : 'cursor-not-allowed border-amber-500/30 bg-amber-500/10 opacity-70'
+                    }`}
                     onClick={() => addDeviceFromDefinition(def.id)}
+                    disabled={!def.isTransportSupported}
                   >
                     <span className='text-sm font-semibold text-foreground'>{def.name}</span>
                     <span className='text-xs text-muted-foreground'>{def.manufacturer} · {def.model}</span>
                     <span className='mt-1 text-[10px] uppercase tracking-wider text-muted-foreground/70'>
                       {def.transportType}
                     </span>
+                    {!def.isTransportSupported ? (
+                      <span className='mt-2 text-[11px] text-amber-700 dark:text-amber-300'>
+                        {def.unsupportedTransportMessage ?? 'This transport is not supported in the current build.'}
+                      </span>
+                    ) : null}
                   </button>
                 ))}
               </div>
@@ -426,6 +439,7 @@ export function DevicesPage() {
             const isSerial = needsSerialPort(device, availableDefinitions);
             const isRunning = device.enabled;
             const def = availableDefinitions.find(d => d.id === device.definitionId);
+            const isTransportSupported = def?.isTransportSupported ?? true;
 
             return (
               <section key={`${device.deviceId}-${index}`} className='rounded-2xl border border-border bg-card/70 p-5 shadow-sm'>
@@ -468,10 +482,10 @@ export function DevicesPage() {
                         type='button'
                         variant='outline'
                         onClick={() => void startDevice(device.deviceId)}
-                        disabled={action?.loading || !device.deviceId}
+                        disabled={action?.loading || !device.deviceId || !isTransportSupported}
                       >
                         {action?.loading ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Play className='h-4 w-4' />}
-                        Start
+                        {isTransportSupported ? 'Start' : 'Unsupported'}
                       </Button>
                     )}
                     <Button type='button' variant='destructive' onClick={() => removeDevice(index)} disabled={isRunning}>
@@ -490,6 +504,12 @@ export function DevicesPage() {
                         : 'border-amber-500/30 bg-amber-500/10 text-amber-400'
                   }`}>
                     {action.result.message}
+                  </div>
+                ) : null}
+
+                {!isTransportSupported ? (
+                  <div className='mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300'>
+                    {def?.unsupportedTransportMessage ?? 'This device transport is not supported in the current build.'}
                   </div>
                 ) : null}
 

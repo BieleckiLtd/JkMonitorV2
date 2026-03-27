@@ -22,6 +22,11 @@ public sealed class DeviceOrchestrator(
     private bool IsTransportSupported(DeviceConfiguration device) =>
         pollingClient is PollingClientDispatcher dispatcher && dispatcher.IsTransportSupported(device);
 
+    private string GetUnsupportedTransportMessage(DeviceConfiguration device) =>
+        pollingClient is PollingClientDispatcher dispatcher
+            ? dispatcher.GetUnsupportedTransportMessage(device) ?? "Transport type is not yet supported."
+            : "Transport type is not yet supported.";
+
     /// <summary>
     /// Apply a full device configuration set. Diffs against running devices to
     /// stop removed ones, start new ones, and restart changed ones — all live.
@@ -71,7 +76,7 @@ public sealed class DeviceOrchestrator(
                     }
                     else
                     {
-                        logger.LogInformation("Device {DeviceId} registered but not started: transport type is not yet supported.", id);
+                        logger.LogInformation("Device {DeviceId} registered but not started: {Reason}", id, GetUnsupportedTransportMessage(device));
                     }
                 }
             }
@@ -85,7 +90,7 @@ public sealed class DeviceOrchestrator(
                 }
                 else
                 {
-                    logger.LogInformation("Device {DeviceId} registered but not started: transport type is not yet supported.", id);
+                    logger.LogInformation("Device {DeviceId} registered but not started: {Reason}", id, GetUnsupportedTransportMessage(device));
                 }
             }
         }
