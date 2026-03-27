@@ -558,21 +558,40 @@ public sealed class GenericBlePollingClient(
 
     private static async Task<bool> IsMatchingDeviceAsync(Device device, string identifier)
     {
-        var target = identifier.Trim();
-        var address = await device.GetAddressAsync();
-        if (string.Equals(address, target, StringComparison.OrdinalIgnoreCase))
-            return true;
+        var address = await SafeGetStringAsync(() => device.GetAddressAsync());
+        var alias = await SafeGetStringAsync(() => device.GetAliasAsync());
+        var name = await SafeGetStringAsync(() => device.GetNameAsync());
+        return IdentifierMatches(identifier, address, alias, name);
+    }
 
-        var alias = await device.GetAliasAsync();
-        if (!string.IsNullOrWhiteSpace(alias) &&
-            alias.Contains(target, StringComparison.OrdinalIgnoreCase))
+    internal static bool IdentifierMatches(string identifier, params string?[] candidates)
+    {
+        if (string.IsNullOrWhiteSpace(identifier))
+            return false;
+
+        var target = identifier.Trim();
+        var normalizedTarget = NormalizeIdentifier(target);
+
+        foreach (var candidate in candidates)
         {
-            return true;
+            if (string.IsNullOrWhiteSpace(candidate))
+                continue;
+
+            var value = candidate.Trim();
+            if (string.Equals(value, target, StringComparison.OrdinalIgnoreCase))
+                return true;
+
+            if (!string.IsNullOrEmpty(normalizedTarget) &&
+                string.Equals(NormalizeIdentifier(value), normalizedTarget, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+
+            if (value.Contains(target, StringComparison.OrdinalIgnoreCase))
+                return true;
         }
 
-        var name = await device.GetNameAsync();
-        return !string.IsNullOrWhiteSpace(name) &&
-               name.Contains(target, StringComparison.OrdinalIgnoreCase);
+        return false;
     }
 
     private static async Task<string?> GetDiscoveryKeyAsync(Device device)
@@ -581,11 +600,11 @@ public sealed class GenericBlePollingClient(
         if (!string.IsNullOrWhiteSpace(address))
             return address;
 
-        var name = await SafeGetStringAsync(() => device.GetNameAsync());
-        if (!string.IsNullOrWhiteSpace(name))
-            return name;
+        var alias = await SafeGetStringAsync(() => device.GetAliasAsync());
+        if (!string.IsNullOrWhiteSpace(alias))
+            return alias;
 
-        return await SafeGetStringAsync(() => device.GetAliasAsync());
+        return await SafeGetStringAsync(() => device.GetNameAsync());
     }
 
     private async Task<BleProbeResult> ProbeDefinitionAsync(
@@ -753,6 +772,17 @@ public sealed class GenericBlePollingClient(
         {
             return null;
         }
+    }
+
+    private static string NormalizeIdentifier(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return string.Empty;
+
+        return new string(value
+            .Where(char.IsLetterOrDigit)
+            .Select(char.ToUpperInvariant)
+            .ToArray());
     }
 
     private static string[] DescribeStringSequence(object? value)
