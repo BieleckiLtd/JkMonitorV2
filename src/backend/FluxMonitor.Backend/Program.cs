@@ -11,18 +11,11 @@ builder.Configuration
 var monitorSection = builder.Configuration.GetSection("Monitor");
 var storageProvider = monitorSection.GetValue<string>("Storage:Provider");
 var storageConnectionString = monitorSection.GetValue<string>("Storage:ConnectionString");
+var storageConfigured =
+    string.Equals(storageProvider, "TimescaleDb", StringComparison.OrdinalIgnoreCase) &&
+    !string.IsNullOrWhiteSpace(storageConnectionString);
 var logStorageOptions = builder.Configuration.GetSection("Monitor:LogStorage").Get<LogStorageOptions>() ?? new LogStorageOptions();
 var logStore = new PostgresLogStore(logStorageOptions);
-
-if (!string.Equals(storageProvider, "TimescaleDb", StringComparison.OrdinalIgnoreCase))
-{
-    throw new InvalidOperationException("Flux Monitor requires PostgreSQL-backed storage. Set Monitor:Storage:Provider to 'TimescaleDb'.");
-}
-
-if (string.IsNullOrWhiteSpace(storageConnectionString))
-{
-    throw new InvalidOperationException("Flux Monitor requires a PostgreSQL connection string. Set Monitor:Storage:ConnectionString before starting the app.");
-}
 
 await logStore.InitializeAsync(CancellationToken.None);
 
@@ -75,13 +68,29 @@ builder.Services.AddSingleton(sp => new FluxMonitor.Backend.Services.DeviceDefin
     sp.GetRequiredService<IHttpClientFactory>(),
     sp.GetRequiredService<ILogger<FluxMonitor.Backend.Services.DeviceDefinitionLoader>>()));
 
-builder.Services.AddSingleton<FluxMonitor.Backend.Services.TimescaleTelemetryRepository>();
-builder.Services.AddSingleton<FluxMonitor.Backend.Services.ITelemetryRepository>(sp => sp.GetRequiredService<FluxMonitor.Backend.Services.TimescaleTelemetryRepository>());
+if (storageConfigured)
+{
+    builder.Services.AddSingleton<FluxMonitor.Backend.Services.TimescaleTelemetryRepository>();
+    builder.Services.AddSingleton<FluxMonitor.Backend.Services.ITelemetryRepository>(sp => sp.GetRequiredService<FluxMonitor.Backend.Services.TimescaleTelemetryRepository>());
+}
+else
+{
+    builder.Services.AddSingleton<FluxMonitor.Backend.Services.ITelemetryRepository, FluxMonitor.Backend.Services.NoOpTelemetryRepository>();
+}
 
-builder.Services.AddHostedService<FluxMonitor.Backend.Services.PollingBackgroundService>();
-builder.Services.AddHostedService<FluxMonitor.Backend.Services.RetentionBackgroundService>();
+if (storageConfigured)
+{
+    builder.Services.AddHostedService<FluxMonitor.Backend.Services.PollingBackgroundService>();
+    builder.Services.AddHostedService<FluxMonitor.Backend.Services.RetentionBackgroundService>();
+}
 
 var app = builder.Build();
+
+if (!storageConfigured)
+{
+    app.Logger.LogError(
+        "PostgreSQL storage is not configured. Flux Monitor started in setup-required mode. Set Monitor:Storage:ConnectionString and restart.");
+}
 
 if (app.Environment.IsDevelopment())
 {

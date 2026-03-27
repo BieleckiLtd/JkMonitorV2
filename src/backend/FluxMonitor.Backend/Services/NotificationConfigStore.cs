@@ -36,7 +36,9 @@ public sealed class NotificationConfigStore(
 
         if (!HasDatabase)
         {
-            throw new InvalidOperationException("Flux Monitor requires PostgreSQL-backed notification storage.");
+            logger.LogError("PostgreSQL storage is not configured. Notification configuration is unavailable until setup is completed.");
+            _initialized = true;
+            return;
         }
 
         await _initializationLock.WaitAsync(cancellationToken);
@@ -117,6 +119,10 @@ public sealed class NotificationConfigStore(
         ArgumentNullException.ThrowIfNull(channels);
 
         await InitializeAsync(cancellationToken);
+        if (!HasDatabase)
+        {
+            throw new InvalidOperationException("Notification channels cannot be saved until PostgreSQL storage is configured.");
+        }
 
         var clonedChannels = channels.Select(CloneChannel).ToList();
 
@@ -139,6 +145,10 @@ public sealed class NotificationConfigStore(
         ArgumentNullException.ThrowIfNull(rules);
 
         await InitializeAsync(cancellationToken);
+        if (!HasDatabase)
+        {
+            throw new InvalidOperationException("Notification rules cannot be saved until PostgreSQL storage is configured.");
+        }
 
         var clonedRules = rules.Select(CloneRule).ToList();
 

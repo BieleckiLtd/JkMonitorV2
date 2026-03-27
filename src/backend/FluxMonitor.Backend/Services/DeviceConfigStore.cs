@@ -42,7 +42,10 @@ public sealed class DeviceConfigStore(
 
             if (!HasDatabase)
             {
-                throw new InvalidOperationException("Flux Monitor requires PostgreSQL-backed device configuration storage.");
+                logger.LogError("PostgreSQL storage is not configured. Device configuration is unavailable until setup is completed.");
+                lock (_cacheLock) { _devices = []; }
+                _initialized = true;
+                return;
             }
 
             await using var connection = await OpenConnectionAsync(cancellationToken);
@@ -81,7 +84,7 @@ public sealed class DeviceConfigStore(
 
         if (!HasDatabase)
         {
-            throw new InvalidOperationException("Flux Monitor requires PostgreSQL-backed device configuration storage.");
+            throw new InvalidOperationException("Device configuration cannot be saved until PostgreSQL storage is configured.");
         }
 
         await using var connection = await OpenConnectionAsync(cancellationToken);
