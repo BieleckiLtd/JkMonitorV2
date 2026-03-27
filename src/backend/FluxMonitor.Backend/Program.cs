@@ -103,15 +103,15 @@ using (var scope = app.Services.CreateScope())
     var repository = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.ITelemetryRepository>();
     await repository.InitializeAsync(CancellationToken.None);
 
+    var definitionLoader = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.DeviceDefinitionLoader>();
+    definitionLoader.LoadAll();
+    await definitionLoader.LoadFromGitHubAsync(CancellationToken.None);
+
     var notificationConfigStore = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.NotificationConfigStore>();
     await notificationConfigStore.InitializeAsync(CancellationToken.None);
 
     var deviceConfigStore = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.DeviceConfigStore>();
     await deviceConfigStore.InitializeAsync(CancellationToken.None);
-
-    var definitionLoader = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.DeviceDefinitionLoader>();
-    definitionLoader.LoadAll();
-    await definitionLoader.LoadFromGitHubAsync(CancellationToken.None);
 }
 
 app.UseDefaultFiles();

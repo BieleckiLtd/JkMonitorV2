@@ -529,15 +529,6 @@ export function DevicesPage() {
                       onChange={(event) => updateDevice(index, 'address', Number(event.target.value))}
                     />
                   </label>
-                  <label className='space-y-2 text-sm text-foreground'>
-                    <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Poll interval ms</span>
-                    <Input
-                      type='number'
-                      min={1}
-                      value={device.pollIntervalMilliseconds}
-                      onChange={(event) => updateDevice(index, 'pollIntervalMilliseconds', Number(event.target.value))}
-                    />
-                  </label>
                 </div>
 
                 {/* Database configuration */}

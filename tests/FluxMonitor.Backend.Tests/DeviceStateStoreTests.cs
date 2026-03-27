@@ -83,7 +83,8 @@ public class DeviceStateStoreTests
         var config = configuration ?? CreateDefaultConfiguration();
         var deviceConfigStore = new DeviceConfigStore(
             Options.Create(config),
-            NullLogger<DeviceConfigStore>.Instance);
+            NullLogger<DeviceConfigStore>.Instance,
+            definitionLoader);
         SeedDeviceConfigStore(deviceConfigStore, config.Devices);
 
         return new DeviceStateStore(

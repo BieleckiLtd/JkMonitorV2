@@ -15,7 +15,8 @@ namespace FluxMonitor.Backend.Services;
 /// </summary>
 public sealed class DeviceConfigStore(
     IOptions<MonitorConfiguration> configuration,
-    ILogger<DeviceConfigStore> logger)
+    ILogger<DeviceConfigStore> logger,
+    DeviceDefinitionLoader definitionLoader)
     : PostgresStore(configuration.Value.Storage.ConnectionString)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -26,6 +27,7 @@ public sealed class DeviceConfigStore(
     };
 
     private readonly IReadOnlyList<DeviceConfiguration> _seedDevices = configuration.Value.Devices;
+    private readonly DeviceDefinitionLoader _definitionLoader = definitionLoader;
     private readonly object _cacheLock = new();
     private readonly SemaphoreSlim _initializationLock = new(1, 1);
     private IReadOnlyList<DeviceConfiguration> _devices = [];
@@ -52,15 +54,16 @@ public sealed class DeviceConfigStore(
 
             await EnsureSchemaAsync(connection);
 
-            var existing = await LoadFromDbAsync(connection);
-            if (existing is null && _seedDevices.Count > 0)
-            {
-                logger.LogInformation("Importing {Count} device(s) from appsettings into database.", _seedDevices.Count);
-                await SaveToDbAsync(connection, _seedDevices);
-                existing = _seedDevices;
-            }
+                var existing = await LoadFromDbAsync(connection);
+                if (existing is null && _seedDevices.Count > 0)
+                {
+                    logger.LogInformation("Importing {Count} device(s) from appsettings into database.", _seedDevices.Count);
+                    var normalizedSeedDevices = NormalizeDevices(_seedDevices);
+                    await SaveToDbAsync(connection, normalizedSeedDevices);
+                    existing = normalizedSeedDevices;
+                }
 
-            lock (_cacheLock) { _devices = existing ?? []; }
+            lock (_cacheLock) { _devices = NormalizeDevices(existing ?? []); }
 
             _initialized = true;
             logger.LogInformation("Loaded {Count} device(s) from database.", _devices.Count);
@@ -87,12 +90,14 @@ public sealed class DeviceConfigStore(
             throw new InvalidOperationException("Device configuration cannot be saved until PostgreSQL storage is configured.");
         }
 
-        await using var connection = await OpenConnectionAsync(cancellationToken);
-        await SaveToDbAsync(connection, devices);
+        var normalizedDevices = NormalizeDevices(devices);
 
-        lock (_cacheLock) { _devices = devices; }
-        logger.LogInformation("Saved {Count} device(s) to database.", devices.Count);
-        return devices;
+        await using var connection = await OpenConnectionAsync(cancellationToken);
+        await SaveToDbAsync(connection, normalizedDevices);
+
+        lock (_cacheLock) { _devices = normalizedDevices; }
+        logger.LogInformation("Saved {Count} device(s) to database.", normalizedDevices.Count);
+        return normalizedDevices;
     }
 
     private void EnsureInitialized()
@@ -137,5 +142,17 @@ public sealed class DeviceConfigStore(
 
         var json = JsonSerializer.Serialize(devices, JsonOptions);
         await connection.ExecuteAsync(sql, new { Json = json });
+    }
+
+    private IReadOnlyList<DeviceConfiguration> NormalizeDevices(IReadOnlyList<DeviceConfiguration> devices)
+    {
+        if (devices.Count == 0)
+        {
+            return devices;
+        }
+
+        return devices
+            .Select(device => DevicePollingIntervalResolver.Normalize(device, _definitionLoader))
+            .ToArray();
     }
 }
