@@ -357,6 +357,33 @@ has_existing_runtime_configuration() {
   return 1
 }
 
+configuration_file_has_postgres_storage() {
+  local config_path="$1"
+
+  if [ ! -f "$config_path" ]; then
+    return 1
+  fi
+
+  grep -Eq '"Provider"[[:space:]]*:[[:space:]]*"TimescaleDb"' "$config_path" || return 1
+  grep -Eq '"ConnectionString"[[:space:]]*:[[:space:]]*"[^"]+"' "$config_path" || return 1
+}
+
+has_reusable_runtime_configuration() {
+  if configuration_file_has_postgres_storage "$APP_ROOT/appsettings.Production.Local.json"; then
+    return 0
+  fi
+
+  if configuration_file_has_postgres_storage "$APP_ROOT/appsettings.Local.json"; then
+    return 0
+  fi
+
+  if configuration_file_has_postgres_storage "$APP_ROOT/appsettings.Development.Local.json"; then
+    return 0
+  fi
+
+  return 1
+}
+
 get_existing_environment_name() {
   if [ -f "$ENV_PATH" ]; then
     local configured_environment
@@ -1022,7 +1049,7 @@ fi
 section 'Configuring startup mode'
 reused_existing_configuration='false'
 
-if has_existing_runtime_configuration && { is_truthy "$NONINTERACTIVE_REUSE_EXISTING_CONFIGURATION" || ! [ -t 0 ]; }; then
+if has_reusable_runtime_configuration && { is_truthy "$NONINTERACTIVE_REUSE_EXISTING_CONFIGURATION" || ! [ -t 0 ]; }; then
   reused_existing_configuration='true'
   ENVIRONMENT="$(get_existing_environment_name)"
   if [ -z "$ENVIRONMENT" ]; then
@@ -1030,7 +1057,13 @@ if has_existing_runtime_configuration && { is_truthy "$NONINTERACTIVE_REUSE_EXIS
   fi
   info "Reusing the existing runtime configuration for $ENVIRONMENT."
 elif has_existing_runtime_configuration; then
-  MODE="$(get_configured_choice "$NONINTERACTIVE_MODE" 'Choose startup mode: 1 = simulator, 2 = hardware' 'startup' '1')"
+  info 'Existing runtime settings were found, but PostgreSQL is not configured. Rebuilding managed production configuration.'
+
+  if ! [ -t 0 ]; then
+    MODE='1'
+  else
+    MODE="$(get_configured_choice "$NONINTERACTIVE_MODE" 'Choose startup mode: 1 = simulator, 2 = hardware' 'startup' '1')"
+  fi
 else
   MODE='1'
   info 'Starting in simulator mode for the first run so the web UI is available immediately.'
