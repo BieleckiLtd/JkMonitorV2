@@ -80,12 +80,14 @@ public sealed class DeviceDefinitionLoader
 
     /// <summary>
     /// Fetch built-in device definitions from the canonical GitHub repository.
+    /// Uses the Git Trees API (one authenticated-optional call) then downloads
+    /// each file from raw.githubusercontent.com which has no rate limit.
     /// Already-loaded definitions (e.g. user-uploaded local files) are not overwritten.
     /// </summary>
     public async Task LoadFromGitHubAsync(CancellationToken cancellationToken = default)
     {
-        var contentsUrl = $"https://api.github.com/repos/{GitHubRepository}/contents/{GitHubDevicesFolder}?ref={GitHubBranch}";
-        _logger.LogInformation("Fetching built-in device definitions from {Url}.", contentsUrl);
+        var treeUrl = $"https://api.github.com/repos/{GitHubRepository}/git/trees/{GitHubBranch}?recursive=0";
+        _logger.LogInformation("Fetching built-in device definitions list from GitHub.");
 
         try
         {
@@ -93,27 +95,31 @@ public sealed class DeviceDefinitionLoader
             client.DefaultRequestHeaders.Add("User-Agent", "FluxMonitor-DeviceDefinitionLoader");
             client.DefaultRequestHeaders.Add("Accept", "application/vnd.github+json");
 
-            var entries = await client.GetFromJsonAsync<GitHubContentEntry[]>(contentsUrl, GitHubApiOptions, cancellationToken);
-            if (entries is null)
+            var tree = await client.GetFromJsonAsync<GitHubTree>(treeUrl, GitHubApiOptions, cancellationToken);
+            if (tree?.TreeItems is null)
             {
-                _logger.LogWarning("GitHub definitions directory returned null.");
+                _logger.LogWarning("GitHub tree API returned null.");
                 return;
             }
 
-            var jsonFiles = entries.Where(e =>
-                string.Equals(e.Type, "file", StringComparison.OrdinalIgnoreCase) &&
-                e.Name.EndsWith(".json", StringComparison.OrdinalIgnoreCase) &&
-                !string.IsNullOrEmpty(e.DownloadUrl));
+            var jsonItems = tree.TreeItems.Where(e =>
+                string.Equals(e.Type, "blob", StringComparison.OrdinalIgnoreCase) &&
+                e.Path.StartsWith(GitHubDevicesFolder + "/", StringComparison.OrdinalIgnoreCase) &&
+                e.Path.EndsWith(".json", StringComparison.OrdinalIgnoreCase));
 
-            foreach (var entry in jsonFiles)
+            foreach (var item in jsonItems)
             {
+                var fileName = Path.GetFileName(item.Path);
+                // Download from raw.githubusercontent.com — no API rate limit.
+                var rawUrl = $"https://raw.githubusercontent.com/{GitHubRepository}/{GitHubBranch}/{item.Path}";
+
                 try
                 {
-                    var json = await client.GetStringAsync(entry.DownloadUrl, cancellationToken);
+                    var json = await client.GetStringAsync(rawUrl, cancellationToken);
                     var definition = JsonSerializer.Deserialize<DeviceDefinition>(json, JsonOptions);
                     if (definition is null)
                     {
-                        _logger.LogWarning("Skipping empty GitHub definition: {File}.", entry.Name);
+                        _logger.LogWarning("Skipping empty GitHub definition: {File}.", fileName);
                         continue;
                     }
 
@@ -129,7 +135,7 @@ public sealed class DeviceDefinitionLoader
                 }
                 catch (Exception ex)
                 {
-                    _logger.LogError(ex, "Failed to load GitHub definition {File}.", entry.Name);
+                    _logger.LogError(ex, "Failed to load GitHub definition {File}.", fileName);
                 }
             }
         }
@@ -139,12 +145,16 @@ public sealed class DeviceDefinitionLoader
         }
     }
 
-    private sealed class GitHubContentEntry
+    private sealed class GitHubTree
     {
-        public string Name { get; init; } = "";
+        [System.Text.Json.Serialization.JsonPropertyName("tree")]
+        public List<GitHubTreeItem> TreeItems { get; init; } = [];
+    }
+
+    private sealed class GitHubTreeItem
+    {
+        public string Path { get; init; } = "";
         public string Type { get; init; } = "";
-        [System.Text.Json.Serialization.JsonPropertyName("download_url")]
-        public string DownloadUrl { get; init; } = "";
     }
 
     /// <summary>

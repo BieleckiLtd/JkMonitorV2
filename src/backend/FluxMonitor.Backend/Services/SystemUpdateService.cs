@@ -35,6 +35,11 @@ public sealed class SystemUpdateService(
     private UpdateProgress? _currentProgress;
     private readonly Lock _lock = new();
 
+    // ETag caching: store the last ETag returned by the release API so repeated
+    // checks return 304 Not Modified and don't count against the rate limit.
+    private string? _releaseETag;
+    private object? _cachedRelease;
+
     public UpdateCheckResult CheckForUpdate()
     {
         var build = buildMetadataProvider.GetBuildInfo();
@@ -59,7 +64,27 @@ public sealed class SystemUpdateService(
             using var client = httpClientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", "FluxMonitor");
 
-            var release = await client.GetFromJsonAsync<GitHubRelease>(ReleaseApiUrl, cancellationToken);
+            // Use ETag / If-None-Match so 304 responses don't count against the rate limit.
+            var request = new HttpRequestMessage(HttpMethod.Get, ReleaseApiUrl);
+            request.Headers.Add("Accept", "application/vnd.github+json");
+            if (_releaseETag is not null)
+                request.Headers.TryAddWithoutValidation("If-None-Match", _releaseETag);
+
+            var response = await client.SendAsync(request, cancellationToken);
+
+            GitHubRelease? release;
+            if (response.StatusCode == System.Net.HttpStatusCode.NotModified)
+            {
+                release = _cachedRelease as GitHubRelease;
+            }
+            else
+            {
+                response.EnsureSuccessStatusCode();
+                release = await response.Content.ReadFromJsonAsync<GitHubRelease>(cancellationToken);
+                _releaseETag = response.Headers.ETag?.Tag;
+                _cachedRelease = release;
+            }
+
             if (release is not null)
             {
                 var checksumAsset = release.Assets?.FirstOrDefault(a =>
