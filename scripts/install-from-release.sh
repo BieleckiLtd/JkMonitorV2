@@ -574,8 +574,10 @@ ENVVARS
 
 if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files | grep -q '^$SERVICE_NAME'; then
   if [ "$(id -u)" -eq 0 ]; then
+    fuser -k "${APP_PORT}/tcp" 2>/dev/null || true
     systemctl restart "$SERVICE_NAME"
   else
+    sudo fuser -k "${APP_PORT}/tcp" 2>/dev/null || true
     sudo systemctl restart "$SERVICE_NAME"
   fi
   echo
@@ -661,6 +663,7 @@ EOF
 
   run_elevated systemctl daemon-reload
   run_elevated systemctl enable "$SERVICE_NAME"
+  run_elevated fuser -k "${APP_PORT}/tcp" 2>/dev/null || true
   run_elevated systemctl restart "$SERVICE_NAME"
 }
 
