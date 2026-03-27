@@ -15,6 +15,7 @@ public sealed class DevicesController(
     DeviceConfigStore deviceConfigStore,
     DeviceDatabaseService deviceDatabaseService,
     GenericModbusPollingClient genericPollingClient,
+    PollingClientDispatcher pollingClientDispatcher,
     DeviceDefinitionLoader definitionLoader,
     ITelemetryRepository telemetryRepository,
     PollTrigger pollTrigger) : ControllerBase
@@ -173,9 +174,10 @@ public sealed class DevicesController(
         if (!definitionLoader.TryGet(device.DefinitionId, out var definition) || definition is null)
             return BadRequest(new { message = $"Device definition '{device.DefinitionId}' not found." });
 
-        if (!PollingClientDispatcher.IsTransportSupported(definition.Connection.Transport.Type))
+        if (!pollingClientDispatcher.IsDefinitionSupported(definition))
         {
-            var supportMessage = PollingClientDispatcher.GetUnsupportedTransportMessage(definition.Connection.Transport.Type);
+            var supportMessage = pollingClientDispatcher.GetUnsupportedDefinitionMessage(definition)
+                ?? "Device definition is not supported.";
             return Ok(new
             {
                 deviceId,

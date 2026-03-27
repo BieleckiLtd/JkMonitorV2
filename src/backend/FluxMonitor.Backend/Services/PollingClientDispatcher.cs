@@ -11,10 +11,14 @@ namespace FluxMonitor.Backend.Services;
 /// </summary>
 public sealed class PollingClientDispatcher(
     GenericModbusPollingClient modbusClient,
+    GenericBlePollingClient bleClient,
     DeviceDefinitionLoader definitionLoader) : IDevicePollingClient
 {
     private static readonly HashSet<string> SupportedTransports =
-        new(StringComparer.OrdinalIgnoreCase) { "serial" };
+        new(StringComparer.OrdinalIgnoreCase) { "serial", "ble" };
+
+    private static readonly HashSet<string> SupportedBleProtocols =
+        new(StringComparer.OrdinalIgnoreCase) { "jk-bms-ble" };
 
     public static bool IsTransportSupported(string? transportType)
         => !string.IsNullOrWhiteSpace(transportType) && SupportedTransports.Contains(transportType);
@@ -28,6 +32,32 @@ public sealed class PollingClientDispatcher(
                $"This build currently supports: {string.Join(", ", SupportedTransports)}.";
     }
 
+    public bool IsDefinitionSupported(FluxMonitor.Contracts.DeviceDefinition.DeviceDefinition definition)
+    {
+        var transportType = definition.Connection.Transport.Type;
+        if (!IsTransportSupported(transportType))
+            return false;
+
+        return !string.Equals(transportType, "ble", StringComparison.OrdinalIgnoreCase) ||
+               SupportedBleProtocols.Contains(definition.Connection.Protocol.Type);
+    }
+
+    public string? GetUnsupportedDefinitionMessage(FluxMonitor.Contracts.DeviceDefinition.DeviceDefinition definition)
+    {
+        var transportType = definition.Connection.Transport.Type;
+        if (!IsTransportSupported(transportType))
+            return GetUnsupportedTransportMessage(transportType);
+
+        if (string.Equals(transportType, "ble", StringComparison.OrdinalIgnoreCase) &&
+            !SupportedBleProtocols.Contains(definition.Connection.Protocol.Type))
+        {
+            return $"BLE protocol '{definition.Connection.Protocol.Type}' is not supported yet. " +
+                   $"This build currently supports BLE protocols: {string.Join(", ", SupportedBleProtocols)}.";
+        }
+
+        return null;
+    }
+
     /// <summary>
     /// Returns true when the device's definition transport is handled by a registered client.
     /// </summary>
@@ -35,7 +65,7 @@ public sealed class PollingClientDispatcher(
     {
         if (!definitionLoader.TryGet(device.DefinitionId, out var definition) || definition is null)
             return false;
-        return IsTransportSupported(definition.Connection.Transport.Type);
+        return IsDefinitionSupported(definition);
     }
 
     public string? GetUnsupportedTransportMessage(DeviceConfiguration device)
@@ -43,8 +73,7 @@ public sealed class PollingClientDispatcher(
         if (!definitionLoader.TryGet(device.DefinitionId, out var definition) || definition is null)
             return $"Device definition '{device.DefinitionId}' was not found.";
 
-        var transportType = definition.Connection.Transport.Type;
-        return IsTransportSupported(transportType) ? null : GetUnsupportedTransportMessage(transportType);
+        return GetUnsupportedDefinitionMessage(definition);
     }
 
     public Task<DevicePollResult> PollAsync(DeviceConfiguration device, CancellationToken cancellationToken)
@@ -58,9 +87,11 @@ public sealed class PollingClientDispatcher(
         return transport switch
         {
             "serial" => modbusClient.PollAsync(device, definition, cancellationToken),
+            "ble" when SupportedBleProtocols.Contains(definition.Connection.Protocol.Type)
+                => bleClient.PollAsync(device, definition, cancellationToken),
             _ => throw new NotSupportedException(
-                $"Transport type '{transport}' is not supported. " +
-                $"Device '{device.DeviceId}' cannot be polled until a '{transport}' polling client is implemented.")
+                $"Device '{device.DeviceId}' cannot be polled: " +
+                $"{GetUnsupportedDefinitionMessage(definition) ?? $"transport '{transport}' is not supported."}")
         };
     }
 }

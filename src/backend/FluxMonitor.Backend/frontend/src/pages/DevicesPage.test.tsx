@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DevicesPage } from './DevicesPage';
 
@@ -19,21 +19,12 @@ describe('DevicesPage', () => {
           ok: true,
           json: async () => ([
             {
-              id: 'jk-inverter-bms',
-              name: 'JK Inverter BMS',
-              manufacturer: 'JK',
-              model: 'JK-PB2A16S20P',
-              transportType: 'serial',
-              isTransportSupported: true,
-            },
-            {
               id: 'jk-inverter-bms-ble',
               name: 'JK Inverter BMS (BLE)',
               manufacturer: 'JK',
               model: 'JK-PB2A16S20P',
               transportType: 'ble',
-              isTransportSupported: false,
-              unsupportedTransportMessage: "Transport type 'ble' is not supported yet. This build currently supports: serial.",
+              isTransportSupported: true,
             },
           ]),
         } as Response;
@@ -61,23 +52,14 @@ describe('DevicesPage', () => {
     vi.restoreAllMocks();
   });
 
-  it('shows unsupported transports as unavailable in the add-device picker', async () => {
+  it('renders a BLE address input for supported BLE definitions', async () => {
     render(<DevicesPage />);
 
     fireEvent.click(await screen.findByRole('button', { name: /add first device/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /jk inverter bms \(ble\)/i }));
 
-    const bleButton = await screen.findByRole('button', { name: /jk inverter bms \(ble\)/i });
-    expect(bleButton).toBeDisabled();
-
-    await waitFor(() => {
-      expect(screen.getByText(/transport type 'ble' is not supported yet/i)).toBeInTheDocument();
-    });
-
-    const supportedButton = screen
-      .getAllByRole('button')
-      .find(button => !button.hasAttribute('disabled') && button.textContent?.includes('JK Inverter BMS'));
-
-    expect(supportedButton).toBeDefined();
-    expect(supportedButton).toBeEnabled();
+    expect(await screen.findByText(/enter the ble device mac address or alias/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/aa:bb:cc:dd:ee:ff or device alias/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /start/i })).toBeDisabled();
   });
 });

@@ -45,8 +45,11 @@ builder.Services.AddSingleton<FluxMonitor.Backend.Services.SystemUpdateService>(
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.PollTrigger>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.CellVoltageSmoothingFilter>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.ExpressionEvaluator>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.DefinitionDrivenTelemetryBuilder>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.GenericModbusPollingClient>();
-builder.Services.AddSingleton<FluxMonitor.Backend.Services.IDevicePollingClient, FluxMonitor.Backend.Services.PollingClientDispatcher>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.GenericBlePollingClient>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.PollingClientDispatcher>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.IDevicePollingClient>(sp => sp.GetRequiredService<FluxMonitor.Backend.Services.PollingClientDispatcher>());
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.SetupConfigurationService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.DeviceDatabaseService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.DeviceOrchestrator>();

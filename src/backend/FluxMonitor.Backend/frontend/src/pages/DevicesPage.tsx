@@ -72,10 +72,15 @@ const defaultDevice = (index: number, definitionId: string, definitionName?: str
   enabled: false,
 });
 
-function needsSerialPort(device: DeviceConfiguration, definitions: DeviceDefinitionSummary[]): boolean {
-  if (!device.definitionId) return true;
+function getTransportType(device: DeviceConfiguration, definitions: DeviceDefinitionSummary[]): string | null {
+  if (!device.definitionId) return null;
   const def = definitions.find(d => d.id === device.definitionId);
-  return !def || def.transportType === 'serial';
+  return def?.transportType ?? null;
+}
+
+function requiresTransportIdentifier(device: DeviceConfiguration, definitions: DeviceDefinitionSummary[]): boolean {
+  const transportType = getTransportType(device, definitions);
+  return transportType === 'serial' || transportType === 'ble';
 }
 
 export function DevicesPage() {
@@ -436,10 +441,12 @@ export function DevicesPage() {
         <div className='grid gap-4'>
           {devices.map((device, index) => {
             const action = deviceActions[device.deviceId];
-            const isSerial = needsSerialPort(device, availableDefinitions);
             const isRunning = device.enabled;
             const def = availableDefinitions.find(d => d.id === device.definitionId);
             const isTransportSupported = def?.isTransportSupported ?? true;
+            const transportType = getTransportType(device, availableDefinitions);
+            const requiresTransport = requiresTransportIdentifier(device, availableDefinitions);
+            const hasTransportTarget = !requiresTransport || Boolean(device.transportPortName?.trim());
 
             return (
               <section key={`${device.deviceId}-${index}`} className='rounded-2xl border border-border bg-card/70 p-5 shadow-sm'>
@@ -482,7 +489,7 @@ export function DevicesPage() {
                         type='button'
                         variant='outline'
                         onClick={() => void startDevice(device.deviceId)}
-                        disabled={action?.loading || !device.deviceId || !isTransportSupported}
+                        disabled={action?.loading || !device.deviceId || !isTransportSupported || !hasTransportTarget}
                       >
                         {action?.loading ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Play className='h-4 w-4' />}
                         {isTransportSupported ? 'Start' : 'Unsupported'}
@@ -513,6 +520,14 @@ export function DevicesPage() {
                   </div>
                 ) : null}
 
+                {isTransportSupported && requiresTransport && !hasTransportTarget ? (
+                  <div className='mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300'>
+                    {transportType === 'ble'
+                      ? 'Enter the BLE device MAC address or alias before starting this device.'
+                      : 'Select the serial port before starting this device.'}
+                  </div>
+                ) : null}
+
                 <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-4'>
                   <label className='space-y-2 text-sm text-foreground'>
                     <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device ID</span>
@@ -522,7 +537,7 @@ export function DevicesPage() {
                     <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Display name</span>
                     <Input value={device.displayName} onChange={(event) => updateDevice(index, 'displayName', event.target.value)} />
                   </label>
-                  {isSerial ? (
+                  {transportType === 'serial' ? (
                     <label className='space-y-2 text-sm text-foreground'>
                       <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Serial Port</span>
                       <select
@@ -538,17 +553,30 @@ export function DevicesPage() {
                       </select>
                     </label>
                   ) : null}
-                  <label className='space-y-2 text-sm text-foreground'>
-                    <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Address</span>
-                    <Input
-                      type='number'
-                      min={0}
-                      max={255}
-                      value={device.address}
-                      disabled={isRunning}
-                      onChange={(event) => updateDevice(index, 'address', Number(event.target.value))}
-                    />
-                  </label>
+                  {transportType === 'ble' ? (
+                    <label className='space-y-2 text-sm text-foreground'>
+                      <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>BLE Address</span>
+                      <Input
+                        value={device.transportPortName ?? ''}
+                        disabled={isRunning}
+                        placeholder='AA:BB:CC:DD:EE:FF or device alias'
+                        onChange={(event) => updateDevice(index, 'transportPortName', event.target.value || null)}
+                      />
+                    </label>
+                  ) : null}
+                  {transportType !== 'ble' ? (
+                    <label className='space-y-2 text-sm text-foreground'>
+                      <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Address</span>
+                      <Input
+                        type='number'
+                        min={0}
+                        max={255}
+                        value={device.address}
+                        disabled={isRunning}
+                        onChange={(event) => updateDevice(index, 'address', Number(event.target.value))}
+                      />
+                    </label>
+                  ) : null}
                 </div>
 
                 {/* Database configuration */}

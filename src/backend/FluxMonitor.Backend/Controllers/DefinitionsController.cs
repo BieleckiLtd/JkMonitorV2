@@ -6,7 +6,9 @@ namespace FluxMonitor.Backend.Controllers;
 
 [ApiController]
 [Route("api/definitions")]
-public sealed class DefinitionsController(DeviceDefinitionLoader definitionLoader) : ControllerBase
+public sealed class DefinitionsController(
+    DeviceDefinitionLoader definitionLoader,
+    PollingClientDispatcher pollingClientDispatcher) : ControllerBase
 {
     [HttpGet]
     public IActionResult GetAll()
@@ -23,10 +25,8 @@ public sealed class DefinitionsController(DeviceDefinitionLoader definitionLoade
             d.Device.Icon,
             ProtocolType = d.Connection.Protocol.Type,
             TransportType = d.Connection.Transport.Type,
-            IsTransportSupported = PollingClientDispatcher.IsTransportSupported(d.Connection.Transport.Type),
-            UnsupportedTransportMessage = PollingClientDispatcher.IsTransportSupported(d.Connection.Transport.Type)
-                ? null
-                : PollingClientDispatcher.GetUnsupportedTransportMessage(d.Connection.Transport.Type),
+            IsTransportSupported = pollingClientDispatcher.IsDefinitionSupported(d),
+            UnsupportedTransportMessage = pollingClientDispatcher.GetUnsupportedDefinitionMessage(d),
             EntityCount = d.Entities.Count,
             DataSourceCount = d.DataSources.Count
         });
@@ -80,10 +80,8 @@ public sealed class DefinitionsController(DeviceDefinitionLoader definitionLoade
                 definition.Device.Icon,
                 ProtocolType = definition.Connection.Protocol.Type,
                 TransportType = definition.Connection.Transport.Type,
-                IsTransportSupported = PollingClientDispatcher.IsTransportSupported(definition.Connection.Transport.Type),
-                UnsupportedTransportMessage = PollingClientDispatcher.IsTransportSupported(definition.Connection.Transport.Type)
-                    ? null
-                    : PollingClientDispatcher.GetUnsupportedTransportMessage(definition.Connection.Transport.Type),
+                IsTransportSupported = pollingClientDispatcher.IsDefinitionSupported(definition),
+                UnsupportedTransportMessage = pollingClientDispatcher.GetUnsupportedDefinitionMessage(definition),
                 EntityCount = definition.Entities.Count,
                 DataSourceCount = definition.DataSources.Count
             });

@@ -15,6 +15,7 @@ namespace FluxMonitor.Backend.Services;
 /// and decode alarms — with no hardcoded protocol knowledge.
 /// </summary>
 public sealed class GenericModbusPollingClient(
+    DefinitionDrivenTelemetryBuilder telemetryBuilder,
     ExpressionEvaluator expressionEvaluator,
     DeviceDefinitionLoader definitionLoader,
     ILogger<GenericModbusPollingClient> logger) : IDevicePollingClient, IDisposable
@@ -100,7 +101,7 @@ public sealed class GenericModbusPollingClient(
 
             // Parse all entities from raw bank data
             var collectedAt = DateTimeOffset.UtcNow;
-            return BuildPollResult(definition, bankData, collectedAt);
+            return telemetryBuilder.BuildPollResult(definition, bankData, collectedAt);
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
