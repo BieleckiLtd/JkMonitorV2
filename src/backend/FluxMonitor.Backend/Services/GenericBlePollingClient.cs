@@ -109,6 +109,12 @@ public sealed class GenericBlePollingClient(
         if (discoveryWindow < TimeSpan.FromSeconds(1))
             discoveryWindow = TimeSpan.FromSeconds(1);
 
+        logger.LogInformation(
+            "Starting BLE discovery. DefinitionId={DefinitionId}, Protocol={Protocol}, TimeoutMs={TimeoutMs}.",
+            definition?.Device.Id ?? "<none>",
+            definition?.Connection.Protocol.Type ?? "<none>",
+            (int)discoveryWindow.TotalMilliseconds);
+
         var adapter = (await BlueZManager.GetAdaptersAsync()).FirstOrDefault()
             ?? throw new InvalidOperationException("No Bluetooth adapter was found.");
 
@@ -164,6 +170,23 @@ public sealed class GenericBlePollingClient(
                 .ToArray())
             {
                 var probe = await ProbeDefinitionAsync(candidate.Address, definition, probeTimeout, cancellationToken);
+                if (probe.IsDefinitionVerified)
+                {
+                    logger.LogInformation(
+                        "BLE probe verified candidate {Address} for definition {DefinitionId}. Details={Details}",
+                        candidate.Address,
+                        definition.Device.Id,
+                        probe.VerificationDetails ?? "<none>");
+                }
+                else if (!string.IsNullOrWhiteSpace(probe.VerificationDetails))
+                {
+                    logger.LogWarning(
+                        "BLE probe could not verify candidate {Address} for definition {DefinitionId}. Details={Details}",
+                        candidate.Address,
+                        definition.Device.Id,
+                        probe.VerificationDetails);
+                }
+
                 discovered[discovered.FindIndex(device => string.Equals(device.Address, candidate.Address, StringComparison.OrdinalIgnoreCase))] =
                     candidate with
                     {
@@ -174,7 +197,7 @@ public sealed class GenericBlePollingClient(
             }
         }
 
-        return discovered
+        var ordered = discovered
             .OrderByDescending(device => device.IsDefinitionVerified)
             .ThenByDescending(device => device.IsConnected)
             .ThenByDescending(device => device.Rssi ?? int.MinValue)
@@ -182,6 +205,14 @@ public sealed class GenericBlePollingClient(
             .ThenBy(device => device.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(device => device.Address, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+
+        logger.LogInformation(
+            "BLE discovery completed. DefinitionId={DefinitionId}, ResultCount={ResultCount}, VerifiedCount={VerifiedCount}.",
+            definition?.Device.Id ?? "<none>",
+            ordered.Length,
+            ordered.Count(device => device.IsDefinitionVerified));
+
+        return ordered;
     }
 
     private async Task EnsureConnectedAsync(
@@ -231,37 +262,56 @@ public sealed class GenericBlePollingClient(
         if (!await adapter.GetAsync<bool>("Powered"))
             await adapter.SetAsync("Powered", true);
 
-        var bleDevice = await ResolveDeviceAsync(adapter, target, timeout, cancellationToken)
-            ?? throw new TimeoutException($"Unable to find BLE device '{target}'.");
+        try
+        {
+            var bleDevice = await ResolveDeviceAsync(adapter, target, timeout, cancellationToken)
+                ?? throw new TimeoutException($"Unable to find BLE device '{target}'.");
 
-        logger.LogInformation("Connecting to BLE device {Target} for device {DeviceId}.", target, device.DeviceId);
-        await bleDevice.ConnectAsync();
-        await bleDevice.WaitForPropertyValueAsync("Connected", value: true, timeout);
-        await bleDevice.WaitForPropertyValueAsync("ServicesResolved", value: true, timeout);
+            logger.LogInformation("Connecting to BLE device {Target} for device {DeviceId}.", target, device.DeviceId);
+            await bleDevice.ConnectAsync();
+            await bleDevice.WaitForPropertyValueAsync("Connected", value: true, timeout);
+            await bleDevice.WaitForPropertyValueAsync("ServicesResolved", value: true, timeout);
 
-        var service = await bleDevice.GetServiceAsync(serviceUuid);
-        if (service is null)
-            throw new InvalidOperationException(
-                $"BLE service '{serviceUuid}' was not found on device '{target}'. Pairing may be required.");
+            var service = await bleDevice.GetServiceAsync(serviceUuid);
+            if (service is null)
+                throw new InvalidOperationException(
+                    $"BLE service '{serviceUuid}' was not found on device '{target}'. Pairing may be required.");
 
-        var characteristics = await service.GetCharacteristicsAsync();
-        var notifyCharacteristic = await SelectCharacteristicAsync(characteristics, notifyUuid, requiredFlag: "notify");
-        var writeCharacteristic = await SelectCharacteristicAsync(
-            characteristics,
-            writeUuid,
-            requiredFlag: "write-without-response",
-            alternateFlag: "write");
+            var characteristics = await service.GetCharacteristicsAsync();
+            var notifyCharacteristic = await SelectCharacteristicAsync(characteristics, notifyUuid, requiredFlag: "notify");
+            var writeCharacteristic = await SelectCharacteristicAsync(
+                characteristics,
+                writeUuid,
+                requiredFlag: "write-without-response",
+                alternateFlag: "write");
 
-        if (notifyCharacteristic is null)
-            throw new InvalidOperationException($"Notify characteristic '{notifyUuid}' was not found on device '{target}'.");
-        if (writeCharacteristic is null)
-            throw new InvalidOperationException($"Write characteristic '{writeUuid}' was not found on device '{target}'.");
+            if (notifyCharacteristic is null)
+                throw new InvalidOperationException($"Notify characteristic '{notifyUuid}' was not found on device '{target}'.");
+            if (writeCharacteristic is null)
+                throw new InvalidOperationException($"Write characteristic '{writeUuid}' was not found on device '{target}'.");
 
-        session.Device = bleDevice;
-        session.NotifyCharacteristic = notifyCharacteristic;
-        session.WriteCharacteristic = writeCharacteristic;
-        session.NotifyWatcher = await notifyCharacteristic.WatchPropertiesAsync(changes => OnNotifyPropertiesChanged(session, definition, changes));
-        await notifyCharacteristic.StartNotifyAsync();
+            session.Device = bleDevice;
+            session.NotifyCharacteristic = notifyCharacteristic;
+            session.WriteCharacteristic = writeCharacteristic;
+            session.NotifyWatcher = await notifyCharacteristic.WatchPropertiesAsync(changes => OnNotifyPropertiesChanged(session, definition, changes));
+            await notifyCharacteristic.StartNotifyAsync();
+
+            logger.LogInformation(
+                "BLE connection established for device {DeviceId}. Target={Target}, ServiceUuid={ServiceUuid}.",
+                device.DeviceId,
+                target,
+                serviceUuid);
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(
+                ex,
+                "BLE connection/setup failed for device {DeviceId}. Target={Target}, DefinitionId={DefinitionId}.",
+                device.DeviceId,
+                target,
+                definition.Device.Id);
+            throw;
+        }
     }
 
     private async Task<byte[]> RequestFrameAsync(
@@ -572,7 +622,13 @@ public sealed class GenericBlePollingClient(
                            ?? definition.DataSources.FirstOrDefault();
 
             if (infoBank is null)
+            {
+                logger.LogWarning(
+                    "BLE probe could not find a readable data source for address {Address} and definition {DefinitionId}.",
+                    address,
+                    definition.Device.Id);
                 return new(false, null, "Probe could not find a readable JK data source.");
+            }
 
             var frame = await RequestFrameAsync(session, definition, infoBank, probeCts.Token);
             var payload = ExtractPayload(frame, infoBank);
@@ -593,10 +649,19 @@ public sealed class GenericBlePollingClient(
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
+            logger.LogWarning(
+                "BLE probe timed out for address {Address} and definition {DefinitionId}.",
+                address,
+                definition.Device.Id);
             return new(false, null, "JK probe timed out.");
         }
         catch (Exception ex)
         {
+            logger.LogWarning(
+                ex,
+                "BLE probe failed for address {Address} and definition {DefinitionId}.",
+                address,
+                definition.Device.Id);
             return new(false, null, $"JK probe failed: {ex.Message}");
         }
         finally

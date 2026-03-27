@@ -3,6 +3,7 @@ import { Check, Database, LoaderCircle, Play, Plus, Square, Trash2, Upload, X } 
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { useDeviceDefinitions } from '../hooks/useDeviceDefinition';
+import { cn } from '../lib/utils';
 
 type DeviceConfiguration = {
   deviceId: string;
@@ -500,6 +501,361 @@ export function DevicesPage() {
             const bleIsScanning = bleScanLoading[device.deviceId] ?? false;
             const bleScanError = bleScanErrors[device.deviceId] ?? null;
             const hasBleScanResults = Object.prototype.hasOwnProperty.call(bleScanResults, device.deviceId);
+            const bleTarget = device.transportPortName?.trim() ?? '';
+            const selectedBleDevice = bleTarget
+              ? bleDevices.find(candidate => candidate.address === bleTarget || candidate.alias === bleTarget || candidate.name === bleTarget) ?? null
+              : null;
+            const verifiedBleCount = bleDevices.filter(candidate => candidate.isDefinitionVerified).length;
+            const databaseConfiguration = (() => {
+              const suggestion = dbSuggestions[device.deviceId];
+              if (!suggestion?.requiresDatabase) return null;
+              const validation = dbValidations[device.deviceId];
+              const creating = dbCreating[device.deviceId];
+              const createMsg = dbCreateMsg[device.deviceId];
+              const currentDbName = device.databaseName ?? '';
+              const dbExists = databases.includes(currentDbName);
+
+              return (
+                <div className={cn(
+                  'rounded-xl border border-border/70 bg-muted/20 p-4',
+                  transportType !== 'ble' && 'mt-4 bg-muted/30'
+                )}>
+                  <div className='mb-4 flex flex-col gap-1.5'>
+                    <div className='flex items-center gap-2'>
+                      <Database className='h-4 w-4 text-muted-foreground' />
+                      <span className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>
+                        Database ({suggestion.provider})
+                      </span>
+                    </div>
+                    <p className='max-w-xl text-sm text-muted-foreground'>
+                      Choose the database that should store this device&apos;s history. New databases can be created here when needed.
+                    </p>
+                  </div>
+
+                  <div className='flex flex-col gap-3 xl:flex-row xl:items-start'>
+                    <div className='flex-1 xl:max-w-sm'>
+                      <select
+                        className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50'
+                        value={currentDbName && dbExists ? currentDbName : (currentDbName ? '__custom__' : '')}
+                        disabled={isRunning}
+                        onChange={(event) => {
+                          const val = event.target.value;
+                          if (val === '__new__') {
+                            updateDevice(index, 'databaseName', suggestion.suggested || '');
+                            if (suggestion.suggested) void validateDatabase(device.deviceId, suggestion.suggested);
+                          } else if (val === '__custom__') {
+                            // keep current
+                          } else {
+                            updateDevice(index, 'databaseName', val || null);
+                            if (val) void validateDatabase(device.deviceId, val);
+                          }
+                        }}
+                      >
+                        <option value=''>Select a database...</option>
+                        {databases.map(db => (
+                          <option key={db} value={db}>{db}</option>
+                        ))}
+                        {currentDbName && !dbExists ? (
+                          <option value='__custom__'>{currentDbName} (new)</option>
+                        ) : null}
+                        <option value='__new__'>+ Create new database</option>
+                      </select>
+                    </div>
+
+                    {currentDbName && !dbExists && !isRunning ? (
+                      <div className='flex flex-col gap-2 sm:flex-row sm:items-center'>
+                        <Input
+                          className='w-full sm:w-56'
+                          value={currentDbName}
+                          placeholder={suggestion.suggested || 'database_name'}
+                          onChange={(event) => {
+                            updateDevice(index, 'databaseName', event.target.value || null);
+                          }}
+                        />
+                        <Button
+                          type='button'
+                          variant='outline'
+                          size='sm'
+                          className='shrink-0'
+                          disabled={creating || !currentDbName}
+                          onClick={() => void createDatabase(device.deviceId, currentDbName, suggestion.provider)}
+                        >
+                          {creating ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Plus className='h-4 w-4' />}
+                          Create
+                        </Button>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {createMsg ? (
+                    <div className='mt-3 rounded-lg border border-border bg-muted/60 px-3 py-2 text-xs text-foreground'>
+                      {createMsg}
+                    </div>
+                  ) : null}
+
+                  {validation ? (
+                    <div className={`mt-3 rounded-lg border px-3 py-2 text-xs ${
+                      validation.compatible || validation.isEmpty
+                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
+                        : 'border-amber-500/30 bg-amber-500/10 text-amber-400'
+                    }`}>
+                      {validation.isEmpty ? (
+                        <span>Empty database — schema will be created on first poll.</span>
+                      ) : validation.compatible ? (
+                        <span>Schema is compatible. Tables: {validation.existingTables.join(', ')}</span>
+                      ) : (
+                        <div>
+                          <span className='font-medium'>Schema issues:</span>
+                          <ul className='mt-1 list-disc list-inside'>
+                            {validation.issues.map((issue, i) => <li key={i}>{issue}</li>)}
+                          </ul>
+                        </div>
+                      )}
+                      {validation.hasTimescaleDb ? (
+                        <span className='ml-2 text-emerald-500/80'>✓ TimescaleDB</span>
+                      ) : currentDbName ? (
+                        <span className='ml-2 text-amber-400'>⚠ No TimescaleDB extension</span>
+                      ) : null}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })();
+            const bleConfiguration = (
+              <div className='grid gap-5 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]'>
+                <div className='space-y-4'>
+                  <div className='rounded-xl border border-border/70 bg-muted/20 p-4'>
+                    <div className='mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
+                      <div>
+                        <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device setup</div>
+                        <p className='mt-1 max-w-md text-sm text-muted-foreground'>
+                          Set the device identity here, then pick the Bluetooth target from the scan panel.
+                        </p>
+                      </div>
+                      {bleTarget ? (
+                        <div className='rounded-lg border border-primary/25 bg-primary/10 px-3 py-2'>
+                          <div className='text-[10px] font-semibold uppercase tracking-[0.18em] text-primary/80'>Selected target</div>
+                          <div className='mt-1 text-xs font-mono text-foreground'>{bleTarget}</div>
+                        </div>
+                      ) : null}
+                    </div>
+
+                    <div className='grid gap-4 sm:grid-cols-2'>
+                      <label className='space-y-2 text-sm text-foreground'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device ID</span>
+                        <Input value={device.deviceId} disabled={isRunning} onChange={(event) => updateDevice(index, 'deviceId', event.target.value)} />
+                      </label>
+                      <label className='space-y-2 text-sm text-foreground'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Display name</span>
+                        <Input value={device.displayName} onChange={(event) => updateDevice(index, 'displayName', event.target.value)} />
+                      </label>
+                    </div>
+                  </div>
+
+                  {databaseConfiguration}
+                </div>
+
+                <div className='rounded-xl border border-border/70 bg-gradient-to-b from-muted/30 via-muted/15 to-background p-4'>
+                  <div className='flex flex-col gap-4'>
+                    <div className='flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between'>
+                      <div>
+                        <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Bluetooth target</div>
+                        <p className='mt-1 max-w-xl text-sm text-muted-foreground'>
+                          Scan on the Pi, compare the verified result, then select the address you want this device to use.
+                        </p>
+                      </div>
+                      <div className='flex flex-wrap gap-2 text-[10px] font-semibold uppercase tracking-[0.18em]'>
+                        {hasBleScanResults ? (
+                          <span className='rounded-full border border-border bg-background/80 px-2 py-1 text-muted-foreground'>
+                            {bleDevices.length} found
+                          </span>
+                        ) : null}
+                        {verifiedBleCount > 0 ? (
+                          <span className='rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-emerald-500'>
+                            {verifiedBleCount} verified
+                          </span>
+                        ) : null}
+                      </div>
+                    </div>
+
+                    <div className='grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end'>
+                      <label className='space-y-2 text-sm text-foreground'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>BLE address or alias</span>
+                        <Input
+                          value={device.transportPortName ?? ''}
+                          disabled={isRunning}
+                          placeholder='AA:BB:CC:DD:EE:FF or device alias'
+                          onChange={(event) => updateDevice(index, 'transportPortName', event.target.value || null)}
+                        />
+                      </label>
+                      <Button
+                        type='button'
+                        variant='outline'
+                        className='w-full shrink-0 lg:w-auto'
+                        disabled={isRunning || bleIsScanning || !device.definitionId}
+                        onClick={() => void scanBleDevices(device.deviceId, device.definitionId)}
+                      >
+                        {bleIsScanning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : null}
+                        {bleIsScanning ? 'Scanning...' : 'Scan nearby'}
+                      </Button>
+                    </div>
+
+                    <div className='rounded-xl border border-border/70 bg-background/70 px-4 py-3'>
+                      <div className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Current selection</div>
+                      {bleTarget ? (
+                        <div className='mt-2 space-y-1.5'>
+                          <div className='flex flex-wrap items-center gap-2'>
+                            <span className='text-sm font-semibold text-foreground'>
+                              {selectedBleDevice?.displayName ?? 'Manual target'}
+                            </span>
+                            {selectedBleDevice?.isDefinitionVerified ? (
+                              <span className='rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-500'>
+                                {selectedBleDevice.verificationLabel ?? 'Verified'}
+                              </span>
+                            ) : null}
+                          </div>
+                          <div className='text-xs font-mono text-muted-foreground'>{bleTarget}</div>
+                          <p className='text-xs text-muted-foreground'>
+                            {selectedBleDevice
+                              ? selectedBleDevice.isDefinitionVerified
+                                ? 'Detected nearby and matched to the selected device definition.'
+                                : 'Detected nearby, but the probe could not positively verify it.'
+                              : 'Entered manually. The service will attempt to connect to this target as-is.'}
+                          </p>
+                        </div>
+                      ) : (
+                        <p className='mt-2 text-sm text-muted-foreground'>
+                          No BLE target selected yet.
+                        </p>
+                      )}
+                    </div>
+
+                    {bleScanError ? (
+                      <div className='rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300'>
+                        {bleScanError}
+                      </div>
+                    ) : null}
+
+                    <div className='space-y-3'>
+                      <div className='flex items-center justify-between gap-3'>
+                        <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Nearby devices</div>
+                        {hasBleScanResults ? (
+                          <div className='text-xs text-muted-foreground'>
+                            {bleDevices.length === 1 ? '1 result' : `${bleDevices.length} results`}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      {bleDevices.length > 0 ? (
+                        <div className='max-h-[34rem] space-y-2 overflow-y-auto pr-1'>
+                          {bleDevices.map(candidate => {
+                            const isSelected = candidate.address === bleTarget;
+                            const showNameDetail = candidate.alias && candidate.name && candidate.alias !== candidate.name;
+
+                            return (
+                              <button
+                                key={candidate.address}
+                                type='button'
+                                aria-label={`Select BLE device ${candidate.address}`}
+                                disabled={isRunning || bleIsScanning}
+                                onClick={() => updateDevice(index, 'transportPortName', candidate.address)}
+                                className={cn(
+                                  'w-full rounded-xl border px-3 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50',
+                                  isSelected
+                                    ? 'border-primary/45 bg-primary/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]'
+                                    : 'border-border/80 bg-background/65 hover:border-primary/30 hover:bg-muted/30'
+                                )}
+                              >
+                                <div className='flex items-start justify-between gap-3'>
+                                  <div className='min-w-0 flex-1'>
+                                    <div className='flex flex-wrap items-center gap-2'>
+                                      <span className='truncate text-sm font-semibold text-foreground'>{candidate.displayName}</span>
+                                      {candidate.isConnected ? (
+                                        <span className='rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-400'>
+                                          Connected
+                                        </span>
+                                      ) : null}
+                                      {candidate.isPaired ? (
+                                        <span className='rounded-full border border-border bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>
+                                          Paired
+                                        </span>
+                                      ) : null}
+                                      {candidate.rssi != null ? (
+                                        <span className='rounded-full border border-border bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>
+                                          {candidate.rssi} dBm
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    <div className='mt-1 text-xs font-mono text-muted-foreground'>{candidate.address}</div>
+                                  </div>
+                                  {isSelected ? (
+                                    <span className='rounded-full border border-primary/40 bg-primary/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary'>
+                                      Selected
+                                    </span>
+                                  ) : null}
+                                </div>
+
+                                {candidate.isDefinitionVerified ? (
+                                  <div className='mt-3 inline-flex rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-500'>
+                                    {candidate.verificationLabel ?? 'Verified'}
+                                  </div>
+                                ) : null}
+
+                                {showNameDetail ? (
+                                  <div className='mt-2 text-xs text-muted-foreground'>
+                                    Broadcasts as {candidate.alias} / {candidate.name}
+                                  </div>
+                                ) : null}
+
+                                {candidate.verificationDetails ? (
+                                  <div className={cn(
+                                    'mt-3 rounded-lg border px-3 py-2 text-xs leading-5',
+                                    candidate.isDefinitionVerified
+                                      ? 'border-emerald-500/20 bg-emerald-500/5 text-muted-foreground'
+                                      : 'border-amber-500/20 bg-amber-500/5 text-amber-200/90'
+                                  )}>
+                                    <div className={cn(
+                                      'mb-1 text-[10px] font-semibold uppercase tracking-[0.18em]',
+                                      candidate.isDefinitionVerified ? 'text-emerald-500/80' : 'text-amber-300/90'
+                                    )}>
+                                      {candidate.isDefinitionVerified ? 'Probe match' : 'Probe note'}
+                                    </div>
+                                    <div>{candidate.verificationDetails}</div>
+                                  </div>
+                                ) : null}
+
+                                {candidate.manufacturerData.length > 0 ? (
+                                  <div className='mt-3 flex flex-col gap-1 text-xs text-muted-foreground sm:flex-row sm:items-start sm:gap-2'>
+                                    <span className='shrink-0 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/80'>
+                                      Manufacturer data
+                                    </span>
+                                    <span className='font-mono text-[11px] text-muted-foreground/90 break-all'>
+                                      {candidate.manufacturerData.join(' · ')}
+                                    </span>
+                                  </div>
+                                ) : null}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      ) : null}
+
+                      {!bleIsScanning && !bleScanError && hasBleScanResults && bleDevices.length === 0 ? (
+                        <div className='rounded-xl border border-dashed border-border bg-muted/25 px-4 py-6 text-center text-sm text-muted-foreground'>
+                          No nearby BLE devices were detected.
+                        </div>
+                      ) : null}
+
+                      {!hasBleScanResults && !bleIsScanning ? (
+                        <div className='rounded-xl border border-dashed border-border bg-muted/15 px-4 py-6 text-center text-sm text-muted-foreground'>
+                          Run a scan to see nearby devices from the Pi and select the correct target.
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            );
 
             return (
               <section key={`${device.deviceId}-${index}`} className='rounded-2xl border border-border bg-card/70 p-5 shadow-sm'>
@@ -581,6 +937,7 @@ export function DevicesPage() {
                   </div>
                 ) : null}
 
+                {transportType === 'ble' ? bleConfiguration : (
                 <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-4'>
                   <label className='space-y-2 text-sm text-foreground'>
                     <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device ID</span>
@@ -727,7 +1084,10 @@ export function DevicesPage() {
                     </label>
                   ) : null}
                 </div>
+                )}
 
+                {transportType !== 'ble' ? (
+                  <>
                 {/* Database configuration */}
                 {(() => {
                   const suggestion = dbSuggestions[device.deviceId];
@@ -837,6 +1197,8 @@ export function DevicesPage() {
                     </div>
                   );
                 })()}
+                  </>
+                ) : null}
               </section>
             );
           })}

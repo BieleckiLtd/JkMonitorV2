@@ -99,7 +99,7 @@ describe('DevicesPage', () => {
     await waitFor(() => {
       expect(screen.getByText(/verified jk bms/i)).toBeInTheDocument();
       expect(screen.getByText(/-54 dBm/i)).toBeInTheDocument();
-      expect(screen.getByText(/manufacturer data: 0x07d0: 4a4b424d53/i)).toBeInTheDocument();
+      expect(screen.getByText(/0x07d0: 4a4b424d53/i)).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole('button', { name: /select ble device aa:bb:cc:dd:ee:ff/i }));

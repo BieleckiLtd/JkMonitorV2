@@ -105,6 +105,12 @@ public sealed class DeviceOrchestrator(
         var handle = new DeviceHandle(device, cts);
         handle.Task = RunDeviceLoopAsync(device, cts.Token);
         _handles[device.DeviceId] = handle;
+        logger.LogInformation(
+            "Device polling loop created for {DeviceId}. DefinitionId={DefinitionId}, PollIntervalMs={PollIntervalMs}, TransportTarget={TransportTarget}.",
+            device.DeviceId,
+            device.DefinitionId,
+            device.PollIntervalMilliseconds,
+            string.IsNullOrWhiteSpace(device.TransportPortName) ? "<none>" : device.TransportPortName);
     }
 
     /// <summary>
@@ -114,6 +120,7 @@ public sealed class DeviceOrchestrator(
     {
         if (_handles.TryRemove(deviceId, out var handle))
         {
+            logger.LogInformation("Stopping device polling loop for {DeviceId}.", deviceId);
             await handle.Cts.CancelAsync();
             try { await handle.Task; } catch (OperationCanceledException) { }
             handle.Cts.Dispose();
