@@ -1,5 +1,6 @@
 import { useEffect, useState, useCallback } from 'react';
-import { AlertTriangle, Filter, Search, RefreshCw, ChevronLeft, ChevronRight } from 'lucide-react';
+import { AlertTriangle, Filter, Search, RefreshCw, ChevronLeft, ChevronRight, Copy, Check, ClipboardX } from 'lucide-react';
+import { Button } from '../components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { cn } from '../lib/utils';
 
@@ -73,6 +74,53 @@ function severityToggleColor(level: string, active: boolean) {
   }
 }
 
+function formatLogEntry(entry: LogEntry) {
+  const lines = [
+    `[${new Date(entry.timestamp).toLocaleString()}] ${entry.level} ${entry.category}`,
+    entry.message,
+  ];
+
+  if (entry.exception) {
+    lines.push('', entry.exception);
+  }
+
+  return lines.join('\n');
+}
+
+function fallbackCopyTextToClipboard(text: string) {
+  const textArea = document.createElement('textarea');
+  textArea.value = text;
+  textArea.setAttribute('readonly', '');
+  textArea.style.position = 'fixed';
+  textArea.style.opacity = '0';
+  textArea.style.pointerEvents = 'none';
+
+  document.body.appendChild(textArea);
+  textArea.focus();
+  textArea.select();
+  textArea.setSelectionRange(0, text.length);
+
+  const copied = document.execCommand('copy');
+  document.body.removeChild(textArea);
+
+  if (!copied) {
+    throw new Error('Clipboard copy failed.');
+  }
+}
+
+async function copyTextToClipboard(text: string) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+  } catch {
+    // Fall back below for browsers or contexts where the async clipboard API is unavailable.
+  }
+
+  fallbackCopyTextToClipboard(text);
+}
+
 export function LogsPanel() {
   const [entries, setEntries] = useState<LogEntry[]>([]);
   const [totalCount, setTotalCount] = useState(0);
@@ -84,6 +132,7 @@ export function LogsPanel() {
   const [toDate, setToDate] = useState(() => toLocalDatetimeString(new Date()));
   const [page, setPage] = useState(0);
   const [expandedId, setExpandedId] = useState<number | null>(null);
+  const [copyState, setCopyState] = useState<'idle' | 'success' | 'error'>('idle');
 
   const fetchLogs = useCallback(async () => {
     setIsLoading(true);
@@ -132,6 +181,15 @@ export function LogsPanel() {
     void fetchLogs();
   }, [fetchLogs]);
 
+  useEffect(() => {
+    if (copyState === 'idle') {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => setCopyState('idle'), 2000);
+    return () => window.clearTimeout(timeoutId);
+  }, [copyState]);
+
   const toggleLevel = (level: string) => {
     setSelectedLevels((prev) => {
       const next = new Set(prev);
@@ -143,6 +201,15 @@ export function LogsPanel() {
       return next;
     });
     setPage(0);
+  };
+
+  const handleCopyVisibleLogs = async () => {
+    try {
+      await copyTextToClipboard(entries.map(formatLogEntry).join('\n\n'));
+      setCopyState('success');
+    } catch {
+      setCopyState('error');
+    }
   };
 
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
@@ -160,14 +227,46 @@ export function LogsPanel() {
               Browse captured log entries filtered by severity and time range.
             </CardDescription>
           </div>
-          <button
-            onClick={() => void fetchLogs()}
-            disabled={isLoading}
-            className='inline-flex items-center gap-2 rounded-lg border border-border px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted hover:text-foreground disabled:opacity-50'
-          >
-            <RefreshCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
-            Refresh
-          </button>
+          <div className='flex items-center gap-2 self-start'>
+            <Button
+              type='button'
+              variant='outline'
+              size='icon-sm'
+              onClick={() => void handleCopyVisibleLogs()}
+              disabled={entries.length === 0}
+              aria-label='Copy visible logs to clipboard'
+              title={
+                copyState === 'success'
+                  ? 'Copied visible logs'
+                  : copyState === 'error'
+                    ? 'Copy failed'
+                    : 'Copy visible logs to clipboard'
+              }
+              className={cn(
+                'text-muted-foreground',
+                copyState === 'success' && 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/15 hover:text-emerald-200',
+                copyState === 'error' && 'text-rose-300 border-rose-500/40 bg-rose-500/10 hover:bg-rose-500/15 hover:text-rose-200',
+              )}
+            >
+              {copyState === 'success' ? (
+                <Check />
+              ) : copyState === 'error' ? (
+                <ClipboardX />
+              ) : (
+                <Copy />
+              )}
+            </Button>
+            <Button
+              type='button'
+              variant='outline'
+              onClick={() => void fetchLogs()}
+              disabled={isLoading}
+              className='text-xs text-muted-foreground'
+            >
+              <RefreshCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
+              Refresh
+            </Button>
+          </div>
         </div>
       </CardHeader>
 
