@@ -352,11 +352,6 @@ repository_slug='$repositorySlug'
 release_tag='$ReleaseTag'
 asset_name='$linuxAssetName'
 expected_source_revision_id='$currentCommit'
-github_token='$githubToken'
-
-if [ -n "\$github_token" ]; then
-  export GITHUB_TOKEN="\$github_token"
-fi
 export FLUXMONITOR_EXPECTED_RELEASE_SHA256="\$expected_sha256"
 export FLUXMONITOR_INSTALL_RUNTIME='y'
 export FLUXMONITOR_INSTALL_SERVICE='y'

@@ -26,7 +26,6 @@ NONINTERACTIVE_INSTALL_RUNTIME="${FLUXMONITOR_INSTALL_RUNTIME:-}"
 NONINTERACTIVE_INSTALL_SERVICE="${FLUXMONITOR_INSTALL_SERVICE:-}"
 NONINTERACTIVE_REUSE_EXISTING_CONFIGURATION="${FLUXMONITOR_REUSE_EXISTING_CONFIGURATION:-}"
 EXPECTED_RELEASE_SHA256="${FLUXMONITOR_EXPECTED_RELEASE_SHA256:-}"
-GITHUB_TOKEN_VALUE="${GITHUB_TOKEN:-${GH_TOKEN:-}}"
 CONFIGURE_SCRIPT_PATH="$DESTINATION/configure.sh"
 
 if [ -t 1 ]; then
@@ -882,151 +881,18 @@ muted "Repository: $NORMALIZED_REPOSITORY"
 muted "Release tag: $RELEASE_TAG"
 muted "Destination: $DESTINATION"
 
-fetch_release_json() {
-  local url="https://api.github.com/repos/$NORMALIZED_REPOSITORY/releases/tags/$RELEASE_TAG"
-
-  if command -v curl >/dev/null 2>&1; then
-    if [ -n "$GITHUB_TOKEN_VALUE" ]; then
-      curl -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: FluxMonitor-install-script' -H "Authorization: Bearer $GITHUB_TOKEN_VALUE" "$url"
-    else
-      curl -fsSL -H 'Accept: application/vnd.github+json' -H 'User-Agent: FluxMonitor-install-script' "$url"
-    fi
-    return
-  fi
-
-  if command -v wget >/dev/null 2>&1; then
-    if [ -n "$GITHUB_TOKEN_VALUE" ]; then
-      wget -qO- --header='Accept: application/vnd.github+json' --header='User-Agent: FluxMonitor-install-script' --header="Authorization: Bearer $GITHUB_TOKEN_VALUE" "$url"
-    else
-      wget -qO- --header='Accept: application/vnd.github+json' --header='User-Agent: FluxMonitor-install-script' "$url"
-    fi
-    return
-  fi
-
-  if command -v python3 >/dev/null 2>&1; then
-    GITHUB_TOKEN_VALUE="$GITHUB_TOKEN_VALUE" python3 - "$url" <<'PY'
-import os
-import sys
-import urllib.request
-
-token = os.environ.get("GITHUB_TOKEN_VALUE", "")
-request = urllib.request.Request(
-    sys.argv[1],
-    headers={
-        "Accept": "application/vnd.github+json",
-        "User-Agent": "FluxMonitor-install-script",
-        **({"Authorization": f"Bearer {token}"} if token else {}),
-    },
-)
-with urllib.request.urlopen(request) as response:
-    sys.stdout.write(response.read().decode("utf-8"))
-PY
-    return
-  fi
-
-  echo 'No supported HTTP client was found. Install curl, wget, or python3.' >&2
-  exit 1
-}
-
-get_release_asset_api_url() {
+get_release_asset_download_url() {
   local asset_name="$1"
-  local release_json
-  release_json="$(fetch_release_json)"
-
-  if ! command -v python3 >/dev/null 2>&1; then
-    echo 'python3 is required to parse the GitHub release metadata.' >&2
-    exit 1
-  fi
-
-  RELEASE_JSON="$release_json" python3 - "$asset_name" <<'PY'
-import json
-import os
-import sys
-
-asset_name = sys.argv[1]
-payload = json.loads(os.environ["RELEASE_JSON"])
-
-for asset in payload.get("assets", []):
-    if asset.get("name") == asset_name and asset.get("url"):
-        print(asset["url"])
-        raise SystemExit(0)
-
-raise SystemExit(1)
-PY
-}
-
-download_release_asset() {
-  local asset_name="$1"
-  local target="$2"
-  local asset_api_url
-  asset_api_url="$(get_release_asset_api_url "$asset_name")"
-
-  if command -v curl >/dev/null 2>&1; then
-    if [ -n "$GITHUB_TOKEN_VALUE" ]; then
-      curl -fsSL \
-        -H 'Accept: application/octet-stream' \
-        -H 'User-Agent: FluxMonitor-install-script' \
-        -H "Authorization: Bearer $GITHUB_TOKEN_VALUE" \
-        "$asset_api_url" \
-        -o "$target"
-    else
-      curl -fsSL \
-        -H 'Accept: application/octet-stream' \
-        -H 'User-Agent: FluxMonitor-install-script' \
-        "$asset_api_url" \
-        -o "$target"
-    fi
-    return
-  fi
-
-  if command -v wget >/dev/null 2>&1; then
-    if [ -n "$GITHUB_TOKEN_VALUE" ]; then
-      wget -qO "$target" \
-        --header='Accept: application/octet-stream' \
-        --header='User-Agent: FluxMonitor-install-script' \
-        --header="Authorization: Bearer $GITHUB_TOKEN_VALUE" \
-        "$asset_api_url"
-    else
-      wget -qO "$target" \
-        --header='Accept: application/octet-stream' \
-        --header='User-Agent: FluxMonitor-install-script' \
-        "$asset_api_url"
-    fi
-    return
-  fi
-
-  if command -v python3 >/dev/null 2>&1; then
-    GITHUB_TOKEN_VALUE="$GITHUB_TOKEN_VALUE" python3 - "$asset_api_url" "$target" <<'PY'
-import os
-import sys
-import urllib.request
-
-token = os.environ.get("GITHUB_TOKEN_VALUE", "")
-request = urllib.request.Request(
-    sys.argv[1],
-    headers={
-        "Accept": "application/octet-stream",
-        "User-Agent": "FluxMonitor-install-script",
-        **({"Authorization": f"Bearer {token}"} if token else {}),
-    },
-)
-with urllib.request.urlopen(request) as response, open(sys.argv[2], "wb") as output:
-    output.write(response.read())
-PY
-    return
-  fi
-
-  echo 'No supported HTTP client was found. Install curl, wget, or python3.' >&2
-  exit 1
+  printf 'https://github.com/%s/releases/download/%s/%s\n' "$NORMALIZED_REPOSITORY" "$RELEASE_TAG" "$asset_name"
 }
 
 section 'Downloading release artifact'
-info 'Fetching the published build from GitHub Releases.'
-download_release_asset "$ASSET_NAME" "$ARCHIVE_PATH"
+info 'Fetching the published build from GitHub Releases via direct asset URL.'
+download_file "$(get_release_asset_download_url "$ASSET_NAME")" "$ARCHIVE_PATH"
 
 section 'Verifying release artifact'
 info 'Checking the published checksum before install.'
-download_release_asset "$CHECKSUM_ASSET_NAME" "$CHECKSUM_PATH"
+download_file "$(get_release_asset_download_url "$CHECKSUM_ASSET_NAME")" "$CHECKSUM_PATH"
 PUBLISHED_RELEASE_SHA256="$(parse_sha256_file "$CHECKSUM_PATH")"
 DOWNLOADED_RELEASE_SHA256="$(compute_sha256 "$ARCHIVE_PATH")"
 
