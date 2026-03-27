@@ -53,6 +53,7 @@ public sealed class GenericBlePollingClient(
         try
         {
             await EnsureConnectedAsync(session, device, definition, cancellationToken);
+            await PrimeSessionAsync(session, definition, cancellationToken);
 
             var bankData = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
             var now = DateTimeOffset.UtcNow;
@@ -100,6 +101,32 @@ public sealed class GenericBlePollingClient(
         finally
         {
             session.Lock.Release();
+        }
+    }
+
+    private async Task PrimeSessionAsync(
+        BleSession session,
+        DeviceDefinition definition,
+        CancellationToken cancellationToken)
+    {
+        var infoBank = definition.DataSources.FirstOrDefault(bank =>
+            string.Equals(bank.Id, "info", StringComparison.OrdinalIgnoreCase));
+
+        if (infoBank is null || session.BankCache.ContainsKey(infoBank.Id))
+            return;
+
+        try
+        {
+            var frame = await RequestFrameAsync(session, definition, infoBank, cancellationToken);
+            var payload = ExtractPayload(frame, infoBank);
+            session.BankCache[infoBank.Id] = (DateTimeOffset.UtcNow, payload);
+        }
+        catch (TimeoutException ex)
+        {
+            logger.LogDebug(
+                ex,
+                "BLE session prime skipped for device {DeviceId}. Info bank did not respond during initial handshake.",
+                session.DeviceId);
         }
     }
 
@@ -427,22 +454,22 @@ public sealed class GenericBlePollingClient(
         TaskCompletionSource<byte[]>? pendingFrame = null;
         byte[]? completedFrame = null;
         byte? frameType = null;
+        var discardedInvalidFrame = false;
 
         lock (session.SyncRoot)
         {
-            if (StartsWithFramePreamble(chunk))
+            if (session.PendingFrame is null || session.ExpectedFrameSize <= 0)
+            {
                 session.FrameBuffer.Clear();
+                return;
+            }
 
             session.FrameBuffer.AddRange(chunk);
-            if (session.ExpectedFrameSize <= 0 || session.FrameBuffer.Count < session.ExpectedFrameSize)
+            if (!TryExtractValidatedFrame(session.FrameBuffer, session.ExpectedFrameSize, checksumType, out var candidate, out discardedInvalidFrame))
                 return;
 
-            var candidate = session.FrameBuffer.Take(session.ExpectedFrameSize).ToArray();
-            session.FrameBuffer.Clear();
-
-            if (!TryValidateFrame(candidate, checksumType))
+            if (candidate is null)
             {
-                logger.LogWarning("Discarded BLE frame with invalid checksum for device {DeviceId}.", session.DeviceId);
                 return;
             }
 
@@ -457,6 +484,8 @@ public sealed class GenericBlePollingClient(
 
         if (pendingFrame is not null && completedFrame is not null)
             pendingFrame.TrySetResult(completedFrame);
+        else if (discardedInvalidFrame)
+            logger.LogWarning("Discarded BLE frame with invalid checksum for device {DeviceId}.", session.DeviceId);
         else if (frameType is not null)
             logger.LogDebug("Received unsolicited BLE frame type 0x{FrameType:X2} for device {DeviceId}.", frameType, session.DeviceId);
     }
@@ -479,6 +508,54 @@ public sealed class GenericBlePollingClient(
            data[2] == 0xEB &&
            data[3] == 0x90;
 
+    internal static bool TryExtractValidatedFrame(
+        List<byte> buffer,
+        int expectedFrameSize,
+        string checksumType,
+        out byte[]? frame,
+        out bool discardedInvalidFrame)
+    {
+        frame = null;
+        discardedInvalidFrame = false;
+
+        if (expectedFrameSize <= 0)
+            return false;
+
+        while (buffer.Count > 0)
+        {
+            var preambleIndex = IndexOfFramePreamble(buffer);
+            if (preambleIndex < 0)
+            {
+                if (buffer.Count > 3)
+                    buffer.RemoveRange(0, buffer.Count - 3);
+                return false;
+            }
+
+            if (preambleIndex > 0)
+                buffer.RemoveRange(0, preambleIndex);
+
+            if (buffer.Count < expectedFrameSize)
+                return false;
+
+            var candidate = buffer.Take(expectedFrameSize).ToArray();
+            if (TryValidateFrame(candidate, checksumType))
+            {
+                frame = candidate;
+                buffer.RemoveRange(0, expectedFrameSize);
+                return true;
+            }
+
+            discardedInvalidFrame = true;
+            var nextPreambleIndex = IndexOfFramePreamble(buffer, 1);
+            if (nextPreambleIndex > 0)
+                buffer.RemoveRange(0, nextPreambleIndex);
+            else
+                buffer.RemoveAt(0);
+        }
+
+        return false;
+    }
+
     private static bool TryValidateFrame(byte[] frame, string checksumType)
     {
         if (frame.Length < 2)
@@ -490,6 +567,22 @@ public sealed class GenericBlePollingClient(
             "none" => true,
             _ => false
         };
+    }
+
+    private static int IndexOfFramePreamble(IReadOnlyList<byte> data, int startIndex = 0)
+    {
+        for (var i = Math.Max(startIndex, 0); i <= data.Count - 4; i++)
+        {
+            if (data[i] == 0x55 &&
+                data[i + 1] == 0xAA &&
+                data[i + 2] == 0xEB &&
+                data[i + 3] == 0x90)
+            {
+                return i;
+            }
+        }
+
+        return -1;
     }
 
     private static byte[] BuildJkBleCommand(byte command)
