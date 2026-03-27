@@ -92,10 +92,6 @@ jobs:
             -p:FluxMonitorBuiltAt="$BUILT_AT" \
             --output artifacts/linux-arm64
 
-      - name: Bundle device definitions
-        shell: bash
-        run: cp -r devices artifacts/linux-arm64/
-
       - name: Package linux artifact
         shell: bash
         run: |
@@ -156,10 +152,6 @@ jobs:
             -p:FluxMonitorWorkflowRunAttempt="${{ github.run_attempt }}" `
             -p:FluxMonitorBuiltAt="$builtAt" `
             --output artifacts/win-x64
-
-      - name: Bundle device definitions
-        shell: pwsh
-        run: Copy-Item -Recurse devices artifacts/win-x64/
 
       - name: Package windows artifact
         shell: pwsh

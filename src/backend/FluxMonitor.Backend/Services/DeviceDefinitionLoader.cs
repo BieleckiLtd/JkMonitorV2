@@ -5,7 +5,8 @@ using FluxMonitor.Contracts.DeviceDefinition;
 namespace FluxMonitor.Backend.Services;
 
 /// <summary>
-/// Loads and caches device definition JSON files from the configured directory.
+/// Loads and caches device definition JSON files from the configured directory
+/// and from the canonical GitHub repository.
 /// </summary>
 public sealed class DeviceDefinitionLoader
 {
@@ -17,13 +18,25 @@ public sealed class DeviceDefinitionLoader
         AllowTrailingCommas = true
     };
 
+    private static readonly JsonSerializerOptions GitHubApiOptions = new()
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
+    // Hardwired source of built-in device definitions.
+    private const string GitHubRepository = "BieleckiLtd/JkMonitorV2";
+    private const string GitHubBranch = "dev";
+    private const string GitHubDevicesFolder = "devices";
+
     private readonly ConcurrentDictionary<string, DeviceDefinition> _definitions = new(StringComparer.OrdinalIgnoreCase);
     private readonly string _definitionsPath;
+    private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<DeviceDefinitionLoader> _logger;
 
-    public DeviceDefinitionLoader(string definitionsPath, ILogger<DeviceDefinitionLoader> logger)
+    public DeviceDefinitionLoader(string definitionsPath, IHttpClientFactory httpClientFactory, ILogger<DeviceDefinitionLoader> logger)
     {
         _definitionsPath = Path.GetFullPath(definitionsPath);
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
     }
 
@@ -63,6 +76,75 @@ public sealed class DeviceDefinitionLoader
                 _logger.LogError(ex, "Failed to load device definition from {File}.", file);
             }
         }
+    }
+
+    /// <summary>
+    /// Fetch built-in device definitions from the canonical GitHub repository.
+    /// Already-loaded definitions (e.g. user-uploaded local files) are not overwritten.
+    /// </summary>
+    public async Task LoadFromGitHubAsync(CancellationToken cancellationToken = default)
+    {
+        var contentsUrl = $"https://api.github.com/repos/{GitHubRepository}/contents/{GitHubDevicesFolder}?ref={GitHubBranch}";
+        _logger.LogInformation("Fetching built-in device definitions from {Url}.", contentsUrl);
+
+        try
+        {
+            using var client = _httpClientFactory.CreateClient();
+            client.DefaultRequestHeaders.Add("User-Agent", "FluxMonitor-DeviceDefinitionLoader");
+            client.DefaultRequestHeaders.Add("Accept", "application/vnd.github+json");
+
+            var entries = await client.GetFromJsonAsync<GitHubContentEntry[]>(contentsUrl, GitHubApiOptions, cancellationToken);
+            if (entries is null)
+            {
+                _logger.LogWarning("GitHub definitions directory returned null.");
+                return;
+            }
+
+            var jsonFiles = entries.Where(e =>
+                string.Equals(e.Type, "file", StringComparison.OrdinalIgnoreCase) &&
+                e.Name.EndsWith(".json", StringComparison.OrdinalIgnoreCase) &&
+                !string.IsNullOrEmpty(e.DownloadUrl));
+
+            foreach (var entry in jsonFiles)
+            {
+                try
+                {
+                    var json = await client.GetStringAsync(entry.DownloadUrl, cancellationToken);
+                    var definition = JsonSerializer.Deserialize<DeviceDefinition>(json, JsonOptions);
+                    if (definition is null)
+                    {
+                        _logger.LogWarning("Skipping empty GitHub definition: {File}.", entry.Name);
+                        continue;
+                    }
+
+                    // Local user-uploaded definitions take precedence.
+                    if (_definitions.ContainsKey(definition.Device.Id))
+                    {
+                        _logger.LogDebug("GitHub definition '{Id}' already loaded locally; skipping.", definition.Device.Id);
+                        continue;
+                    }
+
+                    _definitions[definition.Device.Id] = definition;
+                    _logger.LogInformation("Loaded device definition '{Id}' ({Name}) from GitHub.", definition.Device.Id, definition.Device.Name);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Failed to load GitHub definition {File}.", entry.Name);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to fetch device definitions from GitHub.");
+        }
+    }
+
+    private sealed class GitHubContentEntry
+    {
+        public string Name { get; init; } = "";
+        public string Type { get; init; } = "";
+        [System.Text.Json.Serialization.JsonPropertyName("download_url")]
+        public string DownloadUrl { get; init; } = "";
     }
 
     /// <summary>
