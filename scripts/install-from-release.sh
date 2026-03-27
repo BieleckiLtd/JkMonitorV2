@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env bash
+#!/usr/bin/env bash
 set -euo pipefail
 
 REPOSITORY="${1:-https://github.com/BieleckiLtd/JkMonitorV2}"
