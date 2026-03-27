@@ -213,6 +213,8 @@ preserve_existing_state() {
   copy_if_exists "$source_root/.dotnet" "$preserve_root/.dotnet"
   copy_if_exists "$source_root/fluxmonitor.env" "$preserve_root/fluxmonitor.env"
   copy_if_exists "$source_root/app/notifications.json" "$preserve_root/app/notifications.json"
+  copy_if_exists "$source_root/app/devices.json" "$preserve_root/app/devices.json"
+  copy_if_exists "$source_root/app/devices" "$preserve_root/app/devices"
 
   for file_name in \
     appsettings.Local.json \
@@ -243,6 +245,17 @@ restore_preserved_state() {
   if [ -f "$preserve_root/app/notifications.json" ]; then
     mkdir -p "$destination_root/app"
     cp "$preserve_root/app/notifications.json" "$destination_root/app/notifications.json"
+  fi
+
+  if [ -f "$preserve_root/app/devices.json" ]; then
+    mkdir -p "$destination_root/app"
+    cp "$preserve_root/app/devices.json" "$destination_root/app/devices.json"
+  fi
+
+  # Merge back user-added device definitions without overwriting bundled ones.
+  if [ -d "$preserve_root/app/devices" ]; then
+    mkdir -p "$destination_root/app/devices"
+    cp -n "$preserve_root/app/devices"/*.json "$destination_root/app/devices/" 2>/dev/null || true
   fi
 
   for file_name in \
