@@ -364,6 +364,32 @@ configuration_file_has_postgres_storage() {
     return 1
   fi
 
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$config_path" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+
+try:
+    with open(path, 'r', encoding='utf-8') as handle:
+        payload = json.load(handle)
+except Exception:
+    raise SystemExit(1)
+
+monitor = payload.get('Monitor') if isinstance(payload, dict) else None
+storage = monitor.get('Storage') if isinstance(monitor, dict) else None
+provider = storage.get('Provider') if isinstance(storage, dict) else None
+connection_string = storage.get('ConnectionString') if isinstance(storage, dict) else None
+
+if isinstance(provider, str) and provider.lower() == 'timescaledb' and isinstance(connection_string, str) and connection_string.strip():
+    raise SystemExit(0)
+
+raise SystemExit(1)
+PY
+    return $?
+  fi
+
   grep -Eq '"Provider"[[:space:]]*:[[:space:]]*"TimescaleDb"' "$config_path" || return 1
   grep -Eq '"ConnectionString"[[:space:]]*:[[:space:]]*"[^"]+"' "$config_path" || return 1
 }
@@ -530,7 +556,7 @@ bootstrap_local_postgres_connection_string() {
   local password
   password="$(generate_password)"
 
-  section 'Bootstrapping local PostgreSQL'
+  section 'Bootstrapping local PostgreSQL' >&2
 
   if ! command -v psql >/dev/null 2>&1; then
     if ! command -v apt-get >/dev/null 2>&1; then
@@ -538,21 +564,21 @@ bootstrap_local_postgres_connection_string() {
       exit 1
     fi
 
-    info 'Installing the local PostgreSQL server package.'
-    run_elevated apt-get update
-    run_elevated apt-get install -y postgresql
+    info 'Installing the local PostgreSQL server package.' >&2
+    run_elevated apt-get update >&2
+    run_elevated apt-get install -y postgresql >&2
   fi
 
   if command -v systemctl >/dev/null 2>&1; then
     run_elevated systemctl enable postgresql >/dev/null 2>&1 || true
-    run_elevated systemctl start postgresql
+    run_elevated systemctl start postgresql >/dev/null 2>&1 || true
   fi
 
-  info "Creating or updating the local PostgreSQL role '$role_name' and database '$database_name'."
-  run_as_postgres "psql -v ON_ERROR_STOP=1 -d postgres -c \"DO \\\$\\\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$role_name') THEN CREATE ROLE $role_name LOGIN PASSWORD '$password'; ELSE ALTER ROLE $role_name WITH LOGIN PASSWORD '$password'; END IF; END \\\$\\\$;\""
+  info "Creating or updating the local PostgreSQL role '$role_name' and database '$database_name'." >&2
+  run_as_postgres "psql -v ON_ERROR_STOP=1 -d postgres -c \"DO \\\$\\\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$role_name') THEN CREATE ROLE $role_name LOGIN PASSWORD '$password'; ELSE ALTER ROLE $role_name WITH LOGIN PASSWORD '$password'; END IF; END \\\$\\\$;\"" >/dev/null
 
   if [ "$(run_as_postgres "psql -tAc \"SELECT 1 FROM pg_database WHERE datname = '$database_name'\" postgres" | tr -d '[:space:]')" != '1' ]; then
-    run_as_postgres "createdb -O $role_name $database_name"
+    run_as_postgres "createdb -O $role_name $database_name" >/dev/null 2>&1 || true
   fi
 
   run_as_postgres "psql -d $database_name -c \"CREATE EXTENSION IF NOT EXISTS timescaledb;\"" >/dev/null 2>&1 || true
