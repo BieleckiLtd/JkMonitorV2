@@ -32,6 +32,12 @@ type BleScanDevice = {
   displayName: string;
   isConnected: boolean;
   isPaired: boolean;
+  rssi?: number | null;
+  manufacturerData: string[];
+  advertisedServiceUuids: string[];
+  isDefinitionVerified: boolean;
+  verificationLabel?: string | null;
+  verificationDetails?: string | null;
 };
 
 type BleScanResponse = {
@@ -626,20 +632,74 @@ export function DevicesPage() {
                         Scan on the Pi and choose a detected device, or enter the address manually.
                       </p>
                       {bleDevices.length > 0 ? (
-                        <select
-                          aria-label='Discovered BLE devices'
-                          className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50'
-                          value={bleDevices.some(candidate => candidate.address === device.transportPortName) ? (device.transportPortName ?? '') : ''}
-                          disabled={isRunning || bleIsScanning}
-                          onChange={(event) => updateDevice(index, 'transportPortName', event.target.value || null)}
-                        >
-                          <option value=''>Choose discovered device...</option>
-                          {bleDevices.map(candidate => (
-                            <option key={candidate.address} value={candidate.address}>
-                              {`${candidate.displayName} (${candidate.address})${candidate.isConnected ? ' - connected' : ''}${candidate.isPaired ? ' - paired' : ''}`}
-                            </option>
-                          ))}
-                        </select>
+                        <div className='space-y-2'>
+                          {bleDevices.map(candidate => {
+                            const isSelected = candidate.address === (device.transportPortName ?? '');
+                            const showNameDetail = candidate.alias && candidate.name && candidate.alias !== candidate.name;
+
+                            return (
+                              <button
+                                key={candidate.address}
+                                type='button'
+                                aria-label={`Select BLE device ${candidate.address}`}
+                                disabled={isRunning || bleIsScanning}
+                                onClick={() => updateDevice(index, 'transportPortName', candidate.address)}
+                                className={`w-full rounded-xl border px-3 py-3 text-left transition ${
+                                  isSelected
+                                    ? 'border-primary/50 bg-primary/10'
+                                    : 'border-border bg-muted/20 hover:border-primary/30 hover:bg-muted/40'
+                                } disabled:cursor-not-allowed disabled:opacity-50`}
+                              >
+                                <div className='flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between'>
+                                  <div className='space-y-1.5'>
+                                    <div className='flex flex-wrap items-center gap-2'>
+                                      <span className='text-sm font-semibold text-foreground'>{candidate.displayName}</span>
+                                      {candidate.isDefinitionVerified ? (
+                                        <span className='rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-500'>
+                                          {candidate.verificationLabel ?? 'Verified'}
+                                        </span>
+                                      ) : null}
+                                      {candidate.rssi != null ? (
+                                        <span className='rounded-full border border-border bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>
+                                          {candidate.rssi} dBm
+                                        </span>
+                                      ) : null}
+                                      {candidate.isConnected ? (
+                                        <span className='rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-400'>
+                                          Connected
+                                        </span>
+                                      ) : null}
+                                      {candidate.isPaired ? (
+                                        <span className='rounded-full border border-border bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>
+                                          Paired
+                                        </span>
+                                      ) : null}
+                                    </div>
+                                    <div className='text-xs font-mono text-muted-foreground'>{candidate.address}</div>
+                                    {showNameDetail ? (
+                                      <div className='text-xs text-muted-foreground'>
+                                        Alias: {candidate.alias} · Name: {candidate.name}
+                                      </div>
+                                    ) : null}
+                                    {candidate.verificationDetails ? (
+                                      <div className='text-xs text-muted-foreground'>{candidate.verificationDetails}</div>
+                                    ) : null}
+                                    {candidate.manufacturerData.length > 0 ? (
+                                      <div className='text-xs text-muted-foreground'>
+                                        Manufacturer data: {candidate.manufacturerData.join(' · ')}
+                                      </div>
+                                    ) : null}
+                                  </div>
+                                  {isSelected ? (
+                                    <span className='rounded-full border border-primary/40 bg-primary/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary'>
+                                      Selected
+                                    </span>
+                                  ) : null}
+                                </div>
+                              </button>
+                            );
+                          })}
+                        </div>
                       ) : null}
                       {bleScanError ? (
                         <div className='rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300'>

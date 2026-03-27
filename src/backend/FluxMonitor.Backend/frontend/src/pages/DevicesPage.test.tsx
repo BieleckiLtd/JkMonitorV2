@@ -56,6 +56,12 @@ describe('DevicesPage', () => {
                 displayName: 'JK-BMS',
                 isConnected: false,
                 isPaired: true,
+                rssi: -54,
+                manufacturerData: ['0x07D0: 4A4B424D53'],
+                advertisedServiceUuids: ['0000ffe0-0000-1000-8000-00805f9b34fb'],
+                isDefinitionVerified: true,
+                verificationLabel: 'Verified JK BMS',
+                verificationDetails: 'JK · JK-PB2A16S20P · Battery-1',
               },
             ],
           }),
@@ -90,12 +96,13 @@ describe('DevicesPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /scan nearby/i }));
 
-    const discoveredSelect = await screen.findByRole('combobox', { name: /discovered ble devices/i });
     await waitFor(() => {
-      expect(screen.getByRole('option', { name: /jk-bms \(aa:bb:cc:dd:ee:ff\) - paired/i })).toBeInTheDocument();
+      expect(screen.getByText(/verified jk bms/i)).toBeInTheDocument();
+      expect(screen.getByText(/-54 dBm/i)).toBeInTheDocument();
+      expect(screen.getByText(/manufacturer data: 0x07d0: 4a4b424d53/i)).toBeInTheDocument();
     });
 
-    fireEvent.change(discoveredSelect, { target: { value: 'AA:BB:CC:DD:EE:FF' } });
+    fireEvent.click(screen.getByRole('button', { name: /select ble device aa:bb:cc:dd:ee:ff/i }));
 
     expect(screen.getByPlaceholderText(/aa:bb:cc:dd:ee:ff or device alias/i)).toHaveValue('AA:BB:CC:DD:EE:FF');
     expect(screen.getByRole('button', { name: /start/i })).toBeEnabled();

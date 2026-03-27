@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Collections;
 using Linux.Bluetooth;
 using Linux.Bluetooth.Extensions;
 using Tmds.DBus;
@@ -146,8 +147,37 @@ public sealed class GenericBlePollingClient(
         foreach (var device in devices.Values)
             discovered.Add(await MapDiscoveredDeviceAsync(device));
 
+        if (definition is not null &&
+            string.Equals(definition.Connection.Protocol.Type, "jk-bms-ble", StringComparison.OrdinalIgnoreCase))
+        {
+            var serviceUuid = BlueZManager.NormalizeUUID(
+                definition.Connection.Transport.Defaults?.ServiceUuid
+                ?? throw new InvalidOperationException($"Definition '{definition.Device.Id}' has no BLE service UUID."));
+            var probeTimeout = TimeSpan.FromMilliseconds(Math.Clamp((int)(discoveryWindow.TotalMilliseconds / 2), 1500, 4000));
+
+            foreach (var candidate in discovered
+                .Where(device =>
+                    device.AdvertisedServiceUuids.Length == 0 ||
+                    device.AdvertisedServiceUuids.Contains(serviceUuid, StringComparer.OrdinalIgnoreCase))
+                .OrderByDescending(device => device.Rssi ?? int.MinValue)
+                .Take(4)
+                .ToArray())
+            {
+                var probe = await ProbeDefinitionAsync(candidate.Address, definition, probeTimeout, cancellationToken);
+                discovered[discovered.FindIndex(device => string.Equals(device.Address, candidate.Address, StringComparison.OrdinalIgnoreCase))] =
+                    candidate with
+                    {
+                        IsDefinitionVerified = probe.IsDefinitionVerified,
+                        VerificationLabel = probe.VerificationLabel,
+                        VerificationDetails = probe.VerificationDetails
+                    };
+            }
+        }
+
         return discovered
-            .OrderByDescending(device => device.IsConnected)
+            .OrderByDescending(device => device.IsDefinitionVerified)
+            .ThenByDescending(device => device.IsConnected)
+            .ThenByDescending(device => device.Rssi ?? int.MinValue)
             .ThenBy(device => string.IsNullOrWhiteSpace(device.DisplayName) ? 1 : 0)
             .ThenBy(device => device.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(device => device.Address, StringComparer.OrdinalIgnoreCase)
@@ -508,6 +538,74 @@ public sealed class GenericBlePollingClient(
         return await SafeGetStringAsync(() => device.GetAliasAsync());
     }
 
+    private async Task<BleProbeResult> ProbeDefinitionAsync(
+        string address,
+        DeviceDefinition definition,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(address))
+            return new(false, null, null);
+
+        using var probeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        probeCts.CancelAfter(timeout);
+
+        var probeConfig = new DeviceConfiguration
+        {
+            DeviceId = $"ble-scan-{address.Replace(':', '-').ToLowerInvariant()}",
+            DisplayName = address,
+            DefinitionId = definition.Device.Id,
+            TransportPortName = address,
+            Address = 0,
+            IsMaster = false,
+            PollIntervalMilliseconds = 1000,
+            Enabled = false
+        };
+
+        var session = new BleSession($"probe:{address}");
+        try
+        {
+            await EnsureConnectedAsync(session, probeConfig, definition, probeCts.Token);
+
+            var infoBank = definition.DataSources.FirstOrDefault(bank =>
+                               string.Equals(bank.Id, "info", StringComparison.OrdinalIgnoreCase))
+                           ?? definition.DataSources.FirstOrDefault();
+
+            if (infoBank is null)
+                return new(false, null, "Probe could not find a readable JK data source.");
+
+            var frame = await RequestFrameAsync(session, definition, infoBank, probeCts.Token);
+            var payload = ExtractPayload(frame, infoBank);
+
+            var model = ReadAscii(payload, 0, 16);
+            var deviceName = ReadAscii(payload, 96, 16);
+            var vendor = ReadAscii(payload, 128, 16);
+            var identity = new[] { vendor, model, deviceName }
+                .Where(value => !string.IsNullOrWhiteSpace(value))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToArray();
+
+            var details = identity.Length > 0
+                ? string.Join(" · ", identity)
+                : "JK BLE protocol responded successfully.";
+
+            return new(true, "Verified JK BMS", details);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return new(false, null, "JK probe timed out.");
+        }
+        catch (Exception ex)
+        {
+            return new(false, null, $"JK probe failed: {ex.Message}");
+        }
+        finally
+        {
+            await ResetSessionAsync(session);
+            session.Lock.Dispose();
+        }
+    }
+
     private static async Task<BleDiscoveredDevice> MapDiscoveredDeviceAsync(Device device)
     {
         var address = await SafeGetStringAsync(() => device.GetAddressAsync()) ?? string.Empty;
@@ -515,6 +613,9 @@ public sealed class GenericBlePollingClient(
         var name = await SafeGetStringAsync(() => device.GetNameAsync());
         var isConnected = await SafeGetValueAsync(() => device.GetAsync<bool>("Connected"));
         var isPaired = await SafeGetValueAsync(() => device.GetAsync<bool>("Paired"));
+        var rssi = ConvertToNullableInt(await SafeGetObjectAsync(() => device.GetRSSIAsync()));
+        var manufacturerData = DescribeKeyValuePayloads(await SafeGetObjectAsync(() => device.GetManufacturerDataAsync()));
+        var advertisedServiceUuids = DescribeStringSequence(await SafeGetObjectAsync(() => device.GetUUIDsAsync()));
 
         var displayName = alias;
         if (string.IsNullOrWhiteSpace(displayName))
@@ -528,7 +629,13 @@ public sealed class GenericBlePollingClient(
             name,
             displayName ?? "Unknown BLE device",
             isConnected,
-            isPaired);
+            isPaired,
+            rssi,
+            manufacturerData,
+            advertisedServiceUuids,
+            false,
+            null,
+            null);
     }
 
     private static async Task<string?> SafeGetStringAsync(Func<Task<string>> getter)
@@ -554,6 +661,118 @@ public sealed class GenericBlePollingClient(
         {
             return false;
         }
+    }
+
+    private static async Task<object?> SafeGetObjectAsync<T>(Func<Task<T>> getter)
+    {
+        try
+        {
+            return await getter();
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static int? ConvertToNullableInt(object? value)
+    {
+        if (value is null)
+            return null;
+
+        try
+        {
+            return Convert.ToInt32(value);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static string[] DescribeStringSequence(object? value)
+    {
+        if (value is not IEnumerable enumerable)
+            return [];
+
+        return enumerable
+            .Cast<object?>()
+            .Select(item => item?.ToString()?.Trim())
+            .Where(item => !string.IsNullOrWhiteSpace(item))
+            .Select(item => item!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static string[] DescribeKeyValuePayloads(object? value)
+    {
+        if (value is not IEnumerable enumerable)
+            return [];
+
+        var results = new List<string>();
+        foreach (var entry in enumerable)
+        {
+            if (entry is null)
+                continue;
+
+            var entryType = entry.GetType();
+            var key = entryType.GetProperty("Key")?.GetValue(entry);
+            var payload = entryType.GetProperty("Value")?.GetValue(entry);
+            var keyText = FormatManufacturerKey(key);
+            var payloadText = FormatPayload(payload);
+
+            if (!string.IsNullOrWhiteSpace(keyText) || !string.IsNullOrWhiteSpace(payloadText))
+                results.Add(string.IsNullOrWhiteSpace(payloadText) ? keyText : $"{keyText}: {payloadText}");
+        }
+
+        return results.Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    private static string FormatManufacturerKey(object? key)
+    {
+        if (key is null)
+            return "Manufacturer";
+
+        try
+        {
+            var numeric = Convert.ToUInt32(key);
+            return $"0x{numeric:X4}";
+        }
+        catch
+        {
+            return key.ToString()?.Trim() ?? "Manufacturer";
+        }
+    }
+
+    private static string? FormatPayload(object? payload)
+    {
+        if (payload is null)
+            return null;
+
+        if (payload is byte[] bytes)
+        {
+            var hex = Convert.ToHexString(bytes);
+            return hex.Length > 20 ? $"{hex[..20]}..." : hex;
+        }
+
+        if (payload is IEnumerable<byte> byteEnumerable)
+        {
+            var bytesValue = byteEnumerable.ToArray();
+            var hex = Convert.ToHexString(bytesValue);
+            return hex.Length > 20 ? $"{hex[..20]}..." : hex;
+        }
+
+        return payload.ToString()?.Trim();
+    }
+
+    private static string? ReadAscii(byte[] payload, int offset, int length)
+    {
+        if (payload.Length <= offset || length <= 0)
+            return null;
+
+        var safeLength = Math.Min(length, payload.Length - offset);
+        var value = System.Text.Encoding.ASCII.GetString(payload, offset, safeLength).TrimEnd('\0', ' ');
+        return string.IsNullOrWhiteSpace(value) ? null : value;
     }
 
     private static async Task ResetSessionAsync(BleSession session)
@@ -636,4 +855,15 @@ public sealed record BleDiscoveredDevice(
     string? Name,
     string DisplayName,
     bool IsConnected,
-    bool IsPaired);
+    bool IsPaired,
+    int? Rssi,
+    string[] ManufacturerData,
+    string[] AdvertisedServiceUuids,
+    bool IsDefinitionVerified,
+    string? VerificationLabel,
+    string? VerificationDetails);
+
+public sealed record BleProbeResult(
+    bool IsDefinitionVerified,
+    string? VerificationLabel,
+    string? VerificationDetails);
