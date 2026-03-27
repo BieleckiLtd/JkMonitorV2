@@ -36,9 +36,7 @@ public sealed class NotificationConfigStore(
 
         if (!HasDatabase)
         {
-            logger.LogWarning("No database connection string configured — notification storage is disabled.");
-            _initialized = true;
-            return;
+            throw new InvalidOperationException("Flux Monitor requires PostgreSQL-backed notification storage.");
         }
 
         await _initializationLock.WaitAsync(cancellationToken);

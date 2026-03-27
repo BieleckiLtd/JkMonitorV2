@@ -42,10 +42,7 @@ public sealed class DeviceConfigStore(
 
             if (!HasDatabase)
             {
-                logger.LogWarning("No database connection string configured — device config will use seed values from appsettings (read-only).");
-                lock (_cacheLock) { _devices = _seedDevices; }
-                _initialized = true;
-                return;
+                throw new InvalidOperationException("Flux Monitor requires PostgreSQL-backed device configuration storage.");
             }
 
             await using var connection = await OpenConnectionAsync(cancellationToken);
@@ -84,9 +81,7 @@ public sealed class DeviceConfigStore(
 
         if (!HasDatabase)
         {
-            lock (_cacheLock) { _devices = devices; }
-            logger.LogInformation("Saved {Count} device(s) in memory (no database).", devices.Count);
-            return devices;
+            throw new InvalidOperationException("Flux Monitor requires PostgreSQL-backed device configuration storage.");
         }
 
         await using var connection = await OpenConnectionAsync(cancellationToken);

@@ -132,7 +132,7 @@ export function LogsPanel() {
   const [toDate, setToDate] = useState(() => toLocalDatetimeString(new Date()));
   const [page, setPage] = useState(0);
   const [expandedId, setExpandedId] = useState<number | null>(null);
-  const [copyState, setCopyState] = useState<'idle' | 'success' | 'error'>('idle');
+  const [copyFeedback, setCopyFeedback] = useState<{ entryId: number; state: 'success' | 'error' } | null>(null);
 
   const fetchLogs = useCallback(async () => {
     setIsLoading(true);
@@ -182,13 +182,13 @@ export function LogsPanel() {
   }, [fetchLogs]);
 
   useEffect(() => {
-    if (copyState === 'idle') {
+    if (!copyFeedback) {
       return undefined;
     }
 
-    const timeoutId = window.setTimeout(() => setCopyState('idle'), 2000);
+    const timeoutId = window.setTimeout(() => setCopyFeedback(null), 2000);
     return () => window.clearTimeout(timeoutId);
-  }, [copyState]);
+  }, [copyFeedback]);
 
   const toggleLevel = (level: string) => {
     setSelectedLevels((prev) => {
@@ -203,12 +203,12 @@ export function LogsPanel() {
     setPage(0);
   };
 
-  const handleCopyVisibleLogs = async () => {
+  const handleCopyEntry = async (entry: LogEntry) => {
     try {
-      await copyTextToClipboard(entries.map(formatLogEntry).join('\n\n'));
-      setCopyState('success');
+      await copyTextToClipboard(formatLogEntry(entry));
+      setCopyFeedback({ entryId: entry.id, state: 'success' });
     } catch {
-      setCopyState('error');
+      setCopyFeedback({ entryId: entry.id, state: 'error' });
     }
   };
 
@@ -228,34 +228,6 @@ export function LogsPanel() {
             </CardDescription>
           </div>
           <div className='flex items-center gap-2 self-start'>
-            <Button
-              type='button'
-              variant='outline'
-              size='icon-sm'
-              onClick={() => void handleCopyVisibleLogs()}
-              disabled={entries.length === 0}
-              aria-label='Copy visible logs to clipboard'
-              title={
-                copyState === 'success'
-                  ? 'Copied visible logs'
-                  : copyState === 'error'
-                    ? 'Copy failed'
-                    : 'Copy visible logs to clipboard'
-              }
-              className={cn(
-                'text-muted-foreground',
-                copyState === 'success' && 'text-emerald-300 border-emerald-500/40 bg-emerald-500/10 hover:bg-emerald-500/15 hover:text-emerald-200',
-                copyState === 'error' && 'text-rose-300 border-rose-500/40 bg-rose-500/10 hover:bg-rose-500/15 hover:text-rose-200',
-              )}
-            >
-              {copyState === 'success' ? (
-                <Check />
-              ) : copyState === 'error' ? (
-                <ClipboardX />
-              ) : (
-                <Copy />
-              )}
-            </Button>
             <Button
               type='button'
               variant='outline'
@@ -369,45 +341,82 @@ export function LogsPanel() {
           )}
 
           {entries.map((entry) => (
-            <button
+            <div
               key={entry.id}
-              type='button'
-              onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
-              className='w-full text-left rounded-lg border border-border/60 bg-background/40 px-3 py-2 transition-colors hover:bg-background/70 cursor-pointer'
+              className='rounded-lg border border-border/60 bg-background/40 px-3 py-2 transition-colors hover:bg-background/70'
             >
-              <div className='flex items-start gap-3'>
-                <span
+              <div className='flex items-start gap-2'>
+                <button
+                  type='button'
+                  onClick={() => setExpandedId(expandedId === entry.id ? null : entry.id)}
+                  className='min-w-0 flex-1 text-left cursor-pointer'
+                >
+                  <div className='flex items-start gap-3'>
+                    <span
+                      className={cn(
+                        'mt-0.5 shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider',
+                        severityColor(entry.level)
+                      )}
+                    >
+                      {entry.level.substring(0, 4)}
+                    </span>
+                    <div className='min-w-0 flex-1'>
+                      <div className='flex items-baseline justify-between gap-2'>
+                        <span className='truncate text-xs font-mono text-muted-foreground'>{entry.category}</span>
+                        <span className='shrink-0 text-[11px] text-muted-foreground/70'>
+                          {new Date(entry.timestamp).toLocaleString([], {
+                            month: 'short',
+                            day: 'numeric',
+                            hour: '2-digit',
+                            minute: '2-digit',
+                            second: '2-digit',
+                          })}
+                        </span>
+                      </div>
+                      <div className={cn('mt-1 text-sm text-foreground', expandedId !== entry.id && 'truncate')}>
+                        {entry.message}
+                      </div>
+                      {expandedId === entry.id && entry.exception && (
+                        <pre className='mt-2 overflow-x-auto rounded-lg bg-muted/50 p-2 text-xs font-mono text-rose-300 whitespace-pre-wrap break-all'>
+                          {entry.exception}
+                        </pre>
+                      )}
+                    </div>
+                  </div>
+                </button>
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='icon-sm'
+                  onClick={() => void handleCopyEntry(entry)}
+                  aria-label={`Copy log entry ${entry.id} to clipboard`}
+                  title={
+                    copyFeedback?.entryId === entry.id
+                      ? copyFeedback.state === 'success'
+                        ? 'Copied log entry'
+                        : 'Copy failed'
+                      : 'Copy log entry to clipboard'
+                  }
                   className={cn(
-                    'mt-0.5 shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wider',
-                    severityColor(entry.level)
+                    'mt-0.5 shrink-0 text-muted-foreground',
+                    copyFeedback?.entryId === entry.id && copyFeedback.state === 'success' &&
+                      'text-emerald-300 bg-emerald-500/10 hover:bg-emerald-500/15 hover:text-emerald-200',
+                    copyFeedback?.entryId === entry.id && copyFeedback.state === 'error' &&
+                      'text-rose-300 bg-rose-500/10 hover:bg-rose-500/15 hover:text-rose-200',
                   )}
                 >
-                  {entry.level.substring(0, 4)}
-                </span>
-                <div className='min-w-0 flex-1'>
-                  <div className='flex items-baseline justify-between gap-2'>
-                    <span className='truncate text-xs font-mono text-muted-foreground'>{entry.category}</span>
-                    <span className='shrink-0 text-[11px] text-muted-foreground/70'>
-                      {new Date(entry.timestamp).toLocaleString([], {
-                        month: 'short',
-                        day: 'numeric',
-                        hour: '2-digit',
-                        minute: '2-digit',
-                        second: '2-digit',
-                      })}
-                    </span>
-                  </div>
-                  <div className={cn('mt-1 text-sm text-foreground', expandedId !== entry.id && 'truncate')}>
-                    {entry.message}
-                  </div>
-                  {expandedId === entry.id && entry.exception && (
-                    <pre className='mt-2 overflow-x-auto rounded-lg bg-muted/50 p-2 text-xs font-mono text-rose-300 whitespace-pre-wrap break-all'>
-                      {entry.exception}
-                    </pre>
+                  {copyFeedback?.entryId === entry.id ? (
+                    copyFeedback.state === 'success' ? (
+                      <Check />
+                    ) : (
+                      <ClipboardX />
+                    )
+                  ) : (
+                    <Copy />
                   )}
-                </div>
+                </Button>
               </div>
-            </button>
+            </div>
           ))}
         </div>
 

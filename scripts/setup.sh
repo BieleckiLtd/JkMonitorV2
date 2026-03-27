@@ -113,7 +113,7 @@ open_browser_when_ready() {
 }
 
 section "Flux Monitor setup"
-echo "This script prepares a local toolchain if needed, guides the startup mode, and launches the app."
+echo "This script prepares a local toolchain if needed, requires PostgreSQL configuration, guides the startup mode, and launches the app."
 
 DOTNET_CMD="$(get_dotnet)"
 if [ -z "$DOTNET_CMD" ]; then
@@ -131,10 +131,8 @@ ENVIRONMENT='Development'
 TARGET_CONFIG="$BACKEND_PATH/appsettings.Development.Local.json"
 
 if [ "$MODE" = '1' ]; then
-  USE_DB="$(read_validated_choice 'Enable PostgreSQL and TimescaleDB persistence now?' 'yesno' 'n')"
-  if [ "${USE_DB,,}" = 'y' ]; then
-    read -r -p 'PostgreSQL connection string: ' CONNECTION_STRING
-    cat > "$TARGET_CONFIG" <<EOF
+  CONNECTION_STRING="$(read_required_value 'PostgreSQL connection string: ')"
+  cat > "$TARGET_CONFIG" <<EOF
 {
   "Monitor": {
     "Storage": {
@@ -144,18 +142,6 @@ if [ "$MODE" = '1' ]; then
   }
 }
 EOF
-  else
-    cat > "$TARGET_CONFIG" <<'EOF'
-{
-  "Monitor": {
-    "Storage": {
-      "Provider": "None",
-      "ConnectionString": ""
-    }
-  }
-}
-EOF
-  fi
 else
   ENVIRONMENT='Production'
   TARGET_CONFIG="$BACKEND_PATH/appsettings.Production.Local.json"
@@ -165,11 +151,7 @@ else
     exit 1
   fi
 
-  USE_DB="$(read_validated_choice 'Enable PostgreSQL and TimescaleDB persistence?' 'yesno' 'y')"
-  CONNECTION_STRING=''
-  if [ "${USE_DB,,}" = 'y' ]; then
-    read -r -p 'PostgreSQL connection string: ' CONNECTION_STRING
-  fi
+  CONNECTION_STRING="$(read_required_value 'PostgreSQL connection string: ')"
 
   cat > "$TARGET_CONFIG" <<EOF
 {
@@ -178,7 +160,7 @@ else
       "PortName": "$SERIAL_PORT"
     },
     "Storage": {
-      "Provider": "$( [ "${USE_DB,,}" = 'y' ] && echo 'TimescaleDb' || echo 'None' )",
+      "Provider": "TimescaleDb",
       "ConnectionString": "$CONNECTION_STRING"
     },
     "Devices": [

@@ -41,12 +41,11 @@ public sealed class SetupConfigurationService(
     public ApplySetupResponse Apply(ApplySetupRequest request)
     {
         var startupMode = NormalizeStartupMode(request.StartupMode);
-        var useDatabase = request.UseDatabase;
-        var connectionString = useDatabase ? (request.ConnectionString ?? string.Empty).Trim() : string.Empty;
+        var connectionString = (request.ConnectionString ?? string.Empty).Trim();
 
-        if (useDatabase && string.IsNullOrWhiteSpace(connectionString))
+        if (string.IsNullOrWhiteSpace(connectionString))
         {
-            throw new InvalidOperationException("A PostgreSQL connection string is required when database storage is enabled.");
+            throw new InvalidOperationException("A PostgreSQL connection string is required. Flux Monitor does not support detached storage.");
         }
 
         if (startupMode == "Hardware" && string.IsNullOrWhiteSpace(request.SerialPort))
@@ -60,20 +59,9 @@ public sealed class SetupConfigurationService(
             {
                 UpsertObject(monitor, "Storage", storage =>
                 {
-                    storage["Provider"] = useDatabase ? "TimescaleDb" : "None";
+                    storage["Provider"] = "TimescaleDb";
                     storage["ConnectionString"] = connectionString;
                 });
-
-                if (!useDatabase)
-                {
-                    UpsertObject(monitor, "LogStorage", logStorage =>
-                    {
-                        logStorage["Enabled"] = false;
-                        logStorage["ConnectionString"] = string.Empty;
-                        logStorage["AdminConnectionString"] = string.Empty;
-                        logStorage["AutoCreateDatabase"] = false;
-                    });
-                }
             });
 
             UpdateManagedEnvironmentFile("Development");
@@ -84,20 +72,9 @@ public sealed class SetupConfigurationService(
             {
                 UpsertObject(monitor, "Storage", storage =>
                 {
-                    storage["Provider"] = useDatabase ? "TimescaleDb" : "None";
+                    storage["Provider"] = "TimescaleDb";
                     storage["ConnectionString"] = connectionString;
                 });
-
-                if (!useDatabase)
-                {
-                    UpsertObject(monitor, "LogStorage", logStorage =>
-                    {
-                        logStorage["Enabled"] = false;
-                        logStorage["ConnectionString"] = string.Empty;
-                        logStorage["AdminConnectionString"] = string.Empty;
-                        logStorage["AutoCreateDatabase"] = false;
-                    });
-                }
             });
 
             UpdateManagedEnvironmentFile("Production");

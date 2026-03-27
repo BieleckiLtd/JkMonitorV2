@@ -268,6 +268,17 @@ function Start-FluxMonitorNow {
     Start-Process -FilePath 'powershell.exe' -ArgumentList "-NoProfile -ExecutionPolicy Bypass -WindowStyle Hidden -File `"$startScriptPath`"" -WindowStyle Hidden | Out-Null
 }
 
+function Read-RequiredConnectionString {
+    while ($true) {
+        $connectionString = Read-Host 'PostgreSQL connection string'
+        if (-not [string]::IsNullOrWhiteSpace($connectionString)) {
+            return $connectionString
+        }
+
+        Write-Host 'A PostgreSQL connection string is required.' -ForegroundColor Yellow
+    }
+}
+
 $normalizedRepository = Get-NormalizedRepository $Repository
 $assetUrl = "https://github.com/$normalizedRepository/releases/download/$ReleaseTag/$assetName"
 $tempRoot = Join-Path $env:TEMP ("FluxMonitor-release-install-{0}" -f ([Guid]::NewGuid().ToString('N')))
@@ -319,16 +330,17 @@ try {
 
     Write-Section 'Preparing first run'
     Write-Info 'Starting in simulator mode so the web UI is available immediately.'
+    $connectionString = Read-RequiredConnectionString
     @'
 {
   "Monitor": {
     "Storage": {
-      "Provider": "None",
-      "ConnectionString": ""
+      "Provider": "TimescaleDb",
+      "ConnectionString": "__CONNECTION_STRING__"
     }
   }
 }
-'@ | Set-Content -Path (Join-Path $appRoot 'appsettings.Production.Local.json') -Encoding UTF8
+'@.Replace('__CONNECTION_STRING__', $connectionString) | Set-Content -Path (Join-Path $appRoot 'appsettings.Production.Local.json') -Encoding UTF8
     Write-EnvironmentFile -EnvironmentName 'Production'
 
     Write-Section 'Configuring auto-start'
@@ -340,7 +352,7 @@ try {
     Write-Success "Local access URL: $appLocalUrl"
     Write-Success "LAN access URL: $accessUrl"
     Write-Muted 'Tip: Ctrl+Click usually opens the URL directly from Windows Terminal.'
-    Write-Muted 'Use the Setup panel in the app later when you are ready to switch to real hardware.'
+    Write-Muted 'Use the hardware configuration flow later when you are ready to switch from simulator mode.'
 }
 finally {
     Remove-Item -Path $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

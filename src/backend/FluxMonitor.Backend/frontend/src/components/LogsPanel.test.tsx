@@ -36,12 +36,12 @@ describe('LogsPanel', () => {
     vi.restoreAllMocks();
   });
 
-  it('copies the visible log entries to the clipboard', async () => {
+  it('copies an individual log entry to the clipboard with its exception', async () => {
     render(<LogsPanel />);
 
     await screen.findByText('Polling failed for device inverter-1.');
 
-    fireEvent.click(screen.getByRole('button', { name: 'Copy visible logs to clipboard' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Copy log entry 42 to clipboard' }));
 
     await waitFor(() => expect(writeText).toHaveBeenCalledTimes(1));
     expect(writeText).toHaveBeenCalledWith(

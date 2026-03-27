@@ -6,6 +6,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using System.Net.Http;
+using System.Reflection;
 using Xunit;
 
 namespace FluxMonitor.Backend.Tests;
@@ -82,8 +83,7 @@ public class DeviceStateStoreTests
         var deviceConfigStore = new DeviceConfigStore(
             Options.Create(config),
             NullLogger<DeviceConfigStore>.Instance);
-        // Manually initialize synchronously for tests (no DB, uses seed devices)
-        deviceConfigStore.InitializeAsync(CancellationToken.None).GetAwaiter().GetResult();
+        SeedDeviceConfigStore(deviceConfigStore, config.Devices);
 
         return new DeviceStateStore(
             deviceConfigStore,
@@ -116,6 +116,17 @@ public class DeviceStateStoreTests
                 }
             ]
         };
+    }
+
+    private static void SeedDeviceConfigStore(DeviceConfigStore store, IReadOnlyList<DeviceConfiguration> devices)
+    {
+        typeof(DeviceConfigStore)
+            .GetField("_devices", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(store, devices);
+
+        typeof(DeviceConfigStore)
+            .GetField("_initialized", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(store, true);
     }
 
     private sealed class FakeBuildMetadataProvider(BuildRuntimeInfo buildInfo) : IBuildMetadataProvider

@@ -173,7 +173,7 @@ function Select-SerialPort {
 }
 
 Write-Section 'Flux Monitor setup'
-Write-Host 'This script will prepare a local toolchain if needed, guide the startup mode, and launch the app.' -ForegroundColor DarkGray
+Write-Host 'This script will prepare a local toolchain if needed, require PostgreSQL configuration, guide the startup mode, and launch the app.' -ForegroundColor DarkGray
 
 $dotnet = Get-DotnetCommand
 if (-not $dotnet) {
@@ -198,18 +198,16 @@ $config = @{}
 
 if ($mode -eq '1') {
     Write-Section 'Configuring simulator mode'
-    $useDb = Read-YesNo 'Enable PostgreSQL and TimescaleDB persistence now?' $false
+    $connectionString = Read-Host 'PostgreSQL connection string'
+    if ([string]::IsNullOrWhiteSpace($connectionString)) {
+        throw 'A PostgreSQL connection string is required.'
+    }
 
     $config['Monitor'] = @{
         Storage = @{
-            Provider = if ($useDb) { 'TimescaleDb' } else { 'None' }
-            ConnectionString = ''
+            Provider = 'TimescaleDb'
+            ConnectionString = $connectionString
         }
-    }
-
-    if ($useDb) {
-        $connectionString = Read-Host 'PostgreSQL connection string'
-        $config['Monitor']['Storage']['ConnectionString'] = $connectionString
     }
 }
 else {
@@ -217,10 +215,9 @@ else {
     $environment = 'Production'
     $serialPort = Select-SerialPort
 
-    $useDb = Read-YesNo 'Enable PostgreSQL and TimescaleDB persistence?' $true
-    $connectionString = ''
-    if ($useDb) {
-        $connectionString = Read-Host 'PostgreSQL connection string'
+    $connectionString = Read-Host 'PostgreSQL connection string'
+    if ([string]::IsNullOrWhiteSpace($connectionString)) {
+        throw 'A PostgreSQL connection string is required.'
     }
 
     $config['Monitor'] = @{
@@ -228,7 +225,7 @@ else {
             PortName = $serialPort
         }
         Storage = @{
-            Provider = if ($useDb) { 'TimescaleDb' } else { 'None' }
+            Provider = 'TimescaleDb'
             ConnectionString = $connectionString
         }
         Devices = @(

@@ -78,6 +78,16 @@ run_elevated() {
   fi
 }
 
+run_as_postgres() {
+  local command="$1"
+
+  if [ "$(id -u)" -eq 0 ]; then
+    su postgres -c "$command"
+  else
+    sudo -u postgres bash -lc "$command"
+  fi
+}
+
 normalize_repository() {
   local input="$1"
 
@@ -433,6 +443,73 @@ read_required_value() {
   echo "$value"
 }
 
+get_required_connection_string() {
+  if [ -n "$NONINTERACTIVE_CONNECTION_STRING" ]; then
+    printf '%s\n' "$NONINTERACTIVE_CONNECTION_STRING"
+    return
+  fi
+
+  if command -v psql >/dev/null 2>&1 || command -v apt-get >/dev/null 2>&1; then
+    bootstrap_local_postgres_connection_string
+    return
+  fi
+
+  if ! [ -t 0 ]; then
+    echo 'FLUXMONITOR_CONNECTION_STRING is required when installing non-interactively.' >&2
+    exit 1
+  fi
+
+  read_required_value 'PostgreSQL connection string: '
+}
+
+generate_password() {
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - <<'PY'
+import secrets
+print(secrets.token_urlsafe(24))
+PY
+    return
+  fi
+
+  head -c 32 /dev/urandom | base64 | tr -d '\n=+/' | cut -c1-32
+}
+
+bootstrap_local_postgres_connection_string() {
+  local database_name='fluxmonitor'
+  local role_name='fluxmonitor_app'
+  local password
+  password="$(generate_password)"
+
+  section 'Bootstrapping local PostgreSQL'
+
+  if ! command -v psql >/dev/null 2>&1; then
+    if ! command -v apt-get >/dev/null 2>&1; then
+      echo 'No PostgreSQL client was found and automatic PostgreSQL installation is only implemented for apt-based Linux systems.' >&2
+      exit 1
+    fi
+
+    info 'Installing the local PostgreSQL server package.'
+    run_elevated apt-get update
+    run_elevated apt-get install -y postgresql
+  fi
+
+  if command -v systemctl >/dev/null 2>&1; then
+    run_elevated systemctl enable postgresql >/dev/null 2>&1 || true
+    run_elevated systemctl start postgresql
+  fi
+
+  info "Creating or updating the local PostgreSQL role '$role_name' and database '$database_name'."
+  run_as_postgres "psql -v ON_ERROR_STOP=1 -d postgres -c \"DO \\\$\\\$ BEGIN IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = '$role_name') THEN CREATE ROLE $role_name LOGIN PASSWORD '$password'; ELSE ALTER ROLE $role_name WITH LOGIN PASSWORD '$password'; END IF; END \\\$\\\$;\""
+
+  if [ "$(run_as_postgres "psql -tAc \"SELECT 1 FROM pg_database WHERE datname = '$database_name'\" postgres" | tr -d '[:space:]')" != '1' ]; then
+    run_as_postgres "createdb -O $role_name $database_name"
+  fi
+
+  run_as_postgres "psql -d $database_name -c \"CREATE EXTENSION IF NOT EXISTS timescaledb;\"" >/dev/null 2>&1 || true
+
+  printf 'Host=127.0.0.1;Port=5432;Database=%s;Username=%s;Password=%s\n' "$database_name" "$role_name" "$password"
+}
+
 get_configured_choice() {
   local configured_value="$1"
   local prompt="$2"
@@ -533,7 +610,7 @@ writable_config="$APP_ROOT/appsettings.Production.Local.json"
 
 echo
 echo 'Flux Monitor hardware configuration'
-echo 'This switches the install from simulator preview mode to your real RS485 setup.'
+echo 'This switches the install from simulator preview mode to your real RS485 setup and requires PostgreSQL.'
 
 read -r -p 'RS485 serial port (example: /dev/ttyUSB0): ' serial_port
 while [ -z "$serial_port" ]; do
@@ -541,19 +618,11 @@ while [ -z "$serial_port" ]; do
   read -r -p 'RS485 serial port (example: /dev/ttyUSB0): ' serial_port
 done
 
-read -r -p 'Enable PostgreSQL and TimescaleDB persistence? [y/N] ' use_db
-use_db="${use_db:-n}"
-connection_string=''
-
-case "${use_db,,}" in
-  y|yes)
-    read -r -p 'PostgreSQL connection string: ' connection_string
-    storage_provider='TimescaleDb'
-    ;;
-  *)
-    storage_provider='None'
-    ;;
-esac
+read -r -p 'PostgreSQL connection string: ' connection_string
+while [ -z "$connection_string" ]; do
+  echo 'A PostgreSQL connection string is required.'
+  read -r -p 'PostgreSQL connection string: ' connection_string
+done
 
 cat > "$writable_config" <<JSON
 {
@@ -562,7 +631,7 @@ cat > "$writable_config" <<JSON
       "PortName": "$serial_port"
     },
     "Storage": {
-      "Provider": "$storage_provider",
+      "Provider": "TimescaleDb",
       "ConnectionString": "$connection_string"
     },
     "Devices": [
@@ -947,19 +1016,8 @@ ENVIRONMENT="${ENVIRONMENT:-Development}"
 TARGET_CONFIG="$APP_ROOT/appsettings.Development.Local.json"
 
 if [ "$reused_existing_configuration" = 'false' ] && [ "$MODE" = '1' ]; then
-  if [ -n "$NONINTERACTIVE_USE_DB" ] || [ -n "$NONINTERACTIVE_CONNECTION_STRING" ]; then
-    USE_DB="$(get_configured_choice "$NONINTERACTIVE_USE_DB" 'Enable PostgreSQL and TimescaleDB persistence now?' 'yesno' 'n')"
-  else
-    USE_DB='n'
-  fi
-
-  if [ "${USE_DB,,}" = 'y' ]; then
-    if [ -n "$NONINTERACTIVE_CONNECTION_STRING" ]; then
-      CONNECTION_STRING="$NONINTERACTIVE_CONNECTION_STRING"
-    else
-      read -r -p 'PostgreSQL connection string: ' CONNECTION_STRING
-    fi
-    cat > "$TARGET_CONFIG" <<EOF
+  CONNECTION_STRING="$(get_required_connection_string)"
+  cat > "$TARGET_CONFIG" <<EOF
 {
   "Monitor": {
     "Storage": {
@@ -969,18 +1027,6 @@ if [ "$reused_existing_configuration" = 'false' ] && [ "$MODE" = '1' ]; then
   }
 }
 EOF
-  else
-    cat > "$TARGET_CONFIG" <<'EOF'
-{
-  "Monitor": {
-    "Storage": {
-      "Provider": "None",
-      "ConnectionString": ""
-    }
-  }
-}
-EOF
-  fi
 elif [ "$reused_existing_configuration" = 'false' ]; then
   ENVIRONMENT='Production'
   TARGET_CONFIG="$APP_ROOT/appsettings.Production.Local.json"
@@ -994,15 +1040,7 @@ elif [ "$reused_existing_configuration" = 'false' ]; then
     exit 1
   fi
 
-  USE_DB="$(get_configured_choice "$NONINTERACTIVE_USE_DB" 'Enable PostgreSQL and TimescaleDB persistence?' 'yesno' 'y')"
-  CONNECTION_STRING=''
-  if [ "${USE_DB,,}" = 'y' ]; then
-    if [ -n "$NONINTERACTIVE_CONNECTION_STRING" ]; then
-      CONNECTION_STRING="$NONINTERACTIVE_CONNECTION_STRING"
-    else
-      read -r -p 'PostgreSQL connection string: ' CONNECTION_STRING
-    fi
-  fi
+  CONNECTION_STRING="$(get_required_connection_string)"
 
   cat > "$TARGET_CONFIG" <<EOF
 {
@@ -1011,7 +1049,7 @@ elif [ "$reused_existing_configuration" = 'false' ]; then
       "PortName": "$SERIAL_PORT"
     },
     "Storage": {
-      "Provider": "$( [ "${USE_DB,,}" = 'y' ] && echo 'TimescaleDb' || echo 'None' )",
+      "Provider": "TimescaleDb",
       "ConnectionString": "$CONNECTION_STRING"
     },
     "Devices": [

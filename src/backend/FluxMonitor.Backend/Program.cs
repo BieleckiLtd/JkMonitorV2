@@ -10,8 +10,19 @@ builder.Configuration
 
 var monitorSection = builder.Configuration.GetSection("Monitor");
 var storageProvider = monitorSection.GetValue<string>("Storage:Provider");
+var storageConnectionString = monitorSection.GetValue<string>("Storage:ConnectionString");
 var logStorageOptions = builder.Configuration.GetSection("Monitor:LogStorage").Get<LogStorageOptions>() ?? new LogStorageOptions();
 var logStore = new PostgresLogStore(logStorageOptions);
+
+if (!string.Equals(storageProvider, "TimescaleDb", StringComparison.OrdinalIgnoreCase))
+{
+    throw new InvalidOperationException("Flux Monitor requires PostgreSQL-backed storage. Set Monitor:Storage:Provider to 'TimescaleDb'.");
+}
+
+if (string.IsNullOrWhiteSpace(storageConnectionString))
+{
+    throw new InvalidOperationException("Flux Monitor requires a PostgreSQL connection string. Set Monitor:Storage:ConnectionString before starting the app.");
+}
 
 await logStore.InitializeAsync(CancellationToken.None);
 
@@ -64,15 +75,8 @@ builder.Services.AddSingleton(sp => new FluxMonitor.Backend.Services.DeviceDefin
     sp.GetRequiredService<IHttpClientFactory>(),
     sp.GetRequiredService<ILogger<FluxMonitor.Backend.Services.DeviceDefinitionLoader>>()));
 
-if (string.Equals(storageProvider, "TimescaleDb", StringComparison.OrdinalIgnoreCase))
-{
-    builder.Services.AddSingleton<FluxMonitor.Backend.Services.TimescaleTelemetryRepository>();
-    builder.Services.AddSingleton<FluxMonitor.Backend.Services.ITelemetryRepository>(sp => sp.GetRequiredService<FluxMonitor.Backend.Services.TimescaleTelemetryRepository>());
-}
-else
-{
-    builder.Services.AddSingleton<FluxMonitor.Backend.Services.ITelemetryRepository, FluxMonitor.Backend.Services.NoOpTelemetryRepository>();
-}
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.TimescaleTelemetryRepository>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.ITelemetryRepository>(sp => sp.GetRequiredService<FluxMonitor.Backend.Services.TimescaleTelemetryRepository>());
 
 builder.Services.AddHostedService<FluxMonitor.Backend.Services.PollingBackgroundService>();
 builder.Services.AddHostedService<FluxMonitor.Backend.Services.RetentionBackgroundService>();

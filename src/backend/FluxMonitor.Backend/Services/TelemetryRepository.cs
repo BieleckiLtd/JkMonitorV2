@@ -97,10 +97,9 @@ public sealed class TimescaleTelemetryRepository(
 
             await using var connection = new NpgsqlConnection(_storage.ConnectionString);
             await connection.OpenAsync(cancellationToken);
+            var hasTimescale = await TryEnableTimescaleAsync(connection, cancellationToken);
 
-            await ExecuteNonQueryAsync(connection, @"
-CREATE EXTENSION IF NOT EXISTS timescaledb;
-
+            await ExecuteNonQueryAsync(connection, $@"
 CREATE TABLE IF NOT EXISTS jk_raw_samples (
     sampled_at timestamptz NOT NULL,
     device_id text NOT NULL,
@@ -126,7 +125,7 @@ CREATE TABLE IF NOT EXISTS jk_raw_samples (
     cell_voltages jsonb NULL
 );
 
-SELECT create_hypertable('jk_raw_samples', by_range('sampled_at'), if_not_exists => TRUE);
+{(hasTimescale ? "SELECT create_hypertable('jk_raw_samples', by_range('sampled_at'), if_not_exists => TRUE);" : string.Empty)}
 
 CREATE INDEX IF NOT EXISTS ix_jk_raw_samples_device_sampled_at
     ON jk_raw_samples (device_id, sampled_at DESC);
@@ -162,7 +161,7 @@ CREATE TABLE IF NOT EXISTS {table} (
     PRIMARY KEY (bucket_start, device_id)
 );
 
-SELECT create_hypertable('{table}', by_range('bucket_start'), if_not_exists => TRUE);
+{(hasTimescale ? $"SELECT create_hypertable('{table}', by_range('bucket_start'), if_not_exists => TRUE);" : string.Empty)}
 
 DO $$ BEGIN
   ALTER TABLE {table} ADD COLUMN IF NOT EXISTS avg_mos_temperature_celsius numeric NULL;
@@ -173,7 +172,10 @@ END $$;
             }
 
             _initialized = true;
-            logger.LogInformation("TimescaleDB schema is ready.");
+            logger.LogInformation(
+                hasTimescale
+                    ? "PostgreSQL schema is ready with TimescaleDB enabled."
+                    : "PostgreSQL schema is ready without the TimescaleDB extension.");
         }
         finally
         {
@@ -227,10 +229,9 @@ END $$;
             var connStr = GetConnectionString(device);
             await using var connection = new NpgsqlConnection(connStr);
             await connection.OpenAsync(cancellationToken);
+            var hasTimescale = await TryEnableTimescaleAsync(connection, cancellationToken);
 
-            await ExecuteNonQueryAsync(connection, @"
-CREATE EXTENSION IF NOT EXISTS timescaledb;
-
+            await ExecuteNonQueryAsync(connection, $@"
 CREATE TABLE IF NOT EXISTS jk_raw_samples (
     sampled_at timestamptz NOT NULL,
     device_id text NOT NULL,
@@ -256,7 +257,7 @@ CREATE TABLE IF NOT EXISTS jk_raw_samples (
     cell_voltages jsonb NULL
 );
 
-SELECT create_hypertable('jk_raw_samples', by_range('sampled_at'), if_not_exists => TRUE);
+{(hasTimescale ? "SELECT create_hypertable('jk_raw_samples', by_range('sampled_at'), if_not_exists => TRUE);" : string.Empty)}
 
 CREATE INDEX IF NOT EXISTS ix_jk_raw_samples_device_sampled_at
     ON jk_raw_samples (device_id, sampled_at DESC);
@@ -291,7 +292,7 @@ CREATE TABLE IF NOT EXISTS {table} (
     PRIMARY KEY (bucket_start, device_id)
 );
 
-SELECT create_hypertable('{table}', by_range('bucket_start'), if_not_exists => TRUE);
+{(hasTimescale ? $"SELECT create_hypertable('{table}', by_range('bucket_start'), if_not_exists => TRUE);" : string.Empty)}
 
 DO $$ BEGIN
   ALTER TABLE {table} ADD COLUMN IF NOT EXISTS avg_mos_temperature_celsius numeric NULL;
@@ -302,7 +303,11 @@ END $$;
             }
 
             _deviceDbInitialized[device.DatabaseName] = true;
-            logger.LogInformation("Per-device TimescaleDB schema is ready for database '{DatabaseName}'.", device.DatabaseName);
+            logger.LogInformation(
+                hasTimescale
+                    ? "Per-device PostgreSQL schema is ready with TimescaleDB enabled for database '{DatabaseName}'."
+                    : "Per-device PostgreSQL schema is ready without the TimescaleDB extension for database '{DatabaseName}'.",
+                device.DatabaseName);
         }
         finally
         {
@@ -600,6 +605,32 @@ WHERE target.tableoid = batch.tableoid
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task<bool> TryEnableTimescaleAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    {
+        try
+        {
+            await ExecuteNonQueryAsync(connection, "CREATE EXTENSION IF NOT EXISTS timescaledb;", cancellationToken);
+            return true;
+        }
+        catch (PostgresException exception) when (
+            exception.SqlState is PostgresErrorCodes.UndefinedFile or PostgresErrorCodes.FeatureNotSupported)
+        {
+            logger.LogWarning(
+                "TimescaleDB extension is not installed for database '{DatabaseName}'. Continuing with plain PostgreSQL tables.",
+                connection.Database);
+            return false;
+        }
+        catch (Exception exception) when (
+            exception.Message.Contains("timescaledb", StringComparison.OrdinalIgnoreCase))
+        {
+            logger.LogWarning(
+                exception,
+                "TimescaleDB extension could not be enabled for database '{DatabaseName}'. Continuing with plain PostgreSQL tables.",
+                connection.Database);
+            return false;
+        }
     }
 
     public async Task<IReadOnlyList<CellHistoryDataPoint>> QueryCellHistoryAsync(string deviceId, int cellIndex, string resolution, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
