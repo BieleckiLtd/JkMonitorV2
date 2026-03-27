@@ -13,6 +13,19 @@ public sealed class PollingClientDispatcher(
     GenericModbusPollingClient modbusClient,
     DeviceDefinitionLoader definitionLoader) : IDevicePollingClient
 {
+    private static readonly HashSet<string> SupportedTransports =
+        new(StringComparer.OrdinalIgnoreCase) { "serial" };
+
+    /// <summary>
+    /// Returns true when the device's definition transport is handled by a registered client.
+    /// </summary>
+    public bool IsTransportSupported(DeviceConfiguration device)
+    {
+        if (!definitionLoader.TryGet(device.DefinitionId, out var definition) || definition is null)
+            return false;
+        return SupportedTransports.Contains(definition.Connection.Transport.Type);
+    }
+
     public Task<DevicePollResult> PollAsync(DeviceConfiguration device, CancellationToken cancellationToken)
     {
         if (!definitionLoader.TryGet(device.DefinitionId, out var definition) || definition is null)

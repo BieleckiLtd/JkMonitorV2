@@ -19,6 +19,9 @@ public sealed class DeviceOrchestrator(
 {
     private readonly ConcurrentDictionary<string, DeviceHandle> _handles = new(StringComparer.OrdinalIgnoreCase);
 
+    private bool IsTransportSupported(DeviceConfiguration device) =>
+        pollingClient is PollingClientDispatcher dispatcher && dispatcher.IsTransportSupported(device);
+
     /// <summary>
     /// Apply a full device configuration set. Diffs against running devices to
     /// stop removed ones, start new ones, and restart changed ones — all live.
@@ -61,15 +64,29 @@ public sealed class DeviceOrchestrator(
                 {
                     await StopDeviceAsync(id);
                     stateStore.RegisterDevice(device, definitionLoader);
-                    StartDevice(device, cancellationToken);
-                    logger.LogInformation("Restarted device {DeviceId} with updated configuration (live).", id);
+                    if (IsTransportSupported(device))
+                    {
+                        StartDevice(device, cancellationToken);
+                        logger.LogInformation("Restarted device {DeviceId} with updated configuration (live).", id);
+                    }
+                    else
+                    {
+                        logger.LogInformation("Device {DeviceId} registered but not started: transport type is not yet supported.", id);
+                    }
                 }
             }
             else
             {
                 stateStore.RegisterDevice(device, definitionLoader);
-                StartDevice(device, cancellationToken);
-                logger.LogInformation("Started device {DeviceId} (live).", id);
+                if (IsTransportSupported(device))
+                {
+                    StartDevice(device, cancellationToken);
+                    logger.LogInformation("Started device {DeviceId} (live).", id);
+                }
+                else
+                {
+                    logger.LogInformation("Device {DeviceId} registered but not started: transport type is not yet supported.", id);
+                }
             }
         }
     }
