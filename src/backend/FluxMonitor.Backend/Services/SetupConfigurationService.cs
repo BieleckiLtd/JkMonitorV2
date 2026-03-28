@@ -14,6 +14,7 @@ public sealed class SetupConfigurationService(
     ManagedRestartService managedRestartService,
     ILogger<SetupConfigurationService> logger)
 {
+    private const string ManagedAspNetCoreUrls = "http://[::]:5074";
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true
@@ -191,7 +192,7 @@ public sealed class SetupConfigurationService(
         var lines = new[]
         {
             $"ASPNETCORE_ENVIRONMENT={environmentName}",
-            "ASPNETCORE_URLS=http://0.0.0.0:5074"
+            $"ASPNETCORE_URLS={ManagedAspNetCoreUrls}"
         };
 
         File.WriteAllLines(environmentFilePath, lines);

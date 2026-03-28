@@ -8,7 +8,7 @@ APP_ROOT="$DESTINATION/app"
 LOCAL_DOTNET_ROOT="$DESTINATION/.dotnet"
 LOCAL_DOTNET="$LOCAL_DOTNET_ROOT/dotnet"
 APP_PORT='5074'
-APP_BIND_URL="http://0.0.0.0:$APP_PORT"
+APP_BIND_URL="http://[::]:$APP_PORT"
 APP_LOCAL_URL="http://127.0.0.1:$APP_PORT"
 HEALTH_URL="$APP_LOCAL_URL/api/health"
 ASSET_NAME='fluxmonitor-backend-linux-arm64.tar.gz'
@@ -727,7 +727,7 @@ JSON
 
 cat > "$ENV_PATH" <<ENVVARS
 ASPNETCORE_ENVIRONMENT=Production
-ASPNETCORE_URLS=http://0.0.0.0:$APP_PORT
+ASPNETCORE_URLS=$APP_BIND_URL
 ENVVARS
 
 if command -v systemctl >/dev/null 2>&1 && systemctl list-unit-files | grep -q '^$SERVICE_NAME'; then
@@ -778,7 +778,7 @@ if [ -f "$ENV_PATH" ]; then
 fi
 
 export ASPNETCORE_ENVIRONMENT="${ASPNETCORE_ENVIRONMENT:-Production}"
-export ASPNETCORE_URLS="${ASPNETCORE_URLS:-http://0.0.0.0:5074}"
+export ASPNETCORE_URLS="${ASPNETCORE_URLS:-http://[::]:5074}"
 
 cd "$APP_ROOT"
 exec "$DOTNET_CMD" ./FluxMonitor.Backend.dll

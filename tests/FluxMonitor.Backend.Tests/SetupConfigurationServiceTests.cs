@@ -55,9 +55,35 @@ public sealed class SetupConfigurationServiceTests : IDisposable
             root["Monitor"]?["Storage"]?["ConnectionString"]?.GetValue<string>());
     }
 
-    private SetupConfigurationService CreateService()
+    [Fact]
+    public void Apply_WritesDualStackUrlsToManagedEnvironmentFile()
     {
-        Directory.CreateDirectory(_tempRootPath);
+        var installRoot = Path.Combine(_tempRootPath, "managed-install");
+        var contentRoot = Path.Combine(installRoot, "app");
+        var service = CreateService(contentRoot);
+
+        service.Apply(new ApplySetupRequest
+        {
+            StartupMode = "hardware",
+            UseDatabase = false,
+            ConnectionString = "Host=127.0.0.1;Database=fluxmonitor;Username=fluxmonitor;Password=secret",
+            SerialPort = "/dev/ttyUSB0",
+            RestartApplication = false
+        });
+
+        var envPath = Path.Combine(installRoot, "fluxmonitor.env");
+        var lines = File.ReadAllLines(envPath);
+
+        Assert.Contains("ASPNETCORE_ENVIRONMENT=Production", lines);
+        Assert.Contains(
+            "ASPNETCORE_URLS=http://[::]:5074",
+            lines);
+    }
+
+    private SetupConfigurationService CreateService(string? contentRootPath = null)
+    {
+        var effectiveContentRoot = contentRootPath ?? _tempRootPath;
+        Directory.CreateDirectory(effectiveContentRoot);
 
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -71,7 +97,7 @@ public sealed class SetupConfigurationServiceTests : IDisposable
             })
             .Build();
 
-        var environment = new TestHostEnvironment { ContentRootPath = _tempRootPath };
+        var environment = new TestHostEnvironment { ContentRootPath = effectiveContentRoot };
         var lifetime = new TestHostApplicationLifetime();
         var restartService = new ManagedRestartService(
             environment,

@@ -12,7 +12,7 @@ $appRoot = Join-Path $Destination 'app'
 $localDotnetRoot = Join-Path $Destination '.dotnet'
 $localDotnet = Join-Path $localDotnetRoot 'dotnet.exe'
 $appPort = 5074
-$appBindUrl = "http://0.0.0.0:$appPort"
+$appBindUrl = "http://[::]:$appPort"
 $appLocalUrl = "http://127.0.0.1:$appPort"
 $assetName = 'fluxmonitor-backend-win-x64.zip'
 $installScript = Join-Path $env:TEMP 'dotnet-install-fluxmonitor-runtime.ps1'
@@ -177,7 +177,7 @@ $appRoot = Join-Path $scriptRoot 'app'
 $localDotnet = Join-Path $scriptRoot '.dotnet\dotnet.exe'
 $envPath = Join-Path $scriptRoot 'fluxmonitor.env'
 $appEnvironment = 'Production'
-$appUrls = 'http://0.0.0.0:5074'
+$appUrls = 'http://[::]:5074'
 
 if (Test-Path $envPath) {
     foreach ($line in Get-Content $envPath) {
