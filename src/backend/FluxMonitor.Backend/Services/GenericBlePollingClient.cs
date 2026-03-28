@@ -11,8 +11,10 @@ using FluxMonitor.Contracts.DeviceDefinition;
 namespace FluxMonitor.Backend.Services;
 
 /// <summary>
-/// Definition-driven BLE polling client for frame-based GATT protocols.
-/// The current implementation supports the JK BMS BLE protocol over BlueZ on Linux.
+/// Definition-driven BLE client for frame-based GATT protocols.
+/// Read behavior is described by the device definition per data source:
+/// request/response banks actively write commands, while notify-stream banks
+/// consume unsolicited frames from the active BLE notification subscription.
 /// </summary>
 public sealed class GenericBlePollingClient(
     DefinitionDrivenTelemetryBuilder telemetryBuilder,
@@ -21,6 +23,80 @@ public sealed class GenericBlePollingClient(
 {
     private readonly ConcurrentDictionary<string, BleSession> _sessions = new(StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
+
+    public static bool IsDefinitionSupported(DeviceDefinition definition)
+        => GetUnsupportedDefinitionMessage(definition) is null;
+
+    public static string? GetUnsupportedDefinitionMessage(DeviceDefinition definition)
+    {
+        ArgumentNullException.ThrowIfNull(definition);
+
+        if (!string.Equals(definition.Connection.Transport.Type, "ble", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Transport type '{definition.Connection.Transport.Type}' is not supported by the BLE polling client.";
+        }
+
+        if (definition.DataSources.Count == 0)
+            return "At least one data source must be defined.";
+
+        var transportDefaults = definition.Connection.Transport.Defaults;
+        if (transportDefaults is null)
+            return "BLE transport defaults are required.";
+
+        if (string.IsNullOrWhiteSpace(transportDefaults.ServiceUuid))
+            return "BLE serviceUuid is required.";
+
+        if (string.IsNullOrWhiteSpace(transportDefaults.NotifyCharacteristicUuid))
+            return "BLE notifyCharacteristicUuid is required.";
+
+        var settings = definition.Connection.Protocol.Settings;
+        if (settings is null)
+            return "BLE protocol settings are required.";
+
+        if (settings.ResponseFrameSize < 8)
+            return "BLE responseFrameSize must be at least 8 bytes.";
+
+        if (settings.ResponsePreamble.Count == 0)
+            return "BLE responsePreamble is required.";
+
+        if (!IsSupportedBleChecksum(settings.ChecksumType))
+            return $"BLE checksumType '{settings.ChecksumType}' is not supported.";
+
+        var invalidReadModeBank = definition.DataSources.FirstOrDefault(bank => !IsSupportedReadMode(bank.ReadMode));
+        if (invalidReadModeBank is not null)
+        {
+            return $"BLE data source '{invalidReadModeBank.Id}' declares unsupported readMode '{invalidReadModeBank.ReadMode}'.";
+        }
+
+        if (settings.ResponseFrameTypeOffset < 0 || settings.ResponseFrameTypeOffset >= settings.ResponseFrameSize)
+        {
+            return $"BLE responseFrameTypeOffset {settings.ResponseFrameTypeOffset} must be within responseFrameSize {settings.ResponseFrameSize}.";
+        }
+
+        if (settings.ResponseFooterSize < 0 || settings.ResponseFooterSize >= settings.ResponseFrameSize)
+        {
+            return $"BLE responseFooterSize {settings.ResponseFooterSize} must be within responseFrameSize {settings.ResponseFrameSize}.";
+        }
+
+        if (definition.DataSources.Any(IsRequestResponseBank))
+        {
+            if (string.IsNullOrWhiteSpace(transportDefaults.WriteCharacteristicUuid))
+                return "BLE writeCharacteristicUuid is required for request-response banks.";
+
+            if (settings.RequestFrameSize < 2)
+                return "BLE requestFrameSize must be at least 2 bytes for request-response banks.";
+
+            if (settings.RequestPreamble.Count == 0)
+                return "BLE requestPreamble is required for request-response banks.";
+
+            if (settings.CommandOffset < 0 || settings.CommandOffset >= settings.RequestFrameSize)
+            {
+                return $"BLE commandOffset {settings.CommandOffset} must be within requestFrameSize {settings.RequestFrameSize}.";
+            }
+        }
+
+        return null;
+    }
 
     public Task<DevicePollResult> PollAsync(DeviceConfiguration device, CancellationToken cancellationToken)
     {
@@ -43,25 +119,27 @@ public sealed class GenericBlePollingClient(
         if (!OperatingSystem.IsLinux())
             throw new PlatformNotSupportedException("BLE polling is supported on Linux/BlueZ only.");
 
-        if (!string.Equals(definition.Connection.Protocol.Type, "jk-bms-ble", StringComparison.OrdinalIgnoreCase))
-        {
+        var unsupportedReason = GetUnsupportedDefinitionMessage(definition);
+        if (unsupportedReason is not null)
             throw new NotSupportedException(
-                $"BLE protocol '{definition.Connection.Protocol.Type}' is not supported yet for device '{device.DeviceId}'.");
-        }
+                $"BLE definition '{definition.Device.Id}' is not supported for device '{device.DeviceId}': {unsupportedReason}");
 
         var session = _sessions.GetOrAdd(device.DeviceId, _ => new BleSession(device.DeviceId));
         await session.Lock.WaitAsync(cancellationToken);
         try
         {
-            await EnsureConnectedAsync(session, device, definition, cancellationToken);
-            await PrimeSessionAsync(session, definition, cancellationToken);
+            await EnsureConnectedAsync(
+                session,
+                device,
+                definition,
+                cancellationToken,
+                requireWriteCharacteristic: DefinitionRequiresWriteCharacteristic(definition));
 
             var bankData = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
             var now = DateTimeOffset.UtcNow;
             foreach (var bank in definition.DataSources)
             {
-                var pollGroup = definition.PollGroups.GetValueOrDefault(bank.PollGroup);
-                var intervalMs = pollGroup?.IntervalMs ?? 1000;
+                var intervalMs = GetBankIntervalMilliseconds(definition, bank);
 
                 if (session.BankCache.TryGetValue(bank.Id, out var cached) &&
                     now - cached.LastRead < TimeSpan.FromMilliseconds(intervalMs))
@@ -72,10 +150,8 @@ public sealed class GenericBlePollingClient(
 
                 try
                 {
-                    var frame = await RequestFrameAsync(session, definition, bank, cancellationToken);
-                    var payload = ExtractPayload(frame, bank);
+                    var payload = await ReadBankPayloadAsync(session, definition, bank, cancellationToken);
                     bankData[bank.Id] = payload;
-                    session.BankCache[bank.Id] = (now, payload);
                 }
                 catch (TimeoutException ex) when (IsOptionalBank(bank))
                 {
@@ -115,11 +191,10 @@ public sealed class GenericBlePollingClient(
         if (!OperatingSystem.IsLinux())
             throw new PlatformNotSupportedException("BLE writes are supported on Linux/BlueZ only.");
 
-        if (!string.Equals(definition.Connection.Protocol.Type, "jk-bms-ble", StringComparison.OrdinalIgnoreCase))
-        {
+        var unsupportedReason = GetUnsupportedDefinitionMessage(definition);
+        if (unsupportedReason is not null)
             throw new NotSupportedException(
-                $"BLE protocol '{definition.Connection.Protocol.Type}' is not supported yet for device '{device.DeviceId}'.");
-        }
+                $"BLE definition '{definition.Device.Id}' is not supported for device '{device.DeviceId}': {unsupportedReason}");
 
         var entity = definition.Entities.FirstOrDefault(candidate =>
             string.Equals(candidate.Id, entityId, StringComparison.OrdinalIgnoreCase) && candidate.Writable);
@@ -133,23 +208,37 @@ public sealed class GenericBlePollingClient(
         if (bank.Write is null)
             throw new InvalidOperationException($"BLE bank '{entity.Source.Bank}' does not define a write strategy.");
 
+        var writeUnsupportedReason = GetUnsupportedWriteMessage(definition);
+        if (writeUnsupportedReason is not null)
+        {
+            throw new NotSupportedException(
+                $"BLE definition '{definition.Device.Id}' cannot write entity '{entityId}' for device '{device.DeviceId}': {writeUnsupportedReason}");
+        }
+
         var writeTarget = ResolveFrameWriteTarget(entity, bank.Write);
         var session = _sessions.GetOrAdd(device.DeviceId, _ => new BleSession(device.DeviceId));
 
         await session.Lock.WaitAsync(cancellationToken);
         try
         {
-            await EnsureConnectedAsync(session, device, definition, cancellationToken);
-            await PrimeSessionAsync(session, definition, cancellationToken);
+            await EnsureConnectedAsync(
+                session,
+                device,
+                definition,
+                cancellationToken,
+                requireWriteCharacteristic: true);
+            if (session.WriteCharacteristic is null)
+            {
+                throw new InvalidOperationException(
+                    $"Device '{device.DeviceId}' does not expose a writable BLE characteristic for entity '{entityId}'.");
+            }
 
-            await SendWriteFrameAsync(session, writeTarget, rawValue, cancellationToken);
+            await SendWriteFrameAsync(session, definition, writeTarget, rawValue, cancellationToken);
 
             session.BankCache.Remove(bank.Id);
             await Task.Delay(150, cancellationToken);
 
-            var frame = await RequestFrameAsync(session, definition, bank, cancellationToken);
-            var payload = ExtractPayload(frame, bank);
-            session.BankCache[bank.Id] = (DateTimeOffset.UtcNow, payload);
+            var payload = await ReadBankPayloadAsync(session, definition, bank, cancellationToken);
 
             if (!TryReadRawValue(entity, payload, definition.Connection.Protocol.Settings?.ByteOrder, out var readBackValue))
             {
@@ -175,32 +264,6 @@ public sealed class GenericBlePollingClient(
         finally
         {
             session.Lock.Release();
-        }
-    }
-
-    private async Task PrimeSessionAsync(
-        BleSession session,
-        DeviceDefinition definition,
-        CancellationToken cancellationToken)
-    {
-        var infoBank = definition.DataSources.FirstOrDefault(bank =>
-            string.Equals(bank.Id, "info", StringComparison.OrdinalIgnoreCase));
-
-        if (infoBank is null || session.BankCache.ContainsKey(infoBank.Id))
-            return;
-
-        try
-        {
-            var frame = await RequestFrameAsync(session, definition, infoBank, cancellationToken);
-            var payload = ExtractPayload(frame, infoBank);
-            session.BankCache[infoBank.Id] = (DateTimeOffset.UtcNow, payload);
-        }
-        catch (TimeoutException ex)
-        {
-            logger.LogDebug(
-                ex,
-                "BLE session prime skipped for device {DeviceId}. Info bank did not respond during initial handshake.",
-                session.DeviceId);
         }
     }
 
@@ -267,7 +330,7 @@ public sealed class GenericBlePollingClient(
             discovered.Add(await MapDiscoveredDeviceAsync(device));
 
         if (definition is not null &&
-            string.Equals(definition.Connection.Protocol.Type, "jk-bms-ble", StringComparison.OrdinalIgnoreCase))
+            IsDefinitionSupported(definition))
         {
             var serviceUuid = BlueZManager.NormalizeUUID(
                 definition.Connection.Transport.Defaults?.ServiceUuid
@@ -332,11 +395,14 @@ public sealed class GenericBlePollingClient(
         BleSession session,
         DeviceConfiguration device,
         DeviceDefinition definition,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool requireWriteCharacteristic = false)
     {
+        var requiresWriteCharacteristic = requireWriteCharacteristic || DefinitionRequiresWriteCharacteristic(definition);
         if (session.Device is not null &&
-            session.WriteCharacteristic is not null &&
-            session.NotifyCharacteristic is not null)
+            string.Equals(session.DefinitionId, definition.Device.Id, StringComparison.OrdinalIgnoreCase) &&
+            session.NotifyCharacteristic is not null &&
+            (!requiresWriteCharacteristic || session.WriteCharacteristic is not null))
         {
             try
             {
@@ -362,9 +428,11 @@ public sealed class GenericBlePollingClient(
         var notifyUuid = BlueZManager.NormalizeUUID(
             transportDefaults.NotifyCharacteristicUuid
             ?? throw new InvalidOperationException($"Definition '{definition.Device.Id}' has no BLE notify characteristic UUID."));
-        var writeUuid = BlueZManager.NormalizeUUID(
-            transportDefaults.WriteCharacteristicUuid
-            ?? throw new InvalidOperationException($"Definition '{definition.Device.Id}' has no BLE write characteristic UUID."));
+        var writeUuid = requiresWriteCharacteristic
+            ? BlueZManager.NormalizeUUID(
+                transportDefaults.WriteCharacteristicUuid
+                ?? throw new InvalidOperationException($"Definition '{definition.Device.Id}' has no BLE write characteristic UUID."))
+            : null;
         var target = device.TransportPortName?.Trim();
         if (string.IsNullOrWhiteSpace(target))
             throw new InvalidOperationException($"Device '{device.DeviceId}' has no BLE address or alias configured.");
@@ -392,20 +460,23 @@ public sealed class GenericBlePollingClient(
 
             var characteristics = await service.GetCharacteristicsAsync();
             var notifyCharacteristic = await SelectCharacteristicAsync(characteristics, notifyUuid, requiredFlag: "notify");
-            var writeCharacteristic = await SelectCharacteristicAsync(
-                characteristics,
-                writeUuid,
-                requiredFlag: "write-without-response",
-                alternateFlag: "write");
+            var writeCharacteristic = requiresWriteCharacteristic
+                ? await SelectCharacteristicAsync(
+                    characteristics,
+                    writeUuid!,
+                    requiredFlag: "write-without-response",
+                    alternateFlag: "write")
+                : null;
 
             if (notifyCharacteristic is null)
                 throw new InvalidOperationException($"Notify characteristic '{notifyUuid}' was not found on device '{target}'.");
-            if (writeCharacteristic is null)
+            if (requiresWriteCharacteristic && writeCharacteristic is null)
                 throw new InvalidOperationException($"Write characteristic '{writeUuid}' was not found on device '{target}'.");
 
             session.Device = bleDevice;
             session.NotifyCharacteristic = notifyCharacteristic;
             session.WriteCharacteristic = writeCharacteristic;
+            session.DefinitionId = definition.Device.Id;
             session.NotifyWatcher = await notifyCharacteristic.WatchPropertiesAsync(changes => OnNotifyPropertiesChanged(session, definition, changes));
             await notifyCharacteristic.StartNotifyAsync();
             await Task.Delay(150, cancellationToken);
@@ -428,40 +499,43 @@ public sealed class GenericBlePollingClient(
         }
     }
 
+    private async Task<byte[]> ReadBankPayloadAsync(
+        BleSession session,
+        DeviceDefinition definition,
+        DataSourceDefinition bank,
+        CancellationToken cancellationToken)
+    {
+        return IsNotifyStreamBank(bank)
+            ? await WaitForNotifyStreamPayloadAsync(session, definition, bank, cancellationToken)
+            : await RequestFrameAsync(session, definition, bank, cancellationToken);
+    }
+
     private async Task<byte[]> RequestFrameAsync(
         BleSession session,
         DeviceDefinition definition,
         DataSourceDefinition bank,
         CancellationToken cancellationToken)
     {
-        var transportDefaults = definition.Connection.Transport.Defaults ?? new TransportDefaults();
-        var timeout = TimeSpan.FromMilliseconds(Math.Max(transportDefaults.ConnectionTimeoutMs, 1000));
-        var expectedFrameSize = definition.Connection.Protocol.Settings?.ResponseFrameSize ?? 300;
-        if (expectedFrameSize < 8)
-            throw new InvalidOperationException($"Definition '{definition.Device.Id}' has an invalid BLE response frame size.");
+        if (session.WriteCharacteristic is null)
+            throw new InvalidOperationException($"Device '{session.DeviceId}' is not connected to a writable BLE characteristic.");
 
-        var retries = Math.Max(definition.Connection.Protocol.Settings?.Retries ?? 0, 0);
+        var transportDefaults = definition.Connection.Transport.Defaults ?? new TransportDefaults();
+        var settings = GetRequiredProtocolSettings(definition);
+        var timeout = TimeSpan.FromMilliseconds(Math.Max(transportDefaults.ConnectionTimeoutMs, 1000));
+        var retries = Math.Max(settings.Retries, 0);
         var attempts = retries + 1;
         Exception? lastError = null;
 
         for (var attempt = 1; attempt <= attempts; attempt++)
         {
-            TaskCompletionSource<byte[]> pendingFrame;
-            lock (session.SyncRoot)
-            {
-                session.FrameBuffer.Clear();
-                pendingFrame = new(TaskCreationOptions.RunContinuationsAsynchronously);
-                session.PendingFrame = pendingFrame;
-                session.PendingFrameType = bank.ResponseFrameType;
-                session.ExpectedFrameSize = expectedFrameSize;
-            }
+            var pendingRead = RegisterPendingRead(session, bank.Id);
 
             try
             {
-                var commandFrame = BuildJkBleCommand(bank.Command);
+                var commandFrame = BuildBleRequestCommand(bank.Command, settings);
                 var options = new Dictionary<string, object>
                 {
-                    ["type"] = await SelectWriteTypeAsync(session.WriteCharacteristic!)
+                    ["type"] = await SelectWriteTypeAsync(session.WriteCharacteristic)
                 };
 
                 logger.LogDebug(
@@ -472,22 +546,8 @@ public sealed class GenericBlePollingClient(
                     attempt,
                     attempts);
 
-                await session.WriteCharacteristic!.WriteValueAsync(commandFrame, options);
-
-                using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-                var timeoutTask = Task.Delay(timeout, timeoutCts.Token);
-                var completed = await Task.WhenAny(pendingFrame.Task, timeoutTask);
-                if (completed != pendingFrame.Task)
-                {
-                    var suffix = string.IsNullOrWhiteSpace(session.LastFrameHex)
-                        ? string.Empty
-                        : $" Last valid frame={session.LastFrameHex}.";
-                    throw new TimeoutException(
-                        $"Timed out waiting for BLE frame type 0x{bank.ResponseFrameType:X2} from device '{session.DeviceId}'.{suffix}");
-                }
-
-                timeoutCts.Cancel();
-                return await pendingFrame.Task;
+                await session.WriteCharacteristic.WriteValueAsync(commandFrame, options);
+                return await WaitForPendingReadAsync(session, bank, pendingRead, timeout, cancellationToken);
             }
             catch (Exception ex) when (!cancellationToken.IsCancellationRequested && attempt < attempts)
             {
@@ -504,16 +564,42 @@ public sealed class GenericBlePollingClient(
             }
             finally
             {
-                lock (session.SyncRoot)
-                {
-                    session.PendingFrame = null;
-                    session.PendingFrameType = null;
-                }
+                ClearPendingRead(session, bank.Id, pendingRead);
             }
         }
 
         throw lastError ?? new TimeoutException(
             $"Timed out waiting for BLE frame type 0x{bank.ResponseFrameType:X2} from device '{session.DeviceId}'.");
+    }
+
+    private async Task<byte[]> WaitForNotifyStreamPayloadAsync(
+        BleSession session,
+        DeviceDefinition definition,
+        DataSourceDefinition bank,
+        CancellationToken cancellationToken)
+    {
+        var transportDefaults = definition.Connection.Transport.Defaults ?? new TransportDefaults();
+        var timeout = TimeSpan.FromMilliseconds(Math.Max(transportDefaults.ConnectionTimeoutMs, 1000));
+        var intervalMs = GetBankIntervalMilliseconds(definition, bank);
+        var pendingRead = RegisterPendingRead(session, bank.Id);
+
+        try
+        {
+            if (TryGetFreshCachedPayload(session, bank.Id, intervalMs, out var cachedPayload))
+                return cachedPayload;
+
+            logger.LogDebug(
+                "Waiting for BLE notify-stream frame type 0x{FrameType:X2} for device {DeviceId}. BankId={BankId}.",
+                bank.ResponseFrameType,
+                session.DeviceId,
+                bank.Id);
+
+            return await WaitForPendingReadAsync(session, bank, pendingRead, timeout, cancellationToken);
+        }
+        finally
+        {
+            ClearPendingRead(session, bank.Id, pendingRead);
+        }
     }
 
     private void OnNotifyPropertiesChanged(BleSession session, DeviceDefinition definition, PropertyChanges changes)
@@ -524,84 +610,119 @@ public sealed class GenericBlePollingClient(
         if (changedValue is not byte[] chunk || chunk.Length == 0)
             return;
 
-        var checksumType = definition.Connection.Protocol.Settings?.ChecksumType ?? "sum8";
-        TaskCompletionSource<byte[]>? pendingFrame = null;
-        byte[]? completedFrame = null;
-        byte? frameType = null;
+        var settings = GetRequiredProtocolSettings(definition);
+        var completedReads = new List<(TaskCompletionSource<BankCacheEntry> PendingRead, BankCacheEntry CacheEntry)>();
+        var receivedUnmappedFrameTypes = new HashSet<byte>();
         var discardedInvalidFrame = false;
+        var discardedFrameType = false;
 
         lock (session.SyncRoot)
         {
-            if (session.PendingFrame is null || session.ExpectedFrameSize <= 0)
-            {
-                session.FrameBuffer.Clear();
-                return;
-            }
-
             session.FrameBuffer.AddRange(chunk);
-            if (!TryExtractValidatedFrame(session.FrameBuffer, session.ExpectedFrameSize, checksumType, out var candidate, out discardedInvalidFrame))
-                return;
 
-            if (candidate is null)
+            while (true)
             {
-                return;
-            }
+                var extracted = TryExtractValidatedFrame(
+                    session.FrameBuffer,
+                    settings.ResponseFrameSize,
+                    settings.ResponsePreamble,
+                    settings.ChecksumType,
+                    out var candidate,
+                    out var discardedCurrentFrame);
+                discardedInvalidFrame |= discardedCurrentFrame;
+                if (!extracted)
+                    break;
 
-            frameType = candidate[4];
-            session.LastFrameHex = Convert.ToHexString(candidate);
-            if (session.PendingFrameType == frameType && session.PendingFrame is not null)
-            {
-                pendingFrame = session.PendingFrame;
-                completedFrame = candidate;
+                if (candidate is null)
+                    continue;
+
+                session.LastFrameHex = Convert.ToHexString(candidate);
+                if (!TryGetFrameType(candidate, settings, out var frameType))
+                {
+                    discardedFrameType = true;
+                    continue;
+                }
+
+                var matchedBanks = definition.DataSources
+                    .Where(bank => bank.ResponseFrameType == frameType)
+                    .DistinctBy(bank => bank.Id, StringComparer.OrdinalIgnoreCase)
+                    .ToArray();
+                if (matchedBanks.Length == 0)
+                {
+                    receivedUnmappedFrameTypes.Add(frameType);
+                    continue;
+                }
+
+                var timestamp = DateTimeOffset.UtcNow;
+                foreach (var bank in matchedBanks)
+                {
+                    var cacheEntry = new BankCacheEntry(timestamp, ExtractPayload(candidate, bank, settings.ResponseFooterSize));
+                    session.BankCache[bank.Id] = cacheEntry;
+
+                    if (session.PendingReads.Remove(bank.Id, out var pendingRead))
+                        completedReads.Add((pendingRead, cacheEntry));
+                }
             }
         }
 
-        if (pendingFrame is not null && completedFrame is not null)
-            pendingFrame.TrySetResult(completedFrame);
-        else if (discardedInvalidFrame)
+        foreach (var completedRead in completedReads)
+            completedRead.PendingRead.TrySetResult(completedRead.CacheEntry);
+
+        if (discardedInvalidFrame)
             logger.LogWarning("Discarded BLE frame with invalid checksum for device {DeviceId}.", session.DeviceId);
-        else if (frameType is not null)
-            logger.LogDebug("Received unsolicited BLE frame type 0x{FrameType:X2} for device {DeviceId}.", frameType, session.DeviceId);
+        if (discardedFrameType)
+        {
+            logger.LogWarning(
+                "Discarded BLE frame with invalid frame-type offset for device {DeviceId}. DefinitionId={DefinitionId}.",
+                session.DeviceId,
+                definition.Device.Id);
+        }
+
+        foreach (var frameType in receivedUnmappedFrameTypes)
+        {
+            logger.LogDebug(
+                "Received BLE frame type 0x{FrameType:X2} with no mapped data source for device {DeviceId}.",
+                frameType,
+                session.DeviceId);
+        }
     }
 
-    private static byte[] ExtractPayload(byte[] frame, DataSourceDefinition bank)
+    private static byte[] ExtractPayload(byte[] frame, DataSourceDefinition bank, int footerSize)
     {
         var headerSize = Math.Max(bank.HeaderSize, 0);
-        if (headerSize >= frame.Length)
+        var trailingBytes = Math.Max(footerSize, 0);
+        if (headerSize + trailingBytes >= frame.Length)
             return [];
 
-        var crcSize = 1;
-        var payloadLength = Math.Max(frame.Length - headerSize - crcSize, 0);
+        var payloadLength = frame.Length - headerSize - trailingBytes;
         return frame.AsSpan(headerSize, payloadLength).ToArray();
     }
-
-    private static bool StartsWithFramePreamble(byte[] data)
-        => data.Length >= 4 &&
-           data[0] == 0x55 &&
-           data[1] == 0xAA &&
-           data[2] == 0xEB &&
-           data[3] == 0x90;
 
     internal static bool TryExtractValidatedFrame(
         List<byte> buffer,
         int expectedFrameSize,
+        IReadOnlyList<byte> preamble,
         string checksumType,
         out byte[]? frame,
         out bool discardedInvalidFrame)
     {
+        ArgumentNullException.ThrowIfNull(buffer);
+        ArgumentNullException.ThrowIfNull(preamble);
+
         frame = null;
         discardedInvalidFrame = false;
 
-        if (expectedFrameSize <= 0)
+        if (expectedFrameSize <= 0 || preamble.Count == 0)
             return false;
 
         while (buffer.Count > 0)
         {
-            var preambleIndex = IndexOfFramePreamble(buffer);
+            var preambleIndex = IndexOfFramePreamble(buffer, preamble);
             if (preambleIndex < 0)
             {
-                if (buffer.Count > 3)
-                    buffer.RemoveRange(0, buffer.Count - 3);
+                var trailingBytesToKeep = Math.Max(preamble.Count - 1, 0);
+                if (buffer.Count > trailingBytesToKeep)
+                    buffer.RemoveRange(0, buffer.Count - trailingBytesToKeep);
                 return false;
             }
 
@@ -620,7 +741,7 @@ public sealed class GenericBlePollingClient(
             }
 
             discardedInvalidFrame = true;
-            var nextPreambleIndex = IndexOfFramePreamble(buffer, 1);
+            var nextPreambleIndex = IndexOfFramePreamble(buffer, preamble, 1);
             if (nextPreambleIndex > 0)
                 buffer.RemoveRange(0, nextPreambleIndex);
             else
@@ -643,32 +764,38 @@ public sealed class GenericBlePollingClient(
         };
     }
 
-    private static int IndexOfFramePreamble(IReadOnlyList<byte> data, int startIndex = 0)
+    private static int IndexOfFramePreamble(IReadOnlyList<byte> data, IReadOnlyList<byte> preamble, int startIndex = 0)
     {
-        for (var i = Math.Max(startIndex, 0); i <= data.Count - 4; i++)
+        if (preamble.Count == 0 || data.Count < preamble.Count)
+            return -1;
+
+        for (var i = Math.Max(startIndex, 0); i <= data.Count - preamble.Count; i++)
         {
-            if (data[i] == 0x55 &&
-                data[i + 1] == 0xAA &&
-                data[i + 2] == 0xEB &&
-                data[i + 3] == 0x90)
+            var matched = true;
+            for (var j = 0; j < preamble.Count; j++)
             {
-                return i;
+                if (data[i + j] == preamble[j])
+                    continue;
+
+                matched = false;
+                break;
             }
+
+            if (matched)
+                return i;
         }
 
         return -1;
     }
 
-    private static byte[] BuildJkBleCommand(byte command)
+    internal static byte[] BuildBleRequestCommand(byte command, ProtocolSettings settings)
     {
-        var frame = new byte[20];
-        frame[0] = 0xAA;
-        frame[1] = 0x55;
-        frame[2] = 0x90;
-        frame[3] = 0xEB;
-        frame[4] = command;
-        frame[5] = 0x00;
-        frame[19] = ComputeSum8(frame.AsSpan(0, 19));
+        ArgumentNullException.ThrowIfNull(settings);
+
+        var frame = CreateRequestFrame(settings);
+        ValidateFrameOffset(settings.CommandOffset, frame.Length, nameof(settings.CommandOffset));
+        frame[settings.CommandOffset] = command;
+        ApplyChecksum(frame, settings.ChecksumType);
         return frame;
     }
 
@@ -716,20 +843,32 @@ public sealed class GenericBlePollingClient(
         return new((byte)address.Value, (byte)valueLength);
     }
 
-    internal static byte[] BuildBleFrameWriteCommand(BleFrameWriteTarget target, uint value)
+    internal static byte[] BuildBleFrameWriteCommand(BleFrameWriteTarget target, uint value, ProtocolSettings settings)
     {
-        var frame = new byte[20];
-        frame[0] = 0xAA;
-        frame[1] = 0x55;
-        frame[2] = 0x90;
-        frame[3] = 0xEB;
-        frame[4] = target.RegisterAddress;
-        frame[5] = target.ValueLength;
-        frame[6] = (byte)(value >> 0);
-        frame[7] = (byte)(value >> 8);
-        frame[8] = (byte)(value >> 16);
-        frame[9] = (byte)(value >> 24);
-        frame[19] = ComputeSum8(frame.AsSpan(0, 19));
+        ArgumentNullException.ThrowIfNull(settings);
+
+        if (target.ValueLength <= 0 || target.ValueLength > sizeof(uint))
+        {
+            throw new InvalidOperationException(
+                $"BLE write value length {target.ValueLength} is outside the supported range for 32-bit raw values.");
+        }
+
+        var frame = CreateRequestFrame(settings);
+        ValidateFrameOffset(settings.WriteRegisterOffset, frame.Length, nameof(settings.WriteRegisterOffset));
+        ValidateFrameOffset(settings.WriteValueLengthOffset, frame.Length, nameof(settings.WriteValueLengthOffset));
+        ValidateFrameOffset(settings.WriteValueOffset, frame.Length, nameof(settings.WriteValueOffset));
+
+        var valueEndOffset = settings.WriteValueOffset + target.ValueLength;
+        if (valueEndOffset > frame.Length)
+        {
+            throw new InvalidOperationException(
+                $"BLE write value offset {settings.WriteValueOffset} with length {target.ValueLength} exceeds request frame length {frame.Length}.");
+        }
+
+        frame[settings.WriteRegisterOffset] = target.RegisterAddress;
+        frame[settings.WriteValueLengthOffset] = target.ValueLength;
+        WriteRawValue(frame.AsSpan(settings.WriteValueOffset, target.ValueLength), value, settings.WriteValueByteOrder);
+        ApplyChecksum(frame, settings.ChecksumType);
         return frame;
     }
 
@@ -744,26 +883,243 @@ public sealed class GenericBlePollingClient(
 
     private async Task SendWriteFrameAsync(
         BleSession session,
+        DeviceDefinition definition,
         BleFrameWriteTarget target,
         uint rawValue,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        var frame = BuildBleFrameWriteCommand(target, rawValue);
+        if (session.WriteCharacteristic is null)
+            throw new InvalidOperationException($"Device '{session.DeviceId}' is not connected to a writable BLE characteristic.");
+
+        var frame = BuildBleFrameWriteCommand(target, rawValue, GetRequiredProtocolSettings(definition));
         var options = new Dictionary<string, object>
         {
-            ["type"] = await SelectWriteTypeAsync(session.WriteCharacteristic!)
+            ["type"] = await SelectWriteTypeAsync(session.WriteCharacteristic)
         };
 
         logger.LogInformation(
-            "Sending JK BLE write for device {DeviceId}. Register=0x{Register:X2}, Length={Length}, Value={Value}.",
+            "Sending BLE frame write for device {DeviceId}. Register=0x{Register:X2}, Length={Length}, Value={Value}.",
             session.DeviceId,
             target.RegisterAddress,
             target.ValueLength,
             rawValue);
 
-        await session.WriteCharacteristic!.WriteValueAsync(frame, options);
+        await session.WriteCharacteristic.WriteValueAsync(frame, options);
+    }
+
+    private static ProtocolSettings GetRequiredProtocolSettings(DeviceDefinition definition)
+        => definition.Connection.Protocol.Settings
+           ?? throw new InvalidOperationException($"Definition '{definition.Device.Id}' has no BLE protocol settings.");
+
+    private static string? GetUnsupportedWriteMessage(DeviceDefinition definition)
+    {
+        var transportDefaults = definition.Connection.Transport.Defaults;
+        if (transportDefaults is null)
+            return "BLE transport defaults are required.";
+
+        if (string.IsNullOrWhiteSpace(transportDefaults.WriteCharacteristicUuid))
+            return "BLE writeCharacteristicUuid is required for BLE writes.";
+
+        var settings = definition.Connection.Protocol.Settings;
+        if (settings is null)
+            return "BLE protocol settings are required.";
+
+        if (settings.RequestFrameSize < 2)
+            return "BLE requestFrameSize must be at least 2 bytes for BLE writes.";
+
+        if (settings.RequestPreamble.Count == 0)
+            return "BLE requestPreamble is required for BLE writes.";
+
+        if (!IsSupportedBleChecksum(settings.ChecksumType))
+            return $"BLE checksumType '{settings.ChecksumType}' is not supported.";
+
+        if (settings.WriteRegisterOffset < 0 || settings.WriteRegisterOffset >= settings.RequestFrameSize)
+        {
+            return $"BLE writeRegisterOffset {settings.WriteRegisterOffset} must be within requestFrameSize {settings.RequestFrameSize}.";
+        }
+
+        if (settings.WriteValueLengthOffset < 0 || settings.WriteValueLengthOffset >= settings.RequestFrameSize)
+        {
+            return $"BLE writeValueLengthOffset {settings.WriteValueLengthOffset} must be within requestFrameSize {settings.RequestFrameSize}.";
+        }
+
+        if (settings.WriteValueOffset < 0 || settings.WriteValueOffset >= settings.RequestFrameSize)
+        {
+            return $"BLE writeValueOffset {settings.WriteValueOffset} must be within requestFrameSize {settings.RequestFrameSize}.";
+        }
+
+        return null;
+    }
+
+    private static bool DefinitionRequiresWriteCharacteristic(DeviceDefinition definition)
+        => definition.DataSources.Any(IsRequestResponseBank);
+
+    private static bool IsRequestResponseBank(DataSourceDefinition bank)
+        => string.Equals(NormalizeReadMode(bank.ReadMode), "request-response", StringComparison.Ordinal);
+
+    private static bool IsNotifyStreamBank(DataSourceDefinition bank)
+        => string.Equals(NormalizeReadMode(bank.ReadMode), "notify-stream", StringComparison.Ordinal);
+
+    private static bool IsSupportedReadMode(string? readMode)
+    {
+        var normalized = NormalizeReadMode(readMode);
+        return string.Equals(normalized, "request-response", StringComparison.Ordinal) ||
+               string.Equals(normalized, "notify-stream", StringComparison.Ordinal);
+    }
+
+    private static bool IsSupportedBleChecksum(string? checksumType)
+        => checksumType?.Trim().ToLowerInvariant() is "sum8" or "none";
+
+    private static string NormalizeReadMode(string? readMode)
+        => string.IsNullOrWhiteSpace(readMode)
+            ? "request-response"
+            : readMode.Trim().ToLowerInvariant();
+
+    private static int GetBankIntervalMilliseconds(DeviceDefinition definition, DataSourceDefinition bank)
+        => definition.PollGroups.GetValueOrDefault(bank.PollGroup)?.IntervalMs ?? 1000;
+
+    private static bool TryGetFreshCachedPayload(
+        BleSession session,
+        string bankId,
+        int intervalMs,
+        out byte[] payload)
+    {
+        lock (session.SyncRoot)
+        {
+            if (session.BankCache.TryGetValue(bankId, out var cached) &&
+                DateTimeOffset.UtcNow - cached.LastRead < TimeSpan.FromMilliseconds(intervalMs))
+            {
+                payload = cached.Data;
+                return true;
+            }
+        }
+
+        payload = [];
+        return false;
+    }
+
+    private static TaskCompletionSource<BankCacheEntry> RegisterPendingRead(BleSession session, string bankId)
+    {
+        TaskCompletionSource<BankCacheEntry>? previousPendingRead = null;
+        TaskCompletionSource<BankCacheEntry> pendingRead;
+
+        lock (session.SyncRoot)
+        {
+            if (session.PendingReads.TryGetValue(bankId, out previousPendingRead))
+                session.PendingReads.Remove(bankId);
+
+            pendingRead = new(TaskCreationOptions.RunContinuationsAsynchronously);
+            session.PendingReads[bankId] = pendingRead;
+        }
+
+        previousPendingRead?.TrySetCanceled();
+        return pendingRead;
+    }
+
+    private static void ClearPendingRead(
+        BleSession session,
+        string bankId,
+        TaskCompletionSource<BankCacheEntry> pendingRead)
+    {
+        lock (session.SyncRoot)
+        {
+            if (session.PendingReads.TryGetValue(bankId, out var existingPendingRead) &&
+                ReferenceEquals(existingPendingRead, pendingRead))
+            {
+                session.PendingReads.Remove(bankId);
+            }
+        }
+    }
+
+    private static async Task<byte[]> WaitForPendingReadAsync(
+        BleSession session,
+        DataSourceDefinition bank,
+        TaskCompletionSource<BankCacheEntry> pendingRead,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        var timeoutTask = Task.Delay(timeout, timeoutCts.Token);
+        var completed = await Task.WhenAny(pendingRead.Task, timeoutTask);
+        if (completed != pendingRead.Task)
+        {
+            var suffix = string.IsNullOrWhiteSpace(session.LastFrameHex)
+                ? string.Empty
+                : $" Last valid frame={session.LastFrameHex}.";
+            throw new TimeoutException(
+                $"Timed out waiting for BLE frame type 0x{bank.ResponseFrameType:X2} from device '{session.DeviceId}'.{suffix}");
+        }
+
+        timeoutCts.Cancel();
+        return (await pendingRead.Task).Data;
+    }
+
+    private static bool TryGetFrameType(byte[] frame, ProtocolSettings settings, out byte frameType)
+    {
+        if (settings.ResponseFrameTypeOffset < 0 || settings.ResponseFrameTypeOffset >= frame.Length)
+        {
+            frameType = 0;
+            return false;
+        }
+
+        frameType = frame[settings.ResponseFrameTypeOffset];
+        return true;
+    }
+
+    private static byte[] CreateRequestFrame(ProtocolSettings settings)
+    {
+        if (settings.RequestFrameSize < 2)
+            throw new InvalidOperationException($"BLE requestFrameSize {settings.RequestFrameSize} is invalid.");
+        if (settings.RequestPreamble.Count == 0)
+            throw new InvalidOperationException("BLE requestPreamble is required.");
+        if (settings.RequestPreamble.Count > settings.RequestFrameSize)
+        {
+            throw new InvalidOperationException(
+                $"BLE requestPreamble length {settings.RequestPreamble.Count} exceeds request frame size {settings.RequestFrameSize}.");
+        }
+
+        var frame = new byte[settings.RequestFrameSize];
+        for (var i = 0; i < settings.RequestPreamble.Count; i++)
+            frame[i] = settings.RequestPreamble[i];
+
+        return frame;
+    }
+
+    private static void ApplyChecksum(byte[] frame, string checksumType)
+    {
+        if (frame.Length == 0)
+            return;
+
+        switch (checksumType.Trim().ToLowerInvariant())
+        {
+            case "sum8":
+                frame[^1] = ComputeSum8(frame.AsSpan(0, frame.Length - 1));
+                break;
+            case "none":
+                break;
+            default:
+                throw new InvalidOperationException($"BLE checksum type '{checksumType}' is not supported.");
+        }
+    }
+
+    private static void ValidateFrameOffset(int offset, int frameLength, string name)
+    {
+        if (offset < 0 || offset >= frameLength)
+            throw new InvalidOperationException($"BLE {name} {offset} is outside request frame length {frameLength}.");
+    }
+
+    private static void WriteRawValue(Span<byte> destination, uint value, string? byteOrder)
+    {
+        var littleEndian = !string.Equals(byteOrder, "big-endian", StringComparison.OrdinalIgnoreCase);
+        for (var index = 0; index < destination.Length; index++)
+        {
+            var shift = littleEndian
+                ? index * 8
+                : (destination.Length - 1 - index) * 8;
+            destination[index] = (byte)(value >> shift);
+        }
     }
 
     internal static bool TryReadRawValue(
@@ -992,16 +1348,21 @@ public sealed class GenericBlePollingClient(
         var session = new BleSession($"probe:{address}");
         try
         {
-            await EnsureConnectedAsync(session, probeConfig, definition, probeCts.Token);
-
             var probeBanks = GetProbeBanks(definition).ToArray();
+            await EnsureConnectedAsync(
+                session,
+                probeConfig,
+                definition,
+                probeCts.Token,
+                requireWriteCharacteristic: probeBanks.Any(IsRequestResponseBank));
+
             if (probeBanks.Length == 0)
             {
                 logger.LogWarning(
                     "BLE probe could not find a readable data source for address {Address} and definition {DefinitionId}.",
                     address,
                     definition.Device.Id);
-                return new(false, null, "Probe could not find a readable JK data source.");
+                return new(false, null, "Probe could not find a readable BLE data source.");
             }
 
             var failures = new List<string>();
@@ -1009,27 +1370,9 @@ public sealed class GenericBlePollingClient(
             {
                 try
                 {
-                    var frame = await RequestFrameAsync(session, definition, bank, probeCts.Token);
-                    var payload = ExtractPayload(frame, bank);
-
-                    if (string.Equals(bank.Id, "info", StringComparison.OrdinalIgnoreCase))
-                    {
-                        var model = ReadAscii(payload, 0, 16);
-                        var deviceName = ReadAscii(payload, 96, 16);
-                        var vendor = ReadAscii(payload, 128, 16);
-                        var identity = new[] { vendor, model, deviceName }
-                            .Where(value => !string.IsNullOrWhiteSpace(value))
-                            .Distinct(StringComparer.OrdinalIgnoreCase)
-                            .ToArray();
-
-                        var details = identity.Length > 0
-                            ? string.Join(" · ", identity)
-                            : "JK BLE device-info frame responded successfully.";
-
-                        return new(true, "Verified JK BMS", details);
-                    }
-
-                    return new(true, "Verified JK BMS", $"JK BLE {bank.Name.ToLowerInvariant()} frame responded successfully.");
+                    _ = await ReadBankPayloadAsync(session, definition, bank, probeCts.Token);
+                    var details = $"{bank.Name} ({NormalizeReadMode(bank.ReadMode)}) responded successfully.";
+                    return new(true, "Verified BLE device", details);
                 }
                 catch (TimeoutException ex) when (!probeCts.IsCancellationRequested)
                 {
@@ -1045,7 +1388,7 @@ public sealed class GenericBlePollingClient(
                 "BLE probe timed out for address {Address} and definition {DefinitionId}.",
                 address,
                 definition.Device.Id);
-            return new(false, null, "JK probe timed out.");
+            return new(false, null, "BLE probe timed out.");
         }
         catch (Exception ex)
         {
@@ -1054,7 +1397,7 @@ public sealed class GenericBlePollingClient(
                 "BLE probe failed for address {Address} and definition {DefinitionId}.",
                 address,
                 definition.Device.Id);
-            return new(false, null, $"JK probe failed: {ex.Message}");
+            return new(false, null, $"BLE probe failed: {ex.Message}");
         }
         finally
         {
@@ -1161,13 +1504,14 @@ public sealed class GenericBlePollingClient(
     private static IEnumerable<DataSourceDefinition> GetProbeBanks(DeviceDefinition definition)
     {
         return definition.DataSources
-            .OrderByDescending(bank => string.Equals(bank.Id, "live", StringComparison.OrdinalIgnoreCase))
-            .ThenByDescending(bank => string.Equals(bank.Id, "info", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(bank => IsOptionalBank(bank) ? 1 : 0)
+            .ThenBy(bank => IsRequestResponseBank(bank) ? 1 : 0)
+            .ThenBy(bank => GetBankIntervalMilliseconds(definition, bank))
             .DistinctBy(bank => bank.Id, StringComparer.OrdinalIgnoreCase);
     }
 
     private static bool IsOptionalBank(DataSourceDefinition bank)
-        => string.Equals(bank.Id, "info", StringComparison.OrdinalIgnoreCase);
+        => bank.Optional;
 
     private static string[] DescribeStringSequence(object? value)
     {
@@ -1244,30 +1588,20 @@ public sealed class GenericBlePollingClient(
         return payload.ToString()?.Trim();
     }
 
-    private static string? ReadAscii(byte[] payload, int offset, int length)
-    {
-        if (payload.Length <= offset || length <= 0)
-            return null;
-
-        var safeLength = Math.Min(length, payload.Length - offset);
-        var value = System.Text.Encoding.ASCII.GetString(payload, offset, safeLength).TrimEnd('\0', ' ');
-        return string.IsNullOrWhiteSpace(value) ? null : value;
-    }
-
     private static async Task ResetSessionAsync(BleSession session)
     {
-        TaskCompletionSource<byte[]>? pendingFrame;
+        TaskCompletionSource<BankCacheEntry>[] pendingReads;
         lock (session.SyncRoot)
         {
-            pendingFrame = session.PendingFrame;
-            session.PendingFrame = null;
-            session.PendingFrameType = null;
+            pendingReads = session.PendingReads.Values.ToArray();
+            session.PendingReads.Clear();
             session.FrameBuffer.Clear();
             session.BankCache.Clear();
             session.LastFrameHex = string.Empty;
         }
 
-        pendingFrame?.TrySetCanceled();
+        foreach (var pendingRead in pendingReads)
+            pendingRead.TrySetCanceled();
 
         try { session.NotifyWatcher?.Dispose(); } catch { /* best effort */ }
         session.NotifyWatcher = null;
@@ -1286,6 +1620,7 @@ public sealed class GenericBlePollingClient(
         session.NotifyCharacteristic = null;
         session.WriteCharacteristic = null;
         session.Device = null;
+        session.DefinitionId = null;
     }
 
     public void Dispose()
@@ -1315,15 +1650,14 @@ public sealed class GenericBlePollingClient(
         public string DeviceId { get; } = deviceId;
         public SemaphoreSlim Lock { get; } = new(1, 1);
         public object SyncRoot { get; } = new();
+        public string? DefinitionId { get; set; }
         public Device? Device { get; set; }
         public IGattCharacteristic1? NotifyCharacteristic { get; set; }
         public IGattCharacteristic1? WriteCharacteristic { get; set; }
         public IDisposable? NotifyWatcher { get; set; }
         public List<byte> FrameBuffer { get; } = [];
-        public Dictionary<string, (DateTimeOffset LastRead, byte[] Data)> BankCache { get; } = new(StringComparer.OrdinalIgnoreCase);
-        public TaskCompletionSource<byte[]>? PendingFrame { get; set; }
-        public byte? PendingFrameType { get; set; }
-        public int ExpectedFrameSize { get; set; }
+        public Dictionary<string, BankCacheEntry> BankCache { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, TaskCompletionSource<BankCacheEntry>> PendingReads { get; } = new(StringComparer.OrdinalIgnoreCase);
         public string LastFrameHex { get; set; } = string.Empty;
     }
 }
@@ -1350,3 +1684,7 @@ public sealed record BleProbeResult(
 internal sealed record BleFrameWriteTarget(
     byte RegisterAddress,
     byte ValueLength);
+
+internal sealed record BankCacheEntry(
+    DateTimeOffset LastRead,
+    byte[] Data);

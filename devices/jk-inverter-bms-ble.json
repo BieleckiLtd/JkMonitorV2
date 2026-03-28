@@ -25,12 +25,22 @@
       }
     },
     "protocol": {
-      "type": "jk-bms-ble",
+      "type": "ble-frame",
       "settings": {
         "byteOrder": "little-endian",
+        "requestFrameSize": 20,
         "responseFrameSize": 300,
         "checksumType": "sum8",
-        "retries": 1
+        "retries": 1,
+        "requestPreamble": [170, 85, 144, 235],
+        "responsePreamble": [85, 170, 235, 144],
+        "commandOffset": 4,
+        "responseFrameTypeOffset": 4,
+        "responseFooterSize": 1,
+        "writeRegisterOffset": 4,
+        "writeValueLengthOffset": 5,
+        "writeValueOffset": 6,
+        "writeValueByteOrder": "little-endian"
       }
     }
   },
@@ -42,6 +52,7 @@
       "command": 150,
       "responseFrameType": 2,
       "headerSize": 6,
+      "readMode": "notify-stream",
       "pollGroup": "fast"
     },
     {
@@ -63,6 +74,7 @@
       "command": 151,
       "responseFrameType": 3,
       "headerSize": 6,
+      "optional": true,
       "pollGroup": "slow"
     }
   ],

@@ -114,6 +114,36 @@ public sealed class ProtocolSettings
 
     /// <summary>Checksum algorithm: "crc16" (Modbus), "sum8" (JK BMS BLE), or "none".</summary>
     public string ChecksumType { get; init; } = "crc16";
+
+    /// <summary>Request frame size in bytes for command-driven BLE frame protocols.</summary>
+    public int RequestFrameSize { get; init; } = 20;
+
+    /// <summary>Leading bytes that identify outbound BLE command frames.</summary>
+    public IReadOnlyList<byte> RequestPreamble { get; init; } = [];
+
+    /// <summary>Leading bytes that identify inbound BLE notification frames.</summary>
+    public IReadOnlyList<byte> ResponsePreamble { get; init; } = [];
+
+    /// <summary>Zero-based offset of the bank command byte inside outbound request frames.</summary>
+    public int CommandOffset { get; init; } = 4;
+
+    /// <summary>Zero-based offset of the frame discriminator byte inside inbound notification frames.</summary>
+    public int ResponseFrameTypeOffset { get; init; } = 4;
+
+    /// <summary>Number of trailing bytes to exclude from the payload (e.g. checksum bytes).</summary>
+    public int ResponseFooterSize { get; init; } = 1;
+
+    /// <summary>Zero-based offset of the target register/address byte inside generic frame-register write commands.</summary>
+    public int WriteRegisterOffset { get; init; } = 4;
+
+    /// <summary>Zero-based offset of the value-length byte inside generic frame-register write commands.</summary>
+    public int WriteValueLengthOffset { get; init; } = 5;
+
+    /// <summary>Zero-based offset of the first raw-value byte inside generic frame-register write commands.</summary>
+    public int WriteValueOffset { get; init; } = 6;
+
+    /// <summary>Byte order used when encoding raw values into generic frame-register write commands.</summary>
+    public string WriteValueByteOrder { get; init; } = "little-endian";
 }
 
 public sealed class DataSourceDefinition
@@ -123,6 +153,16 @@ public sealed class DataSourceDefinition
     public required string Name { get; init; }
 
     public required string PollGroup { get; init; }
+
+    /// <summary>
+    /// Read strategy for the data source.
+    /// "request-response" actively writes a request frame and waits for the matching response.
+    /// "notify-stream" consumes matching unsolicited notify frames from the active BLE subscription.
+    /// </summary>
+    public string ReadMode { get; init; } = "request-response";
+
+    /// <summary>When true, read failures for this bank do not fail the overall poll.</summary>
+    public bool Optional { get; init; }
 
     // Modbus: register address and count
     public ushort Address { get; init; }

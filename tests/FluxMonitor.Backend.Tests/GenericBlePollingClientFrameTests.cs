@@ -17,6 +17,7 @@ public sealed class GenericBlePollingClientFrameTests
         var extracted = GenericBlePollingClient.TryExtractValidatedFrame(
             buffer,
             300,
+            JkResponsePreamble,
             "sum8",
             out var frame,
             out var discardedInvalidFrame);
@@ -43,6 +44,7 @@ public sealed class GenericBlePollingClientFrameTests
         var extracted = GenericBlePollingClient.TryExtractValidatedFrame(
             buffer,
             300,
+            JkResponsePreamble,
             "sum8",
             out var frame,
             out var discardedInvalidFrame);
@@ -125,13 +127,44 @@ public sealed class GenericBlePollingClientFrameTests
     [Fact]
     public void BuildBleFrameWriteCommand_EncodesPayloadAndChecksum()
     {
-        var frame = GenericBlePollingClient.BuildBleFrameWriteCommand(new BleFrameWriteTarget(0x1D, 0x04), 0x01020304);
+        var frame = GenericBlePollingClient.BuildBleFrameWriteCommand(
+            new BleFrameWriteTarget(0x1D, 0x04),
+            0x01020304,
+            CreateJkProtocolSettings());
 
         Assert.Equal(
             new byte[]
             {
                 0xAA, 0x55, 0x90, 0xEB, 0x1D, 0x04, 0x04, 0x03, 0x02, 0x01,
                 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xA5
+            },
+            frame);
+    }
+
+    [Fact]
+    public void BuildBleFrameWriteCommand_HonorsConfiguredOffsetsAndByteOrder()
+    {
+        var settings = new ProtocolSettings
+        {
+            RequestFrameSize = 12,
+            RequestPreamble = [0x10, 0x20],
+            ChecksumType = "none",
+            WriteRegisterOffset = 2,
+            WriteValueLengthOffset = 3,
+            WriteValueOffset = 4,
+            WriteValueByteOrder = "big-endian"
+        };
+
+        var frame = GenericBlePollingClient.BuildBleFrameWriteCommand(
+            new BleFrameWriteTarget(0x2A, 0x02),
+            0x00001234,
+            settings);
+
+        Assert.Equal(
+            new byte[]
+            {
+                0x10, 0x20, 0x2A, 0x02, 0x12, 0x34,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00
             },
             frame);
     }
@@ -155,10 +188,10 @@ public sealed class GenericBlePollingClientFrameTests
     private static byte[] BuildFrame(int size, byte frameType)
     {
         var frame = new byte[size];
-        frame[0] = 0x55;
-        frame[1] = 0xAA;
-        frame[2] = 0xEB;
-        frame[3] = 0x90;
+        frame[0] = JkResponsePreamble[0];
+        frame[1] = JkResponsePreamble[1];
+        frame[2] = JkResponsePreamble[2];
+        frame[3] = JkResponsePreamble[3];
         frame[4] = frameType;
 
         for (var i = 5; i < size - 1; i++)
@@ -171,6 +204,20 @@ public sealed class GenericBlePollingClientFrameTests
         frame[^1] = checksum;
         return frame;
     }
+
+    private static ProtocolSettings CreateJkProtocolSettings()
+        => new()
+        {
+            RequestFrameSize = 20,
+            RequestPreamble = [0xAA, 0x55, 0x90, 0xEB],
+            ChecksumType = "sum8",
+            WriteRegisterOffset = 4,
+            WriteValueLengthOffset = 5,
+            WriteValueOffset = 6,
+            WriteValueByteOrder = "little-endian"
+        };
+
+    private static readonly byte[] JkResponsePreamble = [0x55, 0xAA, 0xEB, 0x90];
 
     private static EntityDefinition CreateEntity(string id, int byteOffset, string dataType)
         => new()

@@ -5,9 +5,6 @@ namespace FluxMonitor.Backend.Services;
 
 /// <summary>
 /// Routes poll requests to the correct client based on the device definition's transport type.
-/// Currently supported: "serial" → GenericModbusPollingClient.
-/// Other transports (e.g. "ble") will throw <see cref="NotSupportedException"/> until a
-/// dedicated client is registered.
 /// </summary>
 public sealed class PollingClientDispatcher(
     GenericModbusPollingClient modbusClient,
@@ -16,9 +13,6 @@ public sealed class PollingClientDispatcher(
 {
     private static readonly HashSet<string> SupportedTransports =
         new(StringComparer.OrdinalIgnoreCase) { "serial", "ble" };
-
-    private static readonly HashSet<string> SupportedBleProtocols =
-        new(StringComparer.OrdinalIgnoreCase) { "jk-bms-ble" };
 
     public static bool IsTransportSupported(string? transportType)
         => !string.IsNullOrWhiteSpace(transportType) && SupportedTransports.Contains(transportType);
@@ -39,7 +33,7 @@ public sealed class PollingClientDispatcher(
             return false;
 
         return !string.Equals(transportType, "ble", StringComparison.OrdinalIgnoreCase) ||
-               SupportedBleProtocols.Contains(definition.Connection.Protocol.Type);
+               GenericBlePollingClient.IsDefinitionSupported(definition);
     }
 
     public string? GetUnsupportedDefinitionMessage(FluxMonitor.Contracts.DeviceDefinition.DeviceDefinition definition)
@@ -48,12 +42,8 @@ public sealed class PollingClientDispatcher(
         if (!IsTransportSupported(transportType))
             return GetUnsupportedTransportMessage(transportType);
 
-        if (string.Equals(transportType, "ble", StringComparison.OrdinalIgnoreCase) &&
-            !SupportedBleProtocols.Contains(definition.Connection.Protocol.Type))
-        {
-            return $"BLE protocol '{definition.Connection.Protocol.Type}' is not supported yet. " +
-                   $"This build currently supports BLE protocols: {string.Join(", ", SupportedBleProtocols)}.";
-        }
+        if (string.Equals(transportType, "ble", StringComparison.OrdinalIgnoreCase))
+            return GenericBlePollingClient.GetUnsupportedDefinitionMessage(definition);
 
         return null;
     }
@@ -87,7 +77,7 @@ public sealed class PollingClientDispatcher(
         return transport switch
         {
             "serial" => modbusClient.PollAsync(device, definition, cancellationToken),
-            "ble" when SupportedBleProtocols.Contains(definition.Connection.Protocol.Type)
+            "ble" when GenericBlePollingClient.IsDefinitionSupported(definition)
                 => bleClient.PollAsync(device, definition, cancellationToken),
             _ => throw new NotSupportedException(
                 $"Device '{device.DeviceId}' cannot be polled: " +

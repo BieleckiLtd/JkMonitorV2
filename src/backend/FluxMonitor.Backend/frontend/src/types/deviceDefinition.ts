@@ -63,14 +63,26 @@ export type ProtocolSettings = {
   retries?: number;
   // Universal
   byteOrder?: 'big-endian' | 'little-endian';
+  requestFrameSize?: number;
   responseFrameSize?: number;
   checksumType?: string;
+  requestPreamble?: number[];
+  responsePreamble?: number[];
+  commandOffset?: number;
+  responseFrameTypeOffset?: number;
+  responseFooterSize?: number;
+  writeRegisterOffset?: number;
+  writeValueLengthOffset?: number;
+  writeValueOffset?: number;
+  writeValueByteOrder?: 'big-endian' | 'little-endian';
 };
 
 export type DataSourceDefinition = {
   id: string;
   name: string;
   pollGroup: string;
+  readMode?: 'request-response' | 'notify-stream';
+  optional?: boolean;
   // Modbus
   address?: number;
   count?: number;
