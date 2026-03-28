@@ -145,6 +145,14 @@ function Get-GitHubHeaders([string]$Accept) {
     return $headers
 }
 
+function Convert-WebResponseContentToString($Content) {
+    if ($Content -is [byte[]]) {
+        return [System.Text.Encoding]::UTF8.GetString($Content)
+    }
+
+    return [string]$Content
+}
+
 function Invoke-GitHubApi([string]$RepositorySlug, [string]$Path) {
     $headers = Get-GitHubHeaders -Accept 'application/vnd.github+json'
     return Invoke-RestMethod -Uri "https://api.github.com/repos/$RepositorySlug$Path" -Headers $headers
@@ -187,7 +195,7 @@ function Try-Get-ReleaseAssetFingerprint([string]$RepositorySlug, [string]$Tag, 
 function Get-ReleaseChecksum([string]$RepositorySlug, [string]$Tag, [string]$AssetName) {
     $headers = Get-GitHubHeaders -Accept 'application/octet-stream'
     $checksumAsset = Get-ReleaseAsset -RepositorySlug $RepositorySlug -Tag $Tag -AssetName "$AssetName.sha256"
-    $payload = (Invoke-WebRequest -Uri $checksumAsset.url -Headers $headers -UseBasicParsing).Content
+    $payload = Convert-WebResponseContentToString ((Invoke-WebRequest -Uri $checksumAsset.url -Headers $headers -UseBasicParsing).Content)
     $checksum = ($payload -split '\s+')[0].Trim().ToLowerInvariant()
 
     if ($checksum -notmatch '^[0-9a-f]{64}$') {

@@ -105,7 +105,7 @@ public sealed class TimescaleTelemetryRepository(
 
             await using var connection = new NpgsqlConnection(_storage.ConnectionString);
             await connection.OpenAsync(cancellationToken);
-            var hasTimescale = await TryEnableTimescaleAsync(connection, cancellationToken);
+            var useTimescale = await TryEnableTimescaleAsync(connection, cancellationToken);
 
             await ExecuteNonQueryAsync(connection, """
                 CREATE TABLE IF NOT EXISTS "DeviceSensors" (
@@ -148,12 +148,9 @@ public sealed class TimescaleTelemetryRepository(
                 );
                 """, cancellationToken);
 
-            if (hasTimescale)
+            if (useTimescale)
             {
-                await ExecuteNonQueryAsync(
-                    connection,
-                    """SELECT create_hypertable('"Measurements"', by_range('"Time"'), if_not_exists => TRUE);""",
-                    cancellationToken);
+                useTimescale = await TryConvertMeasurementsToHypertableAsync(connection, cancellationToken);
             }
 
             await ExecuteNonQueryAsync(connection, """
@@ -166,9 +163,9 @@ public sealed class TimescaleTelemetryRepository(
 
             _initialized = true;
             logger.LogInformation(
-                hasTimescale
-                    ? "Telemetry schema is ready with TimescaleDB enabled."
-                    : "Telemetry schema is ready without the TimescaleDB extension.");
+                useTimescale
+                    ? "Telemetry schema is ready with TimescaleDB hypertables enabled."
+                    : "Telemetry schema is ready using plain PostgreSQL tables.");
         }
         finally
         {
@@ -1024,6 +1021,28 @@ public sealed class TimescaleTelemetryRepository(
         await using var command = connection.CreateCommand();
         command.CommandText = sql;
         await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task<bool> TryConvertMeasurementsToHypertableAsync(
+        NpgsqlConnection connection,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await ExecuteNonQueryAsync(
+                connection,
+                """SELECT create_hypertable('"Measurements"', by_range('Time'), if_not_exists => TRUE);""",
+                cancellationToken);
+            return true;
+        }
+        catch (PostgresException exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Measurements table could not be converted to a TimescaleDB hypertable for database '{Database}'. Continuing with plain PostgreSQL tables.",
+                connection.Database);
+            return false;
+        }
     }
 
     private async Task<bool> TryEnableTimescaleAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
