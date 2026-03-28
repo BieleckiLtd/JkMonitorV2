@@ -1,4 +1,5 @@
 using FluxMonitor.Backend.Services;
+using FluxMonitor.Contracts.DeviceDefinition;
 using Xunit;
 
 namespace FluxMonitor.Backend.Tests;
@@ -53,6 +54,104 @@ public sealed class GenericBlePollingClientFrameTests
         Assert.Empty(buffer);
     }
 
+    [Fact]
+    public void ResolveFrameWriteTarget_MapsConfiguredByteOffsetStrategyToHoldingRegister()
+    {
+        var entity = CreateEntity("charge_switch", 112, "uint32");
+        var write = new DataSourceWriteDefinition
+        {
+            Type = "frame-register",
+            AddressBase = 1,
+            AddressStepBytes = 4
+        };
+
+        var target = GenericBlePollingClient.ResolveFrameWriteTarget(entity, write);
+
+        Assert.Equal(0x1D, target.RegisterAddress);
+        Assert.Equal(0x04, target.ValueLength);
+    }
+
+    [Fact]
+    public void ResolveFrameWriteTarget_HonorsEntityWriteOverride()
+    {
+        var entity = new EntityDefinition
+        {
+            Id = "custom_write",
+            Type = "number",
+            Name = "custom_write",
+            Category = "Config",
+            Writable = true,
+            Source = new EntitySourceDefinition
+            {
+                Bank = "config",
+                ByteOffset = 167,
+                DataType = "uint8"
+            },
+            Write = new EntityWriteDefinition
+            {
+                Address = 0xB7,
+                ValueLength = 0x01
+            }
+        };
+        var write = new DataSourceWriteDefinition
+        {
+            Type = "frame-register",
+            AddressBase = 1,
+            AddressStepBytes = 4
+        };
+
+        var target = GenericBlePollingClient.ResolveFrameWriteTarget(entity, write);
+
+        Assert.Equal(0xB7, target.RegisterAddress);
+        Assert.Equal(0x01, target.ValueLength);
+    }
+
+    [Fact]
+    public void ResolveFrameWriteTarget_RejectsUnalignedOffsetsWithoutConfiguredOverride()
+    {
+        var entity = CreateEntity("state_of_charge", 167, "uint8");
+        var write = new DataSourceWriteDefinition
+        {
+            Type = "frame-register",
+            AddressBase = 1,
+            AddressStepBytes = 4
+        };
+
+        var exception = Assert.Throws<InvalidOperationException>(() => GenericBlePollingClient.ResolveFrameWriteTarget(entity, write));
+
+        Assert.Contains("cannot be mapped", exception.Message, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void BuildBleFrameWriteCommand_EncodesPayloadAndChecksum()
+    {
+        var frame = GenericBlePollingClient.BuildBleFrameWriteCommand(new BleFrameWriteTarget(0x1D, 0x04), 0x01020304);
+
+        Assert.Equal(
+            new byte[]
+            {
+                0xAA, 0x55, 0x90, 0xEB, 0x1D, 0x04, 0x04, 0x03, 0x02, 0x01,
+                0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xA5
+            },
+            frame);
+    }
+
+    [Fact]
+    public void TryReadRawValue_ReadsLittleEndianUInt32()
+    {
+        var entity = CreateEntity("max_charge_current", 44, "uint32");
+        var payload = new byte[80];
+        payload[44] = 0xB8;
+        payload[45] = 0x0B;
+        payload[46] = 0x00;
+        payload[47] = 0x00;
+
+        var read = GenericBlePollingClient.TryReadRawValue(entity, payload, "little-endian", out var rawValue);
+
+        Assert.True(read);
+        Assert.Equal(3000u, rawValue);
+    }
+
     private static byte[] BuildFrame(int size, byte frameType)
     {
         var frame = new byte[size];
@@ -72,4 +171,20 @@ public sealed class GenericBlePollingClientFrameTests
         frame[^1] = checksum;
         return frame;
     }
+
+    private static EntityDefinition CreateEntity(string id, int byteOffset, string dataType)
+        => new()
+        {
+            Id = id,
+            Type = "number",
+            Name = id,
+            Category = "Config",
+            Writable = true,
+            Source = new EntitySourceDefinition
+            {
+                Bank = "config",
+                ByteOffset = byteOffset,
+                DataType = dataType
+            }
+        };
 }

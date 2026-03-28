@@ -83,8 +83,12 @@ export type DataSourceDefinition = {
 };
 
 export type DataSourceWriteDefinition = {
-  functionCode: number;
-  registersPerWrite: number;
+  type?: string;
+  functionCode?: number;
+  registersPerWrite?: number;
+  addressBase?: number;
+  addressStepBytes?: number;
+  valueLength?: number;
 };
 
 export type PollGroupDefinition = {
@@ -98,8 +102,14 @@ export type EntityDefinition = {
   name: string;
   category: string;
   source: EntitySourceDefinition;
+  write?: EntityWriteDefinition;
   display?: EntityDisplayDefinition;
   roles?: string[];
+};
+
+export type EntityWriteDefinition = {
+  address?: number;
+  valueLength?: number;
 };
 
 export type EntitySourceDefinition = {

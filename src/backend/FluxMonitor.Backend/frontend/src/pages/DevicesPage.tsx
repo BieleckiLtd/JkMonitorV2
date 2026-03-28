@@ -10,6 +10,7 @@ type DeviceConfiguration = {
   displayName: string;
   definitionId: string;
   transportPortName?: string | null;
+  bleSettingsPin?: string | null;
   databaseName?: string | null;
   address: number;
   isMaster: boolean;
@@ -86,6 +87,7 @@ const defaultDevice = (index: number, definitionId: string, definitionName?: str
   displayName: definitionName ?? `Battery ${index}`,
   definitionId,
   transportPortName: '',
+  bleSettingsPin: '',
   databaseName: '',
   address: index,
   isMaster: false,
@@ -688,6 +690,16 @@ export function DevicesPage() {
                       <label className='space-y-2 text-sm text-foreground'>
                         <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Display name</span>
                         <Input value={device.displayName} onChange={(event) => updateDevice(index, 'displayName', event.target.value)} />
+                      </label>
+                      <label className='space-y-2 text-sm text-foreground sm:col-span-2'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Settings PIN</span>
+                        <Input
+                          type='password'
+                          value={device.bleSettingsPin ?? ''}
+                          disabled={isRunning}
+                          placeholder='Optional'
+                          onChange={(event) => updateDevice(index, 'bleSettingsPin', event.target.value || null)}
+                        />
                       </label>
                     </div>
                   </div>

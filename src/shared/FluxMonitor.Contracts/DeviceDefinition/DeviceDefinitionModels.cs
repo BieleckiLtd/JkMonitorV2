@@ -144,9 +144,17 @@ public sealed class DataSourceDefinition
 
 public sealed class DataSourceWriteDefinition
 {
+    public string Type { get; init; } = "modbus-registers";
+
     public byte FunctionCode { get; init; } = 16;
 
     public int RegistersPerWrite { get; init; } = 2;
+
+    public int AddressBase { get; init; }
+
+    public int AddressStepBytes { get; init; } = 1;
+
+    public int? ValueLength { get; init; }
 }
 
 public sealed class PollGroupDefinition
@@ -173,6 +181,8 @@ public sealed class EntityDefinition
 
     public required EntitySourceDefinition Source { get; init; }
 
+    public EntityWriteDefinition? Write { get; init; }
+
     public EntityDisplayDefinition? Display { get; init; }
 
     public string? Role { get; init; }
@@ -180,6 +190,13 @@ public sealed class EntityDefinition
     public bool Hidden { get; init; }
 
     public bool Writable { get; init; }
+}
+
+public sealed class EntityWriteDefinition
+{
+    public int? Address { get; init; }
+
+    public int? ValueLength { get; init; }
 }
 
 public sealed class EntitySourceDefinition

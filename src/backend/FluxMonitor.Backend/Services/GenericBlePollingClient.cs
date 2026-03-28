@@ -1,3 +1,4 @@
+using System.Buffers.Binary;
 using System.Collections.Concurrent;
 using System.Collections;
 using Linux.Bluetooth;
@@ -92,6 +93,79 @@ public sealed class GenericBlePollingClient(
                 bankData,
                 DateTimeOffset.UtcNow,
                 session.LastFrameHex);
+        }
+        catch (Exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            await ResetSessionAsync(session);
+            throw;
+        }
+        finally
+        {
+            session.Lock.Release();
+        }
+    }
+
+    public async Task<WriteRegisterResult> WriteEntityAsync(
+        DeviceConfiguration device,
+        DeviceDefinition definition,
+        string entityId,
+        uint rawValue,
+        CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsLinux())
+            throw new PlatformNotSupportedException("BLE writes are supported on Linux/BlueZ only.");
+
+        if (!string.Equals(definition.Connection.Protocol.Type, "jk-bms-ble", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new NotSupportedException(
+                $"BLE protocol '{definition.Connection.Protocol.Type}' is not supported yet for device '{device.DeviceId}'.");
+        }
+
+        var entity = definition.Entities.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, entityId, StringComparison.OrdinalIgnoreCase) && candidate.Writable);
+        if (entity is null)
+            throw new ArgumentException($"Writable entity '{entityId}' not found in definition '{definition.Device.Id}'.");
+
+        var bank = definition.DataSources.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, entity.Source.Bank, StringComparison.OrdinalIgnoreCase));
+        if (bank is null)
+            throw new InvalidOperationException($"BLE bank '{entity.Source.Bank}' was not found for entity '{entityId}'.");
+        if (bank.Write is null)
+            throw new InvalidOperationException($"BLE bank '{entity.Source.Bank}' does not define a write strategy.");
+
+        var writeTarget = ResolveFrameWriteTarget(entity, bank.Write);
+        var session = _sessions.GetOrAdd(device.DeviceId, _ => new BleSession(device.DeviceId));
+
+        await session.Lock.WaitAsync(cancellationToken);
+        try
+        {
+            await EnsureConnectedAsync(session, device, definition, cancellationToken);
+            await PrimeSessionAsync(session, definition, cancellationToken);
+
+            await SendWriteFrameAsync(session, writeTarget, rawValue, cancellationToken);
+
+            session.BankCache.Remove(bank.Id);
+            await Task.Delay(150, cancellationToken);
+
+            var frame = await RequestFrameAsync(session, definition, bank, cancellationToken);
+            var payload = ExtractPayload(frame, bank);
+            session.BankCache[bank.Id] = (DateTimeOffset.UtcNow, payload);
+
+            if (!TryReadRawValue(entity, payload, definition.Connection.Protocol.Settings?.ByteOrder, out var readBackValue))
+            {
+                return new WriteRegisterResult(
+                    false,
+                    rawValue,
+                    null,
+                    $"Unable to read back value for entity '{entityId}' after BLE write.");
+            }
+
+            var success = readBackValue == rawValue;
+            return new WriteRegisterResult(
+                success,
+                rawValue,
+                readBackValue,
+                success ? null : $"Read-back mismatch: expected {rawValue}, got {readBackValue}");
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -598,6 +672,67 @@ public sealed class GenericBlePollingClient(
         return frame;
     }
 
+    internal static BleFrameWriteTarget ResolveFrameWriteTarget(
+        EntityDefinition entity,
+        DataSourceWriteDefinition writeDefinition)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        ArgumentNullException.ThrowIfNull(writeDefinition);
+
+        if (!string.Equals(writeDefinition.Type, "frame-register", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                $"Entity '{entity.Id}' uses BLE write strategy '{writeDefinition.Type}', which is not supported by this protocol handler.");
+        }
+
+        var valueLength = entity.Write?.ValueLength ?? writeDefinition.ValueLength ?? GetDataTypeSize(entity.Source.DataType);
+        if (valueLength <= 0)
+            throw new InvalidOperationException($"Entity '{entity.Id}' uses unsupported data type '{entity.Source.DataType}' for BLE writes.");
+
+        var address = entity.Write?.Address;
+        if (!address.HasValue)
+        {
+            if (writeDefinition.AddressStepBytes <= 0)
+                throw new InvalidOperationException($"Entity '{entity.Id}' uses an invalid BLE write addressStepBytes value.");
+
+            if (entity.Source.ByteOffset < 0 || entity.Source.ByteOffset % writeDefinition.AddressStepBytes != 0)
+            {
+                throw new InvalidOperationException(
+                    $"Entity '{entity.Id}' has byte offset {entity.Source.ByteOffset}, which cannot be mapped using the configured BLE write strategy.");
+            }
+
+            address = writeDefinition.AddressBase + (entity.Source.ByteOffset / writeDefinition.AddressStepBytes);
+        }
+
+        if (address <= 0 || address > byte.MaxValue)
+        {
+            throw new InvalidOperationException(
+                $"Entity '{entity.Id}' resolved to BLE register {address}, which is outside the supported range.");
+        }
+
+        if (valueLength > byte.MaxValue)
+            throw new InvalidOperationException($"Entity '{entity.Id}' resolved to BLE value length {valueLength}, which is outside the supported range.");
+
+        return new((byte)address.Value, (byte)valueLength);
+    }
+
+    internal static byte[] BuildBleFrameWriteCommand(BleFrameWriteTarget target, uint value)
+    {
+        var frame = new byte[20];
+        frame[0] = 0xAA;
+        frame[1] = 0x55;
+        frame[2] = 0x90;
+        frame[3] = 0xEB;
+        frame[4] = target.RegisterAddress;
+        frame[5] = target.ValueLength;
+        frame[6] = (byte)(value >> 0);
+        frame[7] = (byte)(value >> 8);
+        frame[8] = (byte)(value >> 16);
+        frame[9] = (byte)(value >> 24);
+        frame[19] = ComputeSum8(frame.AsSpan(0, 19));
+        return frame;
+    }
+
     private static byte ComputeSum8(ReadOnlySpan<byte> data)
     {
         byte checksum = 0;
@@ -606,6 +741,93 @@ public sealed class GenericBlePollingClient(
 
         return checksum;
     }
+
+    private async Task SendWriteFrameAsync(
+        BleSession session,
+        BleFrameWriteTarget target,
+        uint rawValue,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        var frame = BuildBleFrameWriteCommand(target, rawValue);
+        var options = new Dictionary<string, object>
+        {
+            ["type"] = await SelectWriteTypeAsync(session.WriteCharacteristic!)
+        };
+
+        logger.LogInformation(
+            "Sending JK BLE write for device {DeviceId}. Register=0x{Register:X2}, Length={Length}, Value={Value}.",
+            session.DeviceId,
+            target.RegisterAddress,
+            target.ValueLength,
+            rawValue);
+
+        await session.WriteCharacteristic!.WriteValueAsync(frame, options);
+    }
+
+    internal static bool TryReadRawValue(
+        EntityDefinition entity,
+        byte[] payload,
+        string? byteOrder,
+        out uint rawValue)
+    {
+        ArgumentNullException.ThrowIfNull(entity);
+        ArgumentNullException.ThrowIfNull(payload);
+
+        rawValue = 0;
+        var offset = entity.Source.ByteOffset;
+        if (offset < 0 || offset >= payload.Length)
+            return false;
+
+        var littleEndian = !string.Equals(byteOrder, "big-endian", StringComparison.OrdinalIgnoreCase);
+        switch (entity.Source.DataType.ToLowerInvariant())
+        {
+            case "uint8":
+                rawValue = payload[offset];
+                return true;
+
+            case "int8":
+                rawValue = unchecked((uint)(sbyte)payload[offset]);
+                return true;
+
+            case "uint16" when offset + 2 <= payload.Length:
+                rawValue = littleEndian
+                    ? BinaryPrimitives.ReadUInt16LittleEndian(payload.AsSpan(offset, 2))
+                    : BinaryPrimitives.ReadUInt16BigEndian(payload.AsSpan(offset, 2));
+                return true;
+
+            case "int16" when offset + 2 <= payload.Length:
+                rawValue = unchecked((ushort)(littleEndian
+                    ? BinaryPrimitives.ReadInt16LittleEndian(payload.AsSpan(offset, 2))
+                    : BinaryPrimitives.ReadInt16BigEndian(payload.AsSpan(offset, 2))));
+                return true;
+
+            case "uint32" when offset + 4 <= payload.Length:
+                rawValue = littleEndian
+                    ? BinaryPrimitives.ReadUInt32LittleEndian(payload.AsSpan(offset, 4))
+                    : BinaryPrimitives.ReadUInt32BigEndian(payload.AsSpan(offset, 4));
+                return true;
+
+            case "int32" when offset + 4 <= payload.Length:
+                rawValue = unchecked((uint)(littleEndian
+                    ? BinaryPrimitives.ReadInt32LittleEndian(payload.AsSpan(offset, 4))
+                    : BinaryPrimitives.ReadInt32BigEndian(payload.AsSpan(offset, 4))));
+                return true;
+
+            default:
+                return false;
+        }
+    }
+
+    private static int GetDataTypeSize(string? dataType)
+        => dataType?.Trim().ToLowerInvariant() switch
+        {
+            "uint8" or "int8" => 1,
+            "uint16" or "int16" => 2,
+            "uint32" or "int32" => 4,
+            _ => 0
+        };
 
     private static async Task<string> SelectWriteTypeAsync(IGattCharacteristic1 characteristic)
     {
@@ -1124,3 +1346,7 @@ public sealed record BleProbeResult(
     bool IsDefinitionVerified,
     string? VerificationLabel,
     string? VerificationDetails);
+
+internal sealed record BleFrameWriteTarget(
+    byte RegisterAddress,
+    byte ValueLength);

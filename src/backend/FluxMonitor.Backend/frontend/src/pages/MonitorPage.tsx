@@ -433,7 +433,7 @@ function ParameterRow({ param, deviceId }: { param: DeviceParameter; deviceId: s
         body: JSON.stringify({ rawValue }),
       });
 
-      const data = await response.json() as { success?: boolean; writtenValue?: number; readBackValue?: number; error?: string; message?: string };
+      const data = await response.json().catch(() => ({})) as { success?: boolean; writtenValue?: number; readBackValue?: number; error?: string; message?: string };
 
       if (!response.ok) {
         setWriteResult({ success: false, message: data.message ?? 'Write failed' });

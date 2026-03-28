@@ -141,9 +141,15 @@ public sealed class GenericModbusPollingClient(
         var slaveAddress = device.Address != 0 ? device.Address : protocolSettings.DefaultSlaveAddress;
         var readTimeout = transport.Defaults?.ReadTimeoutMs ?? 1000;
 
-        // Calculate the register address for this entity's byte offset
-        // For JK BMS: register address = bank base + byte offset (byte-addressed)
-        var registerAddress = (ushort)(bank.Address + entity.Source.ByteOffset);
+        var configuredWriteAddress = entity.Write?.Address;
+        if (configuredWriteAddress is < 0 or > ushort.MaxValue)
+            throw new InvalidOperationException($"Writable entity '{entityId}' resolved to an invalid register address.");
+
+        // Default behavior remains definition-driven from the bank base plus byte offset,
+        // but entities can now override the write address in the device definition.
+        var registerAddress = configuredWriteAddress.HasValue
+            ? (ushort)configuredWriteAddress.Value
+            : (ushort)(bank.Address + entity.Source.ByteOffset);
 
         using var writeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         writeCts.CancelAfter(readTimeout * 5);

@@ -49,6 +49,7 @@ public static class DevicePollingIntervalResolver
             DisplayName = device.DisplayName,
             DefinitionId = device.DefinitionId,
             TransportPortName = device.TransportPortName,
+            BleSettingsPin = device.BleSettingsPin,
             DatabaseName = device.DatabaseName,
             Address = device.Address,
             IsMaster = device.IsMaster,

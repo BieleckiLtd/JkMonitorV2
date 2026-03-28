@@ -50,7 +50,12 @@
       "command": 150,
       "responseFrameType": 1,
       "headerSize": 6,
-      "pollGroup": "slow"
+      "pollGroup": "slow",
+      "write": {
+        "type": "frame-register",
+        "addressBase": 1,
+        "addressStepBytes": 4
+      }
     },
     {
       "id": "info",

@@ -14,7 +14,7 @@ public sealed class DevicesController(
     DeviceOrchestrator orchestrator,
     DeviceConfigStore deviceConfigStore,
     DeviceDatabaseService deviceDatabaseService,
-    GenericModbusPollingClient genericPollingClient,
+    GenericModbusPollingClient genericModbusPollingClient,
     GenericBlePollingClient genericBlePollingClient,
     PollingClientDispatcher pollingClientDispatcher,
     DeviceDefinitionLoader definitionLoader,
@@ -158,8 +158,11 @@ public sealed class DevicesController(
             if (!definitionLoader.TryGet(device.DefinitionId, out var definition) || definition is null)
                 return BadRequest(new { message = $"Device definition '{device.DefinitionId}' not found." });
 
-            var result = await genericPollingClient.WriteEntityAsync(
-                device, definition, parameterKey, request.RawValue, cancellationToken);
+            var result = string.Equals(definition.Connection.Transport.Type, "ble", StringComparison.OrdinalIgnoreCase)
+                ? await genericBlePollingClient.WriteEntityAsync(
+                    device, definition, parameterKey, request.RawValue, cancellationToken)
+                : await genericModbusPollingClient.WriteEntityAsync(
+                    device, definition, parameterKey, request.RawValue, cancellationToken);
 
             pollTrigger.Signal();
             return Ok(result);
@@ -172,9 +175,26 @@ public sealed class DevicesController(
         {
             return StatusCode(504, new { message = ex.Message });
         }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (NotSupportedException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
         catch (InvalidDataException ex)
         {
             return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(
+                ex,
+                "Parameter write failed for device {DeviceId}, parameter {ParameterKey}.",
+                deviceId,
+                parameterKey);
+            return StatusCode(500, new { message = "Failed to write parameter." });
         }
     }
 
@@ -309,6 +329,7 @@ public sealed class DevicesController(
                     {
                         DeviceId = d.DeviceId, DisplayName = d.DisplayName,
                         DefinitionId = d.DefinitionId, TransportPortName = d.TransportPortName,
+                        BleSettingsPin = d.BleSettingsPin,
                         DatabaseName = d.DatabaseName,
                         Address = d.Address, IsMaster = d.IsMaster,
                         PollIntervalMilliseconds = d.PollIntervalMilliseconds, Enabled = true,
@@ -408,6 +429,7 @@ public sealed class DevicesController(
                     {
                         DeviceId = d.DeviceId, DisplayName = d.DisplayName,
                         DefinitionId = d.DefinitionId, TransportPortName = d.TransportPortName,
+                        BleSettingsPin = d.BleSettingsPin,
                         DatabaseName = d.DatabaseName,
                         Address = d.Address, IsMaster = d.IsMaster,
                         PollIntervalMilliseconds = d.PollIntervalMilliseconds, Enabled = false,

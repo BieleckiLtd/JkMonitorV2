@@ -137,6 +137,7 @@ describe('DevicesPage', () => {
 
     expect(await screen.findByText(/scan and choose a nearby ble device/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/aa:bb:cc:dd:ee:ff or device alias/i)).toBeInTheDocument();
+    expect(screen.getByPlaceholderText(/optional/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /start/i })).toBeDisabled();
   });
 
