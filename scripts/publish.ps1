@@ -380,7 +380,7 @@ if [[ "\${FLUXMONITOR_RELEASE_SHA256,,}" != "\$expected_sha256" ]]; then
 fi
 sleep 5
 sudo systemctl is-active fluxmonitor.service
-health_json="\$(curl -fsS http://127.0.0.1:5074/api/health)"
+health_json="`$(curl -fsS http://127.0.0.1:5074/api/health)"
 
 if command -v python3 >/dev/null 2>&1; then
   HEALTH_JSON="\$health_json" python3 - "\$release_tag" "\$expected_source_revision_id" <<'PY'
