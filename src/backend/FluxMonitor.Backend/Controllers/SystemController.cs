@@ -1,4 +1,5 @@
 ﻿using System.IO.Ports;
+using FluxMonitor.Backend.Models;
 using FluxMonitor.Backend.Services;
 using Microsoft.AspNetCore.Mvc;
 
@@ -6,8 +7,68 @@ namespace FluxMonitor.Backend.Controllers;
 
 [ApiController]
 [Route("api/system")]
-public sealed class SystemController(SystemUpdateService updateService) : ControllerBase
+public sealed class SystemController(
+    SystemUpdateService updateService,
+    NetworkManagementService networkManagementService,
+    BluetoothManagementService bluetoothManagementService) : ControllerBase
 {
+    [HttpGet("connectivity")]
+    public async Task<ActionResult<SystemConnectivitySnapshot>> GetConnectivity(CancellationToken cancellationToken)
+    {
+        var network = await networkManagementService.GetSnapshotAsync(cancellationToken);
+        var bluetooth = await bluetoothManagementService.GetSnapshotAsync(cancellationToken);
+
+        return Ok(new SystemConnectivitySnapshot
+        {
+            Network = network,
+            Bluetooth = bluetooth
+        });
+    }
+
+    [HttpGet("network/wifi/scan")]
+    public async Task<ActionResult<WifiScanResult>> ScanWifi(
+        [FromQuery] string? interfaceName = null,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await networkManagementService.ScanWifiAsync(interfaceName, cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpPost("network/wifi/connect")]
+    public async Task<ActionResult<WifiConnectResult>> ConnectWifi(
+        [FromBody] WifiConnectRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await networkManagementService.ConnectWifiAsync(
+            request.Ssid,
+            request.Password,
+            request.InterfaceName,
+            cancellationToken);
+
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpPost("bluetooth/power")]
+    public async Task<ActionResult<BluetoothPowerResult>> SetBluetoothPower(
+        [FromBody] BluetoothPowerRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await bluetoothManagementService.SetPowerAsync(request.Enabled, cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpGet("bluetooth/scan")]
+    public async Task<ActionResult<BluetoothScanResult>> ScanBluetooth(
+        [FromQuery] int? timeoutMs = null,
+        CancellationToken cancellationToken = default)
+    {
+        var timeout = timeoutMs.HasValue
+            ? TimeSpan.FromMilliseconds(Math.Clamp(timeoutMs.Value, 1000, 15000))
+            : (TimeSpan?)null;
+        var result = await bluetoothManagementService.ScanAsync(timeout, cancellationToken);
+        return Ok(result);
+    }
+
     [HttpGet("update/check")]
     public async Task<ActionResult<UpdateCheckResult>> CheckForUpdate(CancellationToken cancellationToken)
     {
@@ -252,3 +313,7 @@ public sealed class NetworkInterfaceInfo
     public List<string> Addresses { get; set; } = [];
     public long? SpeedMbps { get; set; }
 }
+
+public sealed record WifiConnectRequest(string Ssid, string? Password, string? InterfaceName);
+
+public sealed record BluetoothPowerRequest(bool Enabled);

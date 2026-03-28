@@ -40,6 +40,8 @@ builder.Services.AddSingleton<FluxMonitor.Backend.Services.HostSystemMonitoringS
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.IBuildMetadataProvider, FluxMonitor.Backend.Services.AssemblyBuildMetadataProvider>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.DeviceConfigStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.DeviceStateStore>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.NetworkManagementService>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.BluetoothManagementService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.ManagedRestartService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.SystemUpdateService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.PollTrigger>();
