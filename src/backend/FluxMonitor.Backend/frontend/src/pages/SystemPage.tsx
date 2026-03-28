@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { Bluetooth, Cable, CircleAlert, Cpu, Database, Download, Gauge, HardDrive, Leaf, LoaderCircle, MemoryStick, Power, RefreshCcw, CheckCircle2, Upload, Usb, Wifi, XCircle } from 'lucide-react';
+import { Bluetooth, Cable, CircleAlert, Cpu, Database, Download, HardDrive, Leaf, LoaderCircle, MemoryStick, Power, RefreshCcw, CheckCircle2, Upload, Usb, Wifi, XCircle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { cn } from '../lib/utils';
@@ -694,9 +694,6 @@ export function SystemPage() {
   const memoryUsagePercent = getUsagePercent(memoryUsed, memoryTotal);
   const storageUsagePercent = getUsagePercent(storageUsed, storageTotal);
   const applicationUptime = status ? formatDuration(status.startedAt, status.reportedAt) : noDataLabel;
-  const deviceCount = status?.devices.length ?? 0;
-  const healthyDevices = status?.devices.filter((device) => device.lastOutcome === 'Succeeded').length ?? 0;
-  const failingDevices = status?.devices.filter((device) => device.lastOutcome === 'Failed' || device.lastOutcome === 'PersistFailed').length ?? 0;
   const sourceRevisionId = status?.build?.sourceRevisionId ?? noDataLabel;
   const workflowRun = formatWorkflowRun(status?.build?.workflowRunNumber, status?.build?.workflowRunAttempt);
   const ethernetInterfaces = connectivity?.network.ethernetInterfaces ?? [];
@@ -720,47 +717,6 @@ export function SystemPage() {
         </div>
       ) : null}
 
-      <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-4'>
-        <MetricCard
-          icon={isCpuBelowBaseSpeed ? Leaf : Cpu}
-          title='CPU Utilisation'
-          value={formatPercent(cpuUsage)}
-          accentClass={isCpuBelowBaseSpeed ? 'text-emerald-400' : 'text-sky-400'}
-          iconClassName={isCpuBelowBaseSpeed ? 'text-emerald-400' : 'text-muted-foreground'}
-          detail={`Current speed ${formatFrequency(cpuCurrentClockSpeed)}`}
-          detailLines={[
-            `Base speed ${formatFrequency(cpuBaseClockSpeed)}`,
-            `${formatWholeNumber(metrics?.cpuCoreCount)} cores`,
-            `${formatWholeNumber(metrics?.processCount)} processes`,
-            `System temperature ${formatDecimalValue(metrics?.systemTemperatureCelsius, '°C')}`,
-            `Fan speed ${formatRpm(metrics?.mainFanSpeedRpm)}`,
-            `Host uptime ${formatElapsedDuration(metrics?.systemUptimeSeconds)}`,
-            `App uptime ${applicationUptime}`,
-          ]}
-        />
-        <MetricCard
-          icon={MemoryStick}
-          title='Memory Used'
-          value={formatPercent(memoryUsagePercent)}
-          accentClass='text-emerald-400'
-          detail={formatUsage(memoryUsed, memoryTotal)}
-        />
-        <MetricCard
-          icon={HardDrive}
-          title='Storage Used'
-          value={formatPercent(storageUsagePercent)}
-          accentClass='text-amber-400'
-          detail={formatUsage(storageUsed, storageTotal)}
-        />
-        <MetricCard
-          icon={Gauge}
-          title='Device Polling'
-          value={`${healthyDevices}/${status?.enabledDeviceCount ?? 0}`}
-          accentClass={failingDevices > 0 ? 'text-rose-400' : 'text-primary'}
-          detail={failingDevices > 0 ? `${failingDevices} attention needed` : `${deviceCount} configured devices tracked`}
-        />
-      </div>
-
       {isLoading && !status ? (
         <div className='flex min-h-64 items-center justify-center rounded-2xl border border-border bg-card/60'>
           <LoaderCircle className='h-6 w-6 animate-spin text-primary' />
@@ -772,23 +728,40 @@ export function SystemPage() {
           <div className='space-y-6'>
             <Card className='border border-border/80 bg-card/85 shadow-sm'>
               <CardHeader className='border-b border-border/60 pb-4'>
-                <CardTitle>Resource usage</CardTitle>
-                <CardDescription>CPU, memory, and storage capacity on the host running the monitor service.</CardDescription>
+                <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
+                  <div>
+                    <CardTitle>Resource usage</CardTitle>
+                    <CardDescription>CPU, memory, and storage capacity on the host running the monitor service.</CardDescription>
+                  </div>
+                  <div className='space-y-1 text-right text-xs text-muted-foreground'>
+                    <div>Host uptime {formatElapsedDuration(metrics?.systemUptimeSeconds)}</div>
+                    <div>App uptime {applicationUptime}</div>
+                  </div>
+                </div>
               </CardHeader>
               <CardContent className='grid gap-5 pt-5'>
                 <UsagePanel
+                  icon={isCpuBelowBaseSpeed ? Leaf : Cpu}
                   label='CPU'
                   percent={cpuUsage}
                   summary={`Current ${formatFrequency(metrics?.cpuCurrentClockSpeedMegahertz)}`}
                   secondary={`Base ${formatFrequency(metrics?.cpuMaxClockSpeedMegahertz)} • ${formatWholeNumber(metrics?.cpuCoreCount)} cores`}
+                  details={[
+                    `${formatWholeNumber(metrics?.processCount)} processes`,
+                    `System temperature ${formatDecimalValue(metrics?.systemTemperatureCelsius, '°C')}`,
+                    `Fan speed ${formatRpm(metrics?.mainFanSpeedRpm)}`,
+                  ]}
+                  iconClassName={isCpuBelowBaseSpeed ? 'text-emerald-400' : 'text-muted-foreground'}
                 />
                 <UsagePanel
+                  icon={MemoryStick}
                   label='Memory'
                   percent={memoryUsagePercent}
                   summary={formatUsage(memoryUsed, memoryTotal)}
                   secondary={metrics?.memoryAvailableBytes != null ? `${formatBytes(metrics.memoryAvailableBytes)} free` : noDataLabel}
                 />
                 <UsagePanel
+                  icon={HardDrive}
                   label='Storage'
                   percent={storageUsagePercent}
                   summary={formatUsage(storageUsed, storageTotal)}
@@ -1357,62 +1330,44 @@ export function SystemPage() {
   );
 }
 
-function MetricCard({
+function UsagePanel({
   icon: Icon,
-  title,
-  value,
-  detail,
-  detailLines,
-  accentClass,
+  label,
+  percent,
+  summary,
+  secondary,
+  details,
   iconClassName,
 }: {
   icon: typeof Cpu;
-  title: string;
-  value: string;
-  detail: string;
-  detailLines?: string[];
-  accentClass: string;
+  label: string;
+  percent: number | null;
+  summary: string;
+  secondary: string;
+  details?: string[];
   iconClassName?: string;
 }) {
   return (
-    <Card className='border border-border/80 bg-card/85 shadow-sm'>
-      <CardContent className='p-6'>
-        <div className='flex items-start justify-between gap-3'>
-          <div>
-            <div className='text-xs font-medium uppercase tracking-[0.24em] text-muted-foreground'>{title}</div>
-            <div className={cn('mt-3 text-4xl font-bold tracking-tight', accentClass)}>{value}</div>
-            <div className='mt-2 text-sm text-muted-foreground'>{detail}</div>
-            {detailLines?.length ? (
-              <div className='mt-3 space-y-1 text-sm text-muted-foreground'>
-                {detailLines.map((line) => (
-                  <div key={line}>{line}</div>
-                ))}
-              </div>
-            ) : null}
-          </div>
-          <div className={cn('rounded-2xl border border-border/70 bg-background/60 p-3', iconClassName ?? 'text-muted-foreground')}>
-            <Icon className='h-5 w-5' />
-          </div>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
-function UsagePanel({ label, percent, summary, secondary }: { label: string; percent: number | null; summary: string; secondary: string }) {
-  return (
     <div className='space-y-3'>
       <div className='flex items-center justify-between gap-3'>
-        <div>
-          <div className='text-sm font-semibold text-foreground'>{label}</div>
+        <div className='min-w-0'>
+          <div className='flex items-center gap-2'>
+            <Icon className={cn('h-4 w-4 shrink-0 text-muted-foreground', iconClassName)} />
+            <div className='text-sm font-semibold text-foreground'>{label}</div>
+          </div>
           <div className='text-sm text-muted-foreground'>{summary}</div>
         </div>
-        <div className='text-sm font-semibold text-foreground'>{formatPercent(percent)}</div>
+        <div className='shrink-0 text-sm font-semibold text-foreground'>{formatPercent(percent)}</div>
       </div>
       <div className='h-2 overflow-hidden rounded-full bg-muted'>
         <div className='h-full rounded-full bg-primary transition-[width] duration-500 ease-out' style={{ width: `${Math.max(percent ?? 0, 4)}%` }} />
       </div>
-      <div className='text-xs text-muted-foreground'>{secondary}</div>
+      <div className='space-y-1'>
+        <div className='text-xs text-muted-foreground'>{secondary}</div>
+        {details?.length ? (
+          <div className='text-xs text-muted-foreground'>{details.join(' • ')}</div>
+        ) : null}
+      </div>
     </div>
   );
 }
