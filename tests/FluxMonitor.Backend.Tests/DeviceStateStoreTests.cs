@@ -40,35 +40,25 @@ public class DeviceStateStoreTests
     {
         var store = CreateStore(
             new BuildRuntimeInfo(),
-            new MonitorConfiguration
-            {
-                Storage = new StorageConfiguration
+            CreateDefaultConfiguration(),
+            [
+                new DeviceConfiguration
                 {
-                    Provider = "None",
-                    ConnectionString = string.Empty,
-                    Retention = new RetentionConfiguration()
-                },
-                ApiSecurity = new ApiSecurityConfiguration
-                {
-                    TunnelProvider = "None"
-                },
-                Devices =
-                [
-                    new DeviceConfiguration
-                    {
-                        DeviceId = "device-01",
-                        DisplayName = "Device 01",
-                        DefinitionId = "jk-inverter-bms"
-                    }
-                ]
-            });
+                    DeviceId = "device-01",
+                    DisplayName = "Device 01",
+                    DefinitionId = "jk-inverter-bms"
+                }
+            ]);
 
         var status = store.GetStatus("Production");
 
         Assert.Equal("Hardware", status.StartupMode);
     }
 
-    private static DeviceStateStore CreateStore(BuildRuntimeInfo buildInfo, MonitorConfiguration? configuration = null)
+    private static DeviceStateStore CreateStore(
+        BuildRuntimeInfo buildInfo,
+        MonitorConfiguration? configuration = null,
+        IReadOnlyList<DeviceConfiguration>? devices = null)
     {
         var hostSystemMonitoringService = new HostSystemMonitoringService(
             NullLogger<HostSystemMonitoringService>.Instance,
@@ -85,7 +75,7 @@ public class DeviceStateStoreTests
             Options.Create(config),
             NullLogger<DeviceConfigStore>.Instance,
             definitionLoader);
-        SeedDeviceConfigStore(deviceConfigStore, config.Devices);
+        SeedDeviceConfigStore(deviceConfigStore, devices ?? []);
 
         return new DeviceStateStore(
             deviceConfigStore,
@@ -107,16 +97,7 @@ public class DeviceStateStoreTests
             ApiSecurity = new ApiSecurityConfiguration
             {
                 TunnelProvider = "None"
-            },
-            Devices =
-            [
-                new DeviceConfiguration
-                {
-                    DeviceId = "device-01",
-                    DisplayName = "Device 01",
-                    DefinitionId = "jk-inverter-bms"
-                }
-            ]
+            }
         };
     }
 
@@ -125,6 +106,14 @@ public class DeviceStateStoreTests
         typeof(DeviceConfigStore)
             .GetField("_devices", BindingFlags.Instance | BindingFlags.NonPublic)!
             .SetValue(store, devices);
+
+        typeof(DeviceConfigStore)
+            .GetField("_persistedDeviceIds", BindingFlags.Instance | BindingFlags.NonPublic)!
+            .SetValue(
+                store,
+                devices
+                    .Select((device, index) => new { device.DeviceId, PersistedDeviceId = index + 1 })
+                    .ToDictionary(entry => entry.DeviceId, entry => entry.PersistedDeviceId, StringComparer.OrdinalIgnoreCase));
 
         typeof(DeviceConfigStore)
             .GetField("_initialized", BindingFlags.Instance | BindingFlags.NonPublic)!

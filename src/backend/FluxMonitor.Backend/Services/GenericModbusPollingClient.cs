@@ -29,8 +29,7 @@ public sealed class GenericModbusPollingClient(
 
     public Task<DevicePollResult> PollAsync(DeviceConfiguration device, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrEmpty(device.DefinitionId) ||
-            !definitionLoader.TryGet(device.DefinitionId, out var definition) || definition is null)
+        if (!device.TryResolveDefinition(definitionLoader, out var definition) || definition is null)
         {
             throw new InvalidOperationException(
                 $"Device '{device.DeviceId}' has no valid DefinitionId ('{device.DefinitionId}').");

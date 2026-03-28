@@ -52,7 +52,6 @@
       "command": 150,
       "responseFrameType": 2,
       "headerSize": 6,
-      "readMode": "notify-stream",
       "pollGroup": "fast"
     },
     {

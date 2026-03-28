@@ -18,12 +18,12 @@ public static class DevicePollingIntervalResolver
             .Min();
     }
 
-    public static int Resolve(string? definitionId, DeviceDefinitionLoader definitionLoader, int fallback)
+    public static int Resolve(DeviceConfiguration device, DeviceDefinitionLoader definitionLoader, int fallback)
     {
+        ArgumentNullException.ThrowIfNull(device);
         ArgumentNullException.ThrowIfNull(definitionLoader);
 
-        if (!string.IsNullOrWhiteSpace(definitionId) &&
-            definitionLoader.TryGet(definitionId, out var definition) &&
+        if (device.TryResolveDefinition(definitionLoader, out var definition) &&
             definition is not null)
         {
             return Resolve(definition);
@@ -37,7 +37,7 @@ public static class DevicePollingIntervalResolver
         ArgumentNullException.ThrowIfNull(device);
         ArgumentNullException.ThrowIfNull(definitionLoader);
 
-        var resolvedInterval = Resolve(device.DefinitionId, definitionLoader, device.PollIntervalMilliseconds);
+        var resolvedInterval = Resolve(device, definitionLoader, device.PollIntervalMilliseconds);
         if (resolvedInterval == device.PollIntervalMilliseconds)
         {
             return device;
@@ -50,14 +50,16 @@ public static class DevicePollingIntervalResolver
             DefinitionId = device.DefinitionId,
             TransportPortName = device.TransportPortName,
             BleSettingsPin = device.BleSettingsPin,
-            DatabaseName = device.DatabaseName,
             Address = device.Address,
             IsMaster = device.IsMaster,
             PollIntervalMilliseconds = resolvedInterval,
             Enabled = device.Enabled,
             CellVoltageSmoothingFactor = device.CellVoltageSmoothingFactor,
             CellVoltageSmoothingBreakoutMillivolts = device.CellVoltageSmoothingBreakoutMillivolts,
-            DisplayPrecision = device.DisplayPrecision
+            DisplayPrecision = device.DisplayPrecision,
+            DefinitionVersion = device.DefinitionVersion,
+            DefinitionJson = device.DefinitionJson,
+            DefinitionHash = device.DefinitionHash
         };
     }
 }

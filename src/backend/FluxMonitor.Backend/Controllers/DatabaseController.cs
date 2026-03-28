@@ -5,7 +5,10 @@ namespace FluxMonitor.Backend.Controllers;
 
 [ApiController]
 [Route("api/database")]
-public sealed class DatabaseController(ITelemetryRepository repository) : ControllerBase
+public sealed class DatabaseController(
+    ITelemetryRepository repository,
+    DeviceConfigStore deviceConfigStore,
+    DeviceOrchestrator deviceOrchestrator) : ControllerBase
 {
     [HttpGet("size")]
     public async Task<IActionResult> GetSize(CancellationToken cancellationToken)
@@ -33,6 +36,8 @@ public sealed class DatabaseController(ITelemetryRepository repository) : Contro
 
         await using var stream = file.OpenReadStream();
         await repository.ImportAsync(stream, cancellationToken);
+        await deviceConfigStore.ReloadAsync(cancellationToken);
+        await deviceOrchestrator.ApplyConfigurationAsync(deviceConfigStore.GetDevices(), cancellationToken);
         return Ok(new { message = "Import completed successfully." });
     }
 }

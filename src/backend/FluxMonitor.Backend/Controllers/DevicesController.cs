@@ -13,7 +13,6 @@ public sealed class DevicesController(
     DeviceStateStore stateStore,
     DeviceOrchestrator orchestrator,
     DeviceConfigStore deviceConfigStore,
-    DeviceDatabaseService deviceDatabaseService,
     GenericModbusPollingClient genericModbusPollingClient,
     GenericBlePollingClient genericBlePollingClient,
     PollingClientDispatcher pollingClientDispatcher,
@@ -155,7 +154,7 @@ public sealed class DevicesController(
 
         try
         {
-            if (!definitionLoader.TryGet(device.DefinitionId, out var definition) || definition is null)
+            if (!device.TryResolveDefinition(definitionLoader, out var definition) || definition is null)
                 return BadRequest(new { message = $"Device definition '{device.DefinitionId}' not found." });
 
             var result = string.Equals(definition.Connection.Transport.Type, "ble", StringComparison.OrdinalIgnoreCase)
@@ -287,7 +286,7 @@ public sealed class DevicesController(
             return NotFound(new { message = $"Device '{deviceId}' not found in configuration." });
         }
 
-        if (!definitionLoader.TryGet(device.DefinitionId, out var definition) || definition is null)
+        if (!device.TryResolveDefinition(definitionLoader, out var definition) || definition is null)
         {
             logger.LogWarning(
                 "Start requested for device {DeviceId} but definition '{DefinitionId}' could not be loaded.",
@@ -330,12 +329,14 @@ public sealed class DevicesController(
                         DeviceId = d.DeviceId, DisplayName = d.DisplayName,
                         DefinitionId = d.DefinitionId, TransportPortName = d.TransportPortName,
                         BleSettingsPin = d.BleSettingsPin,
-                        DatabaseName = d.DatabaseName,
                         Address = d.Address, IsMaster = d.IsMaster,
                         PollIntervalMilliseconds = d.PollIntervalMilliseconds, Enabled = true,
                         CellVoltageSmoothingFactor = d.CellVoltageSmoothingFactor,
                         CellVoltageSmoothingBreakoutMillivolts = d.CellVoltageSmoothingBreakoutMillivolts,
-                        DisplayPrecision = d.DisplayPrecision
+                        DisplayPrecision = d.DisplayPrecision,
+                        DefinitionVersion = d.DefinitionVersion,
+                        DefinitionJson = d.DefinitionJson,
+                        DefinitionHash = d.DefinitionHash
                     }
                     : d).ToList();
 
@@ -430,12 +431,14 @@ public sealed class DevicesController(
                         DeviceId = d.DeviceId, DisplayName = d.DisplayName,
                         DefinitionId = d.DefinitionId, TransportPortName = d.TransportPortName,
                         BleSettingsPin = d.BleSettingsPin,
-                        DatabaseName = d.DatabaseName,
                         Address = d.Address, IsMaster = d.IsMaster,
                         PollIntervalMilliseconds = d.PollIntervalMilliseconds, Enabled = false,
                         CellVoltageSmoothingFactor = d.CellVoltageSmoothingFactor,
                         CellVoltageSmoothingBreakoutMillivolts = d.CellVoltageSmoothingBreakoutMillivolts,
-                        DisplayPrecision = d.DisplayPrecision
+                        DisplayPrecision = d.DisplayPrecision,
+                        DefinitionVersion = d.DefinitionVersion,
+                        DefinitionJson = d.DefinitionJson,
+                        DefinitionHash = d.DefinitionHash
                     }
                     : d).ToList();
 
@@ -477,65 +480,6 @@ public sealed class DevicesController(
             ? $"Device started, but no successful poll completed within 8 seconds. Last error: {GetStartOutcomeError(outcome, lastError)}"
             : "Device started but no response received within 8 seconds. Check serial port and address.";
 
-    [HttpGet("databases")]
-    public async Task<IActionResult> ListDatabases(CancellationToken cancellationToken)
-    {
-        try
-        {
-            var databases = await deviceDatabaseService.ListDatabasesAsync(cancellationToken);
-            return Ok(new { databases });
-        }
-        catch (Exception ex)
-        {
-            return Ok(new { databases = Array.Empty<string>(), error = ex.Message });
-        }
-    }
-
-    [HttpPost("databases/create")]
-    public async Task<IActionResult> CreateDatabase(
-        [FromBody] CreateDatabaseRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(request.DatabaseName))
-            return BadRequest(new { message = "Database name is required." });
-
-        var result = await deviceDatabaseService.CreateDatabaseAsync(
-            request.DatabaseName.Trim(), request.Provider ?? "timescaledb", cancellationToken);
-
-        return result.Success ? Ok(result) : BadRequest(result);
-    }
-
-    [HttpPost("databases/validate")]
-    public async Task<IActionResult> ValidateDatabase(
-        [FromBody] ValidateDatabaseRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(request.DatabaseName))
-            return BadRequest(new { message = "Database name is required." });
-
-        var result = await deviceDatabaseService.ValidateSchemaAsync(request.DatabaseName.Trim(), cancellationToken);
-        return Ok(result);
-    }
-
-    [HttpGet("databases/suggest/{deviceId}")]
-    public IActionResult SuggestDatabaseName(string deviceId)
-    {
-        var device = deviceConfigStore.GetDevices().FirstOrDefault(d =>
-            string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase));
-
-        Contracts.DeviceDefinition.DeviceDefinition? definition = null;
-        var defId = device?.DefinitionId;
-        if (!string.IsNullOrEmpty(defId))
-            definitionLoader.TryGet(defId, out definition);
-
-        var suggested = deviceDatabaseService.SuggestDatabaseName(deviceId, definition?.Storage?.Database?.DefaultNamePattern);
-        var requiresDatabase = definition?.Storage?.Database is not null;
-        var provider = definition?.Storage?.Database?.Provider ?? "timescaledb";
-
-        return Ok(new { suggested, requiresDatabase, provider });
-    }
 }
 
 public sealed record WriteParameterRequest(uint RawValue);
-public sealed record CreateDatabaseRequest(string DatabaseName, string? Provider);
-public sealed record ValidateDatabaseRequest(string DatabaseName);

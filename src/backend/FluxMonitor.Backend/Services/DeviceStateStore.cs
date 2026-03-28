@@ -34,8 +34,7 @@ public sealed class DeviceStateStore
     {
         string? protocolHandler = null;
 
-        if (!string.IsNullOrEmpty(device.DefinitionId) &&
-            definitionLoader.TryGet(device.DefinitionId, out var definition) && definition is not null)
+        if (device.TryResolveDefinition(definitionLoader, out var definition) && definition is not null)
         {
             protocolHandler = definition.Connection.Protocol.Type;
         }

@@ -226,12 +226,13 @@ public sealed class DeviceOrchestrator(
     private static bool DeviceConfigChanged(DeviceConfiguration a, DeviceConfiguration b)
     {
         return a.DefinitionId != b.DefinitionId
+            || a.DefinitionHash != b.DefinitionHash
             || a.TransportPortName != b.TransportPortName
             || a.Address != b.Address
             || a.PollIntervalMilliseconds != b.PollIntervalMilliseconds
             || a.DisplayName != b.DisplayName
             || a.IsMaster != b.IsMaster
-            || a.DatabaseName != b.DatabaseName;
+            || a.BleSettingsPin != b.BleSettingsPin;
     }
 
     private sealed class DeviceHandle(DeviceConfiguration device, CancellationTokenSource cts)

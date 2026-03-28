@@ -53,14 +53,14 @@ public sealed class PollingClientDispatcher(
     /// </summary>
     public bool IsTransportSupported(DeviceConfiguration device)
     {
-        if (!definitionLoader.TryGet(device.DefinitionId, out var definition) || definition is null)
+        if (!device.TryResolveDefinition(definitionLoader, out var definition) || definition is null)
             return false;
         return IsDefinitionSupported(definition);
     }
 
     public string? GetUnsupportedTransportMessage(DeviceConfiguration device)
     {
-        if (!definitionLoader.TryGet(device.DefinitionId, out var definition) || definition is null)
+        if (!device.TryResolveDefinition(definitionLoader, out var definition) || definition is null)
             return $"Device definition '{device.DefinitionId}' was not found.";
 
         return GetUnsupportedDefinitionMessage(definition);
@@ -68,7 +68,7 @@ public sealed class PollingClientDispatcher(
 
     public Task<DevicePollResult> PollAsync(DeviceConfiguration device, CancellationToken cancellationToken)
     {
-        if (!definitionLoader.TryGet(device.DefinitionId, out var definition) || definition is null)
+        if (!device.TryResolveDefinition(definitionLoader, out var definition) || definition is null)
             throw new InvalidOperationException(
                 $"Device '{device.DeviceId}' has no valid DefinitionId ('{device.DefinitionId}').");
 

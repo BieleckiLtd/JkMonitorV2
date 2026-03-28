@@ -100,8 +100,7 @@ public sealed class GenericBlePollingClient(
 
     public Task<DevicePollResult> PollAsync(DeviceConfiguration device, CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(device.DefinitionId) ||
-            !definitionLoader.TryGet(device.DefinitionId, out var definition) ||
+        if (!device.TryResolveDefinition(definitionLoader, out var definition) ||
             definition is null)
         {
             throw new InvalidOperationException(

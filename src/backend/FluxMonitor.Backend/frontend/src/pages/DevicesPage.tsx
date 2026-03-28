@@ -1,5 +1,5 @@
-import { useEffect, useState, useCallback, useRef } from 'react';
-import { Check, Database, LoaderCircle, Play, Plus, Square, Trash2, Upload, X } from 'lucide-react';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import { Check, LoaderCircle, Play, Plus, Square, Trash2, Upload, X } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { useDeviceDefinitions } from '../hooks/useDeviceDefinition';
@@ -9,9 +9,9 @@ type DeviceConfiguration = {
   deviceId: string;
   displayName: string;
   definitionId: string;
+  definitionVersion?: string | null;
   transportPortName?: string | null;
   bleSettingsPin?: string | null;
-  databaseName?: string | null;
   address: number;
   isMaster: boolean;
   pollIntervalMilliseconds: number;
@@ -24,7 +24,6 @@ type DeviceConfigurationResponse = {
 
 type PortsResponse = {
   ports: string[];
-  error?: string;
 };
 
 type BleScanDevice = {
@@ -68,45 +67,45 @@ type DeviceDefinitionSummary = {
   unsupportedTransportMessage?: string | null;
 };
 
-type DatabaseSuggestion = {
-  suggested: string;
-  requiresDatabase: boolean;
-  provider: string;
-};
-
-type SchemaValidation = {
-  compatible: boolean;
-  hasTimescaleDb: boolean;
-  existingTables: string[];
-  issues: string[];
-  isEmpty: boolean;
-};
-
-const defaultDevice = (index: number, definitionId: string, definitionName?: string): DeviceConfiguration => ({
+const defaultDevice = (index: number, definition: DeviceDefinitionSummary): DeviceConfiguration => ({
   deviceId: `device-${index}`,
-  displayName: definitionName ?? `Battery ${index}`,
-  definitionId,
+  displayName: definition.name,
+  definitionId: definition.id,
+  definitionVersion: null,
   transportPortName: '',
   bleSettingsPin: '',
-  databaseName: '',
   address: index,
   isMaster: false,
   pollIntervalMilliseconds: 1000,
   enabled: false,
 });
 
-function getTransportType(device: DeviceConfiguration, definitions: DeviceDefinitionSummary[]): string | null {
-  if (!device.definitionId) return null;
-  const def = definitions.find(d => d.id === device.definitionId);
-  return def?.transportType ?? null;
+function getTransportType(device: DeviceConfiguration, definitions: DeviceDefinitionSummary[]) {
+  return definitions.find((definition) => definition.id === device.definitionId)?.transportType ?? null;
 }
 
-function requiresTransportIdentifier(device: DeviceConfiguration, definitions: DeviceDefinitionSummary[]): boolean {
+function getDefinition(device: DeviceConfiguration, definitions: DeviceDefinitionSummary[]) {
+  return definitions.find((definition) => definition.id === device.definitionId) ?? null;
+}
+
+function requiresTransportIdentifier(device: DeviceConfiguration, definitions: DeviceDefinitionSummary[]) {
   const transportType = getTransportType(device, definitions);
   return transportType === 'serial' || transportType === 'ble';
 }
 
-function getActionResultMessage(result: StartStopResult): string {
+function getActionResultClassName(result: StartStopResult) {
+  if (result.outcome === 'Succeeded') {
+    return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400';
+  }
+
+  if (result.stopped || result.outcome === 'Started') {
+    return 'border-border bg-muted/60 text-foreground';
+  }
+
+  return 'border-amber-500/30 bg-amber-500/10 text-amber-400';
+}
+
+function getActionResultMessage(result: StartStopResult) {
   const explicitMessage = result.message?.trim() ?? '';
   const blankFailureMessage = /^Device started but first poll failed:\s*$/i.test(explicitMessage);
 
@@ -134,305 +133,214 @@ function getActionResultMessage(result: StartStopResult): string {
   return error || 'Action completed.';
 }
 
-function getActionResultClassName(result: StartStopResult): string {
-  if (result.outcome === 'Succeeded') {
-    return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400';
-  }
-
-  if (result.stopped || result.outcome === 'Started') {
-    return 'border-border bg-muted/60 text-foreground';
-  }
-
-  return 'border-amber-500/30 bg-amber-500/10 text-amber-400';
-}
-
 export function DevicesPage() {
   const { definitions: availableDefinitions, refresh: refreshDefinitions } = useDeviceDefinitions();
   const [devices, setDevices] = useState<DeviceConfiguration[]>([]);
+  const [ports, setPorts] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [ports, setPorts] = useState<string[]>([]);
+  const [showAddPicker, setShowAddPicker] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [saveDirty, setSaveDirty] = useState(0);
   const [bleScanResults, setBleScanResults] = useState<Record<string, BleScanDevice[]>>({});
   const [bleScanLoading, setBleScanLoading] = useState<Record<string, boolean>>({});
   const [bleScanErrors, setBleScanErrors] = useState<Record<string, string | null>>({});
   const [deviceActions, setDeviceActions] = useState<Record<string, { loading: boolean; result?: StartStopResult }>>({});
-  const [databases, setDatabases] = useState<string[]>([]);
-  const [dbSuggestions, setDbSuggestions] = useState<Record<string, DatabaseSuggestion>>({});
-  const [dbValidations, setDbValidations] = useState<Record<string, SchemaValidation | null>>({});
-  const [dbCreating, setDbCreating] = useState<Record<string, boolean>>({});
-  const [dbCreateMsg, setDbCreateMsg] = useState<Record<string, string | null>>({});
-
-  // Add device picker state
-  const [showAddPicker, setShowAddPicker] = useState(false);
-  const [uploadError, setUploadError] = useState<string | null>(null);
+  const devicesRef = useRef<DeviceConfiguration[]>([]);
+  const initialLoadDone = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Auto-save state
-  const [saveDirty, setSaveDirty] = useState(0);
-  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
-  const initialLoadDone = useRef(false);
-  const devicesRef = useRef(devices);
   devicesRef.current = devices;
 
   const loadPorts = useCallback(async () => {
     try {
-      const resp = await fetch('/api/devices/ports');
-      if (!resp.ok) return;
-      const data = (await resp.json()) as PortsResponse;
+      const response = await fetch('/api/devices/ports');
+      if (!response.ok) return;
+      const data = (await response.json()) as PortsResponse;
       setPorts(data.ports);
-    } catch { /* ignore */ }
+    } catch {
+      // Ignore transient host errors.
+    }
   }, []);
 
-  const loadDatabases = useCallback(async () => {
+  const loadDevices = useCallback(async () => {
     try {
-      const resp = await fetch('/api/devices/databases');
-      if (!resp.ok) return;
-      const data = (await resp.json()) as { databases: string[]; error?: string };
-      setDatabases(data.databases);
-    } catch { /* ignore */ }
-  }, []);
-
-  const scanBleDevices = useCallback(async (deviceId: string, definitionId: string) => {
-    setBleScanLoading(prev => ({ ...prev, [deviceId]: true }));
-    setBleScanErrors(prev => ({ ...prev, [deviceId]: null }));
-
-    try {
-      const query = new URLSearchParams({ definitionId, timeoutMs: '6000' });
-      const resp = await fetch(`/api/devices/ble/scan?${query.toString()}`);
-      const data = (await resp.json()) as BleScanResponse;
-
-      if (!resp.ok) {
-        throw new Error(data.error ?? 'Unable to scan for BLE devices.');
-      }
-
-      setBleScanResults(prev => ({ ...prev, [deviceId]: data.devices }));
-      setBleScanErrors(prev => ({ ...prev, [deviceId]: data.error ?? null }));
+      const response = await fetch('/api/devices/config');
+      if (!response.ok) throw new Error('Unable to load device configuration.');
+      const data = (await response.json()) as DeviceConfigurationResponse;
+      setDevices(data.devices);
+      setLoadError(null);
     } catch (error) {
-      setBleScanResults(prev => ({ ...prev, [deviceId]: [] }));
-      setBleScanErrors(prev => ({
-        ...prev,
-        [deviceId]: error instanceof Error ? error.message : 'Unable to scan for BLE devices.'
-      }));
+      setLoadError(error instanceof Error ? error.message : 'Unable to load device configuration.');
     } finally {
-      setBleScanLoading(prev => ({ ...prev, [deviceId]: false }));
+      setIsLoading(false);
+      window.setTimeout(() => {
+        initialLoadDone.current = true;
+      }, 200);
     }
   }, []);
 
-  const loadDbSuggestion = useCallback(async (deviceId: string) => {
-    try {
-      const resp = await fetch(`/api/devices/databases/suggest/${encodeURIComponent(deviceId)}`);
-      if (!resp.ok) return;
-      const data = (await resp.json()) as DatabaseSuggestion;
-      setDbSuggestions(prev => ({ ...prev, [deviceId]: data }));
-    } catch { /* ignore */ }
-  }, []);
-
-  const validateDatabase = useCallback(async (deviceId: string, dbName: string) => {
-    if (!dbName) { setDbValidations(prev => ({ ...prev, [deviceId]: null })); return; }
-    try {
-      const resp = await fetch('/api/devices/databases/validate', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ databaseName: dbName }),
-      });
-      if (!resp.ok) return;
-      const data = (await resp.json()) as SchemaValidation;
-      setDbValidations(prev => ({ ...prev, [deviceId]: data }));
-    } catch { /* ignore */ }
-  }, []);
-
-  const createDatabase = useCallback(async (deviceId: string, dbName: string, provider: string) => {
-    setDbCreating(prev => ({ ...prev, [deviceId]: true }));
-    setDbCreateMsg(prev => ({ ...prev, [deviceId]: null }));
-    try {
-      const resp = await fetch('/api/devices/databases/create', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ databaseName: dbName, provider }),
-      });
-      const data = (await resp.json()) as { success: boolean; message: string };
-      setDbCreateMsg(prev => ({ ...prev, [deviceId]: data.message }));
-      if (data.success) {
-        await loadDatabases();
-        await validateDatabase(deviceId, dbName);
-      }
-    } catch (err) {
-      setDbCreateMsg(prev => ({ ...prev, [deviceId]: err instanceof Error ? err.message : 'Failed to create database.' }));
-    } finally {
-      setDbCreating(prev => ({ ...prev, [deviceId]: false }));
-    }
-  }, [loadDatabases, validateDatabase]);
-
-  // Load initial data
   useEffect(() => {
-    let isMounted = true;
-
-    const loadDevices = async () => {
-      try {
-        const response = await fetch('/api/devices/config');
-        if (!response.ok) throw new Error('Unable to load device configuration.');
-        const data = (await response.json()) as DeviceConfigurationResponse;
-        if (!isMounted) return;
-        setDevices(data.devices);
-        setLoadError(null);
-      } catch (error) {
-        if (!isMounted) return;
-        setLoadError(error instanceof Error ? error.message : 'Unable to load device configuration.');
-      } finally {
-        if (isMounted) {
-          setIsLoading(false);
-          // Delay to avoid auto-save triggering on initial load side-effects
-          setTimeout(() => { initialLoadDone.current = true; }, 200);
-        }
-      }
-    };
-
     void loadDevices();
     void loadPorts();
-    void loadDatabases();
+  }, [loadDevices, loadPorts]);
 
-    return () => { isMounted = false; };
-  }, [loadPorts, loadDatabases]);
-
-  // Load DB suggestions for devices with definitions
-  useEffect(() => {
-    for (const device of devices) {
-      if (device.deviceId && device.definitionId && !dbSuggestions[device.deviceId]) {
-        void loadDbSuggestion(device.deviceId);
-      }
-    }
-  }, [devices, dbSuggestions, loadDbSuggestion]);
-
-  // Auto-save function (reads latest devices from ref)
   const saveDevicesNow = useCallback(async (devicesToSave?: DeviceConfiguration[]) => {
-    const payload = devicesToSave ?? devicesRef.current;
     try {
       setAutoSaveStatus('saving');
       const response = await fetch('/api/devices/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ devices: payload }),
+        body: JSON.stringify({ devices: devicesToSave ?? devicesRef.current }),
       });
-      if (response.ok) {
-        const data = (await response.json()) as DeviceConfigurationResponse;
-        setDevices(data.devices);
-        setAutoSaveStatus('saved');
-        setTimeout(() => setAutoSaveStatus(prev => prev === 'saved' ? 'idle' : prev), 2000);
-      } else {
-        setAutoSaveStatus('error');
+
+      if (!response.ok) {
+        throw new Error('Unable to save device configuration.');
       }
+
+      const data = (await response.json()) as DeviceConfigurationResponse;
+      setDevices(data.devices);
+      setAutoSaveStatus('saved');
+      window.setTimeout(() => {
+        setAutoSaveStatus((current) => current === 'saved' ? 'idle' : current);
+      }, 2000);
     } catch {
       setAutoSaveStatus('error');
     }
   }, []);
 
-  // Debounced auto-save triggered by dirty counter
   useEffect(() => {
     if (!initialLoadDone.current || saveDirty === 0) return;
-    const timer = setTimeout(() => { void saveDevicesNow(); }, 600);
-    return () => clearTimeout(timer);
+
+    const timer = window.setTimeout(() => {
+      void saveDevicesNow();
+    }, 600);
+
+    return () => window.clearTimeout(timer);
   }, [saveDirty, saveDevicesNow]);
 
   const markDirty = useCallback(() => {
-    setSaveDirty(d => d + 1);
+    setSaveDirty((value) => value + 1);
   }, []);
 
-  const updateDevice = <K extends keyof DeviceConfiguration>(index: number, key: K, value: DeviceConfiguration[K]) => {
-    setDevices(currentDevices => currentDevices.map((device, currentIndex) => {
-      if (currentIndex !== index) return device;
+  const updateDevice = useCallback(<K extends keyof DeviceConfiguration>(index: number, key: K, value: DeviceConfiguration[K]) => {
+    setDevices((current) => current.map((device, deviceIndex) => {
+      if (deviceIndex !== index) return device;
       return { ...device, [key]: value };
     }));
     markDirty();
-  };
+  }, [markDirty]);
 
-  const addDeviceFromDefinition = (definitionId: string) => {
-    const def = availableDefinitions.find(d => d.id === definitionId);
-    if (def && !def.isTransportSupported) return;
-    setDevices(currentDevices => [...currentDevices, defaultDevice(currentDevices.length + 1, definitionId, def?.name)]);
+  const scanBleDevices = useCallback(async (deviceId: string, definitionId: string) => {
+    setBleScanLoading((current) => ({ ...current, [deviceId]: true }));
+    setBleScanErrors((current) => ({ ...current, [deviceId]: null }));
+
+    try {
+      const query = new URLSearchParams({ definitionId, timeoutMs: '6000' });
+      const response = await fetch(`/api/devices/ble/scan?${query.toString()}`);
+      const data = (await response.json()) as BleScanResponse;
+
+      if (!response.ok) {
+        throw new Error(data.error ?? 'Unable to scan for BLE devices.');
+      }
+
+      setBleScanResults((current) => ({ ...current, [deviceId]: data.devices }));
+      setBleScanErrors((current) => ({ ...current, [deviceId]: data.error ?? null }));
+    } catch (error) {
+      setBleScanResults((current) => ({ ...current, [deviceId]: [] }));
+      setBleScanErrors((current) => ({
+        ...current,
+        [deviceId]: error instanceof Error ? error.message : 'Unable to scan for BLE devices.',
+      }));
+    } finally {
+      setBleScanLoading((current) => ({ ...current, [deviceId]: false }));
+    }
+  }, []);
+
+  const addDeviceFromDefinition = useCallback((definitionId: string) => {
+    const definition = availableDefinitions.find((entry) => entry.id === definitionId);
+    if (!definition || !definition.isTransportSupported) return;
+
+    setDevices((current) => [...current, defaultDevice(current.length + 1, definition)]);
     setShowAddPicker(false);
-    markDirty();
-  };
-
-  const handleUploadDefinition = async (file: File) => {
     setUploadError(null);
+    markDirty();
+  }, [availableDefinitions, markDirty]);
+
+  const handleUploadDefinition = useCallback(async (file: File) => {
+    setUploadError(null);
+
     try {
       const formData = new FormData();
       formData.append('file', file);
-      const resp = await fetch('/api/definitions/upload', { method: 'POST', body: formData });
-      const data = (await resp.json()) as { id?: string; name?: string; message?: string };
-      if (!resp.ok) throw new Error(data.message ?? 'Upload failed');
+      const response = await fetch('/api/definitions/upload', { method: 'POST', body: formData });
+      const data = (await response.json()) as { id?: string; message?: string };
+      if (!response.ok) throw new Error(data.message ?? 'Upload failed.');
       await refreshDefinitions();
       if (data.id) addDeviceFromDefinition(data.id);
-    } catch (err) {
-      setUploadError(err instanceof Error ? err.message : 'Upload failed');
+    } catch (error) {
+      setUploadError(error instanceof Error ? error.message : 'Upload failed.');
     }
-  };
+  }, [addDeviceFromDefinition, refreshDefinitions]);
 
-  const removeDevice = (index: number) => {
-    setDevices(currentDevices => currentDevices.filter((_, currentIndex) => currentIndex !== index));
+  const removeDevice = useCallback((index: number) => {
+    setDevices((current) => current.filter((_, deviceIndex) => deviceIndex !== index));
     markDirty();
-  };
+  }, [markDirty]);
 
-  const startDevice = async (deviceId: string) => {
-    setDeviceActions(prev => ({ ...prev, [deviceId]: { loading: true } }));
+  const startDevice = useCallback(async (deviceId: string) => {
+    setDeviceActions((current) => ({ ...current, [deviceId]: { loading: true } }));
+
     try {
-      // Flush any pending changes immediately
       await saveDevicesNow();
-
-      const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/start`, { method: 'POST' });
-      const data = (await resp.json()) as StartStopResult;
-      setDeviceActions(prev => ({ ...prev, [deviceId]: { loading: false, result: data } }));
-      setDevices(prev => prev.map(d => d.deviceId === deviceId ? { ...d, enabled: true } : d));
+      const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/start`, { method: 'POST' });
+      const data = (await response.json()) as StartStopResult;
+      setDeviceActions((current) => ({ ...current, [deviceId]: { loading: false, result: data } }));
+      setDevices((current) => current.map((device) => device.deviceId === deviceId ? { ...device, enabled: true } : device));
     } catch (error) {
-      setDeviceActions(prev => ({
-        ...prev,
+      setDeviceActions((current) => ({
+        ...current,
         [deviceId]: {
           loading: false,
-          result: { deviceId, message: error instanceof Error ? error.message : 'Failed to start device.' }
-        }
+          result: { deviceId, message: error instanceof Error ? error.message : 'Failed to start device.' },
+        },
       }));
     }
-  };
+  }, [saveDevicesNow]);
 
-  const stopDevice = async (deviceId: string) => {
-    setDeviceActions(prev => ({ ...prev, [deviceId]: { loading: true } }));
+  const stopDevice = useCallback(async (deviceId: string) => {
+    setDeviceActions((current) => ({ ...current, [deviceId]: { loading: true } }));
+
     try {
-      const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/stop`, { method: 'POST' });
-      const data = (await resp.json()) as StartStopResult;
-      setDeviceActions(prev => ({ ...prev, [deviceId]: { loading: false, result: data } }));
-      setDevices(prev => prev.map(d => d.deviceId === deviceId ? { ...d, enabled: false } : d));
+      const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/stop`, { method: 'POST' });
+      const data = (await response.json()) as StartStopResult;
+      setDeviceActions((current) => ({ ...current, [deviceId]: { loading: false, result: data } }));
+      setDevices((current) => current.map((device) => device.deviceId === deviceId ? { ...device, enabled: false } : device));
     } catch (error) {
-      setDeviceActions(prev => ({
-        ...prev,
+      setDeviceActions((current) => ({
+        ...current,
         [deviceId]: {
           loading: false,
-          result: { deviceId, message: error instanceof Error ? error.message : 'Failed to stop device.' }
-        }
+          result: { deviceId, message: error instanceof Error ? error.message : 'Failed to stop device.' },
+        },
       }));
     }
-  };
+  }, []);
 
   return (
-    <div className='space-y-6 max-w-6xl mx-auto pb-12'>
+    <div className='mx-auto max-w-6xl space-y-6 pb-12'>
       <div className='flex flex-col gap-2 border-b border-border pb-4 md:flex-row md:items-end md:justify-between'>
         <div>
           <h2 className='text-3xl font-bold tracking-tight text-foreground'>Devices</h2>
           <p className='mt-2 text-sm text-muted-foreground'>
-            Add or remove devices. Changes are saved automatically.
+            Configure device instances. Each saved device stores its resolved definition snapshot with the runtime config.
           </p>
         </div>
         <div className='flex items-center gap-3'>
-          {autoSaveStatus === 'saving' ? (
-            <span className='flex items-center gap-1.5 text-xs text-muted-foreground'>
-              <LoaderCircle className='h-3 w-3 animate-spin' /> Saving...
-            </span>
-          ) : autoSaveStatus === 'saved' ? (
-            <span className='flex items-center gap-1.5 text-xs text-emerald-500'>
-              <Check className='h-3 w-3' /> Saved
-            </span>
-          ) : autoSaveStatus === 'error' ? (
-            <span className='text-xs text-destructive'>Save failed</span>
-          ) : null}
+          {autoSaveStatus === 'saving' ? <span className='flex items-center gap-1.5 text-xs text-muted-foreground'><LoaderCircle className='h-3 w-3 animate-spin' /> Saving...</span> : null}
+          {autoSaveStatus === 'saved' ? <span className='flex items-center gap-1.5 text-xs text-emerald-500'><Check className='h-3 w-3' /> Saved</span> : null}
+          {autoSaveStatus === 'error' ? <span className='text-xs text-destructive'>Save failed</span> : null}
         </div>
       </div>
 
@@ -443,505 +351,102 @@ export function DevicesPage() {
         </Button>
       </div>
 
-      {/* Add device picker */}
       {showAddPicker ? (
         <div className='rounded-2xl border border-border bg-card/70 p-5 shadow-sm'>
-          <div className='flex items-center justify-between mb-4'>
+          <div className='mb-4 flex items-center justify-between'>
             <h3 className='text-lg font-semibold text-foreground'>Add a new device</h3>
             <Button type='button' variant='ghost' size='sm' onClick={() => { setShowAddPicker(false); setUploadError(null); }}>
               <X className='h-4 w-4' />
             </Button>
           </div>
 
-          {availableDefinitions.length > 0 ? (
-            <div className='mb-4'>
-              <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground mb-3'>
-                From device library
-              </span>
-              <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3'>
-                {availableDefinitions.map(def => (
-                  <button
-                    key={def.id}
-                    type='button'
-                    className={`flex flex-col gap-1 rounded-xl border p-4 text-left transition ${
-                      def.isTransportSupported
-                        ? 'border-border bg-muted/30 hover:border-primary/50 hover:bg-muted/60'
-                        : 'cursor-not-allowed border-amber-500/30 bg-amber-500/10 opacity-70'
-                    }`}
-                    onClick={() => addDeviceFromDefinition(def.id)}
-                    disabled={!def.isTransportSupported}
-                  >
-                    <span className='text-sm font-semibold text-foreground'>{def.name}</span>
-                    <span className='text-xs text-muted-foreground'>{def.manufacturer} · {def.model}</span>
-                    <span className='mt-1 text-[10px] uppercase tracking-wider text-muted-foreground/70'>
-                      {def.transportType}
+          <div className='mb-4'>
+            <span className='mb-3 block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>From device library</span>
+            <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3'>
+              {availableDefinitions.map((definition) => (
+                <button
+                  key={definition.id}
+                  type='button'
+                  className={cn(
+                    'flex flex-col gap-1 rounded-xl border p-4 text-left transition',
+                    definition.isTransportSupported
+                      ? 'border-border bg-muted/30 hover:border-primary/50 hover:bg-muted/60'
+                      : 'cursor-not-allowed border-amber-500/30 bg-amber-500/10 opacity-70',
+                  )}
+                  disabled={!definition.isTransportSupported}
+                  onClick={() => addDeviceFromDefinition(definition.id)}
+                >
+                  <span className='text-sm font-semibold text-foreground'>{definition.name}</span>
+                  <span className='text-xs text-muted-foreground'>{definition.manufacturer} · {definition.model}</span>
+                  <span className='mt-1 text-[10px] uppercase tracking-wider text-muted-foreground/70'>{definition.transportType}</span>
+                  {!definition.isTransportSupported ? (
+                    <span className='mt-2 text-[11px] text-amber-700 dark:text-amber-300'>
+                      {definition.unsupportedTransportMessage ?? 'This transport is not supported in the current build.'}
                     </span>
-                    {!def.isTransportSupported ? (
-                      <span className='mt-2 text-[11px] text-amber-700 dark:text-amber-300'>
-                        {def.unsupportedTransportMessage ?? 'This transport is not supported in the current build.'}
-                      </span>
-                    ) : null}
-                  </button>
-                ))}
-              </div>
+                  ) : null}
+                </button>
+              ))}
             </div>
-          ) : null}
+          </div>
 
           <div>
-            <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground mb-3'>
-              Upload definition JSON
-            </span>
+            <span className='mb-3 block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Upload definition JSON</span>
             <input
               ref={fileInputRef}
               type='file'
               accept='.json'
               className='hidden'
-              onChange={(e) => {
-                const file = e.target.files?.[0];
+              onChange={(event) => {
+                const file = event.target.files?.[0];
                 if (file) void handleUploadDefinition(file);
-                e.target.value = '';
+                event.target.value = '';
               }}
             />
-            <Button
-              type='button'
-              variant='outline'
-              onClick={() => fileInputRef.current?.click()}
-            >
+            <Button type='button' variant='outline' onClick={() => fileInputRef.current?.click()}>
               <Upload className='h-4 w-4' />
               Browse for .json file
             </Button>
-            {uploadError ? (
-              <div className='mt-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive'>
-                {uploadError}
-              </div>
-            ) : null}
+            {uploadError ? <div className='mt-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive'>{uploadError}</div> : null}
           </div>
         </div>
       ) : null}
 
-      {loadError ? (
-        <div className='rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive'>
-          {loadError}
-        </div>
-      ) : null}
+      {loadError ? <div className='rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive'>{loadError}</div> : null}
+      {isLoading ? <div className='flex min-h-64 items-center justify-center rounded-2xl border border-border bg-card/60'><LoaderCircle className='h-6 w-6 animate-spin text-primary' /></div> : null}
 
-      {isLoading ? (
-        <div className='flex min-h-64 items-center justify-center rounded-2xl border border-border bg-card/50'>
-          <LoaderCircle className='h-6 w-6 animate-spin text-primary' />
-        </div>
-      ) : (
-        <div className='grid gap-4'>
+      {!isLoading ? (
+        <div className='space-y-4'>
           {devices.map((device, index) => {
-            const action = deviceActions[device.deviceId];
-            const isRunning = device.enabled;
-            const def = availableDefinitions.find(d => d.id === device.definitionId);
-            const isTransportSupported = def?.isTransportSupported ?? true;
+            const definition = getDefinition(device, availableDefinitions);
             const transportType = getTransportType(device, availableDefinitions);
+            const isTransportSupported = definition?.isTransportSupported ?? false;
             const requiresTransport = requiresTransportIdentifier(device, availableDefinitions);
             const hasTransportTarget = !requiresTransport || Boolean(device.transportPortName?.trim());
+            const action = deviceActions[device.deviceId];
             const bleDevices = bleScanResults[device.deviceId] ?? [];
             const bleIsScanning = bleScanLoading[device.deviceId] ?? false;
-            const bleScanError = bleScanErrors[device.deviceId] ?? null;
-            const hasBleScanResults = Object.prototype.hasOwnProperty.call(bleScanResults, device.deviceId);
-            const bleTarget = device.transportPortName?.trim() ?? '';
-            const selectedBleDevice = bleTarget
-              ? bleDevices.find(candidate => candidate.address === bleTarget || candidate.alias === bleTarget || candidate.name === bleTarget) ?? null
-              : null;
-            const verifiedBleCount = bleDevices.filter(candidate => candidate.isDefinitionVerified).length;
-            const databaseConfiguration = (() => {
-              const suggestion = dbSuggestions[device.deviceId];
-              if (!suggestion?.requiresDatabase) return null;
-              const validation = dbValidations[device.deviceId];
-              const creating = dbCreating[device.deviceId];
-              const createMsg = dbCreateMsg[device.deviceId];
-              const currentDbName = device.databaseName ?? '';
-              const dbExists = databases.includes(currentDbName);
-
-              return (
-                <div className={cn(
-                  'rounded-xl border border-border/70 bg-muted/20 p-4',
-                  transportType !== 'ble' && 'mt-4 bg-muted/30'
-                )}>
-                  <div className='mb-4 flex flex-col gap-1.5'>
-                    <div className='flex items-center gap-2'>
-                      <Database className='h-4 w-4 text-muted-foreground' />
-                      <span className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>
-                        Database ({suggestion.provider})
-                      </span>
-                    </div>
-                    <p className='max-w-xl text-sm text-muted-foreground'>
-                      Choose the database that should store this device&apos;s history. New databases can be created here when needed.
-                    </p>
-                  </div>
-
-                  <div className='flex flex-col gap-3 xl:flex-row xl:items-start'>
-                    <div className='flex-1 xl:max-w-sm'>
-                      <select
-                        className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50'
-                        value={currentDbName && dbExists ? currentDbName : (currentDbName ? '__custom__' : '')}
-                        disabled={isRunning}
-                        onChange={(event) => {
-                          const val = event.target.value;
-                          if (val === '__new__') {
-                            updateDevice(index, 'databaseName', suggestion.suggested || '');
-                            if (suggestion.suggested) void validateDatabase(device.deviceId, suggestion.suggested);
-                          } else if (val === '__custom__') {
-                            // keep current
-                          } else {
-                            updateDevice(index, 'databaseName', val || null);
-                            if (val) void validateDatabase(device.deviceId, val);
-                          }
-                        }}
-                      >
-                        <option value=''>Select a database...</option>
-                        {databases.map(db => (
-                          <option key={db} value={db}>{db}</option>
-                        ))}
-                        {currentDbName && !dbExists ? (
-                          <option value='__custom__'>{currentDbName} (new)</option>
-                        ) : null}
-                        <option value='__new__'>+ Create new database</option>
-                      </select>
-                    </div>
-
-                    {currentDbName && !dbExists && !isRunning ? (
-                      <div className='flex flex-col gap-2 sm:flex-row sm:items-center'>
-                        <Input
-                          className='w-full sm:w-56'
-                          value={currentDbName}
-                          placeholder={suggestion.suggested || 'database_name'}
-                          onChange={(event) => {
-                            updateDevice(index, 'databaseName', event.target.value || null);
-                          }}
-                        />
-                        <Button
-                          type='button'
-                          variant='outline'
-                          size='sm'
-                          className='shrink-0'
-                          disabled={creating || !currentDbName}
-                          onClick={() => void createDatabase(device.deviceId, currentDbName, suggestion.provider)}
-                        >
-                          {creating ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Plus className='h-4 w-4' />}
-                          Create
-                        </Button>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  {createMsg ? (
-                    <div className='mt-3 rounded-lg border border-border bg-muted/60 px-3 py-2 text-xs text-foreground'>
-                      {createMsg}
-                    </div>
-                  ) : null}
-
-                  {validation ? (
-                    <div className={`mt-3 rounded-lg border px-3 py-2 text-xs ${
-                      validation.compatible || validation.isEmpty
-                        ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
-                        : 'border-amber-500/30 bg-amber-500/10 text-amber-400'
-                    }`}>
-                      {validation.isEmpty ? (
-                        <span>Empty database — schema will be created on first poll.</span>
-                      ) : validation.compatible ? (
-                        <span>Schema is compatible. Tables: {validation.existingTables.join(', ')}</span>
-                      ) : (
-                        <div>
-                          <span className='font-medium'>Schema issues:</span>
-                          <ul className='mt-1 list-disc list-inside'>
-                            {validation.issues.map((issue, i) => <li key={i}>{issue}</li>)}
-                          </ul>
-                        </div>
-                      )}
-                      {validation.hasTimescaleDb ? (
-                        <span className='ml-2 text-emerald-500/80'>✓ TimescaleDB</span>
-                      ) : currentDbName ? (
-                        <span className='ml-2 text-amber-400'>⚠ No TimescaleDB extension</span>
-                      ) : null}
-                    </div>
-                  ) : null}
-                </div>
-              );
-            })();
-            const bleConfiguration = (
-              <div className='grid gap-5 xl:grid-cols-[minmax(0,0.92fr)_minmax(0,1.08fr)]'>
-                <div className='space-y-4'>
-                  <div className='rounded-xl border border-border/70 bg-muted/20 p-4'>
-                    <div className='mb-4 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
-                      <div>
-                        <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device setup</div>
-                        <p className='mt-1 max-w-md text-sm text-muted-foreground'>
-                          Set the device identity here, then pick the Bluetooth target from the scan panel.
-                        </p>
-                      </div>
-                      {bleTarget ? (
-                        <div className='rounded-lg border border-primary/25 bg-primary/10 px-3 py-2'>
-                          <div className='text-[10px] font-semibold uppercase tracking-[0.18em] text-primary/80'>Selected target</div>
-                          <div className='mt-1 text-xs font-mono text-foreground'>{bleTarget}</div>
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <div className='grid gap-4 sm:grid-cols-2'>
-                      <label className='space-y-2 text-sm text-foreground'>
-                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device ID</span>
-                        <Input value={device.deviceId} disabled={isRunning} onChange={(event) => updateDevice(index, 'deviceId', event.target.value)} />
-                      </label>
-                      <label className='space-y-2 text-sm text-foreground'>
-                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Display name</span>
-                        <Input value={device.displayName} onChange={(event) => updateDevice(index, 'displayName', event.target.value)} />
-                      </label>
-                      <label className='space-y-2 text-sm text-foreground sm:col-span-2'>
-                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Settings PIN</span>
-                        <Input
-                          type='password'
-                          value={device.bleSettingsPin ?? ''}
-                          disabled={isRunning}
-                          placeholder='Optional'
-                          onChange={(event) => updateDevice(index, 'bleSettingsPin', event.target.value || null)}
-                        />
-                      </label>
-                    </div>
-                  </div>
-
-                  {databaseConfiguration}
-                </div>
-
-                <div className='rounded-xl border border-border/70 bg-gradient-to-b from-muted/30 via-muted/15 to-background p-4'>
-                  <div className='flex flex-col gap-4'>
-                    <div className='flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between'>
-                      <div>
-                        <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Bluetooth target</div>
-                        <p className='mt-1 max-w-xl text-sm text-muted-foreground'>
-                          Scan on the Pi, compare the verified result, then select the address you want this device to use.
-                        </p>
-                      </div>
-                      <div className='flex flex-wrap gap-2 text-[10px] font-semibold uppercase tracking-[0.18em]'>
-                        {hasBleScanResults ? (
-                          <span className='rounded-full border border-border bg-background/80 px-2 py-1 text-muted-foreground'>
-                            {bleDevices.length} found
-                          </span>
-                        ) : null}
-                        {verifiedBleCount > 0 ? (
-                          <span className='rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-1 text-emerald-500'>
-                            {verifiedBleCount} verified
-                          </span>
-                        ) : null}
-                      </div>
-                    </div>
-
-                    <div className='grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-end'>
-                      <label className='space-y-2 text-sm text-foreground'>
-                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>BLE address or alias</span>
-                        <Input
-                          value={device.transportPortName ?? ''}
-                          disabled={isRunning}
-                          placeholder='AA:BB:CC:DD:EE:FF or device alias'
-                          onChange={(event) => updateDevice(index, 'transportPortName', event.target.value || null)}
-                        />
-                      </label>
-                      <Button
-                        type='button'
-                        variant='outline'
-                        className='w-full shrink-0 lg:w-auto'
-                        disabled={isRunning || bleIsScanning || !device.definitionId}
-                        onClick={() => void scanBleDevices(device.deviceId, device.definitionId)}
-                      >
-                        {bleIsScanning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : null}
-                        {bleIsScanning ? 'Scanning...' : 'Scan nearby'}
-                      </Button>
-                    </div>
-
-                    <div className='rounded-xl border border-border/70 bg-background/70 px-4 py-3'>
-                      <div className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Current selection</div>
-                      {bleTarget ? (
-                        <div className='mt-2 space-y-1.5'>
-                          <div className='flex flex-wrap items-center gap-2'>
-                            <span className='text-sm font-semibold text-foreground'>
-                              {selectedBleDevice?.displayName ?? 'Manual target'}
-                            </span>
-                            {selectedBleDevice?.isDefinitionVerified ? (
-                              <span className='rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-500'>
-                                {selectedBleDevice.verificationLabel ?? 'Verified'}
-                              </span>
-                            ) : null}
-                          </div>
-                          <div className='text-xs font-mono text-muted-foreground'>{bleTarget}</div>
-                          <p className='text-xs text-muted-foreground'>
-                            {selectedBleDevice
-                              ? selectedBleDevice.isDefinitionVerified
-                                ? 'Detected nearby and matched to the selected device definition.'
-                                : 'Detected nearby, but the probe could not positively verify it.'
-                              : 'Entered manually. The service will attempt to connect to this target as-is.'}
-                          </p>
-                        </div>
-                      ) : (
-                        <p className='mt-2 text-sm text-muted-foreground'>
-                          No BLE target selected yet.
-                        </p>
-                      )}
-                    </div>
-
-                    {bleScanError ? (
-                      <div className='rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300'>
-                        {bleScanError}
-                      </div>
-                    ) : null}
-
-                    <div className='space-y-3'>
-                      <div className='flex items-center justify-between gap-3'>
-                        <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Nearby devices</div>
-                        {hasBleScanResults ? (
-                          <div className='text-xs text-muted-foreground'>
-                            {bleDevices.length === 1 ? '1 result' : `${bleDevices.length} results`}
-                          </div>
-                        ) : null}
-                      </div>
-
-                      {bleDevices.length > 0 ? (
-                        <div className='max-h-[34rem] space-y-2 overflow-y-auto pr-1'>
-                          {bleDevices.map(candidate => {
-                            const isSelected = candidate.address === bleTarget;
-                            const showNameDetail = candidate.alias && candidate.name && candidate.alias !== candidate.name;
-
-                            return (
-                              <button
-                                key={candidate.address}
-                                type='button'
-                                aria-label={`Select BLE device ${candidate.address}`}
-                                disabled={isRunning || bleIsScanning}
-                                onClick={() => updateDevice(index, 'transportPortName', candidate.address)}
-                                className={cn(
-                                  'w-full rounded-xl border px-3 py-3 text-left transition disabled:cursor-not-allowed disabled:opacity-50',
-                                  isSelected
-                                    ? 'border-primary/45 bg-primary/10 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]'
-                                    : 'border-border/80 bg-background/65 hover:border-primary/30 hover:bg-muted/30'
-                                )}
-                              >
-                                <div className='flex items-start justify-between gap-3'>
-                                  <div className='min-w-0 flex-1'>
-                                    <div className='flex flex-wrap items-center gap-2'>
-                                      <span className='truncate text-sm font-semibold text-foreground'>{candidate.displayName}</span>
-                                      {candidate.isConnected ? (
-                                        <span className='rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-400'>
-                                          Connected
-                                        </span>
-                                      ) : null}
-                                      {candidate.isPaired ? (
-                                        <span className='rounded-full border border-border bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>
-                                          Paired
-                                        </span>
-                                      ) : null}
-                                      {candidate.rssi != null ? (
-                                        <span className='rounded-full border border-border bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>
-                                          {candidate.rssi} dBm
-                                        </span>
-                                      ) : null}
-                                    </div>
-                                    <div className='mt-1 text-xs font-mono text-muted-foreground'>{candidate.address}</div>
-                                  </div>
-                                  {isSelected ? (
-                                    <span className='rounded-full border border-primary/40 bg-primary/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary'>
-                                      Selected
-                                    </span>
-                                  ) : null}
-                                </div>
-
-                                {candidate.isDefinitionVerified ? (
-                                  <div className='mt-3 inline-flex rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-500'>
-                                    {candidate.verificationLabel ?? 'Verified'}
-                                  </div>
-                                ) : null}
-
-                                {showNameDetail ? (
-                                  <div className='mt-2 text-xs text-muted-foreground'>
-                                    Broadcasts as {candidate.alias} / {candidate.name}
-                                  </div>
-                                ) : null}
-
-                                {candidate.verificationDetails ? (
-                                  <div className={cn(
-                                    'mt-3 rounded-lg border px-3 py-2 text-xs leading-5',
-                                    candidate.isDefinitionVerified
-                                      ? 'border-emerald-500/20 bg-emerald-500/5 text-muted-foreground'
-                                      : 'border-amber-500/20 bg-amber-500/5 text-amber-200/90'
-                                  )}>
-                                    <div className={cn(
-                                      'mb-1 text-[10px] font-semibold uppercase tracking-[0.18em]',
-                                      candidate.isDefinitionVerified ? 'text-emerald-500/80' : 'text-amber-300/90'
-                                    )}>
-                                      {candidate.isDefinitionVerified ? 'Probe match' : 'Probe note'}
-                                    </div>
-                                    <div>{candidate.verificationDetails}</div>
-                                  </div>
-                                ) : null}
-
-                                {candidate.manufacturerData.length > 0 ? (
-                                  <div className='mt-3 flex flex-col gap-1 text-xs text-muted-foreground sm:flex-row sm:items-start sm:gap-2'>
-                                    <span className='shrink-0 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground/80'>
-                                      Manufacturer data
-                                    </span>
-                                    <span className='font-mono text-[11px] text-muted-foreground/90 break-all'>
-                                      {candidate.manufacturerData.join(' · ')}
-                                    </span>
-                                  </div>
-                                ) : null}
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ) : null}
-
-                      {!bleIsScanning && !bleScanError && hasBleScanResults && bleDevices.length === 0 ? (
-                        <div className='rounded-xl border border-dashed border-border bg-muted/25 px-4 py-6 text-center text-sm text-muted-foreground'>
-                          No nearby BLE devices were detected.
-                        </div>
-                      ) : null}
-
-                      {!hasBleScanResults && !bleIsScanning ? (
-                        <div className='rounded-xl border border-dashed border-border bg-muted/15 px-4 py-6 text-center text-sm text-muted-foreground'>
-                          Run a scan to see nearby devices from the Pi and select the correct target.
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-              </div>
-            );
+            const bleScanError = bleScanErrors[device.deviceId];
 
             return (
-              <section key={`${device.deviceId}-${index}`} className='rounded-2xl border border-border bg-card/70 p-5 shadow-sm'>
-                <div className='mb-5 flex flex-col gap-3 border-b border-border pb-4 md:flex-row md:items-center md:justify-between'>
-                  <div>
-                    <div className='flex items-center gap-2'>
-                      <h3 className='text-lg font-semibold text-foreground'>{device.displayName || `Device ${index + 1}`}</h3>
-                      {isRunning ? (
-                        <span className='rounded-full bg-emerald-500/10 border border-emerald-500/30 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-500'>Running</span>
-                      ) : (
-                        <span className='rounded-full bg-muted border border-border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>Stopped</span>
-                      )}
+              <section key={`${device.deviceId}-${index}`} className='rounded-2xl border border-border bg-card/85 p-5 shadow-sm'>
+                <div className='mb-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between'>
+                  <div className='space-y-1'>
+                    <div className='flex flex-wrap items-center gap-2'>
+                      <h3 className='text-lg font-semibold text-foreground'>{device.displayName || device.deviceId}</h3>
+                      {transportType ? <span className='rounded-full border border-border bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>{transportType}</span> : null}
+                      {device.definitionVersion ? <span className='rounded-full border border-border bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>v{device.definitionVersion}</span> : null}
                     </div>
-                    <div className='mt-1 flex items-center gap-2'>
-                      <span className='text-xs font-mono text-muted-foreground'>{device.deviceId || 'device-id-required'}</span>
-                      {def ? (
-                        <span className='rounded-md bg-primary/10 border border-primary/20 px-2 py-0.5 text-[10px] font-medium text-primary'>
-                          {def.name} ({def.model})
-                        </span>
-                      ) : device.definitionId ? (
-                        <span className='rounded-md bg-muted border border-border px-2 py-0.5 text-[10px] font-medium text-muted-foreground'>
-                          {device.definitionId}
-                        </span>
-                      ) : null}
+                    <div className='text-sm text-muted-foreground'>
+                      {definition ? `${definition.manufacturer} · ${definition.model}` : device.definitionId}
+                    </div>
+                    <div className='text-xs text-muted-foreground'>
+                      Definition snapshot is saved with this device when configuration changes are applied.
                     </div>
                   </div>
+
                   <div className='flex flex-wrap gap-2'>
-                    {isRunning ? (
-                      <Button
-                        type='button'
-                        variant='outline'
-                        onClick={() => void stopDevice(device.deviceId)}
-                        disabled={action?.loading}
-                      >
+                    {device.enabled ? (
+                      <Button type='button' variant='outline' onClick={() => void stopDevice(device.deviceId)} disabled={action?.loading}>
                         {action?.loading ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Square className='h-4 w-4' />}
                         Stop
                       </Button>
@@ -956,25 +461,15 @@ export function DevicesPage() {
                         {isTransportSupported ? 'Start' : 'Unsupported'}
                       </Button>
                     )}
-                    <Button type='button' variant='destructive' onClick={() => removeDevice(index)} disabled={isRunning}>
+                    <Button type='button' variant='destructive' onClick={() => removeDevice(index)} disabled={device.enabled}>
                       <Trash2 className='h-4 w-4' />
                       Remove
                     </Button>
                   </div>
                 </div>
 
-                {action?.result ? (
-                  <div className={`mb-4 rounded-lg border px-4 py-3 text-sm ${getActionResultClassName(action.result)}`}>
-                    {getActionResultMessage(action.result)}
-                  </div>
-                ) : null}
-
-                {!isTransportSupported ? (
-                  <div className='mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300'>
-                    {def?.unsupportedTransportMessage ?? 'This device transport is not supported in the current build.'}
-                  </div>
-                ) : null}
-
+                {action?.result ? <div className={`mb-4 rounded-lg border px-4 py-3 text-sm ${getActionResultClassName(action.result)}`}>{getActionResultMessage(action.result)}</div> : null}
+                {!isTransportSupported ? <div className='mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300'>{definition?.unsupportedTransportMessage ?? 'This device transport is not supported in the current build.'}</div> : null}
                 {isTransportSupported && requiresTransport && !hasTransportTarget ? (
                   <div className='mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300'>
                     {transportType === 'ble'
@@ -983,139 +478,129 @@ export function DevicesPage() {
                   </div>
                 ) : null}
 
-                {transportType === 'ble' ? bleConfiguration : (
                 <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-4'>
                   <label className='space-y-2 text-sm text-foreground'>
                     <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device ID</span>
-                    <Input value={device.deviceId} disabled={isRunning} onChange={(event) => updateDevice(index, 'deviceId', event.target.value)} />
+                    <Input value={device.deviceId} disabled={device.enabled} onChange={(event) => updateDevice(index, 'deviceId', event.target.value)} />
                   </label>
+
                   <label className='space-y-2 text-sm text-foreground'>
                     <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Display name</span>
                     <Input value={device.displayName} onChange={(event) => updateDevice(index, 'displayName', event.target.value)} />
                   </label>
+
+                  <label className='space-y-2 text-sm text-foreground'>
+                    <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device definition</span>
+                    <select
+                      className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+                      value={device.definitionId}
+                      disabled={device.enabled}
+                      onChange={(event) => updateDevice(index, 'definitionId', event.target.value)}
+                    >
+                      {availableDefinitions.map((definitionOption) => (
+                        <option key={definitionOption.id} value={definitionOption.id}>{definitionOption.name}</option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className='space-y-2 text-sm text-foreground'>
+                    <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Poll interval</span>
+                    <Input value={`${device.pollIntervalMilliseconds} ms`} disabled />
+                  </label>
+
                   {transportType === 'serial' ? (
                     <label className='space-y-2 text-sm text-foreground'>
-                      <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Serial Port</span>
+                      <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Serial port</span>
                       <select
-                        className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50'
+                        className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
                         value={device.transportPortName ?? ''}
-                        disabled={isRunning}
+                        disabled={device.enabled}
                         onChange={(event) => updateDevice(index, 'transportPortName', event.target.value || null)}
                       >
                         <option value=''>Select port…</option>
-                        {ports.map(p => (
-                          <option key={p} value={p}>{p}</option>
-                        ))}
+                        {ports.map((port) => <option key={port} value={port}>{port}</option>)}
                       </select>
                     </label>
                   ) : null}
-                  {transportType === 'ble' ? (
-                    <div className='space-y-2 text-sm text-foreground'>
-                      <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>BLE Device</span>
-                      <div className='flex flex-col gap-2 xl:flex-row'>
-                        <Input
-                          className='flex-1'
-                          value={device.transportPortName ?? ''}
-                          disabled={isRunning}
-                          placeholder='AA:BB:CC:DD:EE:FF or device alias'
-                          onChange={(event) => updateDevice(index, 'transportPortName', event.target.value || null)}
-                        />
-                        <Button
-                          type='button'
-                          variant='outline'
-                          className='shrink-0'
-                          disabled={isRunning || bleIsScanning || !device.definitionId}
-                          onClick={() => void scanBleDevices(device.deviceId, device.definitionId)}
-                        >
-                          {bleIsScanning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : null}
-                          {bleIsScanning ? 'Scanning...' : 'Scan nearby'}
-                        </Button>
-                      </div>
-                      <p className='text-xs text-muted-foreground'>
-                        Scan on the Pi and choose a detected device, or enter the address manually.
-                      </p>
-                      {bleDevices.length > 0 ? (
-                        <div className='space-y-2'>
-                          {bleDevices.map(candidate => {
-                            const isSelected = candidate.address === (device.transportPortName ?? '');
-                            const showNameDetail = candidate.alias && candidate.name && candidate.alias !== candidate.name;
 
-                            return (
-                              <button
-                                key={candidate.address}
-                                type='button'
-                                aria-label={`Select BLE device ${candidate.address}`}
-                                disabled={isRunning || bleIsScanning}
-                                onClick={() => updateDevice(index, 'transportPortName', candidate.address)}
-                                className={`w-full rounded-xl border px-3 py-3 text-left transition ${
-                                  isSelected
-                                    ? 'border-primary/50 bg-primary/10'
-                                    : 'border-border bg-muted/20 hover:border-primary/30 hover:bg-muted/40'
-                                } disabled:cursor-not-allowed disabled:opacity-50`}
-                              >
-                                <div className='flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between'>
-                                  <div className='space-y-1.5'>
-                                    <div className='flex flex-wrap items-center gap-2'>
-                                      <span className='text-sm font-semibold text-foreground'>{candidate.displayName}</span>
-                                      {candidate.isDefinitionVerified ? (
-                                        <span className='rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-500'>
-                                          {candidate.verificationLabel ?? 'Verified'}
-                                        </span>
+                  {transportType === 'ble' ? (
+                    <>
+                      <div className='space-y-2 text-sm text-foreground md:col-span-2 xl:col-span-3'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>BLE device</span>
+                        <div className='flex flex-col gap-2 xl:flex-row'>
+                          <Input
+                            className='flex-1'
+                            value={device.transportPortName ?? ''}
+                            disabled={device.enabled}
+                            placeholder='AA:BB:CC:DD:EE:FF or device alias'
+                            onChange={(event) => updateDevice(index, 'transportPortName', event.target.value || null)}
+                          />
+                          <Button
+                            type='button'
+                            variant='outline'
+                            className='shrink-0'
+                            disabled={device.enabled || bleIsScanning || !device.definitionId}
+                            onClick={() => void scanBleDevices(device.deviceId, device.definitionId)}
+                          >
+                            {bleIsScanning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : null}
+                            {bleIsScanning ? 'Scanning...' : 'Scan nearby'}
+                          </Button>
+                        </div>
+                        <p className='text-xs text-muted-foreground'>Scan on the Pi and choose a detected device, or enter the address manually.</p>
+                        {bleScanError ? <div className='rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300'>{bleScanError}</div> : null}
+                        {bleDevices.length > 0 ? (
+                          <div className='space-y-2'>
+                            {bleDevices.map((candidate) => {
+                              const isSelected = candidate.address === (device.transportPortName ?? '');
+                              return (
+                                <button
+                                  key={candidate.address}
+                                  type='button'
+                                  aria-label={`Select BLE device ${candidate.address}`}
+                                  disabled={device.enabled || bleIsScanning}
+                                  onClick={() => updateDevice(index, 'transportPortName', candidate.address)}
+                                  className={cn(
+                                    'w-full rounded-xl border px-3 py-3 text-left transition',
+                                    isSelected
+                                      ? 'border-primary/50 bg-primary/10'
+                                      : 'border-border bg-muted/20 hover:border-primary/30 hover:bg-muted/40',
+                                  )}
+                                >
+                                  <div className='flex items-start justify-between gap-3'>
+                                    <div className='space-y-1'>
+                                      <div className='flex flex-wrap items-center gap-2'>
+                                        <div className='text-sm font-semibold text-foreground'>{candidate.displayName}</div>
+                                        {candidate.isDefinitionVerified ? <span className='rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-500'>{candidate.verificationLabel ?? 'Verified'}</span> : null}
+                                        {candidate.rssi != null ? <span className='rounded-full border border-border bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>{candidate.rssi} dBm</span> : null}
+                                      </div>
+                                      <div className='font-mono text-xs text-muted-foreground'>{candidate.address}</div>
+                                      {candidate.alias && candidate.name && candidate.alias !== candidate.name ? (
+                                        <div className='text-xs text-muted-foreground'>Alias: {candidate.alias} · Name: {candidate.name}</div>
                                       ) : null}
-                                      {candidate.rssi != null ? (
-                                        <span className='rounded-full border border-border bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>
-                                          {candidate.rssi} dBm
-                                        </span>
-                                      ) : null}
-                                      {candidate.isConnected ? (
-                                        <span className='rounded-full border border-sky-500/30 bg-sky-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-sky-400'>
-                                          Connected
-                                        </span>
-                                      ) : null}
-                                      {candidate.isPaired ? (
-                                        <span className='rounded-full border border-border bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>
-                                          Paired
-                                        </span>
-                                      ) : null}
+                                      {candidate.verificationDetails ? <div className='text-xs text-muted-foreground'>{candidate.verificationDetails}</div> : null}
+                                      {candidate.manufacturerData.length > 0 ? <div className='text-xs text-muted-foreground'>Manufacturer data: {candidate.manufacturerData.join(' · ')}</div> : null}
                                     </div>
-                                    <div className='text-xs font-mono text-muted-foreground'>{candidate.address}</div>
-                                    {showNameDetail ? (
-                                      <div className='text-xs text-muted-foreground'>
-                                        Alias: {candidate.alias} · Name: {candidate.name}
-                                      </div>
-                                    ) : null}
-                                    {candidate.verificationDetails ? (
-                                      <div className='text-xs text-muted-foreground'>{candidate.verificationDetails}</div>
-                                    ) : null}
-                                    {candidate.manufacturerData.length > 0 ? (
-                                      <div className='text-xs text-muted-foreground'>
-                                        Manufacturer data: {candidate.manufacturerData.join(' · ')}
-                                      </div>
-                                    ) : null}
+                                    {isSelected ? <span className='rounded-full border border-primary/40 bg-primary/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary'>Selected</span> : null}
                                   </div>
-                                  {isSelected ? (
-                                    <span className='rounded-full border border-primary/40 bg-primary/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary'>
-                                      Selected
-                                    </span>
-                                  ) : null}
-                                </div>
-                              </button>
-                            );
-                          })}
-                        </div>
-                      ) : null}
-                      {bleScanError ? (
-                        <div className='rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300'>
-                          {bleScanError}
-                        </div>
-                      ) : null}
-                      {!bleIsScanning && !bleScanError && hasBleScanResults && bleDevices.length === 0 ? (
-                        <div className='rounded-lg border border-border bg-muted/40 px-3 py-2 text-xs text-muted-foreground'>
-                          No nearby BLE devices were detected.
-                        </div>
-                      ) : null}
-                    </div>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <label className='space-y-2 text-sm text-foreground'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>BLE settings PIN</span>
+                        <Input
+                          value={device.bleSettingsPin ?? ''}
+                          disabled={device.enabled}
+                          placeholder='Optional'
+                          onChange={(event) => updateDevice(index, 'bleSettingsPin', event.target.value || null)}
+                        />
+                      </label>
+                    </>
                   ) : null}
+
                   {transportType !== 'ble' ? (
                     <label className='space-y-2 text-sm text-foreground'>
                       <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Address</span>
@@ -1124,127 +609,12 @@ export function DevicesPage() {
                         min={0}
                         max={255}
                         value={device.address}
-                        disabled={isRunning}
+                        disabled={device.enabled}
                         onChange={(event) => updateDevice(index, 'address', Number(event.target.value))}
                       />
                     </label>
                   ) : null}
                 </div>
-                )}
-
-                {transportType !== 'ble' ? (
-                  <>
-                {/* Database configuration */}
-                {(() => {
-                  const suggestion = dbSuggestions[device.deviceId];
-                  if (!suggestion?.requiresDatabase) return null;
-                  const validation = dbValidations[device.deviceId];
-                  const creating = dbCreating[device.deviceId];
-                  const createMsg = dbCreateMsg[device.deviceId];
-                  const currentDbName = device.databaseName ?? '';
-                  const dbExists = databases.includes(currentDbName);
-
-                  return (
-                    <div className='mt-4 rounded-xl border border-border bg-muted/30 p-4'>
-                      <div className='flex items-center gap-2 mb-3'>
-                        <Database className='h-4 w-4 text-muted-foreground' />
-                        <span className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>
-                          Database ({suggestion.provider})
-                        </span>
-                      </div>
-
-                      <div className='flex items-start gap-3'>
-                        <div className='flex-1 max-w-sm'>
-                          <select
-                            className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50'
-                            value={currentDbName && dbExists ? currentDbName : (currentDbName ? '__custom__' : '')}
-                            disabled={isRunning}
-                            onChange={(event) => {
-                              const val = event.target.value;
-                              if (val === '__new__') {
-                                updateDevice(index, 'databaseName', suggestion.suggested || '');
-                                if (suggestion.suggested) void validateDatabase(device.deviceId, suggestion.suggested);
-                              } else if (val === '__custom__') {
-                                // keep current
-                              } else {
-                                updateDevice(index, 'databaseName', val || null);
-                                if (val) void validateDatabase(device.deviceId, val);
-                              }
-                            }}
-                          >
-                            <option value=''>Select a database...</option>
-                            {databases.map(db => (
-                              <option key={db} value={db}>{db}</option>
-                            ))}
-                            {currentDbName && !dbExists ? (
-                              <option value='__custom__'>{currentDbName} (new)</option>
-                            ) : null}
-                            <option value='__new__'>+ Create new database</option>
-                          </select>
-                        </div>
-
-                        {/* Show input + create button when name doesn't match an existing db */}
-                        {currentDbName && !dbExists && !isRunning ? (
-                          <div className='flex items-center gap-2'>
-                            <Input
-                              className='w-48'
-                              value={currentDbName}
-                              placeholder={suggestion.suggested || 'database_name'}
-                              onChange={(event) => {
-                                updateDevice(index, 'databaseName', event.target.value || null);
-                              }}
-                            />
-                            <Button
-                              type='button'
-                              variant='outline'
-                              size='sm'
-                              className='shrink-0'
-                              disabled={creating || !currentDbName}
-                              onClick={() => void createDatabase(device.deviceId, currentDbName, suggestion.provider)}
-                            >
-                              {creating ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Plus className='h-4 w-4' />}
-                              Create
-                            </Button>
-                          </div>
-                        ) : null}
-                      </div>
-
-                      {createMsg ? (
-                        <div className='mt-2 rounded-lg border border-border bg-muted/60 px-3 py-2 text-xs text-foreground'>
-                          {createMsg}
-                        </div>
-                      ) : null}
-
-                      {validation ? (
-                        <div className={`mt-2 rounded-lg border px-3 py-2 text-xs ${
-                          validation.compatible || validation.isEmpty
-                            ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
-                            : 'border-amber-500/30 bg-amber-500/10 text-amber-400'
-                        }`}>
-                          {validation.isEmpty ? (
-                            <span>Empty database — schema will be created on first poll.</span>
-                          ) : validation.compatible ? (
-                            <span>Schema is compatible. Tables: {validation.existingTables.join(', ')}</span>
-                          ) : (
-                            <div>
-                              <span className='font-medium'>Schema issues:</span>
-                              <ul className='mt-1 list-disc list-inside'>
-                                {validation.issues.map((issue, i) => <li key={i}>{issue}</li>)}
-                              </ul>
-                            </div>
-                          )}
-                          {validation.hasTimescaleDb ? (
-                            <span className='ml-2 text-emerald-500/80'>✓ TimescaleDB</span>
-                          ) : currentDbName ? (
-                            <span className='ml-2 text-amber-400'>⚠ No TimescaleDB extension</span>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </div>
-                  );
-                })()}
-                  </>
-                ) : null}
               </section>
             );
           })}
@@ -1262,7 +632,7 @@ export function DevicesPage() {
             </div>
           ) : null}
         </div>
-      )}
+      ) : null}
     </div>
   );
 }

@@ -1,4 +1,6 @@
-﻿namespace FluxMonitor.Contracts.Configuration;
+using System.Text.Json.Serialization;
+
+namespace FluxMonitor.Contracts.Configuration;
 
 public sealed class MonitorConfiguration
 {
@@ -7,12 +9,6 @@ public sealed class MonitorConfiguration
     public required ApiSecurityConfiguration ApiSecurity { get; init; }
 
     public string DeviceDefinitionsPath { get; init; } = "devices";
-
-    /// <summary>
-    /// Legacy seed list – only used on first run to import into the database.
-    /// After migration the array in appsettings can be removed.
-    /// </summary>
-    public IReadOnlyList<DeviceConfiguration> Devices { get; init; } = [];
 }
 
 public sealed class StorageConfiguration
@@ -66,13 +62,6 @@ public sealed class DeviceConfiguration
     /// </summary>
     public string? BleSettingsPin { get; init; }
 
-    /// <summary>
-    /// Per-device database name. When set, the device stores telemetry in
-    /// its own database instead of the global application database.
-    /// Created automatically on first use when the definition requires storage.
-    /// </summary>
-    public string? DatabaseName { get; init; }
-
     public byte Address { get; init; }
 
     public bool IsMaster { get; init; }
@@ -96,6 +85,14 @@ public sealed class DeviceConfiguration
     public int CellVoltageSmoothingBreakoutMillivolts { get; init; }
 
     public DisplayPrecisionConfiguration DisplayPrecision { get; init; } = new();
+
+    public string? DefinitionVersion { get; init; }
+
+    [JsonIgnore]
+    public string DefinitionJson { get; init; } = string.Empty;
+
+    [JsonIgnore]
+    public string DefinitionHash { get; init; } = string.Empty;
 }
 
 public sealed class DisplayPrecisionConfiguration

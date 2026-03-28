@@ -52,37 +52,6 @@ describe('DevicesPage', () => {
         } as Response;
       }
 
-      if (url === '/api/devices/databases') {
-        return {
-          ok: true,
-          json: async () => ({ databases: [] }),
-        } as Response;
-      }
-
-      if (url.startsWith('/api/devices/databases/suggest/')) {
-        return {
-          ok: true,
-          json: async () => ({
-            suggested: 'jk_inverter_bms_ble',
-            requiresDatabase: true,
-            provider: 'timescaledb',
-          }),
-        } as Response;
-      }
-
-      if (url === '/api/devices/databases/validate') {
-        return {
-          ok: true,
-          json: async () => ({
-            compatible: false,
-            hasTimescaleDb: false,
-            existingTables: [],
-            issues: [],
-            isEmpty: true,
-          }),
-        } as Response;
-      }
-
       if (url === '/api/devices/device-1/start') {
         return {
           ok: true,
