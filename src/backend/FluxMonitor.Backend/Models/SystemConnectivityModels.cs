@@ -13,6 +13,8 @@ public sealed record class NetworkConnectivitySnapshot
 
     public string? StatusMessage { get; init; }
 
+    public bool? WifiPowered { get; init; }
+
     public IReadOnlyList<EthernetInterfaceSnapshot> EthernetInterfaces { get; init; } = [];
 
     public IReadOnlyList<WifiInterfaceSnapshot> WifiInterfaces { get; init; } = [];
@@ -95,6 +97,15 @@ public sealed record class WifiScanResult
 public sealed record class WifiConnectResult
 {
     public bool Success { get; init; }
+
+    public required string Message { get; init; }
+}
+
+public sealed record class WifiPowerResult
+{
+    public bool Success { get; init; }
+
+    public bool Powered { get; init; }
 
     public required string Message { get; init; }
 }

@@ -64,9 +64,22 @@ public sealed class BluetoothManagementService(ILogger<BluetoothManagementServic
 
         try
         {
+            logger.LogInformation("Setting Bluetooth power state to {Enabled}.", enabled);
             cancellationToken.ThrowIfCancellationRequested();
             await adapter.SetAsync("Powered", enabled);
             var powered = await SafeGetValueAsync(() => adapter.GetAsync<bool>("Powered"));
+
+            if (powered == enabled)
+            {
+                logger.LogInformation("Bluetooth power state changed successfully. Powered={Powered}.", powered);
+            }
+            else
+            {
+                logger.LogWarning(
+                    "Bluetooth power state did not change as requested. Requested={Requested}, Actual={Actual}.",
+                    enabled,
+                    powered);
+            }
 
             return new BluetoothPowerResult
             {
@@ -79,11 +92,17 @@ public sealed class BluetoothManagementService(ILogger<BluetoothManagementServic
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
         {
-            logger.LogWarning(exception, "Failed to set Bluetooth power state to {Enabled}.", enabled);
+            var powered = await SafeGetValueAsync(() => adapter.GetAsync<bool>("Powered"));
+            logger.LogWarning(
+                exception,
+                "Failed to set Bluetooth power state to {Enabled}: {ErrorMessage}. Current state={Powered}.",
+                enabled,
+                exception.Message,
+                powered);
             return new BluetoothPowerResult
             {
                 Success = false,
-                Powered = await SafeGetValueAsync(() => adapter.GetAsync<bool>("Powered")),
+                Powered = powered,
                 Message = exception.Message
             };
         }
@@ -147,23 +166,37 @@ public sealed class BluetoothManagementService(ILogger<BluetoothManagementServic
             }
         }
 
-        adapter.DeviceFound += OnDeviceFoundAsync;
         try
         {
-            await adapter.StartDiscoveryAsync();
-            await Task.Delay(scanDuration, cancellationToken);
-        }
-        finally
-        {
-            adapter.DeviceFound -= OnDeviceFoundAsync;
+            adapter.DeviceFound += OnDeviceFoundAsync;
             try
             {
-                await adapter.StopDiscoveryAsync();
+                logger.LogInformation("Starting Bluetooth discovery for {DurationSeconds} seconds.", scanDuration.TotalSeconds);
+                await adapter.StartDiscoveryAsync();
+                await Task.Delay(scanDuration, cancellationToken);
             }
-            catch
+            finally
             {
-                // Best effort.
+                adapter.DeviceFound -= OnDeviceFoundAsync;
+                try
+                {
+                    await adapter.StopDiscoveryAsync();
+                }
+                catch
+                {
+                    // Best effort.
+                }
             }
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(exception, "Bluetooth discovery failed: {ErrorMessage}", exception.Message);
+            return new BluetoothScanResult
+            {
+                Supported = true,
+                Powered = true,
+                StatusMessage = exception.Message
+            };
         }
 
         var mappedDevices = await MapDevicesAsync(devices.Values, cancellationToken);
@@ -175,14 +208,15 @@ public sealed class BluetoothManagementService(ILogger<BluetoothManagementServic
         };
     }
 
-    private static async Task<Adapter?> TryGetAdapterAsync()
+    private async Task<Adapter?> TryGetAdapterAsync()
     {
         try
         {
             return (await BlueZManager.GetAdaptersAsync()).FirstOrDefault();
         }
-        catch
+        catch (Exception exception)
         {
+            logger.LogWarning(exception, "Failed to enumerate Bluetooth adapters: {ErrorMessage}", exception.Message);
             return null;
         }
     }

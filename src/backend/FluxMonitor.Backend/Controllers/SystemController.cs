@@ -48,6 +48,15 @@ public sealed class SystemController(
         return result.Success ? Ok(result) : BadRequest(result);
     }
 
+    [HttpPost("network/wifi/power")]
+    public async Task<ActionResult<WifiPowerResult>> SetWifiPower(
+        [FromBody] WifiPowerRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await networkManagementService.SetWifiPowerAsync(request.Enabled, cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
     [HttpPost("bluetooth/power")]
     public async Task<ActionResult<BluetoothPowerResult>> SetBluetoothPower(
         [FromBody] BluetoothPowerRequest request,
@@ -315,5 +324,6 @@ public sealed class NetworkInterfaceInfo
 }
 
 public sealed record WifiConnectRequest(string Ssid, string? Password, string? InterfaceName);
+public sealed record WifiPowerRequest(bool Enabled);
 
 public sealed record BluetoothPowerRequest(bool Enabled);

@@ -1,4 +1,5 @@
 using FluxMonitor.Backend.Services;
+using System.Net.NetworkInformation;
 using Xunit;
 
 namespace FluxMonitor.Backend.Tests;
@@ -41,5 +42,39 @@ public sealed class NetworkManagementServiceTests
         Assert.Equal("<hidden>", accessPoint!.Ssid);
         Assert.Null(accessPoint.Security);
         Assert.False(accessPoint.IsActive);
+    }
+
+    [Fact]
+    public void ResolveInterfaceKind_UsesInterfaceNameHeuristicsForWifi()
+    {
+        var kind = NetworkManagementService.ResolveInterfaceKind(
+            "wlan0",
+            "wlan0",
+            NetworkInterfaceType.Unknown,
+            networkManagerType: null);
+
+        Assert.Equal("wifi", kind);
+    }
+
+    [Fact]
+    public void ResolveInterfaceKind_PrefersNetworkManagerType()
+    {
+        var kind = NetworkManagementService.ResolveInterfaceKind(
+            "eth0",
+            "Ethernet controller",
+            NetworkInterfaceType.Ethernet,
+            networkManagerType: "wifi");
+
+        Assert.Equal("wifi", kind);
+    }
+
+    [Theory]
+    [InlineData("enabled", true)]
+    [InlineData("disabled", false)]
+    [InlineData("on", true)]
+    [InlineData("off", false)]
+    public void ParseWifiRadioState_ParsesExpectedValues(string value, bool expected)
+    {
+        Assert.Equal(expected, NetworkManagementService.ParseWifiRadioState(value));
     }
 }

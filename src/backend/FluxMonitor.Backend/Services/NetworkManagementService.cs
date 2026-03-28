@@ -11,30 +11,8 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
     public async Task<NetworkConnectivitySnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
     {
         var interfaces = GetBaseInterfaces();
-        var ethernetInterfaces = interfaces
-            .Where(@interface => @interface.Kind == "ethernet")
-            .Select(@interface => new EthernetInterfaceSnapshot
-            {
-                Name = @interface.Name,
-                Description = @interface.Description,
-                Status = @interface.Status,
-                MacAddress = @interface.MacAddress,
-                Addresses = @interface.Addresses,
-                SpeedMbps = @interface.SpeedMbps
-            })
-            .ToArray();
-        var wifiInterfaces = interfaces
-            .Where(@interface => @interface.Kind == "wifi")
-            .Select(@interface => new WifiInterfaceSnapshot
-            {
-                Name = @interface.Name,
-                Description = @interface.Description,
-                Status = @interface.Status,
-                MacAddress = @interface.MacAddress,
-                Addresses = @interface.Addresses,
-                SpeedMbps = @interface.SpeedMbps
-            })
-            .ToArray();
+        var ethernetInterfaces = BuildEthernetInterfaces(interfaces, deviceStatuses: null);
+        var wifiInterfaces = BuildWifiInterfaces(interfaces, deviceStatuses: null);
 
         if (!OperatingSystem.IsLinux())
         {
@@ -42,6 +20,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             {
                 Supported = false,
                 StatusMessage = "Wi-Fi access point management is supported on Linux hosts with NetworkManager.",
+                WifiPowered = null,
                 EthernetInterfaces = ethernetInterfaces,
                 WifiInterfaces = wifiInterfaces
             };
@@ -55,37 +34,23 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             {
                 Supported = false,
                 StatusMessage = "NetworkManager command-line tools are not available on this host.",
+                WifiPowered = null,
                 EthernetInterfaces = ethernetInterfaces,
                 WifiInterfaces = wifiInterfaces
             };
         }
 
         var deviceStatuses = await GetDeviceStatusesAsync(cancellationToken);
-        var detailedEthernetInterfaces = ethernetInterfaces
-            .Select(@interface => ApplyDeviceStatus(@interface, deviceStatuses))
-            .ToArray();
-        var detailedWifiInterfaces = new List<WifiInterfaceSnapshot>(wifiInterfaces.Length);
-
-        foreach (var @interface in wifiInterfaces)
-        {
-            var withStatus = ApplyDeviceStatus(@interface, deviceStatuses);
-            var currentAccessPoint = await TryGetCurrentAccessPointAsync(@interface.Name, cancellationToken);
-
-            detailedWifiInterfaces.Add(withStatus with
-            {
-                ConnectedSsid = currentAccessPoint?.Ssid,
-                ConnectedBssid = currentAccessPoint?.Bssid,
-                SignalPercent = currentAccessPoint?.SignalPercent,
-                Security = currentAccessPoint?.Security,
-                SignalBars = currentAccessPoint?.SignalBars
-            });
-        }
+        var wifiPowered = await GetWifiRadioEnabledAsync(cancellationToken);
+        ethernetInterfaces = BuildEthernetInterfaces(interfaces, deviceStatuses);
+        wifiInterfaces = await BuildWifiInterfacesAsync(interfaces, deviceStatuses, wifiPowered != false, cancellationToken);
 
         return new NetworkConnectivitySnapshot
         {
             Supported = true,
-            EthernetInterfaces = detailedEthernetInterfaces,
-            WifiInterfaces = detailedWifiInterfaces
+            WifiPowered = wifiPowered,
+            EthernetInterfaces = ethernetInterfaces,
+            WifiInterfaces = wifiInterfaces
         };
     }
 
@@ -100,7 +65,16 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             };
         }
 
-        var resolvedInterfaceName = ResolveWifiInterfaceName(interfaceName);
+        if (await GetWifiRadioEnabledAsync(cancellationToken) == false)
+        {
+            return new WifiScanResult
+            {
+                Supported = false,
+                StatusMessage = "Wi-Fi is turned off."
+            };
+        }
+
+        var resolvedInterfaceName = await ResolveWifiInterfaceNameAsync(interfaceName, cancellationToken);
         if (resolvedInterfaceName is null)
         {
             return new WifiScanResult
@@ -115,14 +89,15 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             cancellationToken);
         if (!result.Succeeded)
         {
+            var message = BuildCommandFailureMessage(result, "Unable to scan for Wi-Fi access points.");
             logger.LogWarning(
-                "Wi-Fi scan failed for interface {InterfaceName}. StdErr={ErrorOutput}",
+                "Wi-Fi scan failed for interface {InterfaceName}: {ErrorMessage}",
                 resolvedInterfaceName,
-                result.ErrorOutput);
+                message);
             return new WifiScanResult
             {
                 Supported = false,
-                StatusMessage = BuildCommandFailureMessage(result, "Unable to scan for Wi-Fi access points.")
+                StatusMessage = message
             };
         }
 
@@ -172,7 +147,16 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             };
         }
 
-        var resolvedInterfaceName = ResolveWifiInterfaceName(interfaceName);
+        if (await GetWifiRadioEnabledAsync(cancellationToken) == false)
+        {
+            return new WifiConnectResult
+            {
+                Success = false,
+                Message = "Wi-Fi is turned off."
+            };
+        }
+
+        var resolvedInterfaceName = await ResolveWifiInterfaceNameAsync(interfaceName, cancellationToken);
         if (resolvedInterfaceName is null)
         {
             return new WifiConnectResult
@@ -182,12 +166,18 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             };
         }
 
+        var trimmedSsid = ssid.Trim();
+        logger.LogInformation(
+            "Connecting Wi-Fi interface {InterfaceName} to SSID {Ssid}.",
+            resolvedInterfaceName,
+            trimmedSsid);
+
         var arguments = new List<string>
         {
             "device",
             "wifi",
             "connect",
-            ssid.Trim(),
+            trimmedSsid,
             "ifname",
             resolvedInterfaceName
         };
@@ -201,15 +191,16 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         var result = await RunNmcliAsync(arguments, cancellationToken);
         if (!result.Succeeded)
         {
+            var message = BuildCommandFailureMessage(result, $"Unable to connect to Wi-Fi network '{trimmedSsid}'.");
             logger.LogWarning(
-                "Wi-Fi connect failed for interface {InterfaceName} and SSID {Ssid}. StdErr={ErrorOutput}",
+                "Wi-Fi connect failed for interface {InterfaceName} and SSID {Ssid}: {ErrorMessage}",
                 resolvedInterfaceName,
-                ssid,
-                result.ErrorOutput);
+                trimmedSsid,
+                message);
             return new WifiConnectResult
             {
                 Success = false,
-                Message = BuildCommandFailureMessage(result, $"Unable to connect to Wi-Fi network '{ssid.Trim()}'.")
+                Message = message
             };
         }
 
@@ -217,8 +208,63 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         {
             Success = true,
             Message = string.IsNullOrWhiteSpace(result.StandardOutput)
-                ? $"Connected to '{ssid.Trim()}'."
+                ? $"Connected to '{trimmedSsid}'."
                 : result.StandardOutput.Trim()
+        };
+    }
+
+    public async Task<WifiPowerResult> SetWifiPowerAsync(bool enabled, CancellationToken cancellationToken = default)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return new WifiPowerResult
+            {
+                Success = false,
+                Powered = false,
+                Message = "Wi-Fi radio controls are supported on Linux hosts with NetworkManager."
+            };
+        }
+
+        logger.LogInformation("Setting Wi-Fi power state to {Enabled}.", enabled);
+
+        var result = await RunNmcliAsync(["radio", "wifi", enabled ? "on" : "off"], cancellationToken);
+        if (!result.Succeeded)
+        {
+            var message = BuildCommandFailureMessage(result, "Unable to change Wi-Fi power state.");
+            logger.LogWarning(
+                "Failed to set Wi-Fi power state to {Enabled}: {ErrorMessage}",
+                enabled,
+                message);
+
+            return new WifiPowerResult
+            {
+                Success = false,
+                Powered = await GetWifiRadioEnabledAsync(cancellationToken) ?? false,
+                Message = message
+            };
+        }
+
+        var powered = await GetWifiRadioEnabledAsync(cancellationToken) ?? enabled;
+        var success = powered == enabled;
+        if (success)
+        {
+            logger.LogInformation("Wi-Fi power state changed successfully. Powered={Powered}.", powered);
+        }
+        else
+        {
+            logger.LogWarning(
+                "Wi-Fi power state did not change as requested. Requested={Requested}, Actual={Actual}.",
+                enabled,
+                powered);
+        }
+
+        return new WifiPowerResult
+        {
+            Success = success,
+            Powered = powered,
+            Message = success
+                ? enabled ? "Wi-Fi turned on." : "Wi-Fi turned off."
+                : $"Wi-Fi state did not change as requested. Current state: {(powered ? "on" : "off")}."
         };
     }
 
@@ -280,6 +326,133 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             SignalBars = NormalizeNmcliValue(fields[5]),
             IsActive = string.Equals(fields[0].Trim(), "*", StringComparison.Ordinal)
         };
+    }
+
+    internal static string? ResolveInterfaceKind(
+        string name,
+        string? description,
+        NetworkInterfaceType interfaceType,
+        string? networkManagerType)
+    {
+        if (IsWifiDeviceType(networkManagerType))
+        {
+            return "wifi";
+        }
+
+        if (IsEthernetDeviceType(networkManagerType))
+        {
+            return "ethernet";
+        }
+
+        return interfaceType switch
+        {
+            NetworkInterfaceType.Wireless80211 => "wifi",
+            NetworkInterfaceType.Ethernet or NetworkInterfaceType.GigabitEthernet or NetworkInterfaceType.FastEthernetFx or NetworkInterfaceType.FastEthernetT => "ethernet",
+            _ => InferInterfaceKindFromName(name, description)
+        };
+    }
+
+    internal static bool? ParseWifiRadioState(string? value)
+    {
+        var normalized = NormalizeNmcliValue(value);
+        if (normalized is null)
+        {
+            return null;
+        }
+
+        if (string.Equals(normalized, "enabled", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalized, "on", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.Equals(normalized, "disabled", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(normalized, "off", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return null;
+    }
+
+    private static EthernetInterfaceSnapshot[] BuildEthernetInterfaces(
+        IReadOnlyList<BaseInterfaceInfo> interfaces,
+        IReadOnlyDictionary<string, NetworkManagerDeviceStatus>? deviceStatuses)
+    {
+        return interfaces
+            .Where(@interface => string.Equals(ResolveInterfaceKind(@interface, deviceStatuses), "ethernet", StringComparison.Ordinal))
+            .Select(@interface =>
+            {
+                var snapshot = new EthernetInterfaceSnapshot
+                {
+                    Name = @interface.Name,
+                    Description = @interface.Description,
+                    Status = @interface.Status,
+                    MacAddress = @interface.MacAddress,
+                    Addresses = @interface.Addresses,
+                    SpeedMbps = @interface.SpeedMbps
+                };
+
+                return deviceStatuses is null
+                    ? snapshot
+                    : ApplyDeviceStatus(snapshot, deviceStatuses);
+            })
+            .ToArray();
+    }
+
+    private async Task<WifiInterfaceSnapshot[]> BuildWifiInterfacesAsync(
+        IReadOnlyList<BaseInterfaceInfo> interfaces,
+        IReadOnlyDictionary<string, NetworkManagerDeviceStatus>? deviceStatuses,
+        bool includeCurrentAccessPoint,
+        CancellationToken cancellationToken)
+    {
+        var snapshots = BuildWifiInterfaces(interfaces, deviceStatuses);
+        if (!includeCurrentAccessPoint)
+        {
+            return snapshots;
+        }
+
+        var detailedSnapshots = new List<WifiInterfaceSnapshot>(snapshots.Length);
+
+        foreach (var @interface in snapshots)
+        {
+            var currentAccessPoint = await TryGetCurrentAccessPointAsync(@interface.Name, cancellationToken);
+            detailedSnapshots.Add(@interface with
+            {
+                ConnectedSsid = currentAccessPoint?.Ssid,
+                ConnectedBssid = currentAccessPoint?.Bssid,
+                SignalPercent = currentAccessPoint?.SignalPercent,
+                Security = currentAccessPoint?.Security,
+                SignalBars = currentAccessPoint?.SignalBars
+            });
+        }
+
+        return detailedSnapshots.ToArray();
+    }
+
+    private static WifiInterfaceSnapshot[] BuildWifiInterfaces(
+        IReadOnlyList<BaseInterfaceInfo> interfaces,
+        IReadOnlyDictionary<string, NetworkManagerDeviceStatus>? deviceStatuses)
+    {
+        return interfaces
+            .Where(@interface => string.Equals(ResolveInterfaceKind(@interface, deviceStatuses), "wifi", StringComparison.Ordinal))
+            .Select(@interface =>
+            {
+                var snapshot = new WifiInterfaceSnapshot
+                {
+                    Name = @interface.Name,
+                    Description = @interface.Description,
+                    Status = @interface.Status,
+                    MacAddress = @interface.MacAddress,
+                    Addresses = @interface.Addresses,
+                    SpeedMbps = @interface.SpeedMbps
+                };
+
+                return deviceStatuses is null
+                    ? snapshot
+                    : ApplyDeviceStatus(snapshot, deviceStatuses);
+            })
+            .ToArray();
     }
 
     private static string? NormalizeNmcliValue(string? value)
@@ -362,6 +535,24 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         return statuses;
     }
 
+    private async Task<bool?> GetWifiRadioEnabledAsync(CancellationToken cancellationToken)
+    {
+        var result = await RunNmcliAsync(["--terse", "radio", "wifi"], cancellationToken);
+        if (!result.Succeeded)
+        {
+            logger.LogDebug("Unable to read Wi-Fi radio state: {ErrorOutput}", result.ErrorOutput);
+            return null;
+        }
+
+        var powered = ParseWifiRadioState(result.StandardOutput);
+        if (powered is null)
+        {
+            logger.LogDebug("Unexpected Wi-Fi radio state output: {Output}", result.StandardOutput);
+        }
+
+        return powered;
+    }
+
     private async Task<WifiAccessPointInfo?> TryGetCurrentAccessPointAsync(string interfaceName, CancellationToken cancellationToken)
     {
         var result = await RunNmcliAsync(
@@ -382,15 +573,25 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             .FirstOrDefault(accessPoint => accessPoint?.IsActive == true);
     }
 
-    private string? ResolveWifiInterfaceName(string? interfaceName)
+    private async Task<string?> ResolveWifiInterfaceNameAsync(string? interfaceName, CancellationToken cancellationToken)
     {
         if (!string.IsNullOrWhiteSpace(interfaceName))
         {
             return interfaceName.Trim();
         }
 
+        var deviceStatuses = await GetDeviceStatusesAsync(cancellationToken);
+        var fromNetworkManager = deviceStatuses.Values
+            .Where(deviceStatus => IsWifiDeviceType(deviceStatus.Type))
+            .Select(deviceStatus => deviceStatus.DeviceName)
+            .FirstOrDefault(deviceName => !string.IsNullOrWhiteSpace(deviceName));
+        if (!string.IsNullOrWhiteSpace(fromNetworkManager))
+        {
+            return fromNetworkManager.Trim();
+        }
+
         return GetBaseInterfaces()
-            .FirstOrDefault(@interface => @interface.Kind == "wifi")
+            .FirstOrDefault(@interface => string.Equals(ResolveInterfaceKind(@interface, deviceStatuses: null), "wifi", StringComparison.Ordinal))
             ?.Name;
     }
 
@@ -400,12 +601,6 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         foreach (var networkInterface in NetworkInterface.GetAllNetworkInterfaces())
         {
             if (networkInterface.NetworkInterfaceType == NetworkInterfaceType.Loopback)
-            {
-                continue;
-            }
-
-            var kind = ClassifyInterfaceKind(networkInterface.NetworkInterfaceType);
-            if (kind is null)
             {
                 continue;
             }
@@ -422,7 +617,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
                 FormatMacAddress(networkInterface.GetPhysicalAddress()),
                 addresses,
                 networkInterface.Speed > 0 ? networkInterface.Speed / 1_000_000 : null,
-                kind));
+                networkInterface.NetworkInterfaceType));
         }
 
         return interfaces
@@ -430,15 +625,59 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             .ToArray();
     }
 
-    private static string? ClassifyInterfaceKind(NetworkInterfaceType interfaceType)
+    private static string? ResolveInterfaceKind(
+        BaseInterfaceInfo @interface,
+        IReadOnlyDictionary<string, NetworkManagerDeviceStatus>? deviceStatuses)
     {
-        return interfaceType switch
-        {
-            NetworkInterfaceType.Wireless80211 => "wifi",
-            NetworkInterfaceType.Ethernet or NetworkInterfaceType.GigabitEthernet or NetworkInterfaceType.FastEthernetFx or NetworkInterfaceType.FastEthernetT => "ethernet",
-            _ => null
-        };
+        var networkManagerType = deviceStatuses is not null && deviceStatuses.TryGetValue(@interface.Name, out var deviceStatus)
+            ? deviceStatus.Type
+            : null;
+
+        return ResolveInterfaceKind(
+            @interface.Name,
+            @interface.Description,
+            @interface.InterfaceType,
+            networkManagerType);
     }
+
+    private static string? InferInterfaceKindFromName(string name, string? description)
+    {
+        var candidates = new[]
+        {
+            name,
+            description
+        }
+        .Where(value => !string.IsNullOrWhiteSpace(value))
+        .Select(value => value!.Trim().ToLowerInvariant())
+        .ToArray();
+
+        if (candidates.Any(value =>
+                value.StartsWith("wl", StringComparison.Ordinal)
+                || value.Contains("wlan", StringComparison.Ordinal)
+                || value.Contains("wifi", StringComparison.Ordinal)
+                || value.Contains("wi-fi", StringComparison.Ordinal)
+                || value.Contains("wireless", StringComparison.Ordinal)))
+        {
+            return "wifi";
+        }
+
+        if (candidates.Any(value =>
+                value.StartsWith("en", StringComparison.Ordinal)
+                || value.StartsWith("eth", StringComparison.Ordinal)
+                || value.Contains("ethernet", StringComparison.Ordinal)
+                || value.Contains("wired", StringComparison.Ordinal)))
+        {
+            return "ethernet";
+        }
+
+        return null;
+    }
+
+    private static bool IsWifiDeviceType(string? value)
+        => string.Equals(value, "wifi", StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsEthernetDeviceType(string? value)
+        => string.Equals(value, "ethernet", StringComparison.OrdinalIgnoreCase);
 
     private static string? FormatMacAddress(PhysicalAddress? physicalAddress)
     {
@@ -549,7 +788,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         string? MacAddress,
         IReadOnlyList<string> Addresses,
         long? SpeedMbps,
-        string Kind);
+        NetworkInterfaceType InterfaceType);
 
     private sealed record NetworkManagerDeviceStatus(
         string DeviceName,
