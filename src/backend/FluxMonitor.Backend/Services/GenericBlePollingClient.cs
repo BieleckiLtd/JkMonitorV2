@@ -135,15 +135,13 @@ public sealed class GenericBlePollingClient(
                 requireWriteCharacteristic: DefinitionRequiresWriteCharacteristic(definition));
 
             var bankData = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
-            var now = DateTimeOffset.UtcNow;
             foreach (var bank in definition.DataSources)
             {
                 var intervalMs = GetBankIntervalMilliseconds(definition, bank);
 
-                if (session.BankCache.TryGetValue(bank.Id, out var cached) &&
-                    now - cached.LastRead < TimeSpan.FromMilliseconds(intervalMs))
+                if (TryGetFreshCachedPayload(session, bank.Id, intervalMs, out var cachedPayload))
                 {
-                    bankData[bank.Id] = cached.Data;
+                    bankData[bank.Id] = cachedPayload;
                     continue;
                 }
 
@@ -167,7 +165,7 @@ public sealed class GenericBlePollingClient(
                 definition,
                 bankData,
                 DateTimeOffset.UtcNow,
-                session.LastFrameHex);
+                GetLastFrameHex(session));
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -234,7 +232,7 @@ public sealed class GenericBlePollingClient(
 
             await SendWriteFrameAsync(session, definition, writeTarget, rawValue, cancellationToken);
 
-            session.BankCache.Remove(bank.Id);
+            RemoveCachedPayload(session, bank.Id);
             await Task.Delay(150, cancellationToken);
 
             var payload = await ReadBankPayloadAsync(session, definition, bank, cancellationToken);
@@ -578,8 +576,10 @@ public sealed class GenericBlePollingClient(
         CancellationToken cancellationToken)
     {
         var transportDefaults = definition.Connection.Transport.Defaults ?? new TransportDefaults();
-        var timeout = TimeSpan.FromMilliseconds(Math.Max(transportDefaults.ConnectionTimeoutMs, 1000));
         var intervalMs = GetBankIntervalMilliseconds(definition, bank);
+        var timeout = GetNotifyStreamWaitTimeout(
+            TimeSpan.FromMilliseconds(Math.Max(transportDefaults.ConnectionTimeoutMs, 1000)),
+            intervalMs);
         var pendingRead = RegisterPendingRead(session, bank.Id);
 
         try
@@ -593,7 +593,20 @@ public sealed class GenericBlePollingClient(
                 session.DeviceId,
                 bank.Id);
 
-            return await WaitForPendingReadAsync(session, bank, pendingRead, timeout, cancellationToken);
+            try
+            {
+                return await WaitForPendingReadAsync(session, bank, pendingRead, timeout, cancellationToken);
+            }
+            catch (TimeoutException) when (session.WriteCharacteristic is not null && SupportsNotifyStreamRequestFallback(bank))
+            {
+                logger.LogDebug(
+                    "BLE notify-stream frame type 0x{FrameType:X2} did not arrive in time for device {DeviceId}. Falling back to a request-response read for bank {BankId}.",
+                    bank.ResponseFrameType,
+                    session.DeviceId,
+                    bank.Id);
+            }
+
+            return await RequestFrameAsync(session, definition, bank, cancellationToken);
         }
         finally
         {
@@ -961,6 +974,9 @@ public sealed class GenericBlePollingClient(
     private static bool IsNotifyStreamBank(DataSourceDefinition bank)
         => string.Equals(NormalizeReadMode(bank.ReadMode), "notify-stream", StringComparison.Ordinal);
 
+    internal static bool SupportsNotifyStreamRequestFallback(DataSourceDefinition bank)
+        => bank.Command != 0;
+
     private static bool IsSupportedReadMode(string? readMode)
     {
         var normalized = NormalizeReadMode(readMode);
@@ -978,6 +994,18 @@ public sealed class GenericBlePollingClient(
 
     private static int GetBankIntervalMilliseconds(DeviceDefinition definition, DataSourceDefinition bank)
         => definition.PollGroups.GetValueOrDefault(bank.PollGroup)?.IntervalMs ?? 1000;
+
+    internal static TimeSpan GetNotifyStreamWaitTimeout(TimeSpan connectionTimeout, int intervalMs)
+    {
+        var intervalTimeout = TimeSpan.FromMilliseconds(Math.Max(intervalMs, 1) * 2L);
+        var boundedIntervalTimeout = intervalTimeout < TimeSpan.FromMilliseconds(1500)
+            ? TimeSpan.FromMilliseconds(1500)
+            : intervalTimeout;
+
+        return boundedIntervalTimeout <= connectionTimeout
+            ? boundedIntervalTimeout
+            : connectionTimeout;
+    }
 
     private static bool TryGetFreshCachedPayload(
         BleSession session,
@@ -997,6 +1025,14 @@ public sealed class GenericBlePollingClient(
 
         payload = [];
         return false;
+    }
+
+    private static void RemoveCachedPayload(BleSession session, string bankId)
+    {
+        lock (session.SyncRoot)
+        {
+            session.BankCache.Remove(bankId);
+        }
     }
 
     private static TaskCompletionSource<BankCacheEntry> RegisterPendingRead(BleSession session, string bankId)
@@ -1044,9 +1080,10 @@ public sealed class GenericBlePollingClient(
         var completed = await Task.WhenAny(pendingRead.Task, timeoutTask);
         if (completed != pendingRead.Task)
         {
-            var suffix = string.IsNullOrWhiteSpace(session.LastFrameHex)
+            var lastFrameHex = GetLastFrameHex(session);
+            var suffix = string.IsNullOrWhiteSpace(lastFrameHex)
                 ? string.Empty
-                : $" Last valid frame={session.LastFrameHex}.";
+                : $" Last valid frame={lastFrameHex}.";
             throw new TimeoutException(
                 $"Timed out waiting for BLE frame type 0x{bank.ResponseFrameType:X2} from device '{session.DeviceId}'.{suffix}");
         }
@@ -1620,6 +1657,14 @@ public sealed class GenericBlePollingClient(
         session.WriteCharacteristic = null;
         session.Device = null;
         session.DefinitionId = null;
+    }
+
+    private static string GetLastFrameHex(BleSession session)
+    {
+        lock (session.SyncRoot)
+        {
+            return session.LastFrameHex;
+        }
     }
 
     public void Dispose()

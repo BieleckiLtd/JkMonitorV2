@@ -1,4 +1,5 @@
 using FluxMonitor.Backend.Services;
+using FluxMonitor.Contracts.DeviceDefinition;
 using Xunit;
 
 namespace FluxMonitor.Backend.Tests;
@@ -33,4 +34,49 @@ public sealed class GenericBlePollingClientTests
 
         Assert.False(matched);
     }
+
+    [Fact]
+    public void GetNotifyStreamWaitTimeout_UsesTwoPollIntervalsWhenAvailable()
+    {
+        var timeout = GenericBlePollingClient.GetNotifyStreamWaitTimeout(TimeSpan.FromSeconds(20), 1000);
+
+        Assert.Equal(TimeSpan.FromSeconds(2), timeout);
+    }
+
+    [Fact]
+    public void GetNotifyStreamWaitTimeout_AppliesMinimumFloorForFastPollGroups()
+    {
+        var timeout = GenericBlePollingClient.GetNotifyStreamWaitTimeout(TimeSpan.FromSeconds(20), 250);
+
+        Assert.Equal(TimeSpan.FromMilliseconds(1500), timeout);
+    }
+
+    [Fact]
+    public void GetNotifyStreamWaitTimeout_CapsAtConnectionTimeout()
+    {
+        var timeout = GenericBlePollingClient.GetNotifyStreamWaitTimeout(TimeSpan.FromSeconds(3), 5000);
+
+        Assert.Equal(TimeSpan.FromSeconds(3), timeout);
+    }
+
+    [Fact]
+    public void SupportsNotifyStreamRequestFallback_RequiresConfiguredCommand()
+    {
+        var bankWithoutCommand = CreateBank(0x00);
+        var bankWithCommand = CreateBank(0x96);
+
+        Assert.False(GenericBlePollingClient.SupportsNotifyStreamRequestFallback(bankWithoutCommand));
+        Assert.True(GenericBlePollingClient.SupportsNotifyStreamRequestFallback(bankWithCommand));
+    }
+
+    private static DataSourceDefinition CreateBank(byte command)
+        => new()
+        {
+            Id = "live",
+            Name = "Live Data",
+            PollGroup = "fast",
+            ReadMode = "notify-stream",
+            Command = command,
+            ResponseFrameType = 0x02
+        };
 }
