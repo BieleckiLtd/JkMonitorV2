@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { Bluetooth, Cable, CircleAlert, Cpu, Database, Download, HardDrive, Leaf, LoaderCircle, MemoryStick, Power, RefreshCcw, CheckCircle2, Upload, Usb, Wifi, XCircle } from 'lucide-react';
+import { Bluetooth, Cable, ChevronDown, ChevronRight, CircleAlert, Cpu, Database, Download, HardDrive, Leaf, LoaderCircle, MemoryStick, RefreshCcw, CheckCircle2, Upload, Usb, Wifi, XCircle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
+import { Switch } from '../components/ui/switch';
 import { cn } from '../lib/utils';
 import { LogsPanel } from '../components/LogsPanel';
 
@@ -266,6 +267,7 @@ export function SystemPage() {
   const [bluetoothScanLoading, setBluetoothScanLoading] = useState(false);
   const [bluetoothPowerLoading, setBluetoothPowerLoading] = useState(false);
   const [bluetoothFeedback, setBluetoothFeedback] = useState<InlineFeedback | null>(null);
+  const [expandedConnectivitySection, setExpandedConnectivitySection] = useState<'wifi' | 'bluetooth' | 'ethernet' | null>('wifi');
 
   useEffect(() => {
     let isMounted = true;
@@ -575,6 +577,9 @@ export function SystemPage() {
         if (!data.powered) {
           setWifiAccessPoints({});
           setWifiPassword('');
+          setExpandedConnectivitySection((current) => current === 'wifi' ? null : current);
+        } else {
+          setExpandedConnectivitySection('wifi');
         }
 
         await loadConnectivity();
@@ -595,6 +600,20 @@ export function SystemPage() {
     await scanWifi(wifiInterface.name);
   };
 
+  const toggleConnectivitySection = async (section: 'wifi' | 'bluetooth' | 'ethernet') => {
+    const isOpen = expandedConnectivitySection === section;
+    const nextSection = isOpen ? null : section;
+    setExpandedConnectivitySection(nextSection);
+
+    if (!nextSection) {
+      return;
+    }
+
+    if (section === 'wifi' && connectivity?.network.supported && wifiPowered !== false && selectedWifiInterface) {
+      await selectWifiInterface(selectedWifiInterface);
+    }
+  };
+
   const toggleBluetoothPower = async () => {
     const enabled = !(connectivity?.bluetooth.powered ?? false);
     setBluetoothPowerLoading(true);
@@ -613,6 +632,9 @@ export function SystemPage() {
       if (response.ok && data.success) {
         if (!data.powered) {
           setBluetoothScanResult(null);
+          setExpandedConnectivitySection((current) => current === 'bluetooth' ? null : current);
+        } else {
+          setExpandedConnectivitySection('bluetooth');
         }
 
         await loadConnectivity();
@@ -704,6 +726,48 @@ export function SystemPage() {
   const bluetoothDevices = connectivity?.bluetooth.devices ?? [];
   const scannedBluetoothDevices = bluetoothScanResult?.devices ?? [];
   const visibleBluetoothDevices = mergeBluetoothDevices(bluetoothDevices, scannedBluetoothDevices);
+  const connectedWifiInterface = wifiInterfaces.find((wifiInterface) => wifiInterface.connectedSsid) ?? selectedWifiInterface;
+  const activeBluetoothDevice = visibleBluetoothDevices.find((device) => device.isConnected) ?? visibleBluetoothDevices[0] ?? null;
+  const activeEthernetInterface = ethernetInterfaces.find((ethernetInterface) =>
+    (ethernetInterface.connectionState ?? ethernetInterface.status ?? '').toLowerCase().includes('connected')
+    || stringEqualsIgnoreCase(ethernetInterface.status, 'up')) ?? ethernetInterfaces[0] ?? null;
+  const wifiSectionOpen = expandedConnectivitySection === 'wifi';
+  const bluetoothSectionOpen = expandedConnectivitySection === 'bluetooth';
+  const ethernetSectionOpen = expandedConnectivitySection === 'ethernet';
+  const wifiSummary = !connectivity?.network.supported
+    ? connectivity?.network.statusMessage ?? 'Wi-Fi unavailable'
+    : wifiPowered === false
+      ? 'Off'
+      : connectedWifiInterface?.connectedSsid
+        ? `${connectedWifiInterface.connectedSsid} on ${connectedWifiInterface.name}`
+        : wifiInterfaces.length > 0
+          ? `Not connected${selectedWifiInterface ? ` • ${selectedWifiInterface.name}` : ''}`
+          : 'No Wi-Fi interface detected';
+  const wifiStatusLabel = !connectivity?.network.supported
+    ? 'Unavailable'
+    : wifiPowered === false
+      ? 'Off'
+      : connectedWifiInterface?.signalPercent != null
+        ? `${connectedWifiInterface.signalPercent}%`
+        : 'On';
+  const bluetoothSummary = !connectivity?.bluetooth.supported
+    ? connectivity?.bluetooth.statusMessage ?? 'Bluetooth unavailable'
+    : connectivity.bluetooth.powered
+      ? activeBluetoothDevice
+        ? `${activeBluetoothDevice.displayName} • ${activeBluetoothDevice.address}`
+        : 'Ready to scan nearby devices'
+      : connectivity.bluetooth.statusMessage ?? 'Off';
+  const bluetoothStatusLabel = !connectivity?.bluetooth.supported
+    ? 'Unavailable'
+    : connectivity.bluetooth.powered
+      ? 'On'
+      : 'Off';
+  const ethernetSummary = activeEthernetInterface
+    ? activeEthernetInterface.connectionName
+      ? `${activeEthernetInterface.name} • ${activeEthernetInterface.connectionName}`
+      : activeEthernetInterface.description || activeEthernetInterface.name
+    : 'No wired connection';
+  const ethernetStatusLabel = activeEthernetInterface?.connectionState ?? activeEthernetInterface?.status ?? 'Unavailable';
 
   return (
     <div className='space-y-6 pb-8'>
@@ -893,7 +957,7 @@ export function SystemPage() {
                   </div>
                 </div>
               </CardHeader>
-              <CardContent className='space-y-5 pt-5'>
+              <CardContent className='space-y-4 pt-5'>
                 {connectivityLoading && !connectivity ? (
                   <div className='flex items-center justify-center py-6'>
                     <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
@@ -907,285 +971,340 @@ export function SystemPage() {
                     ) : null}
 
                     <div className='space-y-3'>
-                      <div className='flex items-center justify-between gap-3'>
-                        <div className='flex items-center gap-2'>
-                          <Wifi className='h-4 w-4 text-muted-foreground' />
-                          <div className='text-sm font-semibold text-foreground'>Wi-Fi</div>
-                        </div>
-                        <button
-                          type='button'
-                          disabled={wifiPowerLoading || !(connectivity?.network.supported ?? false)}
-                          onClick={() => void toggleWifiPower()}
-                          className='inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
-                        >
-                          {wifiPowerLoading ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Power className='h-4 w-4' />}
-                          {wifiPowered === false ? 'Turn on' : 'Turn off'}
-                        </button>
-                      </div>
+                      <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
+                        <div className='flex items-center gap-3 px-4 py-4'>
+                          <button
+                            type='button'
+                            onClick={() => void toggleConnectivitySection('wifi')}
+                            className='flex min-w-0 flex-1 items-center gap-3 text-left'
+                          >
+                            <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
+                              <Wifi className='h-4 w-4 text-muted-foreground' />
+                            </div>
+                            <div className='min-w-0 flex-1'>
+                              <div className='text-sm font-semibold text-foreground'>Wi-Fi</div>
+                              <div className='mt-0.5 truncate text-xs text-muted-foreground'>{wifiSummary}</div>
+                            </div>
+                            <div className='flex items-center gap-2 pl-3 text-xs text-muted-foreground'>
+                              <span>{wifiStatusLabel}</span>
+                              {wifiSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
+                            </div>
+                          </button>
 
-                      {!connectivity?.network.supported && connectivity?.network.statusMessage ? (
-                        <div className='rounded-xl border border-border bg-muted/70 px-3 py-2 text-xs text-muted-foreground'>
-                          {connectivity.network.statusMessage}
-                        </div>
-                      ) : wifiPowered === false ? (
-                        <div className='rounded-2xl border border-dashed border-border bg-background/40 px-4 py-4'>
                           <div className='flex items-center gap-2'>
-                            <StatusPill label='Powered off' tone='muted' />
-                            <div className='text-xs text-muted-foreground'>Turn Wi-Fi on to scan and switch networks.</div>
+                            {wifiPowerLoading ? <LoaderCircle className='h-4 w-4 animate-spin text-primary' /> : null}
+                            <Switch
+                              checked={Boolean(connectivity?.network.supported) && wifiPowered !== false}
+                              disabled={wifiPowerLoading || !(connectivity?.network.supported ?? false)}
+                              onCheckedChange={() => void toggleWifiPower()}
+                              aria-label='Toggle Wi-Fi power'
+                            />
                           </div>
                         </div>
-                      ) : wifiInterfaces.length > 0 ? (
-                        <div className='space-y-3'>
-                          <div className='grid gap-2'>
-                            {wifiInterfaces.map((wifiInterface) => (
-                              <button
-                                key={wifiInterface.name}
-                                type='button'
-                                disabled={wifiScanLoading === wifiInterface.name}
-                                onClick={() => void selectWifiInterface(wifiInterface)}
-                                className={cn(
-                                  'rounded-2xl border px-4 py-4 text-left transition-colors',
-                                  selectedWifiInterface?.name === wifiInterface.name
-                                    ? 'border-primary/40 bg-primary/10'
-                                    : 'border-border/70 bg-background/50 hover:bg-background/70'
-                                )}
-                              >
-                                <div className='flex items-start justify-between gap-3'>
+
+                        {wifiSectionOpen ? (
+                          <div className='space-y-4 border-t border-border/60 px-4 py-4'>
+                            {wifiFeedback ? (
+                              <div className={cn(
+                                'rounded-2xl border px-3 py-2 text-xs',
+                                wifiFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                              )}>
+                                {wifiFeedback.message}
+                              </div>
+                            ) : null}
+
+                            {!connectivity?.network.supported ? (
+                              <div className='rounded-2xl border border-border bg-muted/70 px-3 py-3 text-xs text-muted-foreground'>
+                                {connectivity?.network.statusMessage ?? 'Wi-Fi controls are unavailable on this host.'}
+                              </div>
+                            ) : wifiPowered === false ? (
+                              <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
+                                Turn Wi-Fi on to scan nearby networks and switch access points.
+                              </div>
+                            ) : wifiInterfaces.length === 0 || !selectedWifiInterface ? (
+                              <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
+                                No Wi-Fi interfaces detected.
+                              </div>
+                            ) : (
+                              <>
+                                {wifiInterfaces.length > 1 ? (
+                                  <div className='flex flex-wrap gap-2'>
+                                    {wifiInterfaces.map((wifiInterface) => (
+                                      <button
+                                        key={wifiInterface.name}
+                                        type='button'
+                                        disabled={wifiScanLoading === wifiInterface.name}
+                                        onClick={() => void selectWifiInterface(wifiInterface)}
+                                        className={cn(
+                                          'rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
+                                          selectedWifiInterface.name === wifiInterface.name
+                                            ? 'border-primary/40 bg-primary/10 text-foreground'
+                                            : 'border-border bg-background/60 text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+                                        )}
+                                      >
+                                        {wifiInterface.name}
+                                      </button>
+                                    ))}
+                                  </div>
+                                ) : null}
+
+                                <div className='flex flex-col gap-3 rounded-2xl border border-border/70 bg-background/30 px-4 py-3 sm:flex-row sm:items-center sm:justify-between'>
                                   <div className='min-w-0'>
-                                    <div className='flex items-center gap-2'>
-                                      <div className='text-sm font-semibold text-foreground font-mono'>{wifiInterface.name}</div>
-                                      <StatusPill
-                                        label={wifiInterface.connectedSsid ? 'Connected' : wifiInterface.connectionState ?? wifiInterface.status ?? 'Idle'}
-                                        tone={wifiInterface.connectedSsid ? 'success' : 'muted'}
-                                      />
-                                    </div>
-                                    <div className='mt-1 text-sm text-foreground'>
-                                      {wifiInterface.connectedSsid ?? 'Not connected'}
-                                    </div>
+                                    <div className='text-sm font-semibold text-foreground font-mono'>{selectedWifiInterface.name}</div>
                                     <div className='mt-1 text-xs text-muted-foreground'>
-                                      {wifiInterface.connectedSsid
-                                        ? `Signal ${formatWifiSignal(wifiInterface.signalPercent, wifiInterface.signalBars)}`
-                                        : 'Click to scan nearby networks'}
+                                      {selectedWifiInterface.connectedSsid
+                                        ? `${selectedWifiInterface.connectedSsid} • ${formatWifiSignal(selectedWifiInterface.signalPercent, selectedWifiInterface.signalBars)}`
+                                        : 'Not connected'}
                                     </div>
-                                    {wifiInterface.addresses.length > 0 ? (
-                                      <div className='mt-2 space-y-0.5'>
-                                        {wifiInterface.addresses.map((address) => (
-                                          <div key={address} className='text-[11px] font-mono text-muted-foreground'>{address}</div>
-                                        ))}
+                                    {selectedWifiInterface.addresses.length > 0 ? (
+                                      <div className='mt-1 break-all text-[11px] font-mono text-muted-foreground'>
+                                        {selectedWifiInterface.addresses.join(' • ')}
                                       </div>
                                     ) : null}
                                   </div>
-                                  {wifiScanLoading === wifiInterface.name ? (
-                                    <LoaderCircle className='mt-0.5 h-4 w-4 animate-spin text-primary' />
-                                  ) : (
-                                    <RefreshCcw className='mt-0.5 h-4 w-4 text-muted-foreground' />
-                                  )}
-                                </div>
-                              </button>
-                            ))}
-                          </div>
 
-                          {selectedWifiInterface ? (
-                            <div className='space-y-3 rounded-2xl border border-border/70 bg-background/50 px-4 py-4'>
-                              <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>
-                                {selectedWifiInterface.name} networks
-                              </div>
-
-                              {selectedWifiAccessPoints.length > 0 ? (
-                                <div className='space-y-2'>
-                                  {selectedWifiAccessPoints.map((accessPoint) => (
-                                    <button
-                                      key={`${accessPoint.bssid ?? accessPoint.ssid}-${accessPoint.interfaceName}`}
-                                      type='button'
-                                      onClick={() => setWifiTargetSsid(accessPoint.ssid)}
-                                      className={cn(
-                                        'flex w-full items-center justify-between rounded-xl border px-3 py-2 text-left transition-colors',
-                                        wifiTargetSsid === accessPoint.ssid
-                                          ? 'border-primary/40 bg-primary/10'
-                                          : 'border-border/70 bg-background/40 hover:bg-background/70'
-                                      )}
-                                    >
-                                      <div className='min-w-0'>
-                                        <div className='text-sm font-semibold text-foreground'>{accessPoint.ssid}</div>
-                                        <div className='mt-1 text-[11px] text-muted-foreground'>
-                                          {accessPoint.security ?? 'Open'}{accessPoint.bssid ? ` • ${accessPoint.bssid}` : ''}
-                                        </div>
-                                      </div>
-                                      <div className='flex items-center gap-2'>
-                                        {accessPoint.isActive ? <StatusPill label='Current' tone='success' /> : null}
-                                        <div className='text-xs text-muted-foreground'>{formatWifiSignal(accessPoint.signalPercent, accessPoint.signalBars)}</div>
-                                      </div>
-                                    </button>
-                                  ))}
-                                </div>
-                              ) : wifiScanLoading !== selectedWifiInterface.name && !wifiFeedback ? (
-                                <div className='rounded-xl border border-dashed border-border bg-background/40 px-3 py-3 text-center text-xs text-muted-foreground'>
-                                  Click the Wi-Fi card above to scan nearby networks.
-                                </div>
-                              ) : null}
-
-                              <div className='grid gap-3'>
-                                <Input
-                                  value={wifiTargetSsid}
-                                  onChange={(event) => setWifiTargetSsid(event.target.value)}
-                                  placeholder='SSID'
-                                />
-                                <Input
-                                  type='password'
-                                  value={wifiPassword}
-                                  onChange={(event) => setWifiPassword(event.target.value)}
-                                  placeholder='Password (leave blank for open networks)'
-                                />
-                                <div className='flex flex-wrap items-center gap-2'>
                                   <button
                                     type='button'
-                                    disabled={wifiConnectLoading || !selectedWifiInterface}
-                                    onClick={() => void connectWifi()}
-                                    className='inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
+                                    disabled={wifiScanLoading === selectedWifiInterface.name}
+                                    onClick={() => void scanWifi(selectedWifiInterface.name)}
+                                    className='inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
                                   >
-                                    {wifiConnectLoading ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Wifi className='h-4 w-4' />}
-                                    Connect
+                                    {wifiScanLoading === selectedWifiInterface.name ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <RefreshCcw className='h-4 w-4' />}
+                                    Scan networks
                                   </button>
+                                </div>
+
+                                <div className='space-y-2'>
+                                  <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>Nearby networks</div>
+                                  {selectedWifiAccessPoints.length > 0 ? (
+                                    <div className='overflow-hidden rounded-2xl border border-border/70 bg-background/20'>
+                                      {selectedWifiAccessPoints.map((accessPoint, index) => (
+                                        <button
+                                          key={`${accessPoint.bssid ?? accessPoint.ssid}-${accessPoint.interfaceName}`}
+                                          type='button'
+                                          onClick={() => setWifiTargetSsid(accessPoint.ssid)}
+                                          className={cn(
+                                            'flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-background/70',
+                                            index > 0 ? 'border-t border-border/60' : '',
+                                            wifiTargetSsid === accessPoint.ssid ? 'bg-primary/8' : ''
+                                          )}
+                                        >
+                                          <div className='min-w-0'>
+                                            <div className='truncate text-sm font-medium text-foreground'>{accessPoint.ssid}</div>
+                                            <div className='mt-1 text-xs text-muted-foreground'>
+                                              {accessPoint.security ?? 'Open'}{accessPoint.isActive ? ' • Current network' : ''}
+                                            </div>
+                                          </div>
+                                          <div className='shrink-0 text-xs text-muted-foreground'>
+                                            {formatWifiSignal(accessPoint.signalPercent, accessPoint.signalBars)}
+                                          </div>
+                                        </button>
+                                      ))}
+                                    </div>
+                                  ) : wifiScanLoading !== selectedWifiInterface.name ? (
+                                    <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
+                                      No scan results yet. Click scan to refresh nearby networks.
+                                    </div>
+                                  ) : null}
+                                </div>
+
+                                <div className='space-y-2'>
+                                  <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>Join network</div>
+                                  <div className='grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]'>
+                                    <Input
+                                      value={wifiTargetSsid}
+                                      onChange={(event) => setWifiTargetSsid(event.target.value)}
+                                      placeholder='Network name'
+                                    />
+                                    <Input
+                                      type='password'
+                                      value={wifiPassword}
+                                      onChange={(event) => setWifiPassword(event.target.value)}
+                                      placeholder='Password (optional)'
+                                    />
+                                    <button
+                                      type='button'
+                                      disabled={wifiConnectLoading || !selectedWifiInterface}
+                                      onClick={() => void connectWifi()}
+                                      className='inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
+                                    >
+                                      {wifiConnectLoading ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Wifi className='h-4 w-4' />}
+                                      Connect
+                                    </button>
+                                  </div>
                                   <div className='text-xs text-muted-foreground'>
                                     Interface: <span className='font-mono text-foreground'>{selectedWifiInterface.name}</span>
                                   </div>
                                 </div>
-                              </div>
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <div className='rounded-2xl border border-dashed border-border bg-background/40 px-4 py-3 text-center text-xs text-muted-foreground'>
-                          No Wi-Fi interfaces detected.
-                        </div>
-                      )}
-
-                      {wifiFeedback ? (
-                        <div className={cn(
-                          'rounded-xl border px-3 py-2 text-xs',
-                          wifiFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-                        )}>
-                          {wifiFeedback.message}
-                        </div>
-                      ) : null}
-                    </div>
-
-                    <div className='space-y-3 border-t border-border/60 pt-5'>
-                      <div className='flex items-center justify-between gap-3'>
-                        <div className='flex items-center gap-2'>
-                          <Bluetooth className='h-4 w-4 text-muted-foreground' />
-                          <div className='text-sm font-semibold text-foreground'>Bluetooth</div>
-                        </div>
-                        <button
-                          type='button'
-                          disabled={bluetoothPowerLoading || !(connectivity?.bluetooth.supported ?? false)}
-                          onClick={() => void toggleBluetoothPower()}
-                          className='inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
-                        >
-                          {bluetoothPowerLoading ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Power className='h-4 w-4' />}
-                          {connectivity?.bluetooth.powered ? 'Turn off' : 'Turn on'}
-                        </button>
+                              </>
+                            )}
+                          </div>
+                        ) : wifiFeedback ? (
+                          <div className={cn(
+                            'border-t border-border/60 px-4 py-3 text-xs',
+                            wifiFeedback.isError ? 'text-rose-200' : 'text-emerald-200'
+                          )}>
+                            {wifiFeedback.message}
+                          </div>
+                        ) : null}
                       </div>
 
-                      {!connectivity?.bluetooth.supported && connectivity?.bluetooth.statusMessage ? (
-                        <div className='rounded-xl border border-border bg-muted/70 px-3 py-2 text-xs text-muted-foreground'>
-                          {connectivity.bluetooth.statusMessage}
-                        </div>
-                      ) : null}
-
-                      {connectivity?.bluetooth.supported && !connectivity.bluetooth.powered ? (
-                        <>
-                          {bluetoothFeedback ? (
-                            <div className={cn(
-                              'rounded-xl border px-3 py-2 text-xs',
-                              bluetoothFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-                            )}>
-                              {bluetoothFeedback.message}
+                      <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
+                        <div className='flex items-center gap-3 px-4 py-4'>
+                          <button
+                            type='button'
+                            onClick={() => void toggleConnectivitySection('bluetooth')}
+                            className='flex min-w-0 flex-1 items-center gap-3 text-left'
+                          >
+                            <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
+                              <Bluetooth className='h-4 w-4 text-muted-foreground' />
                             </div>
-                          ) : null}
-                          <div className='rounded-2xl border border-dashed border-border bg-background/40 px-4 py-4'>
-                            <div className='flex items-center gap-2'>
-                              <StatusPill label='Powered off' tone='muted' />
-                              <div className='text-xs text-muted-foreground'>Turn Bluetooth on to scan for nearby devices.</div>
+                            <div className='min-w-0 flex-1'>
+                              <div className='text-sm font-semibold text-foreground'>Bluetooth</div>
+                              <div className='mt-0.5 truncate text-xs text-muted-foreground'>{bluetoothSummary}</div>
                             </div>
-                          </div>
-                        </>
-                      ) : connectivity?.bluetooth.supported ? (
-                        <>
-                          <div className='flex flex-wrap items-center gap-2'>
-                            <StatusPill label='Powered on' tone='success' />
-                            <button
-                              type='button'
-                              disabled={bluetoothScanLoading}
-                              onClick={() => void scanBluetooth()}
-                              className='inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-3 py-2 text-xs font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
-                            >
-                              {bluetoothScanLoading ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <RefreshCcw className='h-4 w-4' />}
-                              Scan
-                            </button>
-                          </div>
-
-                          {bluetoothFeedback ? (
-                            <div className={cn(
-                              'rounded-xl border px-3 py-2 text-xs',
-                              bluetoothFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-                            )}>
-                              {bluetoothFeedback.message}
-                            </div>
-                          ) : null}
-
-                          {visibleBluetoothDevices.length > 0 ? (
-                            <div className='space-y-2'>
-                              {visibleBluetoothDevices.map((device) => (
-                                <BluetoothDeviceCard key={device.address} device={device} />
-                              ))}
-                            </div>
-                          ) : (
-                            <div className='rounded-2xl border border-dashed border-border bg-background/40 px-4 py-3 text-center text-xs text-muted-foreground'>
-                              No Bluetooth devices found.
-                            </div>
-                          )}
-                        </>
-                      ) : null}
-                    </div>
-
-                    <div className='space-y-3 border-t border-border/60 pt-5'>
-                      <div className='flex items-center gap-2'>
-                        <Cable className='h-4 w-4 text-muted-foreground' />
-                        <div className='text-sm font-semibold text-foreground'>Ethernet</div>
-                      </div>
-
-                      {ethernetInterfaces.length > 0 ? (
-                        <div className='space-y-2'>
-                          {ethernetInterfaces.map((ethernetInterface) => (
-                            <div key={ethernetInterface.name} className='rounded-2xl border border-border/70 bg-background/50 px-4 py-3'>
-                              <div className='flex items-center justify-between gap-3'>
-                                <div className='text-sm font-semibold text-foreground font-mono'>{ethernetInterface.name}</div>
-                                <StatusPill
-                                  label={ethernetInterface.connectionState ?? ethernetInterface.status ?? 'Unknown'}
-                                  tone={ethernetInterface.status === 'Up' ? 'success' : 'muted'}
-                                />
-                              </div>
-                              <div className='mt-1 text-xs text-muted-foreground'>
-                                {ethernetInterface.connectionName
-                                  ? `${ethernetInterface.connectionName}${ethernetInterface.speedMbps ? ` • ${ethernetInterface.speedMbps} Mbps` : ''}`
-                                  : ethernetInterface.description || 'Wired interface'}
-                              </div>
-                              {ethernetInterface.addresses.length > 0 ? (
-                                <div className='mt-2 space-y-0.5'>
-                                  {ethernetInterface.addresses.map((address) => (
-                                    <div key={address} className='text-[11px] font-mono text-foreground'>{address}</div>
-                                  ))}
-                                </div>
+                            <div className='flex items-center gap-2 pl-3 text-xs text-muted-foreground'>
+                              <span>{bluetoothStatusLabel}</span>
+                              {connectivity?.bluetooth.powered ? (
+                                bluetoothSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />
                               ) : null}
                             </div>
-                          ))}
+                          </button>
+
+                          <div className='flex items-center gap-2'>
+                            {bluetoothPowerLoading ? <LoaderCircle className='h-4 w-4 animate-spin text-primary' /> : null}
+                            <Switch
+                              checked={Boolean(connectivity?.bluetooth.supported) && Boolean(connectivity?.bluetooth.powered)}
+                              disabled={bluetoothPowerLoading || !(connectivity?.bluetooth.supported ?? false)}
+                              onCheckedChange={() => void toggleBluetoothPower()}
+                              aria-label='Toggle Bluetooth power'
+                            />
+                          </div>
                         </div>
-                      ) : (
-                        <div className='rounded-2xl border border-dashed border-border bg-background/40 px-4 py-3 text-center text-xs text-muted-foreground'>
-                          No Ethernet interfaces detected.
-                        </div>
-                      )}
+
+                        {bluetoothSectionOpen ? (
+                          <div className='space-y-4 border-t border-border/60 px-4 py-4'>
+                            {connectivity?.bluetooth.statusMessage ? (
+                              <div className='rounded-2xl border border-border bg-muted/70 px-3 py-2 text-xs text-muted-foreground'>
+                                {connectivity.bluetooth.statusMessage}
+                              </div>
+                            ) : null}
+
+                            {bluetoothFeedback ? (
+                              <div className={cn(
+                                'rounded-2xl border px-3 py-2 text-xs',
+                                bluetoothFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                              )}>
+                                {bluetoothFeedback.message}
+                              </div>
+                            ) : null}
+
+                            {!connectivity?.bluetooth.supported ? (
+                              <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
+                                Bluetooth controls are unavailable on this host.
+                              </div>
+                            ) : !connectivity.bluetooth.powered ? (
+                              <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
+                                Turn Bluetooth on to scan nearby devices.
+                              </div>
+                            ) : (
+                              <>
+                                <div className='flex justify-end'>
+                                  <button
+                                    type='button'
+                                    disabled={bluetoothScanLoading}
+                                    onClick={() => void scanBluetooth()}
+                                    className='inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
+                                  >
+                                    {bluetoothScanLoading ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <RefreshCcw className='h-4 w-4' />}
+                                    Scan
+                                  </button>
+                                </div>
+
+                                {visibleBluetoothDevices.length > 0 ? (
+                                  <div className='overflow-hidden rounded-2xl border border-border/70 bg-background/20'>
+                                    {visibleBluetoothDevices.map((device, index) => (
+                                      <div key={device.address} className={index > 0 ? 'border-t border-border/60' : undefined}>
+                                        <BluetoothDeviceCard device={device} />
+                                      </div>
+                                    ))}
+                                  </div>
+                                ) : (
+                                  <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
+                                    No Bluetooth devices found.
+                                  </div>
+                                )}
+                              </>
+                            )}
+                          </div>
+                        ) : bluetoothFeedback ? (
+                          <div className={cn(
+                            'border-t border-border/60 px-4 py-3 text-xs',
+                            bluetoothFeedback.isError ? 'text-rose-200' : 'text-emerald-200'
+                          )}>
+                            {bluetoothFeedback.message}
+                          </div>
+                        ) : null}
+                      </div>
+
+                      <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
+                        <button
+                          type='button'
+                          onClick={() => void toggleConnectivitySection('ethernet')}
+                          className='flex w-full items-center gap-3 px-4 py-4 text-left'
+                        >
+                          <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
+                            <Cable className='h-4 w-4 text-muted-foreground' />
+                          </div>
+                          <div className='min-w-0 flex-1'>
+                            <div className='text-sm font-semibold text-foreground'>Ethernet</div>
+                            <div className='mt-0.5 truncate text-xs text-muted-foreground'>{ethernetSummary}</div>
+                          </div>
+                          <div className='flex items-center gap-2 pl-3 text-xs text-muted-foreground'>
+                            <span>{ethernetStatusLabel}</span>
+                            {ethernetSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
+                          </div>
+                        </button>
+
+                        {ethernetSectionOpen ? (
+                          <div className='border-t border-border/60 px-4 py-4'>
+                            {ethernetInterfaces.length > 0 ? (
+                              <div className='overflow-hidden rounded-2xl border border-border/70 bg-background/20'>
+                                {ethernetInterfaces.map((ethernetInterface, index) => (
+                                  <div
+                                    key={ethernetInterface.name}
+                                    className={cn(
+                                      'flex items-start justify-between gap-3 px-4 py-3',
+                                      index > 0 ? 'border-t border-border/60' : ''
+                                    )}
+                                  >
+                                    <div className='min-w-0'>
+                                      <div className='text-sm font-semibold text-foreground font-mono'>{ethernetInterface.name}</div>
+                                      <div className='mt-1 text-xs text-muted-foreground'>
+                                        {ethernetInterface.connectionName
+                                          ? `${ethernetInterface.connectionName}${ethernetInterface.speedMbps ? ` • ${ethernetInterface.speedMbps} Mbps` : ''}`
+                                          : ethernetInterface.description || 'Wired interface'}
+                                      </div>
+                                      {ethernetInterface.addresses.length > 0 ? (
+                                        <div className='mt-1 break-all text-[11px] font-mono text-muted-foreground'>
+                                          {ethernetInterface.addresses.join(' • ')}
+                                        </div>
+                                      ) : null}
+                                    </div>
+                                    <div className='shrink-0 text-xs text-muted-foreground'>
+                                      {ethernetInterface.connectionState ?? ethernetInterface.status ?? 'Unknown'}
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
+                                No Ethernet interfaces detected.
+                              </div>
+                            )}
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   </>
                 )}
@@ -1381,26 +1500,14 @@ function DetailTile({ label, value }: { label: string; value: string }) {
   );
 }
 
-function StatusPill({ label, tone }: { label: string; tone: 'success' | 'neutral' | 'muted' | 'warning' }) {
-  return (
-    <span className={cn(
-      'inline-flex items-center rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em]',
-      tone === 'success' ? 'bg-emerald-500/15 text-emerald-300' :
-        tone === 'warning' ? 'bg-amber-500/15 text-amber-300' :
-          tone === 'neutral' ? 'bg-primary/15 text-primary' :
-            'bg-muted text-muted-foreground'
-    )}>
-      {label}
-    </span>
-  );
-}
-
 function BluetoothDeviceCard({ device }: { device: BluetoothDeviceSnapshot }) {
   return (
-    <div className='rounded-2xl border border-border/70 bg-background/50 px-4 py-3'>
-      <div className='text-sm font-semibold text-foreground'>{device.displayName}</div>
-      <div className='mt-1 text-[11px] font-mono text-muted-foreground'>{device.address}</div>
-      <div className='mt-2 text-xs text-muted-foreground'>{formatBluetoothSignal(device.rssi)}</div>
+    <div className='flex items-center justify-between gap-3 px-4 py-3'>
+      <div className='min-w-0'>
+        <div className='truncate text-sm font-semibold text-foreground'>{device.displayName}</div>
+        <div className='mt-1 text-[11px] font-mono text-muted-foreground'>{device.address}</div>
+      </div>
+      <div className='shrink-0 text-xs text-muted-foreground'>{formatBluetoothSignal(device.rssi)}</div>
     </div>
   );
 }
@@ -1438,6 +1545,10 @@ function mergeBluetoothDevices(primary: BluetoothDeviceSnapshot[], secondary: Bl
 
       return left.displayName.localeCompare(right.displayName);
     });
+}
+
+function stringEqualsIgnoreCase(left: string | null | undefined, right: string) {
+  return typeof left === 'string' && left.localeCompare(right, undefined, { sensitivity: 'accent' }) === 0;
 }
 
 function formatBytes(value: number | null | undefined) {
