@@ -16,7 +16,7 @@
 - After a push, wait 120 seconds before checking for the updated `dev-latest` release artifact.
 - Use `git` for commit and push, and use the public GitHub HTTP API to observe the release artifact.
 - Do not ask the user to run `gh auth login` or require the GitHub CLI for this workflow.
-- Deploy by SSH to `pi@jk.local` and run the published artifact installer from GitHub.
+- Deploy by SSH to `pi@fm.local` and run the published artifact installer from GitHub.
 - Verify `fluxmonitor.service` is active and `http://127.0.0.1:5074/api/health` responds on the device.
 
 ## Safety Rules

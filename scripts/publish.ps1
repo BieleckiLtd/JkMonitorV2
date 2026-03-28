@@ -8,7 +8,7 @@ param(
 
     [string]$ReleaseTag = 'dev-latest',
 
-    [string]$DeviceHost = 'pi@jk.local',
+    [string]$DeviceHost = 'pi@fm.local',
 
     [string]$Repository,
 
