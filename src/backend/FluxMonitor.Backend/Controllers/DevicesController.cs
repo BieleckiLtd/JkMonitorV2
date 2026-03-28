@@ -329,6 +329,8 @@ public sealed class DevicesController(
         const int maxWaitMs = 8000;
         const int pollIntervalMs = 200;
         var waited = 0;
+        string? lastObservedOutcome = null;
+        string? lastObservedError = null;
 
         while (waited < maxWaitMs)
         {
@@ -336,49 +338,52 @@ public sealed class DevicesController(
             waited += pollIntervalMs;
 
             var state = stateStore.GetDeviceState(deviceId);
-            if (state is not null && state.LastOutcome is not "NotStarted")
+            if (state is not null && IsTerminalStartOutcome(state.LastOutcome))
             {
-                if (string.Equals(state.LastOutcome, "Succeeded", StringComparison.OrdinalIgnoreCase))
+                var error = GetStartOutcomeError(state.LastOutcome, state.LastError);
+
+                if (IsSuccessfulStartOutcome(state.LastOutcome))
                 {
                     logger.LogInformation(
                         "Initial poll succeeded for device {DeviceId} after {ElapsedMs} ms.",
                         deviceId,
                         waited);
-                }
-                else
-                {
-                    logger.LogWarning(
-                        "Initial poll did not succeed for device {DeviceId}. Outcome={Outcome}, Error={Error}, ElapsedMs={ElapsedMs}.",
+
+                    return Ok(new
+                    {
                         deviceId,
-                        state.LastOutcome,
-                        state.LastError,
-                        waited);
+                        started = true,
+                        outcome = state.LastOutcome,
+                        error,
+                        message = BuildStartOutcomeMessage(state.LastOutcome, error)
+                    });
                 }
 
-                return Ok(new
-                {
+                lastObservedOutcome = state.LastOutcome;
+                lastObservedError = error;
+
+                logger.LogDebug(
+                    "Initial poll attempt did not succeed for device {DeviceId}. Outcome={Outcome}, Error={Error}, ElapsedMs={ElapsedMs}. Waiting for successful poll within timeout.",
                     deviceId,
-                    started = true,
-                    outcome = state.LastOutcome,
-                    error = state.LastError,
-                    message = state.LastOutcome == "Succeeded"
-                        ? "Device started and responding."
-                        : $"Device started but first poll failed: {state.LastError}"
-                });
+                    state.LastOutcome,
+                    error,
+                    waited);
             }
         }
 
         logger.LogWarning(
-            "Device {DeviceId} start timed out waiting for initial poll result after {ElapsedMs} ms.",
+            "Device {DeviceId} start timed out waiting for successful initial poll result after {ElapsedMs} ms. LastOutcome={Outcome}, Error={Error}.",
             deviceId,
-            waited);
+            waited,
+            lastObservedOutcome,
+            lastObservedError);
         return Ok(new
         {
             deviceId,
             started = true,
-            outcome = "Timeout",
-            error = "No poll result within timeout.",
-            message = "Device started but no response received within 8 seconds. Check serial port and address."
+            outcome = lastObservedOutcome ?? "Timeout",
+            error = lastObservedError ?? "No poll result within timeout.",
+            message = BuildStartTimeoutMessage(lastObservedOutcome, lastObservedError)
         });
     }
 
@@ -421,6 +426,34 @@ public sealed class DevicesController(
 
         return Ok(new { deviceId, stopped = true, message = "Device stopped." });
     }
+
+    internal static bool IsTerminalStartOutcome(string? outcome)
+        => !string.IsNullOrWhiteSpace(outcome) &&
+           !string.Equals(outcome, "NotStarted", StringComparison.OrdinalIgnoreCase) &&
+           !string.Equals(outcome, "Started", StringComparison.OrdinalIgnoreCase);
+
+    internal static bool IsSuccessfulStartOutcome(string? outcome)
+        => string.Equals(outcome, "Succeeded", StringComparison.OrdinalIgnoreCase);
+
+    internal static string? GetStartOutcomeError(string? outcome, string? lastError)
+    {
+        if (IsSuccessfulStartOutcome(outcome))
+            return null;
+
+        return string.IsNullOrWhiteSpace(lastError)
+            ? "The first poll did not complete successfully."
+            : lastError.Trim();
+    }
+
+    internal static string BuildStartOutcomeMessage(string? outcome, string? lastError)
+        => IsSuccessfulStartOutcome(outcome)
+            ? "Device started and responding."
+            : $"Device started but first poll failed: {GetStartOutcomeError(outcome, lastError)}";
+
+    internal static string BuildStartTimeoutMessage(string? outcome, string? lastError)
+        => IsTerminalStartOutcome(outcome)
+            ? $"Device started, but no successful poll completed within 8 seconds. Last error: {GetStartOutcomeError(outcome, lastError)}"
+            : "Device started but no response received within 8 seconds. Check serial port and address.";
 
     [HttpGet("databases")]
     public async Task<IActionResult> ListDatabases(CancellationToken cancellationToken)

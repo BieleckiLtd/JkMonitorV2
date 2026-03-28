@@ -104,6 +104,46 @@ function requiresTransportIdentifier(device: DeviceConfiguration, definitions: D
   return transportType === 'serial' || transportType === 'ble';
 }
 
+function getActionResultMessage(result: StartStopResult): string {
+  const explicitMessage = result.message?.trim() ?? '';
+  const blankFailureMessage = /^Device started but first poll failed:\s*$/i.test(explicitMessage);
+
+  if (result.outcome === 'Started') {
+    return 'Device start requested. Waiting for first poll result...';
+  }
+
+  if (explicitMessage && !blankFailureMessage) {
+    return explicitMessage;
+  }
+
+  const error = result.error?.trim();
+  if (result.started && error) {
+    return `Device started but first poll failed: ${error}`;
+  }
+
+  if (result.started) {
+    return 'Device started, but the first poll result is still pending.';
+  }
+
+  if (result.stopped) {
+    return 'Device stopped.';
+  }
+
+  return error || 'Action completed.';
+}
+
+function getActionResultClassName(result: StartStopResult): string {
+  if (result.outcome === 'Succeeded') {
+    return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400';
+  }
+
+  if (result.stopped || result.outcome === 'Started') {
+    return 'border-border bg-muted/60 text-foreground';
+  }
+
+  return 'border-amber-500/30 bg-amber-500/10 text-amber-400';
+}
+
 export function DevicesPage() {
   const { definitions: availableDefinitions, refresh: refreshDefinitions } = useDeviceDefinitions();
   const [devices, setDevices] = useState<DeviceConfiguration[]>([]);
@@ -912,14 +952,8 @@ export function DevicesPage() {
                 </div>
 
                 {action?.result ? (
-                  <div className={`mb-4 rounded-lg border px-4 py-3 text-sm ${
-                    action.result.outcome === 'Succeeded'
-                      ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400'
-                      : action.result.stopped
-                        ? 'border-border bg-muted/60 text-foreground'
-                        : 'border-amber-500/30 bg-amber-500/10 text-amber-400'
-                  }`}>
-                    {action.result.message}
+                  <div className={`mb-4 rounded-lg border px-4 py-3 text-sm ${getActionResultClassName(action.result)}`}>
+                    {getActionResultMessage(action.result)}
                   </div>
                 ) : null}
 
