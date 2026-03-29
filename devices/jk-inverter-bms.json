@@ -1,0 +1,975 @@
+﻿{
+  "$schema": "https://FluxMonitor.local/schemas/device-definition-v1.json",
+  "version": "1",
+
+  "device": {
+    "id": "jk-inverter-bms",
+    "name": "JK Inverter BMS",
+    "manufacturer": "JK",
+    "model": "JK-PB2A16S20P",
+    "category": "energy-storage",
+    "description": "JK Inverter BMS with RS485 Modbus RTU interface for LiFePO4 battery packs. Supports up to 32 cells, charge/discharge/balance control, and comprehensive protection.",
+    "icon": "battery",
+    "documentationUrl": "https://github.com/BieleckiLtd/JkMonitorV2"
+  },
+
+  "connection": {
+    "transport": {
+      "type": "serial",
+      "defaults": {
+        "baudRate": 115200,
+        "dataBits": 8,
+        "parity": "none",
+        "stopBits": 1,
+        "readTimeoutMs": 1000,
+        "writeTimeoutMs": 1000
+      }
+    },
+    "protocol": {
+      "type": "modbus-rtu",
+      "settings": {
+        "defaultSlaveAddress": 1,
+        "interFrameDelayMs": 100,
+        "retries": 1
+      }
+    }
+  },
+
+  "dataSources": [
+    {
+      "id": "live",
+      "name": "Live Data",
+      "address": 4608,
+      "count": 115,
+      "functionCode": 3,
+      "pollGroup": "fast"
+    },
+    {
+      "id": "config",
+      "name": "Configuration",
+      "address": 4096,
+      "count": 115,
+      "functionCode": 3,
+      "pollGroup": "slow",
+      "write": {
+        "functionCode": 16,
+        "registersPerWrite": 2
+      }
+    },
+    {
+      "id": "info",
+      "name": "Device Information",
+      "address": 5120,
+      "count": 123,
+      "functionCode": 3,
+      "pollGroup": "slow"
+    }
+  ],
+
+  "pollGroups": {
+    "fast": {
+      "intervalMs": 1000,
+      "description": "Real-time sensor data — cell voltages, pack status, temperatures"
+    },
+    "slow": {
+      "intervalMs": 30000,
+      "description": "Configuration parameters and device info (slow-changing)"
+    }
+  },
+
+  "entities": [
+    {
+      "_comment": "=== LIVE DATA — Cell Voltages ===",
+      "id": "cell_voltages",
+      "type": "cell_array",
+      "name": "Cell Voltages",
+      "category": "Cells",
+      "source": {
+        "bank": "live",
+        "byteOffset": 0,
+        "elementDataType": "uint16",
+        "elementByteSize": 2,
+        "maxElements": 32,
+        "skipZero": true,
+        "scale": 0.001,
+        "unit": "V"
+      },
+      "display": {
+        "precision": 3,
+        "format": "number"
+      },
+      "role": "cell-voltages"
+    },
+
+    {
+      "_comment": "=== LIVE DATA — Cell Status ===",
+      "id": "cell_status",
+      "type": "sensor",
+      "name": "Cell Status Bitmask",
+      "category": "Diagnostics",
+      "source": {
+        "bank": "live",
+        "byteOffset": 64,
+        "dataType": "uint32"
+      },
+      "display": { "format": "hex" },
+      "hidden": true
+    },
+    {
+      "id": "avg_cell_voltage_hw",
+      "type": "sensor",
+      "name": "Avg Cell Voltage (HW)",
+      "category": "Cells",
+      "source": {
+        "bank": "live",
+        "byteOffset": 68,
+        "dataType": "uint16",
+        "scale": 0.001,
+        "unit": "V"
+      },
+      "display": { "precision": 3 },
+      "hidden": true
+    },
+    {
+      "id": "delta_cell_voltage_hw",
+      "type": "sensor",
+      "name": "Max Cell Delta (HW)",
+      "category": "Cells",
+      "source": {
+        "bank": "live",
+        "byteOffset": 70,
+        "dataType": "uint16",
+        "scale": 0.001,
+        "unit": "V"
+      },
+      "display": { "precision": 3 },
+      "hidden": true
+    },
+
+    {
+      "_comment": "=== LIVE DATA — Temperatures ===",
+      "id": "mos_temperature",
+      "type": "sensor",
+      "name": "MOS Temperature",
+      "category": "Temperatures",
+      "icon": "thermometer",
+      "source": {
+        "bank": "live",
+        "byteOffset": 138,
+        "dataType": "int16",
+        "scale": 0.1,
+        "unit": "°C"
+      },
+      "display": { "precision": 1 },
+      "role": "temperature"
+    },
+    {
+      "id": "battery_temp_1",
+      "type": "sensor",
+      "name": "Battery Temp 1",
+      "category": "Temperatures",
+      "icon": "thermometer",
+      "source": {
+        "bank": "live",
+        "byteOffset": 156,
+        "dataType": "int16",
+        "scale": 0.1,
+        "unit": "°C"
+      },
+      "display": { "precision": 1 },
+      "role": "temperature"
+    },
+    {
+      "id": "battery_temp_2",
+      "type": "sensor",
+      "name": "Battery Temp 2",
+      "category": "Temperatures",
+      "icon": "thermometer",
+      "source": {
+        "bank": "live",
+        "byteOffset": 158,
+        "dataType": "int16",
+        "scale": 0.1,
+        "unit": "°C"
+      },
+      "display": { "precision": 1 },
+      "role": "temperature"
+    },
+
+    {
+      "_comment": "=== LIVE DATA — Pack Status ===",
+      "id": "total_voltage",
+      "type": "sensor",
+      "name": "Total Voltage",
+      "category": "Pack Status",
+      "icon": "zap",
+      "source": {
+        "bank": "live",
+        "byteOffset": 144,
+        "dataType": "uint32",
+        "scale": 0.001,
+        "unit": "V"
+      },
+      "display": { "precision": 2 },
+      "role": "total-voltage"
+    },
+    {
+      "id": "power",
+      "type": "sensor",
+      "name": "Power",
+      "category": "Pack Status",
+      "icon": "gauge",
+      "source": {
+        "bank": "live",
+        "byteOffset": 148,
+        "dataType": "uint32",
+        "scale": 0.001,
+        "unit": "W"
+      },
+      "display": { "precision": 0 },
+      "role": "power"
+    },
+    {
+      "id": "current",
+      "type": "sensor",
+      "name": "Current",
+      "category": "Pack Status",
+      "icon": "activity",
+      "source": {
+        "bank": "live",
+        "byteOffset": 152,
+        "dataType": "int32",
+        "scale": 0.001,
+        "unit": "A"
+      },
+      "display": { "precision": 1 },
+      "role": "current"
+    },
+
+    {
+      "_comment": "=== LIVE DATA — Alarms & State ===",
+      "id": "alarm_flags",
+      "type": "sensor",
+      "name": "Alarm Flags",
+      "category": "Diagnostics",
+      "source": {
+        "bank": "live",
+        "byteOffset": 160,
+        "dataType": "uint32"
+      },
+      "display": { "format": "hex" },
+      "role": "alarm-flags",
+      "hidden": true
+    },
+    {
+      "id": "balance_state",
+      "type": "sensor",
+      "name": "Balance State",
+      "category": "Diagnostics",
+      "source": {
+        "bank": "live",
+        "byteOffset": 166,
+        "dataType": "uint8"
+      },
+      "hidden": true
+    },
+    {
+      "id": "state_of_charge",
+      "type": "sensor",
+      "name": "State of Charge",
+      "category": "Pack Status",
+      "icon": "battery",
+      "source": {
+        "bank": "live",
+        "byteOffset": 167,
+        "dataType": "uint8",
+        "unit": "%"
+      },
+      "display": { "precision": 0 },
+      "role": "state-of-charge"
+    },
+    {
+      "id": "cycle_count",
+      "type": "sensor",
+      "name": "Cycle Count",
+      "category": "Pack Status",
+      "source": {
+        "bank": "live",
+        "byteOffset": 176,
+        "dataType": "uint32"
+      },
+      "display": { "precision": 0 },
+      "role": "cycle-count"
+    },
+
+    {
+      "_comment": "=== LIVE DATA — Charge/Discharge Status ===",
+      "id": "charging_enabled",
+      "type": "binary_sensor",
+      "name": "Charging",
+      "category": "Status",
+      "source": {
+        "bank": "live",
+        "byteOffset": 192,
+        "dataType": "uint8",
+        "trueValue": 1
+      },
+      "role": "charging-enabled"
+    },
+    {
+      "id": "discharging_enabled",
+      "type": "binary_sensor",
+      "name": "Discharging",
+      "category": "Status",
+      "source": {
+        "bank": "live",
+        "byteOffset": 193,
+        "dataType": "uint8",
+        "trueValue": 1
+      },
+      "role": "discharging-enabled"
+    },
+
+    {
+      "_comment": "=== CONFIG — Cell Protection ===",
+      "id": "smart_sleep_voltage",
+      "type": "number",
+      "name": "Smart Sleep Voltage",
+      "category": "Cell Protection",
+      "source": { "bank": "config", "byteOffset": 0, "dataType": "uint32", "scale": 0.001, "unit": "V" },
+      "display": { "precision": 3 },
+      "writable": true
+    },
+    {
+      "id": "cell_uvp",
+      "type": "number",
+      "name": "Cell UVP",
+      "category": "Cell Protection",
+      "source": { "bank": "config", "byteOffset": 4, "dataType": "uint32", "scale": 0.001, "unit": "V" },
+      "display": { "precision": 3 },
+      "writable": true
+    },
+    {
+      "id": "cell_uvp_recovery",
+      "type": "number",
+      "name": "Cell UVP Recovery",
+      "category": "Cell Protection",
+      "source": { "bank": "config", "byteOffset": 8, "dataType": "uint32", "scale": 0.001, "unit": "V" },
+      "display": { "precision": 3 },
+      "writable": true
+    },
+    {
+      "id": "cell_ovp",
+      "type": "number",
+      "name": "Cell OVP",
+      "category": "Cell Protection",
+      "source": { "bank": "config", "byteOffset": 12, "dataType": "uint32", "scale": 0.001, "unit": "V" },
+      "display": { "precision": 3 },
+      "writable": true
+    },
+    {
+      "id": "cell_ovp_recovery",
+      "type": "number",
+      "name": "Cell OVP Recovery",
+      "category": "Cell Protection",
+      "source": { "bank": "config", "byteOffset": 16, "dataType": "uint32", "scale": 0.001, "unit": "V" },
+      "display": { "precision": 3 },
+      "writable": true
+    },
+    {
+      "id": "power_off_voltage",
+      "type": "number",
+      "name": "Power Off Voltage",
+      "category": "Cell Protection",
+      "source": { "bank": "config", "byteOffset": 40, "dataType": "uint32", "scale": 0.001, "unit": "V" },
+      "display": { "precision": 3 },
+      "writable": true
+    },
+
+    {
+      "_comment": "=== CONFIG — Balance Settings ===",
+      "id": "balance_trigger_voltage",
+      "type": "number",
+      "name": "Balance Trigger Voltage",
+      "category": "Balance Settings",
+      "source": { "bank": "config", "byteOffset": 20, "dataType": "uint32", "unit": "mV" },
+      "display": { "precision": 0 },
+      "writable": true
+    },
+    {
+      "id": "max_balance_current",
+      "type": "number",
+      "name": "Max Balance Current",
+      "category": "Balance Settings",
+      "source": { "bank": "config", "byteOffset": 72, "dataType": "uint32", "unit": "mA" },
+      "display": { "precision": 0 },
+      "writable": true
+    },
+    {
+      "id": "start_balance_voltage",
+      "type": "number",
+      "name": "Start Balance Voltage",
+      "category": "Balance Settings",
+      "source": { "bank": "config", "byteOffset": 132, "dataType": "uint32", "scale": 0.001, "unit": "V" },
+      "display": { "precision": 3 },
+      "writable": true
+    },
+
+    {
+      "_comment": "=== CONFIG — SOC Settings ===",
+      "id": "soc_100_voltage",
+      "type": "number",
+      "name": "SOC 100% Voltage",
+      "category": "SOC Settings",
+      "source": { "bank": "config", "byteOffset": 24, "dataType": "uint32", "scale": 0.001, "unit": "V" },
+      "display": { "precision": 3 },
+      "writable": true
+    },
+    {
+      "id": "soc_0_voltage",
+      "type": "number",
+      "name": "SOC 0% Voltage",
+      "category": "SOC Settings",
+      "source": { "bank": "config", "byteOffset": 28, "dataType": "uint32", "scale": 0.001, "unit": "V" },
+      "display": { "precision": 3 },
+      "writable": true
+    },
+
+    {
+      "_comment": "=== CONFIG — Charging ===",
+      "id": "cell_charge_request_voltage",
+      "type": "number",
+      "name": "Cell Charge Request Voltage",
+      "category": "Charging",
+      "source": { "bank": "config", "byteOffset": 32, "dataType": "uint32", "scale": 0.001, "unit": "V" },
+      "display": { "precision": 3 },
+      "writable": true
+    },
+    {
+      "id": "cell_float_voltage",
+      "type": "number",
+      "name": "Cell Float Voltage",
+      "category": "Charging",
+      "source": { "bank": "config", "byteOffset": 36, "dataType": "uint32", "scale": 0.001, "unit": "V" },
+      "display": { "precision": 3 },
+      "writable": true
+    },
+    {
+      "id": "max_charge_current",
+      "type": "number",
+      "name": "Max Charge Current",
+      "category": "Charging",
+      "source": { "bank": "config", "byteOffset": 44, "dataType": "uint32", "scale": 0.001, "unit": "A" },
+      "display": { "precision": 1 },
+      "writable": true
+    },
+
+    {
+      "_comment": "=== CONFIG — Current Protection ===",
+      "id": "charge_ocp_delay",
+      "type": "number",
+      "name": "Charge OCP Delay",
+      "category": "Current Protection",
+      "source": { "bank": "config", "byteOffset": 48, "dataType": "uint32", "unit": "s" },
+      "display": { "precision": 0 },
+      "writable": true
+    },
+    {
+      "id": "charge_ocp_recovery_delay",
+      "type": "number",
+      "name": "Charge OCP Recovery Delay",
+      "category": "Current Protection",
+      "source": { "bank": "config", "byteOffset": 52, "dataType": "uint32", "unit": "s" },
+      "display": { "precision": 0 },
+      "writable": true
+    },
+    {
+      "id": "max_discharge_current",
+      "type": "number",
+      "name": "Max Discharge Current",
+      "category": "Discharging",
+      "source": { "bank": "config", "byteOffset": 56, "dataType": "uint32", "scale": 0.001, "unit": "A" },
+      "display": { "precision": 1 },
+      "writable": true
+    },
+    {
+      "id": "discharge_ocp_delay",
+      "type": "number",
+      "name": "Discharge OCP Delay",
+      "category": "Current Protection",
+      "source": { "bank": "config", "byteOffset": 60, "dataType": "uint32", "unit": "s" },
+      "display": { "precision": 0 },
+      "writable": true
+    },
+    {
+      "id": "discharge_ocp_recovery_delay",
+      "type": "number",
+      "name": "Discharge OCP Recovery Delay",
+      "category": "Current Protection",
+      "source": { "bank": "config", "byteOffset": 64, "dataType": "uint32", "unit": "s" },
+      "display": { "precision": 0 },
+      "writable": true
+    },
+    {
+      "id": "scp_recovery_time",
+      "type": "number",
+      "name": "SCP Recovery Time",
+      "category": "Current Protection",
+      "source": { "bank": "config", "byteOffset": 68, "dataType": "uint32", "unit": "s" },
+      "display": { "precision": 0 },
+      "writable": true
+    },
+    {
+      "id": "scp_delay",
+      "type": "number",
+      "name": "SCP Delay",
+      "category": "Current Protection",
+      "source": { "bank": "config", "byteOffset": 128, "dataType": "uint32", "unit": "μs" },
+      "display": { "precision": 0 },
+      "writable": true
+    },
+
+    {
+      "_comment": "=== CONFIG — Thermal Protection ===",
+      "id": "charge_otp",
+      "type": "number",
+      "name": "Charge OTP",
+      "category": "Thermal Protection",
+      "source": { "bank": "config", "byteOffset": 76, "dataType": "uint32", "scale": 0.1, "unit": "°C" },
+      "display": { "precision": 1 },
+      "writable": true
+    },
+    {
+      "id": "charge_otp_recovery",
+      "type": "number",
+      "name": "Charge OTP Recovery",
+      "category": "Thermal Protection",
+      "source": { "bank": "config", "byteOffset": 80, "dataType": "uint32", "scale": 0.1, "unit": "°C" },
+      "display": { "precision": 1 },
+      "writable": true
+    },
+    {
+      "id": "discharge_otp",
+      "type": "number",
+      "name": "Discharge OTP",
+      "category": "Thermal Protection",
+      "source": { "bank": "config", "byteOffset": 84, "dataType": "uint32", "scale": 0.1, "unit": "°C" },
+      "display": { "precision": 1 },
+      "writable": true
+    },
+    {
+      "id": "discharge_otp_recovery",
+      "type": "number",
+      "name": "Discharge OTP Recovery",
+      "category": "Thermal Protection",
+      "source": { "bank": "config", "byteOffset": 88, "dataType": "uint32", "scale": 0.1, "unit": "°C" },
+      "display": { "precision": 1 },
+      "writable": true
+    },
+    {
+      "id": "charge_utp",
+      "type": "number",
+      "name": "Charge UTP",
+      "category": "Thermal Protection",
+      "source": { "bank": "config", "byteOffset": 92, "dataType": "uint32", "scale": 0.1, "unit": "°C" },
+      "display": { "precision": 1 },
+      "writable": true
+    },
+    {
+      "id": "charge_utp_recovery",
+      "type": "number",
+      "name": "Charge UTP Recovery",
+      "category": "Thermal Protection",
+      "source": { "bank": "config", "byteOffset": 96, "dataType": "uint32", "scale": 0.1, "unit": "°C" },
+      "display": { "precision": 1 },
+      "writable": true
+    },
+    {
+      "id": "mos_otp",
+      "type": "number",
+      "name": "MOS OTP",
+      "category": "Thermal Protection",
+      "source": { "bank": "config", "byteOffset": 100, "dataType": "uint32", "scale": 0.1, "unit": "°C" },
+      "display": { "precision": 1 },
+      "writable": true
+    },
+    {
+      "id": "mos_otp_recovery",
+      "type": "number",
+      "name": "MOS OTP Recovery",
+      "category": "Thermal Protection",
+      "source": { "bank": "config", "byteOffset": 104, "dataType": "uint32", "scale": 0.1, "unit": "°C" },
+      "display": { "precision": 1 },
+      "writable": true
+    },
+
+    {
+      "_comment": "=== CONFIG — System ===",
+      "id": "cell_count",
+      "type": "number",
+      "name": "Cell Count",
+      "category": "System",
+      "source": { "bank": "config", "byteOffset": 108, "dataType": "uint32" },
+      "display": { "precision": 0 },
+      "writable": true
+    },
+    {
+      "id": "charge_switch",
+      "type": "switch",
+      "name": "Charge Switch",
+      "category": "System",
+      "source": { "bank": "config", "byteOffset": 112, "dataType": "uint32" },
+      "writable": true
+    },
+    {
+      "id": "discharge_switch",
+      "type": "switch",
+      "name": "Discharge Switch",
+      "category": "System",
+      "source": { "bank": "config", "byteOffset": 116, "dataType": "uint32" },
+      "writable": true
+    },
+    {
+      "id": "balancer_switch",
+      "type": "switch",
+      "name": "Balancer Switch",
+      "category": "System",
+      "source": { "bank": "config", "byteOffset": 120, "dataType": "uint32" },
+      "writable": true
+    },
+    {
+      "id": "nominal_battery_capacity",
+      "type": "number",
+      "name": "Nominal Battery Capacity",
+      "category": "System",
+      "source": { "bank": "config", "byteOffset": 124, "dataType": "uint32", "scale": 0.001, "unit": "Ah" },
+      "display": { "precision": 1 },
+      "writable": true
+    },
+
+    {
+      "_comment": "=== DEVICE INFO ===",
+      "id": "manufacturer_device_id",
+      "type": "text",
+      "name": "Device Model",
+      "category": "Device Info",
+      "source": { "bank": "info", "byteOffset": 0, "dataType": "ascii", "length": 16 },
+      "role": "manufacturer-id"
+    },
+    {
+      "id": "hardware_version",
+      "type": "text",
+      "name": "Hardware Version",
+      "category": "Device Info",
+      "source": { "bank": "info", "byteOffset": 16, "dataType": "ascii", "length": 8 }
+    },
+    {
+      "id": "software_version",
+      "type": "text",
+      "name": "Software Version",
+      "category": "Device Info",
+      "source": { "bank": "info", "byteOffset": 24, "dataType": "ascii", "length": 8 },
+      "role": "software-version"
+    },
+    {
+      "id": "serial_number",
+      "type": "text",
+      "name": "Serial Number",
+      "category": "Device Info",
+      "source": { "bank": "info", "byteOffset": 40, "dataType": "ascii", "length": 16 }
+    },
+    {
+      "id": "manufacturing_date",
+      "type": "text",
+      "name": "Manufacturing Date",
+      "category": "Device Info",
+      "source": { "bank": "info", "byteOffset": 72, "dataType": "ascii", "length": 8 }
+    },
+    {
+      "id": "device_name",
+      "type": "text",
+      "name": "Device Name",
+      "category": "Device Info",
+      "source": { "bank": "info", "byteOffset": 96, "dataType": "ascii", "length": 16 }
+    },
+    {
+      "id": "vendor_id",
+      "type": "text",
+      "name": "Vendor",
+      "category": "Device Info",
+      "source": { "bank": "info", "byteOffset": 128, "dataType": "ascii", "length": 16 }
+    }
+  ],
+
+  "computedEntities": [
+    {
+      "id": "min_cell_voltage",
+      "type": "sensor",
+      "name": "Min Cell Voltage",
+      "category": "Cells",
+      "expression": "min(cell_voltages)",
+      "unit": "V",
+      "display": { "precision": 3 }
+    },
+    {
+      "id": "max_cell_voltage",
+      "type": "sensor",
+      "name": "Max Cell Voltage",
+      "category": "Cells",
+      "expression": "max(cell_voltages)",
+      "unit": "V",
+      "display": { "precision": 3 }
+    },
+    {
+      "id": "avg_cell_voltage",
+      "type": "sensor",
+      "name": "Avg Cell Voltage",
+      "category": "Cells",
+      "expression": "avg(cell_voltages)",
+      "unit": "V",
+      "display": { "precision": 3 },
+      "fallbackFor": "avg_cell_voltage_hw"
+    },
+    {
+      "id": "delta_cell_voltage",
+      "type": "sensor",
+      "name": "Cell Delta",
+      "category": "Cells",
+      "expression": "max(cell_voltages) - min(cell_voltages)",
+      "unit": "V",
+      "display": { "precision": 3 },
+      "role": "delta-voltage",
+      "fallbackFor": "delta_cell_voltage_hw"
+    },
+    {
+      "id": "cell_count_live",
+      "type": "sensor",
+      "name": "Active Cells",
+      "category": "Cells",
+      "expression": "count(cell_voltages)",
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "computed_power",
+      "type": "sensor",
+      "name": "Computed Power",
+      "category": "Pack Status",
+      "expression": "total_voltage * current",
+      "unit": "W",
+      "display": { "precision": 0 },
+      "fallbackFor": "power"
+    },
+    {
+      "id": "balancing_enabled",
+      "type": "binary_sensor",
+      "name": "Balancing",
+      "category": "Status",
+      "expression": "balance_state != 0",
+      "role": "balancing-enabled"
+    }
+  ],
+
+  "alarms": {
+    "source": "alarm_flags",
+    "type": "bitmask",
+    "bits": [
+      { "bit": 0,  "name": "Wire resistance too high",     "severity": "warning" },
+      { "bit": 1,  "name": "MOS overtemperature",          "severity": "critical" },
+      { "bit": 2,  "name": "Cell count mismatch",          "severity": "warning" },
+      { "bit": 3,  "name": "Current sensor error",         "severity": "critical" },
+      { "bit": 4,  "name": "Cell overvoltage",             "severity": "critical" },
+      { "bit": 5,  "name": "Battery overvoltage",          "severity": "critical" },
+      { "bit": 6,  "name": "Charge overcurrent",           "severity": "critical" },
+      { "bit": 7,  "name": "Charge short circuit",         "severity": "critical" },
+      { "bit": 8,  "name": "Charge overtemperature",       "severity": "warning" },
+      { "bit": 9,  "name": "Charge undertemperature",      "severity": "warning" },
+      { "bit": 10, "name": "CPU-AUX communication error",  "severity": "critical" },
+      { "bit": 11, "name": "Cell undervoltage",            "severity": "critical" },
+      { "bit": 12, "name": "Battery undervoltage",         "severity": "critical" },
+      { "bit": 13, "name": "Discharge overcurrent",        "severity": "critical" },
+      { "bit": 14, "name": "Discharge short circuit",      "severity": "critical" },
+      { "bit": 15, "name": "Discharge overtemperature",    "severity": "warning" },
+      { "bit": 16, "name": "Charge MOS error",             "severity": "critical" },
+      { "bit": 17, "name": "Discharge MOS error",          "severity": "critical" },
+      { "bit": 18, "name": "GPS disconnected",             "severity": "info" },
+      { "bit": 19, "name": "Modify password reminder",     "severity": "info" },
+      { "bit": 20, "name": "Discharge on failed",          "severity": "critical" },
+      { "bit": 21, "name": "Battery over temp alarm",      "severity": "critical" },
+      { "bit": 22, "name": "Temperature sensor anomaly",   "severity": "warning" },
+      { "bit": 23, "name": "PLC module anomaly",           "severity": "warning" }
+    ]
+  },
+
+  "storage": {
+    "database": {
+      "provider": "timescaledb",
+      "defaultNamePattern": "FluxMonitor_{deviceId}"
+    },
+    "timeSeries": [
+      { "entity": "total_voltage",      "aggregate": "avg", "column": "total_voltage_v" },
+      { "entity": "current",            "aggregate": "avg", "column": "current_a" },
+      { "entity": "power",              "aggregate": "avg", "column": "power_w" },
+      { "entity": "state_of_charge",    "aggregate": "last", "column": "soc_pct" },
+      { "entity": "min_cell_voltage",   "aggregate": "min", "column": "min_cell_v" },
+      { "entity": "max_cell_voltage",   "aggregate": "max", "column": "max_cell_v" },
+      { "entity": "delta_cell_voltage", "aggregate": "avg", "column": "delta_cell_v" },
+      { "entity": "mos_temperature",    "aggregate": "avg", "column": "mos_temp_c" },
+      { "entity": "battery_temp_1",     "aggregate": "avg", "column": "battery_temp_c" }
+    ],
+    "cellVoltages": {
+      "entity": "cell_voltages",
+      "aggregate": "avg"
+    },
+    "retention": {
+      "raw":  { "window": "24h" },
+      "1m":   { "window": "1y" },
+      "5m":   { "window": "1y" },
+      "1h":   { "window": "10y" }
+    }
+  },
+
+  "ui": {
+    "pages": {
+      "monitor": {
+        "sections": [
+          {
+            "type": "hero-metrics",
+            "metrics": [
+              { "entity": "total_voltage",    "icon": "zap",      "color": "emerald" },
+              { "entity": "current",          "icon": "activity",  "color": "blue" },
+              { "entity": "power",            "icon": "gauge",     "color": "amber" },
+              { "entity": "state_of_charge",  "icon": "battery",   "color": "green" }
+            ]
+          },
+          {
+            "type": "status-indicators",
+            "entities": ["charging_enabled", "discharging_enabled", "balancing_enabled"]
+          },
+          {
+            "type": "cell-chart",
+            "entity": "cell_voltages",
+            "showStats": true,
+            "showDelta": true,
+            "stats": ["min_cell_voltage", "max_cell_voltage", "avg_cell_voltage", "delta_cell_voltage"]
+          },
+          {
+            "type": "parameter-table",
+            "title": "Configuration",
+            "filter": { "writable": true },
+            "groupBy": "category"
+          },
+          {
+            "type": "parameter-table",
+            "title": "Device Info",
+            "filter": { "categories": ["Device Info"] }
+          }
+        ]
+      },
+      "history": {
+        "resolutions": [
+          { "id": "1s", "label": "1 Second",  "defaultWindow": "10m" },
+          { "id": "1m", "label": "1 Minute",  "defaultWindow": "1h" },
+          { "id": "5m", "label": "5 Minutes", "defaultWindow": "24h" },
+          { "id": "1h", "label": "1 Hour",    "defaultWindow": "7d" }
+        ],
+        "charts": [
+          {
+            "title": "Current",
+            "type": "line-chart",
+            "traces": [
+              { "entity": "current", "label": "Current", "color": "blue" }
+            ],
+            "yAxis": { "unit": "A", "label": "Current" }
+          },
+          {
+            "title": "Energy",
+            "type": "area-chart",
+            "traces": [
+              { "entity": "power", "color": "amber", "positiveLabel": "Charging", "negativeLabel": "Discharging" }
+            ],
+            "yAxis": { "unit": "W", "label": "Power" },
+            "showEnergyTotals": true
+          },
+          {
+            "title": "State of Charge",
+            "type": "line-chart",
+            "traces": [
+              { "entity": "state_of_charge", "label": "SOC", "color": "green" }
+            ],
+            "yAxis": { "unit": "%", "label": "SOC", "domain": [0, 100] }
+          },
+          {
+            "title": "Temperatures",
+            "type": "line-chart",
+            "traces": [
+              { "entity": "mos_temperature", "label": "MOS",      "color": "red" },
+              { "entity": "battery_temp_1",  "label": "Battery 1", "color": "orange" },
+              { "entity": "battery_temp_2",  "label": "Battery 2", "color": "yellow" }
+            ],
+            "yAxis": { "unit": "°C", "label": "Temperature" }
+          },
+          {
+            "title": "Cell Voltage Spread",
+            "type": "line-chart",
+            "traces": [
+              { "entity": "min_cell_voltage",   "label": "Min",   "color": "red" },
+              { "entity": "max_cell_voltage",   "label": "Max",   "color": "emerald" },
+              { "entity": "avg_cell_voltage",   "label": "Avg",   "color": "blue", "dashed": true }
+            ],
+            "yAxis": { "unit": "V", "label": "Cell Voltage" }
+          },
+          {
+            "title": "Cell Voltages",
+            "type": "multi-cell-chart",
+            "entity": "cell_voltages",
+            "selectable": true
+          }
+        ]
+      },
+      "dashboard": {
+        "card": {
+          "primaryMetric": "state_of_charge",
+          "secondaryMetrics": ["total_voltage", "current", "power"],
+          "statusEntities": ["charging_enabled", "discharging_enabled"]
+        }
+      }
+    }
+  },
+
+  "notifications": {
+    "rules": [
+      {
+        "id": "low-soc",
+        "name": "Low Battery",
+        "condition": { "entity": "state_of_charge", "operator": "<", "value": 10 },
+        "severity": "critical",
+        "message": "Battery critically low: {state_of_charge}%",
+        "cooldownMinutes": 15
+      },
+      {
+        "id": "high-mos-temp",
+        "name": "MOS Overtemperature",
+        "condition": { "entity": "mos_temperature", "operator": ">", "value": 60 },
+        "severity": "warning",
+        "message": "MOS temperature high: {mos_temperature}°C",
+        "cooldownMinutes": 30
+      },
+      {
+        "id": "high-delta",
+        "name": "Cell Imbalance",
+        "condition": { "entity": "delta_cell_voltage", "operator": ">", "value": 0.05 },
+        "severity": "warning",
+        "message": "Cell imbalance detected: delta {delta_cell_voltage}V",
+        "cooldownMinutes": 60
+      },
+      {
+        "id": "alarm-active",
+        "name": "Device Alarm",
+        "condition": { "entity": "alarm_flags", "operator": "!=", "value": 0 },
+        "severity": "critical",
+        "message": "Active device alarm detected",
+        "cooldownMinutes": 5
+      }
+    ]
+  }
+}

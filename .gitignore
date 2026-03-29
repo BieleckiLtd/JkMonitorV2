@@ -1,5 +1,6 @@
 bin/
 obj/
+.dotnet/
 .vs/
 .vscode/
 *.user
@@ -12,5 +13,16 @@ obj/
 node_modules/
 dist/
 build/
+.artifacts/
 .env
 .env.*
+artifacts/
+appsettings.Local.json
+appsettings.*.Local.json
+Docs/
+
+# Local CodeQL CLI and analysis artifacts
+.codeql-db/
+.codeql-results/
+.tools/codeql/
+.tools/codeql-win64.zip

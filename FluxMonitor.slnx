@@ -1,0 +1,11 @@
+﻿<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/FluxMonitor.Backend/FluxMonitor.Backend.csproj" />
+  </Folder>
+  <Folder Name="/src/shared/">
+    <Project Path="src/shared/FluxMonitor.Contracts/FluxMonitor.Contracts.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/FluxMonitor.Backend.Tests/FluxMonitor.Backend.Tests.csproj" />
+  </Folder>
+</Solution>

@@ -3,10 +3,10 @@ set -euo pipefail
 
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_ROOT/.." && pwd)"
-BACKEND_PATH="$REPO_ROOT/src/backend/JkMonitor.Backend"
+BACKEND_PATH="$REPO_ROOT/src/FluxMonitor.Backend"
 LOCAL_DOTNET_ROOT="$REPO_ROOT/.dotnet"
 LOCAL_DOTNET="$LOCAL_DOTNET_ROOT/dotnet"
-INSTALL_SCRIPT="${TMPDIR:-/tmp}/dotnet-install-jkmonitor.sh"
+INSTALL_SCRIPT="${TMPDIR:-/tmp}/dotnet-install-FluxMonitor.sh"
 APP_URL='http://localhost:5074'
 HEALTH_URL="$APP_URL/api/health"
 
@@ -33,55 +33,79 @@ get_dotnet() {
 
 read_choice() {
   local prompt="$1"
-  local mode="$2"
-  local default_value="$3"
+  local default_value="$2"
   local value
   read -r -p "$prompt [$default_value] " value
   if [ -z "$value" ]; then
     echo "$default_value"
   else
-    local normalized="${value,,}"
-    if [ "$mode" = 'startup' ]; then
-      case "$normalized" in
-        1|sim|simulator) echo '1' ;;
-        2|hw|hardware) echo '2' ;;
-        *)
-          echo ""
-          ;;
-      esac
-    elif [ "$mode" = 'yesno' ]; then
-      case "$normalized" in
-        y|yes) echo 'y' ;;
-        n|no) echo 'n' ;;
-        *)
-          echo ""
-          ;;
-      esac
-    else
-      echo "$value"
-    fi
+    case "${value,,}" in
+      y|yes) echo 'y' ;;
+      n|no) echo 'n' ;;
+      *)
+        echo ""
+        ;;
+    esac
   fi
 }
 
 read_validated_choice() {
   local prompt="$1"
-  local type="$2"
-  local default_value="$3"
+  local default_value="$2"
 
   while true; do
     local chosen
-    chosen="$(read_choice "$prompt" "$type" "$default_value")"
+    chosen="$(read_choice "$prompt" "$default_value")"
     if [ -n "$chosen" ]; then
       echo "$chosen"
       return
     fi
 
-    if [ "$type" = 'startup' ]; then
-      echo 'Accepted values: 1, 2, simulator, hardware'
-    else
-      echo 'Accepted values: y, n, yes, no'
+    echo 'Accepted values: y, n, yes, no'
+  done
+}
+
+read_required_value() {
+  local prompt="$1"
+  local value=""
+
+  while [ -z "$value" ]; do
+    read -r -p "$prompt" value
+    if [ -z "$value" ]; then
+      echo 'A value is required to continue.'
     fi
   done
+
+  echo "$value"
+}
+
+write_install_audit() {
+  local target_path="$1"
+  local install_kind="$2"
+  local repository="$3"
+  local branch="$4"
+  local release_tag="$5"
+  local asset_name="$6"
+  local checksum="$7"
+  local destination="$8"
+  local installed_by="$9"
+  local installed_at_utc="${10}"
+  local machine_name="${11}"
+
+  cat > "$target_path" <<EOF
+{
+  "installKind": "$install_kind",
+  "repository": "$repository",
+  "branch": "$branch",
+  "releaseTag": "$release_tag",
+  "assetName": "$asset_name",
+  "checksum": "$checksum",
+  "destination": "$destination",
+  "installedBy": "$installed_by",
+  "installedAtUtc": "$installed_at_utc",
+  "machineName": "$machine_name"
+}
+EOF
 }
 
 install_local_dotnet() {
@@ -112,12 +136,12 @@ open_browser_when_ready() {
   BROWSER_PID=$!
 }
 
-section "JK Monitor setup"
-echo "This script prepares a local toolchain if needed, guides the startup mode, and launches the app."
+section "Flux Monitor setup"
+echo "This script prepares a local toolchain if needed, configures PostgreSQL storage, and launches the app without preloading any devices."
 
 DOTNET_CMD="$(get_dotnet)"
 if [ -z "$DOTNET_CMD" ]; then
-  answer="$(read_validated_choice 'No compatible .NET 10 SDK was found. Install a local copy into this repository?' 'yesno' 'y')"
+  answer="$(read_validated_choice 'No compatible .NET 10 SDK was found. Install a local copy into this repository?' 'y')"
   if [ "${answer,,}" != "y" ]; then
     echo "A .NET 10 SDK is required to run this repository from source."
     exit 1
@@ -126,15 +150,15 @@ if [ -z "$DOTNET_CMD" ]; then
   DOTNET_CMD="$LOCAL_DOTNET"
 fi
 
-MODE="$(read_validated_choice 'Choose startup mode: 1 = simulator, 2 = hardware' 'startup' '1')"
 ENVIRONMENT='Development'
 TARGET_CONFIG="$BACKEND_PATH/appsettings.Development.Local.json"
-
-if [ "$MODE" = '1' ]; then
-  USE_DB="$(read_validated_choice 'Enable PostgreSQL and TimescaleDB persistence now?' 'yesno' 'n')"
-  if [ "${USE_DB,,}" = 'y' ]; then
-    read -r -p 'PostgreSQL connection string: ' CONNECTION_STRING
-    cat > "$TARGET_CONFIG" <<EOF
+AUDIT_PATH="$REPO_ROOT/src/install-audit.json"
+IS_FIRST_INSTALL='true'
+if [ -f "$TARGET_CONFIG" ] || [ -f "$AUDIT_PATH" ]; then
+  IS_FIRST_INSTALL='false'
+fi
+CONNECTION_STRING="$(read_required_value 'PostgreSQL connection string: ')"
+cat > "$TARGET_CONFIG" <<EOF
 {
   "Monitor": {
     "Storage": {
@@ -144,67 +168,30 @@ if [ "$MODE" = '1' ]; then
   }
 }
 EOF
-  else
-    cat > "$TARGET_CONFIG" <<'EOF'
-{
-  "Monitor": {
-    "Storage": {
-      "Provider": "None",
-      "ConnectionString": ""
-    }
-  }
-}
-EOF
-  fi
-else
-  ENVIRONMENT='Production'
-  TARGET_CONFIG="$BACKEND_PATH/appsettings.Production.Local.json"
-  read -r -p 'RS485 serial port (example: /dev/ttyUSB0): ' SERIAL_PORT
-  if [ -z "$SERIAL_PORT" ]; then
-    echo 'A serial port is required for hardware mode.'
-    exit 1
-  fi
 
-  USE_DB="$(read_validated_choice 'Enable PostgreSQL and TimescaleDB persistence?' 'yesno' 'y')"
-  CONNECTION_STRING=''
-  if [ "${USE_DB,,}" = 'y' ]; then
-    read -r -p 'PostgreSQL connection string: ' CONNECTION_STRING
-  fi
-
-  cat > "$TARGET_CONFIG" <<EOF
-{
-  "Monitor": {
-    "SerialBus": {
-      "PortName": "$SERIAL_PORT"
-    },
-    "Storage": {
-      "Provider": "$( [ "${USE_DB,,}" = 'y' ] && echo 'TimescaleDb' || echo 'None' )",
-      "ConnectionString": "$CONNECTION_STRING"
-    },
-    "Devices": [
-      {
-        "DeviceId": "jk-master-01",
-        "DisplayName": "Main Battery Rack",
-        "Protocol": "jk-rs485",
-        "RegisterProfile": "jk-inverter-v15",
-        "Address": 1,
-        "IsMaster": true,
-        "PollIntervalMilliseconds": 1000,
-        "Enabled": true
-      }
-    ]
-  }
-}
-EOF
+if [ "$IS_FIRST_INSTALL" = 'true' ]; then
+  write_install_audit \
+    "$AUDIT_PATH" \
+    'source' \
+    "$(git -C "$REPO_ROOT" remote get-url origin 2>/dev/null || echo '')" \
+    "$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '')" \
+    '' \
+    '' \
+    '' \
+    "$REPO_ROOT" \
+    "$(id -un 2>/dev/null || echo unknown)" \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    "$(hostname 2>/dev/null || echo unknown)"
 fi
 
-section "Starting JK Monitor"
+section "Starting Flux Monitor"
 echo "Environment: $ENVIRONMENT"
 echo "Opening $APP_URL after the backend is ready."
+echo "No devices are preconfigured. Add them from the app after it starts."
 
 BROWSER_PID=''
 open_browser_when_ready
 
 cd "$REPO_ROOT"
 trap 'if [ -n "${BROWSER_PID:-}" ]; then kill "$BROWSER_PID" >/dev/null 2>&1 || true; fi' EXIT
-ASPNETCORE_ENVIRONMENT="$ENVIRONMENT" "$DOTNET_CMD" run --project ./src/backend/JkMonitor.Backend --launch-profile http
+ASPNETCORE_ENVIRONMENT="$ENVIRONMENT" "$DOTNET_CMD" run --project ./src/FluxMonitor.Backend --launch-profile http

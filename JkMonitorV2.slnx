@@ -1,9 +1,0 @@
-<Solution>
-  <Folder Name="/src/" />
-  <Folder Name="/src/backend/">
-    <Project Path="src/backend/JkMonitor.Backend/JkMonitor.Backend.csproj" />
-  </Folder>
-  <Folder Name="/src/shared/">
-    <Project Path="src/shared/JkMonitor.Contracts/JkMonitor.Contracts.csproj" />
-  </Folder>
-</Solution>

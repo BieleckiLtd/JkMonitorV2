@@ -1,0 +1,113 @@
+﻿<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <FluxMonitorFrontendRoot>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\FluxMonitor.UI'))</FluxMonitorFrontendRoot>
+    <FluxMonitorFrontendPackageJson>$(FluxMonitorFrontendRoot)\package.json</FluxMonitorFrontendPackageJson>
+    <FluxMonitorFrontendRestoreStamp>$(FluxMonitorFrontendRoot)\node_modules\.fluxmonitor-npm-ci.stamp</FluxMonitorFrontendRestoreStamp>
+    <FluxMonitorFrontendBuild Condition="'$(FluxMonitorFrontendBuild)' == ''">true</FluxMonitorFrontendBuild>
+    <FluxMonitorFrontendRestore Condition="'$(FluxMonitorFrontendRestore)' == ''">true</FluxMonitorFrontendRestore>
+    <SourceRevisionId Condition="'$(FluxMonitorSourceRevisionId)' != ''">$(FluxMonitorSourceRevisionId)</SourceRevisionId>
+    <InformationalVersion Condition="'$(FluxMonitorReleaseTag)' != '' and '$(FluxMonitorSourceRevisionId)' != ''">$(FluxMonitorReleaseTag)+$(FluxMonitorSourceRevisionId)</InformationalVersion>
+    <InformationalVersion Condition="'$(FluxMonitorReleaseTag)' != '' and '$(FluxMonitorSourceRevisionId)' == ''">$(FluxMonitorReleaseTag)</InformationalVersion>
+  </PropertyGroup>
+
+  <ItemGroup Condition="'$(FluxMonitorReleaseTag)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>FluxMonitorReleaseTag</_Parameter1>
+      <_Parameter2>$(FluxMonitorReleaseTag)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(FluxMonitorSourceRevisionId)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>FluxMonitorSourceRevisionId</_Parameter1>
+      <_Parameter2>$(FluxMonitorSourceRevisionId)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(FluxMonitorWorkflowRunNumber)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>FluxMonitorWorkflowRunNumber</_Parameter1>
+      <_Parameter2>$(FluxMonitorWorkflowRunNumber)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(FluxMonitorWorkflowRunAttempt)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>FluxMonitorWorkflowRunAttempt</_Parameter1>
+      <_Parameter2>$(FluxMonitorWorkflowRunAttempt)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(FluxMonitorBuiltAt)' != ''">
+    <AssemblyAttribute Include="System.Reflection.AssemblyMetadataAttribute">
+      <_Parameter1>FluxMonitorBuiltAt</_Parameter1>
+      <_Parameter2>$(FluxMonitorBuiltAt)</_Parameter2>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <AssemblyAttribute Include="System.Runtime.CompilerServices.InternalsVisibleTo">
+      <_Parameter1>FluxMonitor.Backend.Tests</_Parameter1>
+    </AssemblyAttribute>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Dapper" Version="2.1.72" />
+    <PackageReference Include="Linux.Bluetooth" Version="5.67.0" />
+    <PackageReference Include="MailKit" Version="4.15.1" />
+    <PackageReference Include="MimeKit" Version="4.15.1" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.5" />
+    <PackageReference Include="NCalcSync" Version="5.12.0" />
+    <PackageReference Include="Npgsql" Version="10.0.2" />
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+    <PackageReference Include="Serilog.Settings.Configuration" Version="10.0.0" />
+    <PackageReference Include="Serilog.Sinks.Console" Version="6.1.1" />
+    <PackageReference Include="System.IO.Ports" Version="10.0.5" />
+    <PackageReference Include="System.Management" Version="10.0.5" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\shared\FluxMonitor.Contracts\FluxMonitor.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrontendRestoreInputs Include="$(FluxMonitorFrontendRoot)\package.json" />
+    <FrontendRestoreInputs Include="$(FluxMonitorFrontendRoot)\package-lock.json" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\components.json" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\eslint.config.js" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\index.html" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\package.json" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\package-lock.json" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\tsconfig.app.json" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\tsconfig.json" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\tsconfig.node.json" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\vite.config.ts" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\public\**\*" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\src\**\*" />
+  </ItemGroup>
+
+  <Target
+    Name="RestoreFrontendDependencies"
+    Condition="'$(FluxMonitorFrontendBuild)' == 'true' and '$(FluxMonitorFrontendRestore)' == 'true' and Exists('$(FluxMonitorFrontendPackageJson)')"
+    Inputs="@(FrontendRestoreInputs)"
+    Outputs="$(FluxMonitorFrontendRestoreStamp)"
+    BeforeTargets="Build;Publish">
+    <Exec Command="npm ci" WorkingDirectory="$(FluxMonitorFrontendRoot)" />
+    <Touch Files="$(FluxMonitorFrontendRestoreStamp)" AlwaysCreate="true" />
+  </Target>
+
+  <Target
+    Name="BuildFrontendAssets"
+    Condition="'$(FluxMonitorFrontendBuild)' == 'true' and Exists('$(FluxMonitorFrontendPackageJson)')"
+    Inputs="@(FrontendBuildInputs)"
+    Outputs="$(MSBuildProjectDirectory)\wwwroot\index.html"
+    DependsOnTargets="RestoreFrontendDependencies"
+    BeforeTargets="Build;Publish">
+    <Exec Command="npm run build" WorkingDirectory="$(FluxMonitorFrontendRoot)" />
+  </Target>
+
+</Project>

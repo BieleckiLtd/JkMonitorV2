@@ -1,0 +1,211 @@
+﻿name: publish-backend
+
+on:
+  push:
+    branches:
+      - dev
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-backend-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DOTNET_VERSION: 10.0.x
+  NODE_VERSION: 24.x
+  PROJECT_PATH: src/FluxMonitor.Backend/FluxMonitor.Backend.csproj
+  FRONTEND_PATH: src/FluxMonitor.UI
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
+jobs:
+  resolve-release:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      title: ${{ steps.release.outputs.title }}
+      prerelease: ${{ steps.release.outputs.prerelease }}
+
+    steps:
+      - name: Resolve release channel
+        id: release
+        shell: bash
+        run: |
+          if [[ "${GITHUB_REF_TYPE}" == "tag" ]]; then
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "title=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=dev-latest" >> "$GITHUB_OUTPUT"
+            echo "title=dev-latest" >> "$GITHUB_OUTPUT"
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+          fi
+
+  publish-linux-arm64:
+    runs-on: ubuntu-latest
+    needs: resolve-release
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v5
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: ${{ env.FRONTEND_PATH }}/package-lock.json
+
+      - name: Restore
+        run: dotnet restore ${{ env.PROJECT_PATH }}
+
+      - name: Publish linux-arm64 backend
+        shell: bash
+        run: |
+          BUILT_AT=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          dotnet publish "${{ env.PROJECT_PATH }}" \
+            --configuration Release \
+            --runtime linux-arm64 \
+            --self-contained false \
+            -p:UseAppHost=false \
+            -p:FluxMonitorReleaseTag="${{ needs.resolve-release.outputs.tag }}" \
+            -p:FluxMonitorSourceRevisionId="${{ github.sha }}" \
+            -p:FluxMonitorWorkflowRunNumber="${{ github.run_number }}" \
+            -p:FluxMonitorWorkflowRunAttempt="${{ github.run_attempt }}" \
+            -p:FluxMonitorBuiltAt="$BUILT_AT" \
+            --output artifacts/linux-arm64
+
+      - name: Package linux artifact
+        shell: bash
+        run: |
+          tar -C artifacts -czf fluxmonitor-backend-linux-arm64.tar.gz linux-arm64
+          sha256sum fluxmonitor-backend-linux-arm64.tar.gz > fluxmonitor-backend-linux-arm64.tar.gz.sha256
+
+      - name: Upload linux workflow artifact
+        uses: actions/upload-artifact@v5
+        with:
+          name: release-linux-arm64
+          path: |
+            fluxmonitor-backend-linux-arm64.tar.gz
+            fluxmonitor-backend-linux-arm64.tar.gz.sha256
+
+  # publish-windows-x64:
+  #   runs-on: windows-latest
+  #   needs: resolve-release
+  #
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v5
+  #
+  #     - name: Setup .NET
+  #       uses: actions/setup-dotnet@v5
+  #       with:
+  #         dotnet-version: ${{ env.DOTNET_VERSION }}
+  #
+  #     - name: Setup Node.js
+  #       uses: actions/setup-node@v4
+  #       with:
+  #         node-version: ${{ env.NODE_VERSION }}
+  #         cache: npm
+  #         cache-dependency-path: ${{ env.FRONTEND_PATH }}/package-lock.json
+  #
+  #     - name: Restore
+  #       run: dotnet restore ${{ env.PROJECT_PATH }}
+  #
+  #     - name: Publish win-x64 backend
+  #       shell: pwsh
+  #       run: |
+  #         $builtAt = (Get-Date -AsUTC -Format 'yyyy-MM-ddTHH:mm:ssZ')
+  #         dotnet publish ${{ env.PROJECT_PATH }} `
+  #           --configuration Release `
+  #           --runtime win-x64 `
+  #           --self-contained false `
+  #           -p:UseAppHost=true `
+  #           -p:FluxMonitorReleaseTag="${{ needs.resolve-release.outputs.tag }}" `
+  #           -p:FluxMonitorSourceRevisionId="${{ github.sha }}" `
+  #           -p:FluxMonitorWorkflowRunNumber="${{ github.run_number }}" `
+  #           -p:FluxMonitorWorkflowRunAttempt="${{ github.run_attempt }}" `
+  #           -p:FluxMonitorBuiltAt="$builtAt" `
+  #           --output artifacts/win-x64
+  #
+  #     - name: Package windows artifact
+  #       shell: pwsh
+  #       run: |
+  #         Compress-Archive -Path artifacts/win-x64/* -DestinationPath fluxmonitor-backend-win-x64.zip -Force
+  #         $hash = (Get-FileHash -Algorithm SHA256 fluxmonitor-backend-win-x64.zip).Hash.ToLowerInvariant()
+  #         "$hash  fluxmonitor-backend-win-x64.zip" | Set-Content -Path fluxmonitor-backend-win-x64.zip.sha256 -Encoding ascii
+  #
+  #     - name: Upload windows workflow artifact
+  #       uses: actions/upload-artifact@v5
+  #       with:
+  #         name: release-win-x64
+  #         path: |
+  #           fluxmonitor-backend-win-x64.zip
+  #           fluxmonitor-backend-win-x64.zip.sha256
+
+  publish-release:
+    runs-on: ubuntu-latest
+    needs:
+      - resolve-release
+      - publish-linux-arm64
+      # - publish-windows-x64
+
+    steps:
+      - name: Download release artifacts
+        uses: actions/download-artifact@v5
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: Create release notes
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.tag }}
+        run: |
+          printf '%s\n' \
+            'Install on a Linux ARM64 device directly from GitHub:' \
+            '' \
+            '```bash' \
+            "wget -qO- https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-release.sh | bash -s -- https://github.com/BieleckiLtd/JkMonitorV2 $RELEASE_TAG" \
+            '```' \
+            '' \
+            'Install on Windows x64 directly from GitHub:' \
+            '' \
+            '```powershell' \
+            "powershell -ExecutionPolicy Bypass -Command \"& { \\$tmp = Join-Path \\$env:TEMP 'FluxMonitor-release-install.ps1'; Invoke-WebRequest 'https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-release.ps1' -OutFile \\$tmp; & powershell -ExecutionPolicy Bypass -File \\$tmp -Repository 'https://github.com/BieleckiLtd/JkMonitorV2' -ReleaseTag '$RELEASE_TAG' }\"" \
+            '```' \
+            '' \
+            'Both installers download the published app artifact from GitHub Releases, install the ASP.NET Core runtime when needed, start in simulator mode for an immediate first run, and let the user finish RS485 setup from the browser UI.' \
+            > release-notes.md
+
+      - name: Create or update GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ needs.resolve-release.outputs.tag }}
+          RELEASE_TITLE: ${{ needs.resolve-release.outputs.title }}
+          RELEASE_PRERELEASE: ${{ needs.resolve-release.outputs.prerelease }}
+        shell: bash
+        run: |
+          mapfile -t assets < <(find release-assets -maxdepth 1 -type f | sort)
+
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+            gh release edit "$RELEASE_TAG" --title "$RELEASE_TITLE" --notes-file release-notes.md
+            exit 0
+          fi
+
+          if [[ "$RELEASE_PRERELEASE" == "true" ]]; then
+            gh release create "$RELEASE_TAG" "${assets[@]}" --title "$RELEASE_TITLE" --notes-file release-notes.md --prerelease
+          else
+            gh release create "$RELEASE_TAG" "${assets[@]}" --title "$RELEASE_TITLE" --notes-file release-notes.md
+          fi
