@@ -278,6 +278,7 @@ export function SystemPage() {
   const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateActionError, setUpdateActionError] = useState<string | null>(null);
+  const [softwareUpdateSectionOpen, setSoftwareUpdateSectionOpen] = useState(false);
   const [interfaces, setInterfaces] = useState<SystemInterfacesResponse | null>(null);
   const [connectivity, setConnectivity] = useState<SystemConnectivitySnapshot | null>(null);
   const [connectivityLoading, setConnectivityLoading] = useState(true);
@@ -389,8 +390,12 @@ export function SystemPage() {
   }, []);
 
   useEffect(() => {
+    if (!softwareUpdateSectionOpen) {
+      return;
+    }
+
     void checkForUpdate();
-  }, [checkForUpdate]);
+  }, [checkForUpdate, softwareUpdateSectionOpen]);
 
   const loadConnectivity = useCallback(async () => {
     try {
@@ -446,12 +451,12 @@ export function SystemPage() {
       setUpdateActionError(null);
     }
 
-    if (previousUpdateStatusRef.current !== 'succeeded' && updateProgress?.status === 'succeeded') {
+    if (softwareUpdateSectionOpen && previousUpdateStatusRef.current !== 'succeeded' && updateProgress?.status === 'succeeded') {
       void checkForUpdate();
     }
 
     previousUpdateStatusRef.current = updateProgress?.status ?? null;
-  }, [checkForUpdate, updateProgress]);
+  }, [checkForUpdate, softwareUpdateSectionOpen, updateProgress]);
 
   useEffect(() => {
     const loadInterfaces = async () => {
@@ -838,7 +843,6 @@ export function SystemPage() {
   const memoryUsagePercent = getUsagePercent(memoryUsed, memoryTotal);
   const storageUsagePercent = getUsagePercent(storageUsed, storageTotal);
   const applicationUptime = status ? formatDuration(status.startedAt, status.reportedAt) : noDataLabel;
-  const sourceRevisionId = status?.build?.sourceRevisionId ?? noDataLabel;
   const workflowRun = formatWorkflowRun(status?.build?.workflowRunNumber, status?.build?.workflowRunAttempt);
   const ethernetInterfaces = connectivity?.network.ethernetInterfaces ?? [];
   const wifiInterfaces = connectivity?.network.wifiInterfaces ?? [];
@@ -855,6 +859,17 @@ export function SystemPage() {
   const wifiSectionOpen = expandedConnectivitySection === 'wifi';
   const bluetoothSectionOpen = expandedConnectivitySection === 'bluetooth';
   const ethernetSectionOpen = expandedConnectivitySection === 'ethernet';
+  const softwareUpdateSummary = updateProgress?.isRunning
+    ? updateProgress.stage
+    : updateChecking
+      ? 'Checking for updates'
+      : updateCheck?.checkError
+        ? 'Update check failed'
+        : updateCheck?.updateAvailable
+          ? 'Update available'
+          : updateCheck?.currentReleaseTag
+            ? `Installed ${updateCheck.currentReleaseTag}`
+            : 'Expand to check for updates';
   const wifiSummary = !connectivity?.network.supported
     ? connectivity?.network.statusMessage ?? 'Wi-Fi unavailable'
     : wifiPowered === false
@@ -971,142 +986,153 @@ export function SystemPage() {
             </Card>
 
             <Card className='border border-border/80 bg-card/85 shadow-sm'>
-              <CardHeader className='border-b border-border/60 pb-4'>
-                <div className='flex items-center gap-2'>
-                  <RefreshCcw className='h-4 w-4 text-muted-foreground' />
-                  <div>
-                    <CardTitle>Software update</CardTitle>
-                    <CardDescription>Check for new releases and install updates from GitHub.</CardDescription>
+              <CardHeader className='pb-4'>
+                <button
+                  type='button'
+                  onClick={() => setSoftwareUpdateSectionOpen((current) => !current)}
+                  className='flex w-full items-center gap-3 text-left'
+                >
+                  <div className='flex items-center gap-2'>
+                    <RefreshCcw className='h-4 w-4 text-muted-foreground' />
+                    <div>
+                      <CardTitle>Software update</CardTitle>
+                      <CardDescription>Check for new releases and install updates from GitHub.</CardDescription>
+                    </div>
                   </div>
-                </div>
+                  <div className='ml-auto flex items-center gap-2 pl-3 text-xs text-muted-foreground'>
+                    <span className='hidden sm:inline'>{softwareUpdateSummary}</span>
+                    {softwareUpdateSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
+                  </div>
+                </button>
               </CardHeader>
-              <CardContent className='space-y-4 pt-5'>
-                <DetailTile label='Current commit' value={formatCommit(sourceRevisionId)} />
-                <DetailTile label='Workflow' value={workflowRun} />
-                {updateChecking && !updateCheck ? (
-                  <div className='flex items-center justify-center py-6'>
-                    <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
-                  </div>
-                ) : updateCheck ? (
-                  <>
-                    <DetailTile label='Installed release' value={updateCheck.currentReleaseTag ?? noDataLabel} />
-                    <DetailTile label='Installed commit' value={formatCommit(updateCheck.currentSourceRevision)} />
-                    {updateCheck.currentBuiltAt ? <DetailTile label='Built at' value={formatTimestamp(updateCheck.currentBuiltAt)} /> : null}
-                    {updateCheck.checkError ? (
-                      <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
-                        Update check failed: {updateCheck.checkError}
-                      </div>
-                    ) : updateCheck.updateAvailable && updateProgress?.success !== true ? (
-                      <div className='rounded-xl border border-primary/20 bg-primary/10 px-3 py-2 text-sm text-primary'>
-                        <div className='flex items-center gap-2'>
-                          <Download className='h-4 w-4' />
-                          A new version is available.
+              {softwareUpdateSectionOpen ? (
+                <CardContent className='space-y-4 border-t border-border/60 pt-5'>
+                  <DetailTile label='Workflow' value={workflowRun} />
+                  {updateChecking && !updateCheck ? (
+                    <div className='flex items-center justify-center py-6'>
+                      <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
+                    </div>
+                  ) : updateCheck ? (
+                    <>
+                      <DetailTile label='Installed release' value={updateCheck.currentReleaseTag ?? noDataLabel} />
+                      <DetailTile label='Installed commit' value={formatCommit(updateCheck.currentSourceRevision)} />
+                      {updateCheck.currentBuiltAt ? <DetailTile label='Built at' value={formatTimestamp(updateCheck.currentBuiltAt)} /> : null}
+                      {updateCheck.checkError ? (
+                        <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
+                          Update check failed: {updateCheck.checkError}
                         </div>
-                        {updateCheck.remoteReleasePublishedAt ? (
-                          <div className='mt-1 text-xs text-primary/80'>Built {formatTimestamp(updateCheck.remoteReleasePublishedAt)}</div>
-                        ) : null}
-                        {updateCheck.commits && updateCheck.commits.length > 0 ? (
-                          <div className='mt-2 space-y-1'>
-                            <div className='text-[10px] font-medium uppercase tracking-[0.16em] text-primary/60'>Changes</div>
-                            <ul className='space-y-0.5 text-xs text-primary/80'>
-                              {updateCheck.commits.map((c, i) => (
-                                <li key={i} className='flex gap-1.5'>
-                                  <span className='shrink-0 font-mono text-[10px] text-primary/50'>{c.sha ?? ''}</span>
-                                  <span>{c.message ?? ''}</span>
-                                </li>
-                              ))}
-                            </ul>
+                      ) : updateCheck.updateAvailable && updateProgress?.success !== true ? (
+                        <div className='rounded-xl border border-primary/20 bg-primary/10 px-3 py-2 text-sm text-primary'>
+                          <div className='flex items-center gap-2'>
+                            <Download className='h-4 w-4' />
+                            A new version is available.
                           </div>
-                        ) : null}
-                      </div>
-                    ) : updateCheck.localChecksum && updateCheck.remoteChecksum ? (
-                      <div className='rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200 flex items-center gap-2'>
-                        <CheckCircle2 className='h-4 w-4' />
-                        You are running the latest version.
-                      </div>
-                    ) : null}
-
-                    {!updateCheck.canUpdate ? (
-                      <div className='rounded-xl border border-border bg-muted/70 px-3 py-2 text-xs text-muted-foreground'>
-                        {updateCheck.reason}
-                      </div>
-                    ) : null}
-
-                    {updateActionError ? (
-                      <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
-                        {updateActionError}
-                      </div>
-                    ) : null}
-
-                    {updateProgress ? (
-                      <div className={cn(
-                        'rounded-xl border px-3 py-2 text-xs',
-                        getUpdateStateTone(updateProgress.status) === 'success'
-                          ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-                          : getUpdateStateTone(updateProgress.status) === 'error'
-                            ? 'border-rose-500/20 bg-rose-500/10 text-rose-200'
-                            : getUpdateStateTone(updateProgress.status) === 'warning'
-                              ? 'border-amber-500/20 bg-amber-500/10 text-amber-200'
-                              : 'border-primary/20 bg-primary/10 text-primary'
-                      )}>
-                        <div className='flex items-center gap-2'>
-                          {updateProgress.isRunning ? <LoaderCircle className='h-3.5 w-3.5 animate-spin shrink-0' /> : updateProgress.status === 'succeeded' ? <CheckCircle2 className='h-3.5 w-3.5 shrink-0' /> : updateProgress.status === 'cancelled' ? <CircleAlert className='h-3.5 w-3.5 shrink-0' /> : <XCircle className='h-3.5 w-3.5 shrink-0' />}
-                          {updateProgress.stage}
-                        </div>
-                        <div className='mt-1.5 opacity-90'>
-                          {updateProgress.detail}
-                        </div>
-                        {updateProgress.percentComplete != null ? (
-                          <div className='mt-3'>
-                            <div className='mb-1 flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.16em] opacity-70'>
-                              <span>
-                                {updateProgress.stepIndex && updateProgress.stepCount ? `Step ${updateProgress.stepIndex} of ${updateProgress.stepCount}` : 'Progress'}
-                              </span>
-                              <span>{updateProgress.percentComplete}%</span>
+                          {updateCheck.remoteReleasePublishedAt ? (
+                            <div className='mt-1 text-xs text-primary/80'>Built {formatTimestamp(updateCheck.remoteReleasePublishedAt)}</div>
+                          ) : null}
+                          {updateCheck.commits && updateCheck.commits.length > 0 ? (
+                            <div className='mt-2 space-y-1'>
+                              <div className='text-[10px] font-medium uppercase tracking-[0.16em] text-primary/60'>Changes</div>
+                              <ul className='space-y-0.5 text-xs text-primary/80'>
+                                {updateCheck.commits.map((c, i) => (
+                                  <li key={i} className='flex gap-1.5'>
+                                    <span className='shrink-0 font-mono text-[10px] text-primary/50'>{c.sha ?? ''}</span>
+                                    <span>{c.message ?? ''}</span>
+                                  </li>
+                                ))}
+                              </ul>
                             </div>
-                            <div className='h-1.5 overflow-hidden rounded-full bg-background/40'>
-                              <div className='h-full rounded-full bg-current transition-[width] duration-500 ease-out' style={{ width: `${Math.max(updateProgress.percentComplete, 4)}%` }} />
+                          ) : null}
+                        </div>
+                      ) : updateCheck.localChecksum && updateCheck.remoteChecksum ? (
+                        <div className='flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200'>
+                          <CheckCircle2 className='h-4 w-4' />
+                          You are running the latest version.
+                        </div>
+                      ) : null}
+
+                      {!updateCheck.canUpdate ? (
+                        <div className='rounded-xl border border-border bg-muted/70 px-3 py-2 text-xs text-muted-foreground'>
+                          {updateCheck.reason}
+                        </div>
+                      ) : null}
+
+                      {updateActionError ? (
+                        <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
+                          {updateActionError}
+                        </div>
+                      ) : null}
+
+                      {updateProgress ? (
+                        <div className={cn(
+                          'rounded-xl border px-3 py-2 text-xs',
+                          getUpdateStateTone(updateProgress.status) === 'success'
+                            ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                            : getUpdateStateTone(updateProgress.status) === 'error'
+                              ? 'border-rose-500/20 bg-rose-500/10 text-rose-200'
+                              : getUpdateStateTone(updateProgress.status) === 'warning'
+                                ? 'border-amber-500/20 bg-amber-500/10 text-amber-200'
+                                : 'border-primary/20 bg-primary/10 text-primary'
+                        )}>
+                          <div className='flex items-center gap-2'>
+                            {updateProgress.isRunning ? <LoaderCircle className='h-3.5 w-3.5 animate-spin shrink-0' /> : updateProgress.status === 'succeeded' ? <CheckCircle2 className='h-3.5 w-3.5 shrink-0' /> : updateProgress.status === 'cancelled' ? <CircleAlert className='h-3.5 w-3.5 shrink-0' /> : <XCircle className='h-3.5 w-3.5 shrink-0' />}
+                            {updateProgress.stage}
+                          </div>
+                          <div className='mt-1.5 opacity-90'>
+                            {updateProgress.detail}
+                          </div>
+                          {updateProgress.percentComplete != null ? (
+                            <div className='mt-3'>
+                              <div className='mb-1 flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.16em] opacity-70'>
+                                <span>
+                                  {updateProgress.stepIndex && updateProgress.stepCount ? `Step ${updateProgress.stepIndex} of ${updateProgress.stepCount}` : 'Progress'}
+                                </span>
+                                <span>{updateProgress.percentComplete}%</span>
+                              </div>
+                              <div className='h-1.5 overflow-hidden rounded-full bg-background/40'>
+                                <div className='h-full rounded-full bg-current transition-[width] duration-500 ease-out' style={{ width: `${Math.max(updateProgress.percentComplete, 4)}%` }} />
+                              </div>
                             </div>
-                          </div>
-                        ) : null}
-                        {updateProgress.isRunning ? (
-                          <div className='mt-2 opacity-80'>
-                            {updateProgress.canCancel
-                              ? 'You can still cancel now if you need to stop the update.'
-                              : updateProgress.cancelUnavailableReason ?? 'Do not turn off the device while the update is being finalized.'}
-                          </div>
-                        ) : null}
-                      </div>
-                    ) : null}
-                  </>
-                ) : (
-                  <div className='text-sm text-muted-foreground'>Unable to check for updates.</div>
-                )}
+                          ) : null}
+                          {updateProgress.isRunning ? (
+                            <div className='mt-2 opacity-80'>
+                              {updateProgress.canCancel
+                                ? 'You can still cancel now if you need to stop the update.'
+                                : updateProgress.cancelUnavailableReason ?? 'Do not turn off the device while the update is being finalized.'}
+                            </div>
+                          ) : null}
+                        </div>
+                      ) : null}
+                    </>
+                  ) : (
+                    <div className='text-sm text-muted-foreground'>Unable to check for updates.</div>
+                  )}
 
-                <div className='flex gap-2 pt-2'>
-                  <button
-                    type='button'
-                    disabled={updateChecking}
-                    onClick={() => void checkForUpdate()}
-                    className='inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
-                  >
-                    {updateChecking ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <RefreshCcw className='h-4 w-4' />}
-                    Check for updates
-                  </button>
-
-                  {updateCheck?.canUpdate && updateCheck?.updateAvailable ? (
+                  <div className='flex flex-col gap-2 pt-2'>
                     <button
                       type='button'
-                      disabled={updateActionPending === 'starting' || (updateProgress?.isRunning ?? false)}
-                      onClick={() => void installUpdate()}
-                      className='inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
+                      disabled={updateChecking}
+                      onClick={() => void checkForUpdate()}
+                      className='inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
                     >
-                      {updateActionPending === 'starting' || updateProgress?.isRunning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Download className='h-4 w-4' />}
-                      Install update
+                      {updateChecking ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <RefreshCcw className='h-4 w-4' />}
+                      Check for updates
                     </button>
-                  ) : null}
-                </div>
-              </CardContent>
+
+                    {updateCheck?.canUpdate && updateCheck?.updateAvailable ? (
+                      <button
+                        type='button'
+                        disabled={updateActionPending === 'starting' || (updateProgress?.isRunning ?? false)}
+                        onClick={() => void installUpdate()}
+                        className='inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
+                      >
+                        {updateActionPending === 'starting' || updateProgress?.isRunning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Download className='h-4 w-4' />}
+                        Install update
+                      </button>
+                    ) : null}
+                  </div>
+                </CardContent>
+              ) : null}
             </Card>
           </div>
 
@@ -1223,7 +1249,7 @@ export function SystemPage() {
                                   </div>
                                 ) : null}
 
-                                <div className='flex flex-col gap-3 rounded-2xl border border-border/70 bg-background/30 px-4 py-3 sm:flex-row sm:items-center sm:justify-between'>
+                                <div className='rounded-2xl border border-border/70 bg-background/30 px-4 py-3'>
                                   <div className='min-w-0'>
                                     <div className='text-sm font-semibold text-foreground font-mono'>{selectedWifiInterface.name}</div>
                                     {selectedWifiInterface.connectedSsid ? (
@@ -1243,16 +1269,6 @@ export function SystemPage() {
                                       </div>
                                     ) : null}
                                   </div>
-
-                                  <button
-                                    type='button'
-                                    disabled={wifiScanLoading === selectedWifiInterface.name}
-                                    onClick={() => void scanWifi(selectedWifiInterface.name)}
-                                    className='inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
-                                  >
-                                    {wifiScanLoading === selectedWifiInterface.name ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <RefreshCcw className='h-4 w-4' />}
-                                    Scan networks
-                                  </button>
                                 </div>
 
                                 <div className='space-y-2'>
@@ -1307,6 +1323,16 @@ export function SystemPage() {
                                     <ChevronRight className='h-4 w-4 text-muted-foreground' />
                                   </button>
                                 </div>
+
+                                <button
+                                  type='button'
+                                  disabled={wifiScanLoading === selectedWifiInterface.name}
+                                  onClick={() => void scanWifi(selectedWifiInterface.name)}
+                                  className='inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
+                                >
+                                  {wifiScanLoading === selectedWifiInterface.name ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <RefreshCcw className='h-4 w-4' />}
+                                  Scan networks
+                                </button>
                               </>
                             )}
                           </div>
@@ -1380,18 +1406,6 @@ export function SystemPage() {
                               </div>
                             ) : (
                               <>
-                                <div className='flex justify-end'>
-                                  <button
-                                    type='button'
-                                    disabled={bluetoothScanLoading}
-                                    onClick={() => void scanBluetooth()}
-                                    className='inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-3 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
-                                  >
-                                    {bluetoothScanLoading ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <RefreshCcw className='h-4 w-4' />}
-                                    Scan
-                                  </button>
-                                </div>
-
                                 {visibleBluetoothDevices.length > 0 ? (
                                   <div className='overflow-hidden rounded-2xl border border-border/70 bg-background/20'>
                                     {visibleBluetoothDevices.map((device, index) => (
@@ -1405,6 +1419,16 @@ export function SystemPage() {
                                     No Bluetooth devices found.
                                   </div>
                                 )}
+
+                                <button
+                                  type='button'
+                                  disabled={bluetoothScanLoading}
+                                  onClick={() => void scanBluetooth()}
+                                  className='inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
+                                >
+                                  {bluetoothScanLoading ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <RefreshCcw className='h-4 w-4' />}
+                                  Scan networks
+                                </button>
                               </>
                             )}
                           </div>
