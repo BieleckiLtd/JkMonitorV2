@@ -1,3 +1,4 @@
+using FluxMonitor.Backend.Models;
 using FluxMonitor.Backend.Services;
 using System.Net.NetworkInformation;
 using Xunit;
@@ -81,6 +82,52 @@ public sealed class NetworkManagementServiceTests
                 Assert.Equal("FIVE_EXT", accessPoint.Ssid);
                 Assert.Equal(34, accessPoint.SignalPercent);
             });
+    }
+
+    [Fact]
+    public void CountVisibleWifiNetworks_IgnoresHiddenEntriesAndDeduplicatesBySsid()
+    {
+        var accessPoints = new[]
+        {
+            new WifiAccessPointInfo { InterfaceName = "wlan0", Ssid = "FIVE_EXT", Bssid = "AA:AA:AA:AA:AA:AA" },
+            new WifiAccessPointInfo { InterfaceName = "wlan0", Ssid = "FIVE_5G", Bssid = "BB:BB:BB:BB:BB:BB" },
+            new WifiAccessPointInfo { InterfaceName = "wlan0", Ssid = "FIVE_5G", Bssid = "CC:CC:CC:CC:CC:CC" },
+            new WifiAccessPointInfo { InterfaceName = "wlan0", Ssid = "<hidden>", Bssid = "DD:DD:DD:DD:DD:DD" }
+        };
+
+        Assert.Equal(2, NetworkManagementService.CountVisibleWifiNetworks(accessPoints));
+    }
+
+    [Fact]
+    public void ShouldRetryWifiAccessPointRead_RetriesWhenOnlyOneVisibleNetworkIsPresent()
+    {
+        var accessPoints = new[]
+        {
+            new WifiAccessPointInfo { InterfaceName = "wlan0", Ssid = "FIVE_EXT", Bssid = "AA:AA:AA:AA:AA:AA" },
+            new WifiAccessPointInfo { InterfaceName = "wlan0", Ssid = "<hidden>", Bssid = "BB:BB:BB:BB:BB:BB" }
+        };
+
+        Assert.True(NetworkManagementService.ShouldRetryWifiAccessPointRead(accessPoints, attempt: 0));
+        Assert.False(NetworkManagementService.ShouldRetryWifiAccessPointRead(accessPoints, attempt: 4));
+    }
+
+    [Fact]
+    public void IsBetterWifiAccessPointRead_PrefersMoreVisibleNetworksOverPartialRead()
+    {
+        var partialRead = new[]
+        {
+            new WifiAccessPointInfo { InterfaceName = "wlan0", Ssid = "FIVE_EXT", Bssid = "AA:AA:AA:AA:AA:AA", IsActive = true }
+        };
+
+        var fullerRead = new[]
+        {
+            new WifiAccessPointInfo { InterfaceName = "wlan0", Ssid = "FIVE_EXT", Bssid = "AA:AA:AA:AA:AA:AA", IsActive = true },
+            new WifiAccessPointInfo { InterfaceName = "wlan0", Ssid = "FIVE_5G_EXT", Bssid = "BB:BB:BB:BB:BB:BB" },
+            new WifiAccessPointInfo { InterfaceName = "wlan0", Ssid = "TeslaPW_EWJRDG", Bssid = "CC:CC:CC:CC:CC:CC" }
+        };
+
+        Assert.True(NetworkManagementService.IsBetterWifiAccessPointRead(fullerRead, partialRead));
+        Assert.False(NetworkManagementService.IsBetterWifiAccessPointRead(partialRead, fullerRead));
     }
 
     [Fact]

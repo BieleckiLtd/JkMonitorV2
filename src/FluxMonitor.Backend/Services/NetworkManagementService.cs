@@ -679,25 +679,35 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
 
         ProcessResult? lastResult = null;
         WifiAccessPointInfo[] lastAccessPoints = [];
+        WifiAccessPointInfo[] bestAccessPoints = [];
 
-        for (var attempt = 0; attempt < 3; attempt++)
+        for (var attempt = 0; attempt < 5; attempt++)
         {
             lastResult = await ListWifiAccessPointsAsync(interfaceName, cancellationToken);
             if (!lastResult.Succeeded)
             {
-                return new WifiAccessPointCollectionResult(lastResult, []);
+                return bestAccessPoints.Length > 0
+                    ? new WifiAccessPointCollectionResult(lastResult, bestAccessPoints)
+                    : new WifiAccessPointCollectionResult(lastResult, []);
             }
 
             lastAccessPoints = ParseWifiAccessPoints(lastResult.StandardOutput, interfaceName);
-            if (!ShouldRetryWifiAccessPointRead(lastAccessPoints, attempt))
+            if (IsBetterWifiAccessPointRead(lastAccessPoints, bestAccessPoints))
             {
-                return new WifiAccessPointCollectionResult(lastResult, lastAccessPoints);
+                bestAccessPoints = lastAccessPoints;
             }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(750), cancellationToken);
+            if (!ShouldRetryWifiAccessPointRead(bestAccessPoints, attempt))
+            {
+                return new WifiAccessPointCollectionResult(lastResult, bestAccessPoints);
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
         }
 
-        return new WifiAccessPointCollectionResult(lastResult ?? new ProcessResult(false, string.Empty, string.Empty, null), lastAccessPoints);
+        return new WifiAccessPointCollectionResult(
+            lastResult ?? new ProcessResult(false, string.Empty, string.Empty, null),
+            bestAccessPoints.Length > 0 ? bestAccessPoints : lastAccessPoints);
     }
 
     private async Task RequestWifiRescanAsync(string interfaceName, CancellationToken cancellationToken)
@@ -722,14 +732,43 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             cancellationToken);
     }
 
-    private static bool ShouldRetryWifiAccessPointRead(IReadOnlyList<WifiAccessPointInfo> accessPoints, int attempt)
+    internal static bool ShouldRetryWifiAccessPointRead(IReadOnlyList<WifiAccessPointInfo> accessPoints, int attempt)
     {
-        if (attempt >= 2)
+        if (attempt >= 4)
         {
             return false;
         }
 
-        return accessPoints.Count <= 1;
+        return CountVisibleWifiNetworks(accessPoints) <= 1;
+    }
+
+    internal static int CountVisibleWifiNetworks(IReadOnlyList<WifiAccessPointInfo> accessPoints)
+    {
+        return accessPoints
+            .Where(accessPoint => !string.IsNullOrWhiteSpace(accessPoint.Ssid)
+                && !string.Equals(accessPoint.Ssid, "<hidden>", StringComparison.OrdinalIgnoreCase))
+            .Select(accessPoint => accessPoint.Ssid)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Count();
+    }
+
+    internal static bool IsBetterWifiAccessPointRead(
+        IReadOnlyList<WifiAccessPointInfo> candidateAccessPoints,
+        IReadOnlyList<WifiAccessPointInfo> currentBestAccessPoints)
+    {
+        var candidateVisibleCount = CountVisibleWifiNetworks(candidateAccessPoints);
+        var currentVisibleCount = CountVisibleWifiNetworks(currentBestAccessPoints);
+        if (candidateVisibleCount != currentVisibleCount)
+        {
+            return candidateVisibleCount > currentVisibleCount;
+        }
+
+        if (candidateAccessPoints.Count != currentBestAccessPoints.Count)
+        {
+            return candidateAccessPoints.Count > currentBestAccessPoints.Count;
+        }
+
+        return false;
     }
 
     private async Task<string?> ResolveWifiInterfaceNameAsync(string? interfaceName, CancellationToken cancellationToken)
