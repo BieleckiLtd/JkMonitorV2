@@ -268,6 +268,59 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         };
     }
 
+    public async Task<EthernetDisconnectResult> DisconnectEthernetAsync(string? interfaceName, CancellationToken cancellationToken = default)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return new EthernetDisconnectResult
+            {
+                Success = false,
+                InterfaceName = interfaceName?.Trim() ?? string.Empty,
+                Message = "Ethernet disconnect is supported on Linux hosts with NetworkManager."
+            };
+        }
+
+        var resolvedInterfaceName = await ResolveEthernetInterfaceNameAsync(interfaceName, cancellationToken);
+        if (resolvedInterfaceName is null)
+        {
+            return new EthernetDisconnectResult
+            {
+                Success = false,
+                InterfaceName = interfaceName?.Trim() ?? string.Empty,
+                Message = "No Ethernet interface was detected on this host."
+            };
+        }
+
+        logger.LogInformation("Disconnecting Ethernet interface {InterfaceName}.", resolvedInterfaceName);
+
+        var result = await RunNmcliAsync(["device", "disconnect", resolvedInterfaceName], cancellationToken);
+        if (!result.Succeeded)
+        {
+            var message = BuildCommandFailureMessage(result, $"Unable to disconnect Ethernet interface '{resolvedInterfaceName}'.");
+            logger.LogWarning(
+                "Failed to disconnect Ethernet interface {InterfaceName}: {ErrorMessage}",
+                resolvedInterfaceName,
+                message);
+
+            return new EthernetDisconnectResult
+            {
+                Success = false,
+                InterfaceName = resolvedInterfaceName,
+                Message = message
+            };
+        }
+
+        logger.LogInformation("Ethernet interface {InterfaceName} disconnected successfully.", resolvedInterfaceName);
+        return new EthernetDisconnectResult
+        {
+            Success = true,
+            InterfaceName = resolvedInterfaceName,
+            Message = string.IsNullOrWhiteSpace(result.StandardOutput)
+                ? $"Disconnected '{resolvedInterfaceName}'."
+                : result.StandardOutput.Trim()
+        };
+    }
+
     internal static string[] SplitNmcliFields(string line)
     {
         if (string.IsNullOrEmpty(line))
@@ -593,6 +646,31 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         return GetBaseInterfaces()
             .FirstOrDefault(@interface => string.Equals(ResolveInterfaceKind(@interface, deviceStatuses: null), "wifi", StringComparison.Ordinal))
             ?.Name;
+    }
+
+    private async Task<string?> ResolveEthernetInterfaceNameAsync(string? interfaceName, CancellationToken cancellationToken)
+    {
+        var deviceStatuses = await GetDeviceStatusesAsync(cancellationToken);
+        var ethernetInterfaces = GetBaseInterfaces()
+            .Where(@interface => string.Equals(ResolveInterfaceKind(@interface, deviceStatuses), "ethernet", StringComparison.Ordinal))
+            .Select(@interface => @interface.Name)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(interfaceName))
+        {
+            var trimmed = interfaceName.Trim();
+            return ethernetInterfaces.Contains(trimmed) ? trimmed : null;
+        }
+
+        var activeEthernet = deviceStatuses.Values
+            .Where(deviceStatus => IsEthernetDeviceType(deviceStatus.Type))
+            .FirstOrDefault(deviceStatus => string.Equals(deviceStatus.State, "connected", StringComparison.OrdinalIgnoreCase));
+        if (!string.IsNullOrWhiteSpace(activeEthernet?.DeviceName))
+        {
+            return activeEthernet.DeviceName.Trim();
+        }
+
+        return ethernetInterfaces.FirstOrDefault();
     }
 
     private static BaseInterfaceInfo[] GetBaseInterfaces()

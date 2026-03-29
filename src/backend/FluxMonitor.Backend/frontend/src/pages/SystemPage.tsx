@@ -1,4 +1,6 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
+import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
+import { faSignal, faWifi, type IconDefinition } from '@fortawesome/free-solid-svg-icons';
 import { Bluetooth, Cable, ChevronDown, ChevronRight, CircleAlert, Cpu, Database, Download, HardDrive, Leaf, LoaderCircle, MemoryStick, RefreshCcw, CheckCircle2, Upload, Usb, Wifi, XCircle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
@@ -197,6 +199,12 @@ type WifiPowerResult = {
   message: string;
 };
 
+type EthernetDisconnectResult = {
+  success: boolean;
+  interfaceName: string;
+  message: string;
+};
+
 type BluetoothDeviceSnapshot = {
   address: string;
   alias?: string | null;
@@ -238,6 +246,18 @@ type InlineFeedback = {
   isError: boolean;
 };
 
+type PendingConnectivityAction =
+  | {
+    kind: 'disable-wifi';
+    interfaceName: string;
+    connectionName?: string | null;
+  }
+  | {
+    kind: 'disconnect-ethernet';
+    interfaceName: string;
+    connectionName?: string | null;
+  };
+
 export function SystemPage() {
   const [status, setStatus] = useState<MonitorRuntimeStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -267,6 +287,9 @@ export function SystemPage() {
   const [bluetoothScanLoading, setBluetoothScanLoading] = useState(false);
   const [bluetoothPowerLoading, setBluetoothPowerLoading] = useState(false);
   const [bluetoothFeedback, setBluetoothFeedback] = useState<InlineFeedback | null>(null);
+  const [ethernetDisconnectLoading, setEthernetDisconnectLoading] = useState<string | null>(null);
+  const [ethernetFeedback, setEthernetFeedback] = useState<InlineFeedback | null>(null);
+  const [pendingConnectivityAction, setPendingConnectivityAction] = useState<PendingConnectivityAction | null>(null);
   const [expandedConnectivitySection, setExpandedConnectivitySection] = useState<'wifi' | 'bluetooth' | 'ethernet' | null>('wifi');
 
   useEffect(() => {
@@ -594,6 +617,76 @@ export function SystemPage() {
     }
   };
 
+  const disconnectEthernet = async (interfaceName: string) => {
+    setEthernetDisconnectLoading(interfaceName);
+    setEthernetFeedback(null);
+
+    try {
+      const response = await fetch('/api/system/network/ethernet/disconnect', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ interfaceName }),
+      });
+
+      const data = await response.json() as EthernetDisconnectResult;
+      setEthernetFeedback({ message: data.message, isError: !response.ok || !data.success });
+
+      if (response.ok && data.success) {
+        await loadConnectivity();
+      }
+    } catch (error) {
+      setEthernetFeedback({
+        message: error instanceof Error ? error.message : 'Unable to disconnect the Ethernet interface.',
+        isError: true,
+      });
+    } finally {
+      setEthernetDisconnectLoading(null);
+    }
+  };
+
+  const requestWifiPowerToggle = () => {
+    const isDisabling = wifiPowered !== false;
+    if (isDisabling && isWifiInterfaceInUse(connectedWifiInterface)) {
+      setPendingConnectivityAction({
+        kind: 'disable-wifi',
+        interfaceName: connectedWifiInterface?.name ?? 'wifi',
+        connectionName: connectedWifiInterface?.connectedSsid,
+      });
+      return;
+    }
+
+    void toggleWifiPower();
+  };
+
+  const requestEthernetDisconnect = (ethernetInterface: EthernetInterfaceSnapshot) => {
+    if (isEthernetInterfaceActive(ethernetInterface)) {
+      setPendingConnectivityAction({
+        kind: 'disconnect-ethernet',
+        interfaceName: ethernetInterface.name,
+        connectionName: ethernetInterface.connectionName,
+      });
+      return;
+    }
+
+    void disconnectEthernet(ethernetInterface.name);
+  };
+
+  const confirmPendingConnectivityAction = async () => {
+    const action = pendingConnectivityAction;
+    if (!action) {
+      return;
+    }
+
+    setPendingConnectivityAction(null);
+
+    if (action.kind === 'disable-wifi') {
+      await toggleWifiPower();
+      return;
+    }
+
+    await disconnectEthernet(action.interfaceName);
+  };
+
   const selectWifiInterface = async (wifiInterface: WifiInterfaceSnapshot) => {
     setWifiTargetInterface(wifiInterface.name);
     setWifiTargetSsid(wifiInterface.connectedSsid || '');
@@ -728,9 +821,7 @@ export function SystemPage() {
   const visibleBluetoothDevices = mergeBluetoothDevices(bluetoothDevices, scannedBluetoothDevices);
   const connectedWifiInterface = wifiInterfaces.find((wifiInterface) => wifiInterface.connectedSsid) ?? selectedWifiInterface;
   const activeBluetoothDevice = visibleBluetoothDevices.find((device) => device.isConnected) ?? visibleBluetoothDevices[0] ?? null;
-  const activeEthernetInterface = ethernetInterfaces.find((ethernetInterface) =>
-    (ethernetInterface.connectionState ?? ethernetInterface.status ?? '').toLowerCase().includes('connected')
-    || stringEqualsIgnoreCase(ethernetInterface.status, 'up')) ?? ethernetInterfaces[0] ?? null;
+  const activeEthernetInterface = ethernetInterfaces.find((ethernetInterface) => isEthernetInterfaceActive(ethernetInterface)) ?? ethernetInterfaces[0] ?? null;
   const wifiSectionOpen = expandedConnectivitySection === 'wifi';
   const bluetoothSectionOpen = expandedConnectivitySection === 'bluetooth';
   const ethernetSectionOpen = expandedConnectivitySection === 'ethernet';
@@ -747,8 +838,8 @@ export function SystemPage() {
     ? 'Unavailable'
     : wifiPowered === false
       ? 'Off'
-      : connectedWifiInterface?.signalPercent != null
-        ? `${connectedWifiInterface.signalPercent}%`
+      : connectedWifiInterface?.connectedSsid
+        ? 'Connected'
         : 'On';
   const bluetoothSummary = !connectivity?.bluetooth.supported
     ? connectivity?.bluetooth.statusMessage ?? 'Bluetooth unavailable'
@@ -768,6 +859,21 @@ export function SystemPage() {
       : activeEthernetInterface.description || activeEthernetInterface.name
     : 'No wired connection';
   const ethernetStatusLabel = activeEthernetInterface?.connectionState ?? activeEthernetInterface?.status ?? 'Unavailable';
+  const pendingConnectivityDialogTitle = pendingConnectivityAction?.kind === 'disable-wifi'
+    ? 'Turn off Wi-Fi?'
+    : pendingConnectivityAction?.kind === 'disconnect-ethernet'
+      ? 'Disconnect Ethernet?'
+      : null;
+  const pendingConnectivityDialogDescription = pendingConnectivityAction?.kind === 'disable-wifi'
+    ? `You are currently using ${pendingConnectivityAction.connectionName ?? pendingConnectivityAction.interfaceName}. Turning Wi-Fi off will disconnect this device from that network.`
+    : pendingConnectivityAction?.kind === 'disconnect-ethernet'
+      ? `Disconnect ${pendingConnectivityAction.interfaceName}${pendingConnectivityAction.connectionName ? ` from ${pendingConnectivityAction.connectionName}` : ''}? This can interrupt access to the device.`
+      : null;
+  const pendingConnectivityConfirmLabel = pendingConnectivityAction?.kind === 'disable-wifi'
+    ? 'Turn off Wi-Fi'
+    : pendingConnectivityAction?.kind === 'disconnect-ethernet'
+      ? 'Disconnect Ethernet'
+      : null;
 
   return (
     <div className='space-y-6 pb-8'>
@@ -976,7 +1082,7 @@ export function SystemPage() {
                           <button
                             type='button'
                             onClick={() => void toggleConnectivitySection('wifi')}
-                            className='flex min-w-0 flex-1 items-center gap-3 text-left'
+                            className='group flex min-w-0 flex-1 items-center gap-3 text-left'
                           >
                             <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
                               <Wifi className='h-4 w-4 text-muted-foreground' />
@@ -986,7 +1092,15 @@ export function SystemPage() {
                               <div className='mt-0.5 truncate text-xs text-muted-foreground'>{wifiSummary}</div>
                             </div>
                             <div className='flex items-center gap-2 pl-3 text-xs text-muted-foreground'>
-                              <span>{wifiStatusLabel}</span>
+                              {connectedWifiInterface?.connectedSsid ? (
+                                <SignalStrengthIndicator
+                                  kind='wifi'
+                                  percent={connectedWifiInterface.signalPercent}
+                                  revealOnParentInteraction
+                                />
+                              ) : (
+                                <span>{wifiStatusLabel}</span>
+                              )}
                               {wifiSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
                             </div>
                           </button>
@@ -996,7 +1110,7 @@ export function SystemPage() {
                             <Switch
                               checked={Boolean(connectivity?.network.supported) && wifiPowered !== false}
                               disabled={wifiPowerLoading || !(connectivity?.network.supported ?? false)}
-                              onCheckedChange={() => void toggleWifiPower()}
+                              onCheckedChange={() => requestWifiPowerToggle()}
                               aria-label='Toggle Wi-Fi power'
                             />
                           </div>
@@ -1051,11 +1165,17 @@ export function SystemPage() {
                                 <div className='flex flex-col gap-3 rounded-2xl border border-border/70 bg-background/30 px-4 py-3 sm:flex-row sm:items-center sm:justify-between'>
                                   <div className='min-w-0'>
                                     <div className='text-sm font-semibold text-foreground font-mono'>{selectedWifiInterface.name}</div>
-                                    <div className='mt-1 text-xs text-muted-foreground'>
-                                      {selectedWifiInterface.connectedSsid
-                                        ? `${selectedWifiInterface.connectedSsid} • ${formatWifiSignal(selectedWifiInterface.signalPercent, selectedWifiInterface.signalBars)}`
-                                        : 'Not connected'}
-                                    </div>
+                                    {selectedWifiInterface.connectedSsid ? (
+                                      <div className='mt-1 flex items-center gap-2 text-xs text-muted-foreground'>
+                                        <span>{selectedWifiInterface.connectedSsid}</span>
+                                        <SignalStrengthIndicator
+                                          kind='wifi'
+                                          percent={selectedWifiInterface.signalPercent}
+                                        />
+                                      </div>
+                                    ) : (
+                                      <div className='mt-1 text-xs text-muted-foreground'>Not connected</div>
+                                    )}
                                     {selectedWifiInterface.addresses.length > 0 ? (
                                       <div className='mt-1 break-all text-[11px] font-mono text-muted-foreground'>
                                         {selectedWifiInterface.addresses.join(' • ')}
@@ -1084,7 +1204,7 @@ export function SystemPage() {
                                           type='button'
                                           onClick={() => setWifiTargetSsid(accessPoint.ssid)}
                                           className={cn(
-                                            'flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-background/70',
+                                            'group flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-background/70',
                                             index > 0 ? 'border-t border-border/60' : '',
                                             wifiTargetSsid === accessPoint.ssid ? 'bg-primary/8' : ''
                                           )}
@@ -1095,9 +1215,12 @@ export function SystemPage() {
                                               {accessPoint.security ?? 'Open'}{accessPoint.isActive ? ' • Current network' : ''}
                                             </div>
                                           </div>
-                                          <div className='shrink-0 text-xs text-muted-foreground'>
-                                            {formatWifiSignal(accessPoint.signalPercent, accessPoint.signalBars)}
-                                          </div>
+                                          <SignalStrengthIndicator
+                                            kind='wifi'
+                                            percent={accessPoint.signalPercent}
+                                            revealOnParentInteraction
+                                            className='shrink-0'
+                                          />
                                         </button>
                                       ))}
                                     </div>
@@ -1267,7 +1390,16 @@ export function SystemPage() {
                         </button>
 
                         {ethernetSectionOpen ? (
-                          <div className='border-t border-border/60 px-4 py-4'>
+                          <div className='space-y-4 border-t border-border/60 px-4 py-4'>
+                            {ethernetFeedback ? (
+                              <div className={cn(
+                                'rounded-2xl border px-3 py-2 text-xs',
+                                ethernetFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                              )}>
+                                {ethernetFeedback.message}
+                              </div>
+                            ) : null}
+
                             {ethernetInterfaces.length > 0 ? (
                               <div className='overflow-hidden rounded-2xl border border-border/70 bg-background/20'>
                                 {ethernetInterfaces.map((ethernetInterface, index) => (
@@ -1291,8 +1423,20 @@ export function SystemPage() {
                                         </div>
                                       ) : null}
                                     </div>
-                                    <div className='shrink-0 text-xs text-muted-foreground'>
-                                      {ethernetInterface.connectionState ?? ethernetInterface.status ?? 'Unknown'}
+                                    <div className='flex shrink-0 flex-col items-end gap-2'>
+                                      <div className='text-xs text-muted-foreground'>
+                                        {ethernetInterface.connectionState ?? ethernetInterface.status ?? 'Unknown'}
+                                      </div>
+                                      {isEthernetInterfaceActive(ethernetInterface) ? (
+                                        <button
+                                          type='button'
+                                          disabled={ethernetDisconnectLoading === ethernetInterface.name}
+                                          onClick={() => requestEthernetDisconnect(ethernetInterface)}
+                                          className='inline-flex items-center justify-center rounded-lg border border-border bg-background/80 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
+                                        >
+                                          {ethernetDisconnectLoading === ethernetInterface.name ? <LoaderCircle className='h-3.5 w-3.5 animate-spin' /> : 'Disconnect'}
+                                        </button>
+                                      ) : null}
                                     </div>
                                   </div>
                                 ))}
@@ -1443,6 +1587,39 @@ export function SystemPage() {
         </div>
       ) : null}
 
+      {pendingConnectivityAction && pendingConnectivityDialogTitle && pendingConnectivityDialogDescription && pendingConnectivityConfirmLabel ? (
+        <div className='fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 backdrop-blur-sm'>
+          <div className='w-full max-w-md rounded-3xl border border-border/80 bg-card p-5 shadow-2xl'>
+            <div className='flex items-start gap-3'>
+              <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-amber-500/12 text-amber-300'>
+                <CircleAlert className='h-5 w-5' />
+              </div>
+              <div className='min-w-0'>
+                <div className='text-base font-semibold text-foreground'>{pendingConnectivityDialogTitle}</div>
+                <div className='mt-1 text-sm text-muted-foreground'>{pendingConnectivityDialogDescription}</div>
+              </div>
+            </div>
+
+            <div className='mt-5 flex justify-end gap-2'>
+              <button
+                type='button'
+                onClick={() => setPendingConnectivityAction(null)}
+                className='inline-flex items-center justify-center rounded-xl border border-border bg-background/70 px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
+              >
+                Cancel
+              </button>
+              <button
+                type='button'
+                onClick={() => void confirmPendingConnectivityAction()}
+                className='inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90'
+              >
+                {pendingConnectivityConfirmLabel}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {/* Application Logs */}
       <LogsPanel />
     </div>
@@ -1507,8 +1684,79 @@ function BluetoothDeviceCard({ device }: { device: BluetoothDeviceSnapshot }) {
         <div className='truncate text-sm font-semibold text-foreground'>{device.displayName}</div>
         <div className='mt-1 text-[11px] font-mono text-muted-foreground'>{device.address}</div>
       </div>
-      <div className='shrink-0 text-xs text-muted-foreground'>{formatBluetoothSignal(device.rssi)}</div>
+      <SignalStrengthIndicator
+        kind='signal'
+        percent={normalizeBluetoothSignalPercent(device.rssi)}
+        unavailableLabel='Signal unavailable'
+        className='shrink-0'
+      />
     </div>
+  );
+}
+
+function SignalStrengthIndicator({
+  kind,
+  percent,
+  unavailableLabel = 'Unavailable',
+  revealOnParentInteraction = false,
+  className,
+}: {
+  kind: 'wifi' | 'signal';
+  percent: number | null | undefined;
+  unavailableLabel?: string;
+  revealOnParentInteraction?: boolean;
+  className?: string;
+}) {
+  const [revealed, setRevealed] = useState(false);
+  const normalizedPercent = normalizeSignalPercent(percent);
+  const icon = kind === 'wifi' ? faWifi : faSignal;
+  const label = normalizedPercent != null ? `${normalizedPercent}%` : unavailableLabel;
+
+  if (revealOnParentInteraction) {
+    return (
+      <span className={cn('inline-flex items-center gap-1.5 text-xs text-muted-foreground', className)}>
+        <SignalStrengthGlyph icon={icon} percent={normalizedPercent} />
+        <span className='max-w-0 overflow-hidden whitespace-nowrap opacity-0 transition-all duration-150 group-hover:max-w-16 group-hover:opacity-100 group-focus:max-w-16 group-focus:opacity-100 group-active:max-w-16 group-active:opacity-100'>
+          {label}
+        </span>
+      </span>
+    );
+  }
+
+  return (
+    <button
+      type='button'
+      onClick={(event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        setRevealed((current) => !current);
+      }}
+      onMouseEnter={() => setRevealed(true)}
+      onMouseLeave={() => setRevealed(false)}
+      onBlur={() => setRevealed(false)}
+      className={cn(
+        'inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-background/60',
+        className
+      )}
+    >
+      <SignalStrengthGlyph icon={icon} percent={normalizedPercent} />
+      <span className={cn(
+        'overflow-hidden whitespace-nowrap transition-all duration-150',
+        revealed ? 'max-w-16 opacity-100' : 'max-w-0 opacity-0'
+      )}>
+        {label}
+      </span>
+    </button>
+  );
+}
+
+function SignalStrengthGlyph({ icon, percent }: { icon: IconDefinition; percent: number | null }) {
+  const toneClassName = getSignalToneClassName(percent);
+
+  return (
+    <span className='inline-flex items-center justify-center' aria-hidden='true'>
+      <FontAwesomeIcon icon={icon} className={cn('h-3.5 w-3.5 transition-opacity', toneClassName)} />
+    </span>
   );
 }
 
@@ -1547,6 +1795,56 @@ function mergeBluetoothDevices(primary: BluetoothDeviceSnapshot[], secondary: Bl
     });
 }
 
+function normalizeSignalPercent(percent: number | null | undefined) {
+  if (percent == null || !Number.isFinite(percent)) {
+    return null;
+  }
+
+  return Math.max(0, Math.min(100, Math.round(percent)));
+}
+
+function normalizeBluetoothSignalPercent(rssi: number | null | undefined) {
+  if (rssi == null || !Number.isFinite(rssi)) {
+    return null;
+  }
+
+  return normalizeSignalPercent(((rssi + 100) / 50) * 100);
+}
+
+function getSignalToneClassName(percent: number | null) {
+  if (percent == null) {
+    return 'text-muted-foreground/35';
+  }
+
+  if (percent >= 75) {
+    return 'text-foreground';
+  }
+
+  if (percent >= 50) {
+    return 'text-foreground/80';
+  }
+
+  if (percent >= 25) {
+    return 'text-muted-foreground/75';
+  }
+
+  return 'text-muted-foreground/45';
+}
+
+function isWifiInterfaceInUse(wifiInterface: WifiInterfaceSnapshot | null | undefined) {
+  return Boolean(wifiInterface?.connectedSsid) || (wifiInterface?.addresses.length ?? 0) > 0;
+}
+
+function isEthernetInterfaceActive(ethernetInterface: EthernetInterfaceSnapshot | null | undefined) {
+  if (!ethernetInterface) {
+    return false;
+  }
+
+  return (ethernetInterface.connectionState ?? ethernetInterface.status ?? '').toLowerCase().includes('connected')
+    || stringEqualsIgnoreCase(ethernetInterface.status, 'up')
+    || ethernetInterface.addresses.length > 0;
+}
+
 function stringEqualsIgnoreCase(left: string | null | undefined, right: string) {
   return typeof left === 'string' && left.localeCompare(right, undefined, { sensitivity: 'accent' }) === 0;
 }
@@ -1583,30 +1881,6 @@ function formatPercent(value: number | null | undefined) {
   }
 
   return `${value.toFixed(value >= 10 ? 0 : 1)}%`;
-}
-
-function formatWifiSignal(signalPercent: number | null | undefined, signalBars: string | null | undefined) {
-  if (signalPercent == null && !signalBars) {
-    return noDataLabel;
-  }
-
-  if (signalPercent != null && signalBars) {
-    return `${signalPercent}% • ${signalBars}`;
-  }
-
-  if (signalPercent != null) {
-    return `${signalPercent}%`;
-  }
-
-  return signalBars ?? noDataLabel;
-}
-
-function formatBluetoothSignal(rssi: number | null | undefined) {
-  if (rssi == null || !Number.isFinite(rssi)) {
-    return 'Signal unavailable';
-  }
-
-  return `${Math.round(rssi)} dBm`;
 }
 
 function formatWholeNumber(value: number | null | undefined) {

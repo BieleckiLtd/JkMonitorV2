@@ -110,6 +110,15 @@ public sealed record class WifiPowerResult
     public required string Message { get; init; }
 }
 
+public sealed record class EthernetDisconnectResult
+{
+    public bool Success { get; init; }
+
+    public required string InterfaceName { get; init; }
+
+    public required string Message { get; init; }
+}
+
 public sealed record class BluetoothRuntimeSnapshot
 {
     public bool Supported { get; init; }
