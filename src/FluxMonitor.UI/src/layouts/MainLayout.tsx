@@ -1,5 +1,5 @@
 import { useEffect, useState, type ReactNode } from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { Bell, Cable, Settings, Menu, Activity, Monitor, Gauge, X, Sparkles } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
@@ -104,8 +104,10 @@ export function Header() {
 }
 
 export function MainLayout({ children }: { children: ReactNode }) {
+  const location = useLocation();
   const isMobileSidebarOpen = useAppStore((state) => state.isMobileSidebarOpen);
   const hasUpdateOverlay = useAppStore((state) => state.updateProgress !== null);
+  const isFullWidthRoute = location.pathname === '/';
 
   useEffect(() => {
     document.body.style.overflow = isMobileSidebarOpen || hasUpdateOverlay ? 'hidden' : '';
@@ -121,7 +123,7 @@ export function MainLayout({ children }: { children: ReactNode }) {
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <Header />
         <main className="safe-area-bottom flex min-h-0 flex-1 w-full overflow-y-auto px-1 py-2 sm:p-4 md:p-6">
-          <div className="mx-auto flex min-h-full w-full max-w-7xl flex-col">
+          <div className={cn('flex min-h-full w-full flex-col', isFullWidthRoute ? 'max-w-none' : 'mx-auto max-w-7xl')}>
             {children}
           </div>
         </main>

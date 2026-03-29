@@ -921,7 +921,7 @@ export function SystemPage() {
       : null;
 
   return (
-    <div className='space-y-6 pb-8'>
+    <div className='min-w-0 space-y-6 pb-8'>
       {loadError ? (
         <div className='flex items-start gap-3 rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-4 text-sm text-destructive'>
           <CircleAlert className='mt-0.5 h-5 w-5 shrink-0' />
@@ -939,8 +939,8 @@ export function SystemPage() {
       ) : null}
 
       {status ? (
-        <div className='grid gap-6 xl:grid-cols-[1.35fr_1fr]'>
-          <div className='space-y-6'>
+        <div className='grid gap-6 2xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]'>
+          <div className='min-w-0 space-y-6'>
             <Card className='border border-border/80 bg-card/85 shadow-sm'>
               <CardHeader className='border-b border-border/60 pb-4'>
                 <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
@@ -1136,7 +1136,7 @@ export function SystemPage() {
             </Card>
           </div>
 
-          <div className='space-y-6'>
+          <div className='min-w-0 space-y-6'>
             <Card className='border border-border/80 bg-card/85 shadow-sm'>
               <CardHeader className='border-b border-border/60 pb-4'>
                 <div className='flex items-center gap-2'>
@@ -1162,7 +1162,7 @@ export function SystemPage() {
 
                     <div className='space-y-3'>
                       <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
-                        <div className='flex items-center gap-3 px-4 py-4'>
+                        <div className='flex flex-wrap items-center gap-3 px-4 py-4 sm:flex-nowrap'>
                           <button
                             type='button'
                             onClick={() => void toggleConnectivitySection('wifi')}
@@ -1192,7 +1192,7 @@ export function SystemPage() {
                             </div>
                           </button>
 
-                          <div className='flex items-center gap-2'>
+                          <div className='ml-auto flex w-full items-center justify-end gap-2 sm:ml-0 sm:w-auto'>
                             {wifiPowerLoading ? <LoaderCircle className='h-4 w-4 animate-spin text-primary' /> : null}
                             <Switch
                               checked={Boolean(connectivity?.network.supported) && wifiPowered !== false}
@@ -1347,7 +1347,7 @@ export function SystemPage() {
                       </div>
 
                       <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
-                        <div className='flex items-center gap-3 px-4 py-4'>
+                        <div className='flex flex-wrap items-center gap-3 px-4 py-4 sm:flex-nowrap'>
                           <button
                             type='button'
                             onClick={() => void toggleConnectivitySection('bluetooth')}
@@ -1368,7 +1368,7 @@ export function SystemPage() {
                             </div>
                           </button>
 
-                          <div className='flex items-center gap-2'>
+                          <div className='ml-auto flex w-full items-center justify-end gap-2 sm:ml-0 sm:w-auto'>
                             {bluetoothPowerLoading ? <LoaderCircle className='h-4 w-4 animate-spin text-primary' /> : null}
                             <Switch
                               checked={Boolean(connectivity?.bluetooth.supported) && Boolean(connectivity?.bluetooth.powered)}
@@ -1446,7 +1446,7 @@ export function SystemPage() {
                         <button
                           type='button'
                           onClick={() => void toggleConnectivitySection('ethernet')}
-                          className='flex w-full items-center gap-3 px-4 py-4 text-left'
+                          className='flex w-full min-w-0 items-center gap-3 px-4 py-4 text-left'
                         >
                           <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
                             <Cable className='h-4 w-4 text-muted-foreground' />
@@ -1478,11 +1478,11 @@ export function SystemPage() {
                                   <div
                                     key={ethernetInterface.name}
                                     className={cn(
-                                      'flex items-start justify-between gap-3 px-4 py-3',
+                                      'flex flex-col items-start gap-3 px-4 py-3 sm:flex-row sm:justify-between',
                                       index > 0 ? 'border-t border-border/60' : ''
                                     )}
                                   >
-                                    <div className='min-w-0'>
+                                    <div className='min-w-0 flex-1'>
                                       <div className='text-sm font-semibold text-foreground font-mono'>{ethernetInterface.name}</div>
                                       <div className='mt-1 text-xs text-muted-foreground'>
                                         {ethernetInterface.connectionName
@@ -1495,8 +1495,8 @@ export function SystemPage() {
                                         </div>
                                       ) : null}
                                     </div>
-                                    <div className='flex shrink-0 flex-col items-end gap-2'>
-                                      <div className='text-xs text-muted-foreground'>
+                                    <div className='flex w-full flex-col items-start gap-2 sm:w-auto sm:shrink-0 sm:items-end'>
+                                      <div className='text-xs text-muted-foreground sm:text-right'>
                                         {ethernetInterface.connectionState ?? ethernetInterface.status ?? 'Unknown'}
                                       </div>
                                       {isEthernetInterfaceActive(ethernetInterface) ? (
@@ -1561,8 +1561,8 @@ export function SystemPage() {
                         <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>Block devices</div>
                         {interfaces.blockDevices.map((dev) => (
                           <div key={dev.name} className='rounded-2xl border border-border/70 bg-background/50 px-4 py-3'>
-                            <div className='flex items-center justify-between'>
-                              <div className='text-sm font-semibold text-foreground font-mono'>{dev.name}</div>
+                            <div className='flex flex-wrap items-center justify-between gap-2'>
+                              <div className='min-w-0 break-all text-sm font-semibold text-foreground font-mono'>{dev.name}</div>
                               <div className='text-xs text-muted-foreground'>{dev.sizeFormatted}</div>
                             </div>
                             {dev.model ? <div className='mt-1 text-xs text-muted-foreground'>{dev.model}</div> : null}
@@ -1602,8 +1602,8 @@ export function SystemPage() {
                     <div className='space-y-2'>
                       {dbSize.tables.map((t) => (
                         <div key={t.tableName} className='rounded-2xl border border-border/70 bg-background/50 px-4 py-3'>
-                          <div className='flex items-center justify-between'>
-                            <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground font-mono'>{t.tableName}</div>
+                          <div className='flex flex-wrap items-center justify-between gap-2'>
+                            <div className='min-w-0 break-all text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground font-mono'>{t.tableName}</div>
                             <div className='text-xs text-muted-foreground'>{t.rowCount.toLocaleString()} rows</div>
                           </div>
                           <div className='mt-1 text-sm font-semibold text-foreground'>{t.sizeFormatted}</div>
