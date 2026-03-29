@@ -13,8 +13,6 @@ function App() {
   const loadExternalTheme = useAppStore((state) => state.loadExternalTheme);
   const connectUpdateProgressStream = useAppStore((state) => state.connectUpdateProgressStream);
   const disconnectUpdateProgressStream = useAppStore((state) => state.disconnectUpdateProgressStream);
-  const fetchUpdateProgress = useAppStore((state) => state.fetchUpdateProgress);
-  const updateRunning = useAppStore((state) => state.updateProgress?.isRunning ?? false);
 
   useEffect(() => {
     void loadExternalTheme();
@@ -26,16 +24,6 @@ function App() {
       disconnectUpdateProgressStream();
     };
   }, [connectUpdateProgressStream, disconnectUpdateProgressStream]);
-
-  useEffect(() => {
-    void fetchUpdateProgress();
-
-    const intervalId = window.setInterval(() => {
-      void fetchUpdateProgress();
-    }, updateRunning ? 1500 : 10000);
-
-    return () => window.clearInterval(intervalId);
-  }, [fetchUpdateProgress, updateRunning]);
 
   return (
     <Router>

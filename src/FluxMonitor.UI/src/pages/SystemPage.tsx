@@ -517,8 +517,6 @@ export function SystemPage() {
 
   useEffect(() => {
     void loadDbSize();
-    const id = window.setInterval(() => void loadDbSize(), 30000);
-    return () => window.clearInterval(id);
   }, []);
 
   const checkForUpdate = useCallback(async () => {
@@ -609,8 +607,6 @@ export function SystemPage() {
 
   useEffect(() => {
     void loadConnectivity();
-    const id = window.setInterval(() => void loadConnectivity(), 15000);
-    return () => window.clearInterval(id);
   }, [loadConnectivity]);
 
   useEffect(() => {
@@ -618,15 +614,7 @@ export function SystemPage() {
   }, [loadInternetSpeedTest]);
 
   useEffect(() => {
-    const intervalMs = internetSpeedTest?.isRunning ? 1500 : 15000;
-    const id = window.setInterval(() => void loadInternetSpeedTest(), intervalMs);
-    return () => window.clearInterval(id);
-  }, [internetSpeedTest?.isRunning, loadInternetSpeedTest]);
-
-  useEffect(() => {
     void loadCloudflareTunnelStatus();
-    const id = window.setInterval(() => void loadCloudflareTunnelStatus(), 15000);
-    return () => window.clearInterval(id);
   }, [loadCloudflareTunnelStatus]);
 
   useEffect(() => {
@@ -706,8 +694,6 @@ export function SystemPage() {
       }
     };
     void loadInterfaces();
-    const id = window.setInterval(() => void loadInterfaces(), 30000);
-    return () => window.clearInterval(id);
   }, []);
 
   const scanWifi = async (interfaceName: string) => {
@@ -1608,15 +1594,26 @@ export function SystemPage() {
                         This test downloads and uploads real traffic from the device. While it runs, keep this panel open and wait for the full result before starting another test.
                       </div>
 
-                      <button
-                        type='button'
-                        disabled={internetSpeedTestStarting || internetSpeedTest?.isRunning || !internetSpeedTest?.canStart}
-                        onClick={() => void startInternetSpeedTest()}
-                        className='inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
-                      >
-                        {internetSpeedTestStarting || internetSpeedTest?.isRunning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Wifi className='h-4 w-4' />}
-                        {internetSpeedTest?.isRunning ? 'Speed test running… please wait' : 'Run internet speed test'}
-                      </button>
+                      <div className='grid gap-2 sm:grid-cols-2'>
+                        <button
+                          type='button'
+                          disabled={internetSpeedTestStarting}
+                          onClick={() => void loadInternetSpeedTest()}
+                          className='inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
+                        >
+                          <RefreshCcw className='h-4 w-4' />
+                          Refresh status
+                        </button>
+                        <button
+                          type='button'
+                          disabled={internetSpeedTestStarting || internetSpeedTest?.isRunning || !internetSpeedTest?.canStart}
+                          onClick={() => void startInternetSpeedTest()}
+                          className='inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
+                        >
+                          {internetSpeedTestStarting || internetSpeedTest?.isRunning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Wifi className='h-4 w-4' />}
+                          {internetSpeedTest?.isRunning ? 'Speed test running… please wait' : 'Run internet speed test'}
+                        </button>
+                      </div>
                     </>
                   )}
                 </CardContent>

@@ -1,42 +1,22 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { ServicesPage } from './ServicesPage';
 
 describe('ServicesPage', () => {
   beforeEach(() => {
-    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    let serviceInsightStopped = false;
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
 
-      if (url === '/api/system/services/catalog') {
+      if (url === '/api/system/services') {
         return {
           ok: true,
           json: async () => ({
             supported: true,
-            summary: {
-              packageCount: 2,
-              automaticPackageCount: 1,
-              serviceCount: 2,
-              enabledServiceCount: 1,
-              runningServiceCount: 1,
-            },
-            packages: [
-              {
-                name: 'fluxmonitor',
-                version: '1.2.3',
-                architecture: 'arm64',
-                channel: 'stable,now',
-                status: 'installed',
-                isAutomatic: false,
-              },
-              {
-                name: 'libfoo',
-                version: '2.0.0',
-                architecture: 'arm64',
-                channel: 'stable,now',
-                status: 'installed,automatic',
-                isAutomatic: true,
-              },
-            ],
+            serviceCount: 2,
+            enabledServiceCount: 1,
+            runningServiceCount: 1,
             services: [
               {
                 name: 'fluxmonitor.service',
@@ -65,6 +45,35 @@ describe('ServicesPage', () => {
         } as Response;
       }
 
+      if (url === '/api/system/packages') {
+        return {
+          ok: true,
+          json: async () => ({
+            supported: true,
+            packageCount: 2,
+            automaticPackageCount: 1,
+            packages: [
+              {
+                name: 'fluxmonitor',
+                version: '1.2.3',
+                architecture: 'arm64',
+                channel: 'stable,now',
+                status: 'installed',
+                isAutomatic: false,
+              },
+              {
+                name: 'libfoo',
+                version: '2.0.0',
+                architecture: 'arm64',
+                channel: 'stable,now',
+                status: 'installed,automatic',
+                isAutomatic: true,
+              },
+            ],
+          }),
+        } as Response;
+      }
+
       if (url === '/api/system/services/insight?kind=service&id=fluxmonitor.service') {
         return {
           ok: true,
@@ -73,18 +82,18 @@ describe('ServicesPage', () => {
             kind: 'service',
             id: 'fluxmonitor.service',
             title: 'Flux Monitor',
-            subtitle: 'fluxmonitor.service · Active',
+            subtitle: serviceInsightStopped ? 'fluxmonitor.service · Inactive' : 'fluxmonitor.service · Active',
             summary: 'Main monitoring service',
             narrative: 'Installed as part of fluxmonitor.',
             metrics: [
-              { label: 'Current state', value: 'Active' },
+              { label: 'Current state', value: serviceInsightStopped ? 'Inactive' : 'Active' },
               { label: 'Startup', value: 'Starts automatically' },
               { label: 'Package', value: 'fluxmonitor' },
             ],
             facts: [
               { label: 'Service name', value: 'fluxmonitor.service' },
             ],
-            highlights: ['Running right now.'],
+            highlights: [serviceInsightStopped ? 'Currently Inactive.' : 'Running right now.'],
             relatedItems: [
               { kind: 'package', id: 'fluxmonitor', title: 'fluxmonitor', subtitle: '1.2.3 · Main app' },
             ],
@@ -115,6 +124,29 @@ describe('ServicesPage', () => {
         } as Response;
       }
 
+      if (url === '/api/system/services/stop' && init?.method === 'POST') {
+        serviceInsightStopped = true;
+
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            message: "Service 'fluxmonitor.service' was stopped.",
+            service: {
+              name: 'fluxmonitor.service',
+              displayName: 'Flux Monitor',
+              description: 'Main monitoring service',
+              unitFileState: 'enabled',
+              vendorPreset: 'enabled',
+              activeState: 'inactive',
+              subState: 'dead',
+              isEnabled: true,
+              isRunning: false,
+            },
+          }),
+        } as Response;
+      }
+
       throw new Error(`Unhandled fetch: ${url}`);
     }) as typeof fetch;
   });
@@ -124,36 +156,63 @@ describe('ServicesPage', () => {
     vi.restoreAllMocks();
   });
 
-  it('loads the catalog, defaults to the running service, and loads package insight on click', async () => {
+  it('loads services first, keeps insight hidden until selection, and lazy-loads packages', async () => {
     render(<ServicesPage />);
 
     expect(await screen.findByText('Flux Monitor')).toBeInTheDocument();
-    expect(screen.queryByText('What this does')).not.toBeInTheDocument();
+    expect(screen.queryByText('Package insight')).not.toBeInTheDocument();
+    expect(screen.queryByText('Service insight')).not.toBeInTheDocument();
+    expect(globalThis.fetch).toHaveBeenCalledWith('/api/system/services', { cache: 'no-store' });
+    expect(globalThis.fetch).not.toHaveBeenCalledWith('/api/system/packages', { cache: 'no-store' });
+
+    fireEvent.click(screen.getByRole('button', { name: /packages/i }));
+
+    expect(await screen.findByText('libfoo')).toBeInTheDocument();
+    expect(globalThis.fetch).toHaveBeenCalledWith('/api/system/packages', { cache: 'no-store' });
+  });
+
+  it('loads insight only when a service is clicked and can navigate to a related package', async () => {
+    render(<ServicesPage />);
+
+    expect(await screen.findByText('Flux Monitor')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /flux monitor/i }));
+
+    expect(await screen.findByText('Service insight')).toBeInTheDocument();
     expect(await screen.findByText(/running right now/i)).toBeInTheDocument();
 
-    const packageCard = screen.getByText('Installed packages').closest('[data-slot="card"]');
-    expect(packageCard).not.toBeNull();
-    fireEvent.click(within(packageCard as HTMLElement).getByRole('button', { name: /fluxmonitor/i }));
+    fireEvent.click(screen.getByText('1.2.3 · Main app'));
+
+    expect(await screen.findByText('Package insight')).toBeInTheDocument();
+    expect(await screen.findByText(/collects and publishes monitor data/i)).toBeInTheDocument();
+  });
+
+  it('stops a running service from the insight panel', async () => {
+    render(<ServicesPage />);
+
+    expect(await screen.findByText('Flux Monitor')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /flux monitor/i }));
+    expect(await screen.findByRole('button', { name: /stop service/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /stop service/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/collects and publishes monitor data/i)).toBeInTheDocument();
-      expect(screen.getByText(/24 MB/i)).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /stop service/i })).not.toBeInTheDocument();
+      expect(screen.getByText('fluxmonitor.service · Inactive')).toBeInTheDocument();
     });
   });
 
-  it('filters the package list with the quick filter input', async () => {
+  it('filters the package list after the packages tab loads', async () => {
     render(<ServicesPage />);
 
     await screen.findByText('Flux Monitor');
+    fireEvent.click(screen.getByRole('button', { name: /packages/i }));
 
-    const packageCard = screen.getByText('Installed packages').closest('[data-slot="card"]');
-    expect(packageCard).not.toBeNull();
-
-    fireEvent.change(within(packageCard as HTMLElement).getByPlaceholderText(/quick filter/i), { target: { value: 'libfoo' } });
+    const packageFilter = (await screen.findByPlaceholderText(/quick filter/i)) as HTMLInputElement;
+    fireEvent.change(packageFilter, { target: { value: 'libfoo' } });
 
     await waitFor(() => {
-      expect(within(packageCard as HTMLElement).getByRole('button', { name: /libfoo/i })).toBeInTheDocument();
-      expect(within(packageCard as HTMLElement).queryByRole('button', { name: /fluxmonitor/i })).not.toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /libfoo/i })).toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /^fluxmonitor$/i })).not.toBeInTheDocument();
     });
   });
 });

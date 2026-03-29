@@ -200,4 +200,45 @@ describe('useAppStore update restart recovery', () => {
       });
     });
   });
+
+  it('ignores an older polled snapshot for the active update session', async () => {
+    const currentProgress: UpdateProgress = {
+      sessionId: 'steady123',
+      status: 'running',
+      isRunning: true,
+      stage: 'Updating tunnel connector…',
+      detail: 'Installing or refreshing the cloudflared package used for internet access.',
+      success: null,
+      canCancel: false,
+      cancelUnavailableReason: 'Cancellation is no longer available because the installed files are being replaced.',
+      stepIndex: 6,
+      stepCount: 11,
+      percentComplete: 61,
+      startedAt: '2026-03-29T12:00:00.000Z',
+      updatedAt: '2026-03-29T12:00:10.000Z',
+    };
+
+    const staleProgress: UpdateProgress = {
+      ...currentProgress,
+      stage: 'Replacing installed files…',
+      detail: 'Switching the app over to the new release and preserving your local configuration.',
+      stepIndex: 5,
+      percentComplete: 50,
+      updatedAt: '2026-03-29T12:00:08.000Z',
+    };
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify(staleProgress), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      })) as typeof fetch;
+
+    useAppStore.setState({ updateProgress: currentProgress });
+
+    await useAppStore.getState().fetchUpdateProgress();
+
+    expect(useAppStore.getState().updateProgress).toMatchObject(currentProgress);
+  });
 });

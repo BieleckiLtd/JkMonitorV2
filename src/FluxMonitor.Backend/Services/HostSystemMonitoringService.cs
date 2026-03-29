@@ -578,10 +578,14 @@ public sealed class HostSystemMonitoringService(ILogger<HostSystemMonitoringServ
             return null;
         }
 
+        const uint underVoltageNowBit = 1u << 0;
+        const uint frequencyCappedNowBit = 1u << 1;
         const uint currentlyThrottledBit = 1u << 2;
         const uint softTemperatureLimitBit = 1u << 3;
 
-        return (flags & (currentlyThrottledBit | softTemperatureLimitBit)) != 0;
+        // Surface the warning icon whenever the Pi is currently performance-limited,
+        // including undervoltage/frequency capping and thermal throttle conditions.
+        return (flags & (underVoltageNowBit | frequencyCappedNowBit | currentlyThrottledBit | softTemperatureLimitBit)) != 0;
     }
 
     private static string? TryRunLinuxCommand(params string[] arguments)

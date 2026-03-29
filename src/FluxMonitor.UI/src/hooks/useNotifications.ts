@@ -83,8 +83,6 @@ export function useNotificationLog() {
 
   useEffect(() => {
     void load();
-    const interval = setInterval(() => void load(), 10000);
-    return () => clearInterval(interval);
   }, [load]);
 
   return { log, reload: load };

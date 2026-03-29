@@ -63,6 +63,54 @@ function shouldRecoverRestartFromProgressLoss(progress: UpdateProgress | null | 
   return (progress.percentComplete ?? 0) >= 96;
 }
 
+function getUpdateStatusRank(status: UpdateProgress['status']): number {
+  switch (status) {
+    case 'running':
+      return 0;
+    case 'cancelling':
+      return 1;
+    case 'restarting':
+      return 2;
+    case 'cancelled':
+    case 'failed':
+    case 'succeeded':
+      return 3;
+    default:
+      return 0;
+  }
+}
+
+function parseProgressUpdatedAt(progress: UpdateProgress): number | null {
+  const timestamp = Date.parse(progress.updatedAt);
+  return Number.isFinite(timestamp) ? timestamp : null;
+}
+
+function isStaleProgressSnapshot(current: UpdateProgress | null, incoming: UpdateProgress): boolean {
+  if (!current || current.sessionId !== incoming.sessionId) {
+    return false;
+  }
+
+  const currentUpdatedAt = parseProgressUpdatedAt(current);
+  const incomingUpdatedAt = parseProgressUpdatedAt(incoming);
+  if (currentUpdatedAt !== null && incomingUpdatedAt !== null && incomingUpdatedAt !== currentUpdatedAt) {
+    return incomingUpdatedAt < currentUpdatedAt;
+  }
+
+  const currentStepIndex = current.stepIndex ?? -1;
+  const incomingStepIndex = incoming.stepIndex ?? -1;
+  if (currentStepIndex !== incomingStepIndex) {
+    return incomingStepIndex < currentStepIndex;
+  }
+
+  const currentPercent = current.percentComplete ?? -1;
+  const incomingPercent = incoming.percentComplete ?? -1;
+  if (currentPercent !== incomingPercent) {
+    return incomingPercent < currentPercent;
+  }
+
+  return getUpdateStatusRank(incoming.status) < getUpdateStatusRank(current.status);
+}
+
 function applyUpdateProgressSnapshot(
   progress: UpdateProgress | null,
   set: (partial:
@@ -90,6 +138,10 @@ function applyUpdateProgressSnapshot(
   }
 
   set((state) => {
+    if (isStaleProgressSnapshot(state.updateProgress, progress)) {
+      return state;
+    }
+
     if (!progress.isRunning && state.dismissedUpdateSessionId === progress.sessionId) {
       return state;
     }

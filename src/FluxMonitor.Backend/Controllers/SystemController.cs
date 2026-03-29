@@ -19,6 +19,20 @@ public sealed class SystemController(
     HostServicesCatalogService hostServicesCatalogService,
     ILogger<SystemController> logger) : ControllerBase
 {
+    [HttpGet("services")]
+    public async Task<ActionResult<SystemServicesSnapshot>> GetServices(CancellationToken cancellationToken)
+    {
+        var result = await hostServicesCatalogService.GetServicesAsync(cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpGet("packages")]
+    public async Task<ActionResult<SystemPackagesSnapshot>> GetPackages(CancellationToken cancellationToken)
+    {
+        var result = await hostServicesCatalogService.GetPackagesAsync(cancellationToken);
+        return Ok(result);
+    }
+
     [HttpGet("services/catalog")]
     public async Task<ActionResult<SystemServicesCatalogSnapshot>> GetServicesCatalog(CancellationToken cancellationToken)
     {
@@ -34,6 +48,15 @@ public sealed class SystemController(
     {
         var result = await hostServicesCatalogService.GetInsightAsync(kind, id, cancellationToken);
         return Ok(result);
+    }
+
+    [HttpPost("services/stop")]
+    public async Task<ActionResult<ServiceCommandResponse>> StopService(
+        [FromBody] StopServiceRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await hostServicesCatalogService.StopServiceAsync(request.Name, cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
     }
 
     [HttpGet("connectivity")]
@@ -476,6 +499,7 @@ public sealed record WifiPowerRequest(bool Enabled);
 public sealed record EthernetDisconnectRequest(string InterfaceName);
 
 public sealed record BluetoothPowerRequest(bool Enabled);
+public sealed record StopServiceRequest(string Name);
 
 file sealed class UpdateProgressStreamEnvelope
 {

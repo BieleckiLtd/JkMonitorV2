@@ -891,6 +891,22 @@ public sealed class SystemUpdateService(
         }
 
         if (combinedLines.Any(line =>
+                line.Contains("No space left on device", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("Write error - write (28", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("ENOSPC", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "The device ran out of free storage while applying the update. Free up disk space on the Raspberry Pi and try again.";
+        }
+
+        if (combinedLines.Any(line =>
+                line.Contains("The package lists or status file could not be parsed or opened.", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("Some index files failed to download.", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("into data and signature failed", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "The device package manager failed while Flux Monitor was updating system packages. This usually means the Raspberry Pi is out of space or apt is in a broken state. Free disk space, repair apt if needed, and try again.";
+        }
+
+        if (combinedLines.Any(line =>
                 line.Contains("No compatible ASP.NET Core 10 runtime was found", StringComparison.OrdinalIgnoreCase)
                 || line.Contains("An ASP.NET Core 10 runtime is required", StringComparison.OrdinalIgnoreCase)))
         {

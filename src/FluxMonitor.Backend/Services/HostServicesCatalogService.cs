@@ -9,16 +9,51 @@ public sealed class HostServicesCatalogService(ILogger<HostServicesCatalogServic
 {
     public async Task<SystemServicesCatalogSnapshot> GetCatalogAsync(CancellationToken cancellationToken = default)
     {
+        var packagesTask = GetPackagesAsync(cancellationToken);
+        var servicesTask = GetServicesAsync(cancellationToken);
+
+        await Task.WhenAll(packagesTask, servicesTask);
+
+        var packagesSnapshot = await packagesTask;
+        var servicesSnapshot = await servicesTask;
+
+        var statusMessages = new[]
+        {
+            servicesSnapshot.StatusMessage,
+            packagesSnapshot.StatusMessage
+        }
+            .Where(message => !string.IsNullOrWhiteSpace(message))
+            .Distinct(StringComparer.Ordinal)
+            .ToList();
+
+        return new SystemServicesCatalogSnapshot
+        {
+            Supported = packagesSnapshot.Supported || servicesSnapshot.Supported,
+            StatusMessage = statusMessages.Count > 0 ? string.Join(' ', statusMessages) : null,
+            Summary = new SystemServicesCatalogSummary
+            {
+                PackageCount = packagesSnapshot.PackageCount,
+                AutomaticPackageCount = packagesSnapshot.AutomaticPackageCount,
+                ServiceCount = servicesSnapshot.ServiceCount,
+                EnabledServiceCount = servicesSnapshot.EnabledServiceCount,
+                RunningServiceCount = servicesSnapshot.RunningServiceCount
+            },
+            Packages = packagesSnapshot.Packages,
+            Services = servicesSnapshot.Services
+        };
+    }
+
+    public async Task<SystemServicesSnapshot> GetServicesAsync(CancellationToken cancellationToken = default)
+    {
         if (!OperatingSystem.IsLinux())
         {
-            return new SystemServicesCatalogSnapshot
+            return new SystemServicesSnapshot
             {
                 Supported = false,
-                StatusMessage = "Package and service browsing is available on Linux hosts."
+                StatusMessage = "Service browsing is available on Linux hosts."
             };
         }
 
-        var packageTask = RunProcessAsync("apt", ["list", "--installed"], cancellationToken);
         var unitFilesTask = RunProcessAsync(
             "systemctl",
             ["list-unit-files", "--type=service", "--no-legend", "--no-pager", "--plain"],
@@ -28,15 +63,11 @@ public sealed class HostServicesCatalogService(ILogger<HostServicesCatalogServic
             ["list-units", "--type=service", "--all", "--no-legend", "--no-pager", "--plain"],
             cancellationToken);
 
-        await Task.WhenAll(packageTask, unitFilesTask, runtimeTask);
+        await Task.WhenAll(unitFilesTask, runtimeTask);
 
-        var packagesResult = await packageTask;
         var unitFilesResult = await unitFilesTask;
         var runtimeResult = await runtimeTask;
 
-        var packages = packagesResult.Succeeded
-            ? ParseInstalledPackages(packagesResult.StandardOutput)
-            : [];
         var runtimeByName = runtimeResult.Succeeded
             ? ParseUnitRuntimeLines(runtimeResult.StandardOutput)
                 .ToDictionary(runtime => runtime.Name, StringComparer.OrdinalIgnoreCase)
@@ -46,15 +77,6 @@ public sealed class HostServicesCatalogService(ILogger<HostServicesCatalogServic
             : [];
 
         var statusMessages = new List<string>();
-        if (!packagesResult.Succeeded)
-        {
-            statusMessages.Add("Installed packages could not be loaded.");
-            logger.LogWarning(
-                "Failed to read installed package list. ExitCode={ExitCode}. StdErr={ErrorOutput}",
-                packagesResult.ExitCode,
-                packagesResult.ErrorOutput);
-        }
-
         if (!unitFilesResult.Succeeded)
         {
             statusMessages.Add("Services could not be loaded.");
@@ -73,20 +95,48 @@ public sealed class HostServicesCatalogService(ILogger<HostServicesCatalogServic
                 runtimeResult.ErrorOutput);
         }
 
-        return new SystemServicesCatalogSnapshot
+        return new SystemServicesSnapshot
         {
-            Supported = packagesResult.Succeeded || unitFilesResult.Succeeded,
+            Supported = unitFilesResult.Succeeded,
             StatusMessage = statusMessages.Count > 0 ? string.Join(' ', statusMessages) : null,
-            Summary = new SystemServicesCatalogSummary
-            {
-                PackageCount = packages.Count,
-                AutomaticPackageCount = packages.Count(package => package.IsAutomatic),
-                ServiceCount = services.Count,
-                EnabledServiceCount = services.Count(service => service.IsEnabled),
-                RunningServiceCount = services.Count(service => service.IsRunning)
-            },
-            Packages = packages,
+            ServiceCount = services.Count,
+            EnabledServiceCount = services.Count(service => service.IsEnabled),
+            RunningServiceCount = services.Count(service => service.IsRunning),
             Services = services
+        };
+    }
+
+    public async Task<SystemPackagesSnapshot> GetPackagesAsync(CancellationToken cancellationToken = default)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return new SystemPackagesSnapshot
+            {
+                Supported = false,
+                StatusMessage = "Package browsing is available on Linux hosts."
+            };
+        }
+
+        var packagesResult = await RunProcessAsync("apt", ["list", "--installed"], cancellationToken);
+        var packages = packagesResult.Succeeded
+            ? ParseInstalledPackages(packagesResult.StandardOutput)
+            : [];
+
+        if (!packagesResult.Succeeded)
+        {
+            logger.LogWarning(
+                "Failed to read installed package list. ExitCode={ExitCode}. StdErr={ErrorOutput}",
+                packagesResult.ExitCode,
+                packagesResult.ErrorOutput);
+        }
+
+        return new SystemPackagesSnapshot
+        {
+            Supported = packagesResult.Succeeded,
+            StatusMessage = packagesResult.Succeeded ? null : "Installed packages could not be loaded.",
+            PackageCount = packages.Count,
+            AutomaticPackageCount = packages.Count(package => package.IsAutomatic),
+            Packages = packages
         };
     }
 
@@ -107,6 +157,64 @@ public sealed class HostServicesCatalogService(ILogger<HostServicesCatalogServic
             "package" => await GetPackageInsightAsync(id.Trim(), cancellationToken),
             "service" => await GetServiceInsightAsync(id.Trim(), cancellationToken),
             _ => UnsupportedInsight(kind, id, "Unknown insight type.")
+        };
+    }
+
+    public async Task<ServiceCommandResponse> StopServiceAsync(string? serviceName, CancellationToken cancellationToken = default)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return new ServiceCommandResponse
+            {
+                Success = false,
+                Message = "Service control is available on Linux hosts."
+            };
+        }
+
+        if (string.IsNullOrWhiteSpace(serviceName))
+        {
+            return new ServiceCommandResponse
+            {
+                Success = false,
+                Message = "A service selection is required."
+            };
+        }
+
+        var normalizedServiceName = serviceName.Trim();
+        var stopResult = await RunProcessAsync("systemctl", ["stop", normalizedServiceName], cancellationToken);
+        var snapshot = await TryGetServiceSnapshotAsync(normalizedServiceName, cancellationToken);
+
+        if (!stopResult.Succeeded)
+        {
+            logger.LogWarning(
+                "Failed to stop service {ServiceName}. ExitCode={ExitCode}. StdErr={ErrorOutput}",
+                normalizedServiceName,
+                stopResult.ExitCode,
+                stopResult.ErrorOutput);
+
+            return new ServiceCommandResponse
+            {
+                Success = false,
+                Message = BuildCommandFailureMessage(stopResult, $"Service '{normalizedServiceName}' could not be stopped."),
+                Service = snapshot
+            };
+        }
+
+        if (snapshot?.IsRunning == true)
+        {
+            return new ServiceCommandResponse
+            {
+                Success = false,
+                Message = $"Service '{normalizedServiceName}' is still running.",
+                Service = snapshot
+            };
+        }
+
+        return new ServiceCommandResponse
+        {
+            Success = true,
+            Message = $"Service '{normalizedServiceName}' was stopped.",
+            Service = snapshot
         };
     }
 

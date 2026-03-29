@@ -129,6 +129,26 @@ public class SystemUpdateServiceTests
     }
 
     [Fact]
+    public void CreateFriendlyFailureDetail_ReportsLowDiskProblemsClearly()
+    {
+        var detail = SystemUpdateService.CreateFriendlyFailureDetail(
+            ["Installing internet speed test tool"],
+            ["E: Write error - write (28: No space left on device)"]);
+
+        Assert.Contains("ran out of free storage", detail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CreateFriendlyFailureDetail_ReportsAptStateProblemsClearly()
+    {
+        var detail = SystemUpdateService.CreateFriendlyFailureDetail(
+            ["Installing internet speed test tool"],
+            ["E: The package lists or status file could not be parsed or opened."]);
+
+        Assert.Contains("package manager failed", detail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void CancelUpdate_WhenNoUpdateIsRunning_ReturnsFriendlyError()
     {
         var service = CreateService(new StubHttpClientFactory(new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound))));

@@ -150,6 +150,35 @@ PY
   exit 1
 }
 
+try_download_file() {
+  local url="$1"
+  local target="$2"
+
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$url" -o "$target"
+    return $?
+  fi
+
+  if command -v wget >/dev/null 2>&1; then
+    wget -qO "$target" "$url"
+    return $?
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$url" "$target" <<'PY'
+import sys
+import urllib.request
+
+url, target = sys.argv[1], sys.argv[2]
+urllib.request.urlretrieve(url, target)
+PY
+    return $?
+  fi
+
+  echo 'No supported download tool was found. Install curl, wget, or python3.' >&2
+  return 1
+}
+
 parse_sha256_file() {
   local checksum_file="$1"
   local checksum
@@ -919,8 +948,7 @@ install_or_update_speedtest_cli() {
 
   if command -v apt-get >/dev/null 2>&1; then
     info 'Installing or updating speedtest-cli from the system package repository.'
-    run_elevated apt-get update >&2
-    if run_elevated apt-get install -y speedtest-cli >&2; then
+    if run_elevated apt-get update >&2 && run_elevated apt-get install -y speedtest-cli >&2; then
       return 0
     fi
 
@@ -930,14 +958,20 @@ install_or_update_speedtest_cli() {
   fi
 
   if ! command -v python3 >/dev/null 2>&1; then
-    warn 'python3 is required for the speedtest-cli fallback installation, but it is not available.'
-    return 1
+    warn 'python3 is required for the speedtest-cli fallback installation, but it is not available. Skipping this optional helper.'
+    return 0
   fi
 
   info 'Installing the upstream speedtest-cli helper script to /usr/local/bin.'
-  download_file 'https://raw.githubusercontent.com/sivel/speedtest-cli/master/speedtest.py' "$fallback_path"
+  if ! try_download_file 'https://raw.githubusercontent.com/sivel/speedtest-cli/master/speedtest.py' "$fallback_path"; then
+    warn 'The upstream speedtest-cli download failed. Continuing without updating that optional helper.'
+    return 0
+  fi
+
   chmod +x "$fallback_path"
-  run_elevated install -m 0755 "$fallback_path" /usr/local/bin/speedtest-cli
+  if ! run_elevated install -m 0755 "$fallback_path" /usr/local/bin/speedtest-cli; then
+    warn 'The upstream speedtest-cli script could not be installed. Continuing without updating that optional helper.'
+  fi
 }
 
 write_cloudflared_start_script() {
