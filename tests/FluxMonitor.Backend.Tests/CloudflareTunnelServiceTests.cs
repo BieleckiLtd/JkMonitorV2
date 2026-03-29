@@ -24,6 +24,15 @@ public sealed class CloudflareTunnelServiceTests
     }
 
     [Fact]
+    public void NormalizeTunnelToken_ExtractsEmbeddedJwtTokenFromPastedCommand()
+    {
+        var token = CloudflareTunnelService.NormalizeTunnelToken(
+            "sudo cloudflared tunnel token --some-flag https://example.com eyJhIjoiZXhhbXBsZS10b2tlbiJ9");
+
+        Assert.Equal("eyJhIjoiZXhhbXBsZS10b2tlbiJ9", token);
+    }
+
+    [Fact]
     public void NormalizeTunnelToken_RejectsUnparseableCommand()
     {
         var exception = Assert.Throws<InvalidOperationException>(() =>
@@ -33,19 +42,16 @@ public sealed class CloudflareTunnelServiceTests
     }
 
     [Fact]
-    public void NormalizePublicUrl_AddsHttpsWhenMissing()
+    public void MaskToken_ReturnsPrefixOnly()
     {
-        var normalized = CloudflareTunnelService.NormalizePublicUrl("monitor.example.com");
+        var masked = CloudflareTunnelService.MaskToken("eyJhIjoiNm9yLWxlc3MtbG9uZy10b2tlbiI");
 
-        Assert.Equal("https://monitor.example.com", normalized);
+        Assert.Equal("eyJhIjoiNm...", masked);
     }
 
     [Fact]
-    public void NormalizePublicUrl_RejectsInvalidUrl()
+    public void MaskToken_ReturnsNullForEmptyValue()
     {
-        var exception = Assert.Throws<InvalidOperationException>(() =>
-            CloudflareTunnelService.NormalizePublicUrl("not a valid url"));
-
-        Assert.Contains("Enter a valid public URL", exception.Message);
+        Assert.Null(CloudflareTunnelService.MaskToken(" "));
     }
 }

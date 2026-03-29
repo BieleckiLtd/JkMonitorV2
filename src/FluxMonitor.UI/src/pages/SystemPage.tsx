@@ -258,8 +258,8 @@ type CloudflareTunnelStatusSnapshot = {
   supported: boolean;
   statusMessage?: string | null;
   tunnelProvider: string;
-  publicUrl?: string | null;
   hasStoredToken: boolean;
+  maskedToken?: string | null;
   configured: boolean;
   packageInstalled: boolean;
   packageVersion?: string | null;
@@ -321,6 +321,7 @@ export function SystemPage() {
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateActionError, setUpdateActionError] = useState<string | null>(null);
   const [softwareUpdateSectionOpen, setSoftwareUpdateSectionOpen] = useState(false);
+  const [tunnelSectionOpen, setTunnelSectionOpen] = useState(false);
   const [interfaces, setInterfaces] = useState<SystemInterfacesResponse | null>(null);
   const [connectivity, setConnectivity] = useState<SystemConnectivitySnapshot | null>(null);
   const [connectivityLoading, setConnectivityLoading] = useState(true);
@@ -331,7 +332,6 @@ export function SystemPage() {
   const [cloudflareTunnelFeedback, setCloudflareTunnelFeedback] = useState<InlineFeedback | null>(null);
   const [cloudflareTunnelSaving, setCloudflareTunnelSaving] = useState(false);
   const [cloudflareTunnelEnabled, setCloudflareTunnelEnabled] = useState(false);
-  const [cloudflareTunnelPublicUrl, setCloudflareTunnelPublicUrl] = useState('');
   const [cloudflareTunnelTokenOrCommand, setCloudflareTunnelTokenOrCommand] = useState('');
   const [wifiScanLoading, setWifiScanLoading] = useState<string | null>(null);
   const [wifiAccessPoints, setWifiAccessPoints] = useState<Record<string, WifiAccessPointInfo[]>>({});
@@ -370,7 +370,6 @@ export function SystemPage() {
 
       if (!cloudflareTunnelDirtyRef.current) {
         setCloudflareTunnelEnabled(stringEqualsIgnoreCase(data.tunnelProvider, 'cloudflared'));
-        setCloudflareTunnelPublicUrl(data.publicUrl ?? '');
       }
     } catch (error) {
       setCloudflareTunnelError(error instanceof Error ? error.message : 'Unable to load Cloudflare Tunnel status.');
@@ -974,7 +973,6 @@ export function SystemPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           enabled: cloudflareTunnelEnabled,
-          publicUrl: cloudflareTunnelPublicUrl.trim() || null,
           tunnelTokenOrCommand: cloudflareTunnelTokenOrCommand.trim() || null,
         }),
       });
@@ -986,7 +984,6 @@ export function SystemPage() {
       if (response.ok && data.success) {
         cloudflareTunnelDirtyRef.current = false;
         setCloudflareTunnelEnabled(stringEqualsIgnoreCase(data.status.tunnelProvider, 'cloudflared'));
-        setCloudflareTunnelPublicUrl(data.status.publicUrl ?? '');
         setCloudflareTunnelTokenOrCommand('');
       }
     } catch (error) {
@@ -1056,19 +1053,31 @@ export function SystemPage() {
   const activeEthernetInterface = ethernetInterfaces.find((ethernetInterface) => isEthernetInterfaceActive(ethernetInterface)) ?? ethernetInterfaces[0] ?? null;
   const cloudflareTunnelRunning = cloudflareTunnelStatus?.serviceRunning ?? false;
   const cloudflareTunnelSupported = cloudflareTunnelStatus?.supported ?? false;
+  const cloudflareTunnelMaskedToken = cloudflareTunnelStatus?.maskedToken ?? null;
   const cloudflareTunnelSummary = !cloudflareTunnelSupported
     ? cloudflareTunnelStatus?.statusMessage ?? 'Unavailable'
     : cloudflareTunnelRunning
-      ? cloudflareTunnelStatus?.publicUrl ?? 'Connected to Cloudflare'
+      ? 'Connected through Cloudflare'
+      : cloudflareTunnelStatus?.hasStoredToken
+        ? 'Token saved'
+        : 'Not configured';
+  const cloudflareTunnelDetailSummary = !cloudflareTunnelSupported
+    ? cloudflareTunnelStatus?.statusMessage ?? 'Unavailable'
+    : cloudflareTunnelRunning
+      ? 'Tunnel is live'
       : cloudflareTunnelStatus?.configured
         ? 'Configured but not connected'
-        : 'Not configured';
+        : cloudflareTunnelStatus?.hasStoredToken
+          ? 'Token saved, switch is off'
+          : 'Not configured';
   const cloudflareTunnelStateLabel = !cloudflareTunnelSupported
     ? 'Unavailable'
     : cloudflareTunnelRunning
       ? 'Online'
       : cloudflareTunnelStatus?.configured
         ? 'Configured'
+        : cloudflareTunnelStatus?.hasStoredToken
+          ? 'Saved'
         : 'Off';
   const wifiSectionOpen = expandedConnectivitySection === 'wifi';
   const bluetoothSectionOpen = expandedConnectivitySection === 'bluetooth';
@@ -1359,163 +1368,222 @@ export function SystemPage() {
 
           <div className='min-w-0 space-y-6'>
             <Card className='border border-border/80 bg-card/85 shadow-sm'>
-              <CardHeader className='border-b border-border/60 pb-4'>
-                <div className='flex items-start gap-3'>
-                  <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
+              <CardHeader className='pb-4'>
+                <button
+                  type='button'
+                  onClick={() => setTunnelSectionOpen((current) => !current)}
+                  className='flex w-full items-center gap-3 text-left'
+                >
+                  <div className='flex items-center gap-2'>
                     <Cloud className='h-4 w-4 text-muted-foreground' />
-                  </div>
-                  <div className='min-w-0 flex-1'>
-                    <CardTitle>Cloudflare tunnel</CardTitle>
-                    <CardDescription>Expose Flux Monitor on the internet through a managed cloudflared service on this device.</CardDescription>
-                  </div>
-                  <div className='shrink-0 rounded-full border border-border/70 bg-background/70 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground'>
-                    {cloudflareTunnelStateLabel}
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className='space-y-4 pt-5'>
-                {cloudflareTunnelLoading && !cloudflareTunnelStatus ? (
-                  <div className='flex items-center justify-center py-6'>
-                    <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
-                  </div>
-                ) : (
-                  <>
-                    {cloudflareTunnelError ? (
-                      <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
-                        {cloudflareTunnelError}
-                      </div>
-                    ) : null}
-
-                    {cloudflareTunnelFeedback ? (
-                      <div className={cn(
-                        'rounded-xl border px-3 py-2 text-xs',
-                        cloudflareTunnelFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-                      )}>
-                        {cloudflareTunnelFeedback.message}
-                      </div>
-                    ) : null}
-
-                    {cloudflareTunnelStatus?.statusMessage ? (
-                      <div className='rounded-xl border border-border/70 bg-background/50 px-4 py-3'>
-                        <div className='text-sm font-medium text-foreground'>{cloudflareTunnelSummary}</div>
-                        <div className='mt-1 text-xs text-muted-foreground'>{cloudflareTunnelStatus.statusMessage}</div>
-                      </div>
-                    ) : null}
-
-                    <div className='grid gap-3 sm:grid-cols-2'>
-                      <DetailTile
-                        label='Package'
-                        value={cloudflareTunnelStatus?.packageInstalled
-                          ? cloudflareTunnelStatus.packageVersion ?? 'Installed'
-                          : 'Missing'}
-                      />
-                      <DetailTile
-                        label='Service'
-                        value={cloudflareTunnelStatus?.serviceInstalled
-                          ? formatCompactState(cloudflareTunnelStatus.serviceActiveState, cloudflareTunnelStatus.serviceSubState)
-                          : 'Missing'}
-                      />
-                      <DetailTile label='Provider' value={cloudflareTunnelStatus?.tunnelProvider ?? 'none'} />
-                      <DetailTile label='Token' value={cloudflareTunnelStatus?.hasStoredToken ? 'Saved' : 'Not saved'} />
+                    <div>
+                      <CardTitle>Tunnel</CardTitle>
+                      <CardDescription>Expose Flux Monitor over the internet through Cloudflare Tunnel.</CardDescription>
                     </div>
+                  </div>
+                  <div className='ml-auto flex items-center gap-2 pl-3 text-xs text-muted-foreground'>
+                    <span className='hidden sm:inline'>{cloudflareTunnelSummary}</span>
+                    <span className='rounded-full border border-border/70 bg-background/70 px-3 py-1 font-medium uppercase tracking-[0.16em]'>
+                      {cloudflareTunnelStateLabel}
+                    </span>
+                    {tunnelSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
+                  </div>
+                </button>
+              </CardHeader>
+              {tunnelSectionOpen ? (
+                <CardContent className='space-y-4 border-t border-border/60 pt-5'>
+                  {cloudflareTunnelLoading && !cloudflareTunnelStatus ? (
+                    <div className='flex items-center justify-center py-6'>
+                      <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
+                    </div>
+                  ) : (
+                    <>
+                      {cloudflareTunnelError ? (
+                        <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
+                          {cloudflareTunnelError}
+                        </div>
+                      ) : null}
 
-                    <div className='flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/70 bg-background/35 px-4 py-3'>
-                      <div className='min-w-0'>
-                        <div className='text-sm font-semibold text-foreground'>Enable internet access through Cloudflare</div>
-                        <div className='mt-1 text-xs text-muted-foreground'>
-                          Paste the full `cloudflared service install ...` command from Cloudflare, or paste only the tunnel token.
+                      {cloudflareTunnelFeedback ? (
+                        <div className={cn(
+                          'rounded-xl border px-3 py-2 text-xs',
+                          cloudflareTunnelFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                        )}>
+                          {cloudflareTunnelFeedback.message}
+                        </div>
+                      ) : null}
+
+                      {cloudflareTunnelStatus?.statusMessage ? (
+                        <div className='rounded-xl border border-border/70 bg-background/50 px-4 py-3'>
+                          <div className='text-sm font-medium text-foreground'>{cloudflareTunnelDetailSummary}</div>
+                          <div className='mt-1 text-xs text-muted-foreground'>{cloudflareTunnelStatus.statusMessage}</div>
+                        </div>
+                      ) : null}
+
+                      <div className='grid gap-3 sm:grid-cols-2'>
+                        <DetailTile
+                          label='Package'
+                          value={cloudflareTunnelStatus?.packageInstalled
+                            ? cloudflareTunnelStatus.packageVersion ?? 'Installed'
+                            : 'Missing'}
+                        />
+                        <DetailTile
+                          label='Service'
+                          value={cloudflareTunnelStatus?.serviceInstalled
+                            ? formatCompactState(cloudflareTunnelStatus.serviceActiveState, cloudflareTunnelStatus.serviceSubState)
+                            : 'Missing'}
+                        />
+                        <DetailTile label='Stored token' value={cloudflareTunnelMaskedToken ?? 'Not saved'} />
+                        <DetailTile label='Provider' value={cloudflareTunnelStatus?.tunnelProvider ?? 'none'} />
+                      </div>
+
+                      <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-4'>
+                        <div className='text-sm font-semibold text-foreground'>How it works</div>
+                        <div className='mt-3 space-y-1 font-mono text-sm text-muted-foreground'>
+                          <div>Your browser eg. on the phone</div>
+                          <div>↓</div>
+                          <div>Cloudflare (login + protection)</div>
+                          <div>↓</div>
+                          <div>Tunnel (secure pipe)</div>
+                          <div>↓</div>
+                          <div>Flux Monitor app on Raspberry Pi</div>
+                        </div>
+                        <div className='mt-3 text-xs text-muted-foreground'>
+                          This exposes Flux Monitor to the internet on your own hostname or on a Cloudflare URL such as
+                          {' '}
+                          <span className='font-mono text-foreground'>random-name.trycloudflare.com</span>
+                          . Because it is reachable from outside your home network, add a Cloudflare login wall first.
                         </div>
                       </div>
-                      <Switch
-                        checked={cloudflareTunnelEnabled}
-                        disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
-                        onCheckedChange={(checked) => {
-                          cloudflareTunnelDirtyRef.current = true;
-                          setCloudflareTunnelEnabled(checked);
-                          setCloudflareTunnelFeedback(null);
-                        }}
-                        aria-label='Toggle Cloudflare Tunnel'
-                      />
-                    </div>
 
-                    <div className='space-y-2'>
-                      <label className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground' htmlFor='cloudflare-public-url'>
-                        Public URL
-                      </label>
-                      <Input
-                        id='cloudflare-public-url'
-                        value={cloudflareTunnelPublicUrl}
-                        onChange={(event) => {
-                          cloudflareTunnelDirtyRef.current = true;
-                          setCloudflareTunnelPublicUrl(event.target.value);
-                        }}
-                        placeholder='https://monitor.example.com'
-                        disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
-                        className='h-10 rounded-xl bg-background/70'
-                      />
-                      <div className='text-xs text-muted-foreground'>
-                        Optional. This gives the System page a quick link once the tunnel is running.
+                      <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-4'>
+                        <div className='flex items-center gap-2 text-sm font-semibold text-foreground'>
+                          <ExternalLink className='h-4 w-4 text-muted-foreground' />
+                          Cloudflare setup
+                        </div>
+                        <div className='mt-3 space-y-2 text-sm text-muted-foreground'>
+                          <div>1. In Cloudflare Tunnel, create a tunnel and copy the command or token shown on the connector page.</div>
+                          <div>2. In Published applications, choose your hostname. Use your own domain if you have one. If you use a temporary Cloudflare URL, that is configured on the Cloudflare side, not here in Flux Monitor.</div>
+                          <div>3. Leave Path empty unless you only want to expose part of the app.</div>
+                          <div>4. Set Service Type to <span className='font-mono text-foreground'>HTTP</span>.</div>
+                          <div>5. Set URL to <span className='font-mono text-foreground'>127.0.0.1:5074</span> or <span className='font-mono text-foreground'>localhost:5074</span>.</div>
+                        </div>
+                        <div className='mt-3 flex flex-wrap gap-3 text-sm'>
+                          <a
+                            href='https://developers.cloudflare.com/tunnel/setup/'
+                            target='_blank'
+                            rel='noreferrer'
+                            className='inline-flex items-center gap-2 text-primary hover:underline'
+                          >
+                            <ExternalLink className='h-4 w-4' />
+                            Open Tunnel hostname docs
+                          </a>
+                          <a
+                            href='https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/remote-tunnel-permissions/'
+                            target='_blank'
+                            rel='noreferrer'
+                            className='inline-flex items-center gap-2 text-primary hover:underline'
+                          >
+                            <ExternalLink className='h-4 w-4' />
+                            Open connector setup docs
+                          </a>
+                        </div>
                       </div>
-                    </div>
 
-                    <div className='space-y-2'>
-                      <label className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground' htmlFor='cloudflare-token'>
-                        Tunnel token or install command
-                      </label>
-                      <textarea
-                        id='cloudflare-token'
-                        value={cloudflareTunnelTokenOrCommand}
-                        onChange={(event) => {
-                          cloudflareTunnelDirtyRef.current = true;
-                          setCloudflareTunnelTokenOrCommand(event.target.value);
-                        }}
-                        placeholder={cloudflareTunnelStatus?.hasStoredToken
-                          ? 'Leave blank to keep the saved token.'
-                          : 'cloudflared service install <token>'}
-                        disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
-                        className='min-h-24 w-full rounded-xl border border-input bg-background/70 px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50'
-                      />
-                      <div className='text-xs text-muted-foreground'>
-                        In Cloudflare, point the public hostname at `http://127.0.0.1:5074`. Saving with the switch off disables the tunnel and clears the saved token.
+                      <div className='rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-4'>
+                        <div className='flex items-center gap-2 text-sm font-semibold text-foreground'>
+                          <Lock className='h-4 w-4 text-amber-200' />
+                          Protect it with Cloudflare Access
+                        </div>
+                        <div className='mt-3 space-y-2 text-sm text-amber-50/90'>
+                          <div>Access → Applications</div>
+                          <div>Add application</div>
+                          <div>Enter your hostname</div>
+                          <div>Add policy: Allow → Emails → your@email.com</div>
+                          <div>Choose login method: OTP or Google</div>
+                        </div>
+                        <div className='mt-3 text-xs text-amber-100/80'>
+                          OTP is the simplest option if you already use one-time email codes. This puts a login wall in front of the app before traffic reaches your Raspberry Pi.
+                        </div>
+                        <div className='mt-3'>
+                          <a
+                            href='https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-apps/'
+                            target='_blank'
+                            rel='noreferrer'
+                            className='inline-flex items-center gap-2 text-sm text-amber-100 hover:underline'
+                          >
+                            <ExternalLink className='h-4 w-4' />
+                            Open Access application docs
+                          </a>
+                        </div>
                       </div>
-                    </div>
 
-                    <div className='flex flex-col gap-2 sm:flex-row'>
-                      <button
-                        type='button'
-                        disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
-                        onClick={() => void saveCloudflareTunnel()}
-                        className='inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
-                      >
-                        {cloudflareTunnelSaving ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Cloud className='h-4 w-4' />}
-                        Save tunnel settings
-                      </button>
+                      <div className='flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/70 bg-background/35 px-4 py-3'>
+                        <div className='min-w-0'>
+                          <div className='text-sm font-semibold text-foreground'>Enable Tunnel</div>
+                          <div className='mt-1 text-xs text-muted-foreground'>
+                            Flux Monitor stores the token in PostgreSQL. When you reopen this page you only see a shortened preview, not the full token.
+                          </div>
+                        </div>
+                        <Switch
+                          checked={cloudflareTunnelEnabled}
+                          disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
+                          onCheckedChange={(checked) => {
+                            cloudflareTunnelDirtyRef.current = true;
+                            setCloudflareTunnelEnabled(checked);
+                            setCloudflareTunnelFeedback(null);
+                          }}
+                          aria-label='Toggle Tunnel'
+                        />
+                      </div>
 
-                      <button
-                        type='button'
-                        disabled={cloudflareTunnelSaving}
-                        onClick={() => void loadCloudflareTunnelStatus()}
-                        className='inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
-                      >
-                        <RefreshCcw className='h-4 w-4' />
-                        Refresh status
-                      </button>
-                    </div>
+                      <div className='space-y-2'>
+                        <label className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground' htmlFor='cloudflare-token'>
+                          Tunnel token or Cloudflare command
+                        </label>
+                        <textarea
+                          id='cloudflare-token'
+                          value={cloudflareTunnelTokenOrCommand}
+                          onChange={(event) => {
+                            cloudflareTunnelDirtyRef.current = true;
+                            setCloudflareTunnelTokenOrCommand(event.target.value);
+                          }}
+                          placeholder={cloudflareTunnelMaskedToken
+                            ? `Leave blank to keep the saved token (${cloudflareTunnelMaskedToken}).`
+                            : 'Paste the cloudflared install command, run command, or the raw tunnel token.'}
+                          disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
+                          className='min-h-24 w-full rounded-xl border border-input bg-background/70 px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50'
+                        />
+                        <div className='text-xs text-muted-foreground'>
+                          Flux Monitor extracts the token automatically if you paste a command copied from the Cloudflare page.
+                        </div>
+                      </div>
 
-                    {cloudflareTunnelRunning && cloudflareTunnelStatus?.publicUrl ? (
-                      <a
-                        href={cloudflareTunnelStatus.publicUrl}
-                        target='_blank'
-                        rel='noreferrer'
-                        className='inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline'
-                      >
-                        <ExternalLink className='h-4 w-4' />
-                        Open {cloudflareTunnelStatus.publicUrl}
-                      </a>
-                    ) : null}
-                  </>
-                )}
-              </CardContent>
+                      <div className='flex flex-col gap-2 sm:flex-row'>
+                        <button
+                          type='button'
+                          disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
+                          onClick={() => void saveCloudflareTunnel()}
+                          className='inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
+                        >
+                          {cloudflareTunnelSaving ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Cloud className='h-4 w-4' />}
+                          Save tunnel settings
+                        </button>
+
+                        <button
+                          type='button'
+                          disabled={cloudflareTunnelSaving}
+                          onClick={() => void loadCloudflareTunnelStatus()}
+                          className='inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
+                        >
+                          <RefreshCcw className='h-4 w-4' />
+                          Refresh status
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </CardContent>
+              ) : null}
             </Card>
 
             <Card className='border border-border/80 bg-card/85 shadow-sm'>

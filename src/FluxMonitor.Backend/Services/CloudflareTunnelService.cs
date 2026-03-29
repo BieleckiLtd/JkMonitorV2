@@ -1,6 +1,4 @@
 using System.Diagnostics;
-using System.Text.Json;
-using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
 using FluxMonitor.Backend.Models;
 
@@ -8,9 +6,9 @@ namespace FluxMonitor.Backend.Services;
 
 public sealed class CloudflareTunnelService(
     IHostEnvironment environment,
-    IConfiguration appConfiguration,
     ManagedRestartService managedRestartService,
     ICommandRunner commandRunner,
+    CloudflareTunnelStore cloudflareTunnelStore,
     ILogger<CloudflareTunnelService> logger)
 {
     private const string CloudflaredBinary = "cloudflared";
@@ -19,36 +17,41 @@ public sealed class CloudflareTunnelService(
     private const string NoTunnelProvider = "none";
     private const string TunnelTokenVariableName = "CLOUDFLARED_TUNNEL_TOKEN";
 
-    private static readonly JsonSerializerOptions JsonOptions = new()
-    {
-        WriteIndented = true
-    };
-
     private static readonly Regex CommandTokenRegex = new(
         @"(?:--token|service\s+install)\s+['""]?(?<token>[^\s'""]+)['""]?",
         RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
+
+    private static readonly Regex EmbeddedJwtTokenRegex = new(
+        @"(?<token>eyJ[A-Za-z0-9._-]+)",
+        RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private static readonly Regex VersionRegex = new(
         @"\bversion\s+(?<version>[^\s]+)",
         RegexOptions.IgnoreCase | RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
     private readonly string _contentRoot = environment.ContentRootPath;
-    private readonly string _environmentName = environment.EnvironmentName;
+
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    {
+        await cloudflareTunnelStore.InitializeAsync(cancellationToken);
+        await SyncRuntimeStateAsync(cancellationToken);
+    }
 
     public async Task<CloudflareTunnelStatusSnapshot> GetStatusAsync(CancellationToken cancellationToken = default)
     {
+        var storedSettings = await cloudflareTunnelStore.GetSettingsAsync(cancellationToken);
+
         if (!OperatingSystem.IsLinux() || !managedRestartService.IsManagedInstall)
         {
             return new CloudflareTunnelStatusSnapshot
             {
                 Supported = false,
-                StatusMessage = "Cloudflare Tunnel is available on managed Linux installs.",
-                TunnelProvider = GetSavedSettings().TunnelProvider
+                StatusMessage = "Tunnel is available on managed Linux installs.",
+                TunnelProvider = storedSettings.Enabled ? CloudflareTunnelProvider : NoTunnelProvider,
+                HasStoredToken = !string.IsNullOrWhiteSpace(storedSettings.TunnelToken),
+                MaskedToken = MaskToken(storedSettings.TunnelToken)
             };
         }
-
-        var savedSettings = GetSavedSettings();
-        var savedToken = TryReadStoredTunnelToken();
 
         var versionTask = commandRunner.RunAsync(CloudflaredBinary, ["--version"], cancellationToken);
         var serviceTask = commandRunner.RunAsync(
@@ -83,24 +86,23 @@ public sealed class CloudflareTunnelService(
         var serviceInstalled = !string.Equals(serviceLoadState, "not-found", StringComparison.OrdinalIgnoreCase);
         var serviceRunning = string.Equals(serviceActiveState, "active", StringComparison.OrdinalIgnoreCase);
         var serviceEnabled = serviceUnitFileState?.StartsWith("enabled", StringComparison.OrdinalIgnoreCase) == true;
-        var configured = string.Equals(savedSettings.TunnelProvider, CloudflareTunnelProvider, StringComparison.OrdinalIgnoreCase)
-            && !string.IsNullOrWhiteSpace(savedToken);
+        var hasStoredToken = !string.IsNullOrWhiteSpace(storedSettings.TunnelToken);
+        var configured = storedSettings.Enabled && hasStoredToken;
 
         return new CloudflareTunnelStatusSnapshot
         {
             Supported = true,
             StatusMessage = BuildStatusMessage(
-                savedSettings.TunnelProvider,
-                savedSettings.PublicUrl,
-                savedToken,
+                storedSettings.Enabled,
+                storedSettings.TunnelToken,
                 packageInstalled,
                 serviceInstalled,
                 serviceRunning,
                 serviceActiveState,
                 serviceSystemdResult),
-            TunnelProvider = savedSettings.TunnelProvider,
-            PublicUrl = savedSettings.PublicUrl,
-            HasStoredToken = !string.IsNullOrWhiteSpace(savedToken),
+            TunnelProvider = storedSettings.Enabled ? CloudflareTunnelProvider : NoTunnelProvider,
+            HasStoredToken = hasStoredToken,
+            MaskedToken = MaskToken(storedSettings.TunnelToken),
             Configured = configured,
             PackageInstalled = packageInstalled,
             PackageVersion = packageVersion,
@@ -126,7 +128,7 @@ public sealed class CloudflareTunnelService(
             return new SaveCloudflareTunnelResponse
             {
                 Success = false,
-                Message = currentStatus.StatusMessage ?? "Cloudflare Tunnel is not available in this environment.",
+                Message = currentStatus.StatusMessage ?? "Tunnel is not available in this environment.",
                 Status = currentStatus
             };
         }
@@ -151,15 +153,12 @@ public sealed class CloudflareTunnelService(
             };
         }
 
-        var enabled = request.Enabled;
-        var existingToken = TryReadStoredTunnelToken();
+        var storedSettings = await cloudflareTunnelStore.GetSettingsAsync(cancellationToken);
         string? normalizedToken;
-        string? normalizedPublicUrl;
 
         try
         {
             normalizedToken = NormalizeTunnelToken(request.TunnelTokenOrCommand);
-            normalizedPublicUrl = NormalizePublicUrl(request.PublicUrl);
         }
         catch (InvalidOperationException exception)
         {
@@ -171,51 +170,37 @@ public sealed class CloudflareTunnelService(
             };
         }
 
-        var effectiveToken = enabled
-            ? !string.IsNullOrWhiteSpace(normalizedToken)
-                ? normalizedToken
-                : existingToken
-            : null;
+        var effectiveToken = !string.IsNullOrWhiteSpace(normalizedToken)
+            ? normalizedToken
+            : storedSettings.TunnelToken;
 
-        if (enabled && string.IsNullOrWhiteSpace(effectiveToken))
+        if (request.Enabled && string.IsNullOrWhiteSpace(effectiveToken))
         {
             return new SaveCloudflareTunnelResponse
             {
                 Success = false,
-                Message = "Paste the Cloudflare install command or the tunnel token before enabling the tunnel.",
+                Message = "Paste the Cloudflare install command or the tunnel token before enabling Tunnel.",
                 Status = currentStatus
             };
         }
 
         try
         {
-            UpdateJson(GetEnvironmentLocalSettingsPath(), monitor =>
-            {
-                UpsertObject(monitor, "ApiSecurity", apiSecurity =>
-                {
-                    apiSecurity["TunnelProvider"] = enabled ? CloudflareTunnelProvider : NoTunnelProvider;
-
-                    UpsertObject(apiSecurity, "CloudflareTunnel", cloudflareTunnel =>
-                    {
-                        cloudflareTunnel["PublicUrl"] = normalizedPublicUrl ?? string.Empty;
-                    });
-                });
-            });
-
-            WriteStoredTunnelToken(enabled ? effectiveToken : null);
+            await cloudflareTunnelStore.SaveSettingsAsync(request.Enabled, effectiveToken, cancellationToken);
+            await SyncRuntimeStateAsync(cancellationToken);
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "Failed to save Cloudflare Tunnel configuration.");
+            logger.LogWarning(exception, "Failed to save Tunnel configuration.");
             return new SaveCloudflareTunnelResponse
             {
                 Success = false,
-                Message = "Flux Monitor could not save the Cloudflare Tunnel configuration.",
+                Message = "Flux Monitor could not save the Tunnel configuration.",
                 Status = await GetStatusAsync(cancellationToken)
             };
         }
 
-        var command = enabled ? "restart" : "stop";
+        var command = request.Enabled ? "restart" : "stop";
         var serviceCommandResult = await commandRunner.RunAsync(
             "systemctl",
             [command, CloudflaredServiceName],
@@ -229,14 +214,14 @@ public sealed class CloudflareTunnelService(
             return new SaveCloudflareTunnelResponse
             {
                 Success = false,
-                Message = enabled
+                Message = request.Enabled
                     ? $"Settings were saved, but cloudflared could not be restarted. {BuildCommandFailureMessage(serviceCommandResult)}"
                     : $"Settings were saved, but cloudflared could not be stopped. {BuildCommandFailureMessage(serviceCommandResult)}",
                 Status = updatedStatus
             };
         }
 
-        if (enabled && !updatedStatus.ServiceRunning)
+        if (request.Enabled && !updatedStatus.ServiceRunning)
         {
             return new SaveCloudflareTunnelResponse
             {
@@ -249,11 +234,17 @@ public sealed class CloudflareTunnelService(
         return new SaveCloudflareTunnelResponse
         {
             Success = true,
-            Message = enabled
-                ? "Cloudflare Tunnel settings were saved and the service was restarted."
-                : "Cloudflare Tunnel was disabled and the service was stopped.",
+            Message = request.Enabled
+                ? "Tunnel settings were saved and the service was restarted."
+                : "Tunnel was disabled. The saved token was kept in PostgreSQL.",
             Status = updatedStatus
         };
+    }
+
+    public async Task SyncRuntimeStateAsync(CancellationToken cancellationToken = default)
+    {
+        var storedSettings = await cloudflareTunnelStore.GetSettingsAsync(cancellationToken);
+        WriteStoredTunnelToken(storedSettings.Enabled ? storedSettings.TunnelToken : null);
     }
 
     internal static string? NormalizeTunnelToken(string? value)
@@ -264,88 +255,41 @@ public sealed class CloudflareTunnelService(
             return null;
         }
 
-        var match = CommandTokenRegex.Match(trimmed);
-        if (match.Success)
+        var commandMatch = CommandTokenRegex.Match(trimmed);
+        if (commandMatch.Success)
         {
-            return match.Groups["token"].Value.Trim();
+            return commandMatch.Groups["token"].Value.Trim();
+        }
+
+        var embeddedTokenMatch = EmbeddedJwtTokenRegex.Match(trimmed);
+        if (embeddedTokenMatch.Success)
+        {
+            return embeddedTokenMatch.Groups["token"].Value.Trim();
         }
 
         if (trimmed.Contains(' ', StringComparison.Ordinal))
         {
-            throw new InvalidOperationException("The Cloudflare command could not be parsed. Paste the full install command or just the tunnel token.");
+            throw new InvalidOperationException("The Cloudflare command could not be parsed. Paste the full install command, run command, or just the tunnel token.");
         }
 
         return trimmed;
     }
 
-    internal static string? NormalizePublicUrl(string? value)
+    internal static string? MaskToken(string? token)
     {
-        var trimmed = value?.Trim();
+        var trimmed = token?.Trim();
         if (string.IsNullOrWhiteSpace(trimmed))
         {
             return null;
         }
 
-        if (!trimmed.Contains("://", StringComparison.Ordinal))
-        {
-            trimmed = $"https://{trimmed}";
-        }
-
-        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
-            || (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps)
-            || string.IsNullOrWhiteSpace(uri.Host))
-        {
-            throw new InvalidOperationException("Enter a valid public URL, for example https://monitor.example.com.");
-        }
-
-        return uri.GetLeftPart(UriPartial.Path).TrimEnd('/');
-    }
-
-    private TunnelSettings GetSavedSettings()
-    {
-        var root = LoadJsonObject(GetEnvironmentLocalSettingsPath(), optional: true);
-        var configuredProvider = ReadNestedString(root, "Monitor", "ApiSecurity", "TunnelProvider");
-        var configuredPublicUrl = ReadNestedString(root, "Monitor", "ApiSecurity", "CloudflareTunnel", "PublicUrl");
-
-        var provider = configuredProvider
-            ?? appConfiguration["Monitor:ApiSecurity:TunnelProvider"]
-            ?? NoTunnelProvider;
-        var publicUrl = configuredPublicUrl
-            ?? appConfiguration["Monitor:ApiSecurity:CloudflareTunnel:PublicUrl"];
-
-        return new TunnelSettings(
-            string.IsNullOrWhiteSpace(provider) ? NoTunnelProvider : provider.Trim(),
-            string.IsNullOrWhiteSpace(publicUrl) ? null : publicUrl.Trim());
-    }
-
-    private string GetEnvironmentLocalSettingsPath()
-    {
-        return Path.Combine(_contentRoot, $"appsettings.{_environmentName}.Local.json");
+        return trimmed.Length <= 10 ? trimmed : $"{trimmed[..10]}...";
     }
 
     private string GetTunnelEnvironmentFilePath()
     {
         var installRoot = Directory.GetParent(_contentRoot)?.FullName ?? _contentRoot;
         return Path.Combine(installRoot, "cloudflared.env");
-    }
-
-    private string? TryReadStoredTunnelToken()
-    {
-        var path = GetTunnelEnvironmentFilePath();
-        if (!File.Exists(path))
-        {
-            return null;
-        }
-
-        foreach (var line in File.ReadLines(path))
-        {
-            if (TryParseEnvironmentValue(line, TunnelTokenVariableName, out var value))
-            {
-                return value;
-            }
-        }
-
-        return null;
     }
 
     private void WriteStoredTunnelToken(string? token)
@@ -368,78 +312,6 @@ public sealed class CloudflareTunnelService(
         }
 
         File.WriteAllText(path, $"{TunnelTokenVariableName}={token.Trim()}{Environment.NewLine}");
-    }
-
-    private void UpdateJson(string path, Action<JsonObject> updateMonitor)
-    {
-        var root = LoadJsonObject(path, optional: true);
-        var monitor = GetOrCreateObject(root, "Monitor");
-
-        updateMonitor(monitor);
-
-        var directory = Path.GetDirectoryName(path);
-        if (!string.IsNullOrWhiteSpace(directory))
-        {
-            Directory.CreateDirectory(directory);
-        }
-
-        File.WriteAllText(path, root.ToJsonString(JsonOptions) + Environment.NewLine);
-    }
-
-    private static JsonObject LoadJsonObject(string path, bool optional)
-    {
-        if (!File.Exists(path))
-        {
-            return optional ? new JsonObject() : throw new InvalidOperationException($"Configuration file '{path}' does not exist.");
-        }
-
-        var json = File.ReadAllText(path);
-        if (string.IsNullOrWhiteSpace(json))
-        {
-            return new JsonObject();
-        }
-
-        return JsonNode.Parse(json) as JsonObject
-            ?? throw new InvalidOperationException($"Configuration file '{Path.GetFileName(path)}' must contain a JSON object.");
-    }
-
-    private static JsonObject GetOrCreateObject(JsonObject parent, string propertyName)
-    {
-        if (parent[propertyName] is JsonObject existing)
-        {
-            return existing;
-        }
-
-        if (parent[propertyName] is not null)
-        {
-            throw new InvalidOperationException($"Configuration section '{propertyName}' must be a JSON object.");
-        }
-
-        var created = new JsonObject();
-        parent[propertyName] = created;
-        return created;
-    }
-
-    private static void UpsertObject(JsonObject parent, string propertyName, Action<JsonObject> updateChild)
-    {
-        var child = GetOrCreateObject(parent, propertyName);
-        updateChild(child);
-    }
-
-    private static string? ReadNestedString(JsonObject parent, params string[] segments)
-    {
-        JsonNode? current = parent;
-        foreach (var segment in segments)
-        {
-            if (current is not JsonObject currentObject || currentObject[segment] is not JsonNode next)
-            {
-                return null;
-            }
-
-            current = next;
-        }
-
-        return current?.GetValue<string>();
     }
 
     private static Dictionary<string, string> ParseSystemctlProperties(string output)
@@ -476,8 +348,7 @@ public sealed class CloudflareTunnelService(
     }
 
     private static string BuildStatusMessage(
-        string tunnelProvider,
-        string? publicUrl,
+        bool enabled,
         string? savedToken,
         bool packageInstalled,
         bool serviceInstalled,
@@ -495,11 +366,11 @@ public sealed class CloudflareTunnelService(
             return "The managed cloudflared service is missing. Run the installer or updater again.";
         }
 
-        if (!string.Equals(tunnelProvider, CloudflareTunnelProvider, StringComparison.OrdinalIgnoreCase))
+        if (!enabled)
         {
             return !string.IsNullOrWhiteSpace(savedToken)
-                ? "A tunnel token is stored, but Cloudflare Tunnel is currently disabled."
-                : "Cloudflare Tunnel is disabled.";
+                ? "Tunnel is off. A token is saved in PostgreSQL and can be re-enabled from this page."
+                : "Tunnel is off. Paste a token from Cloudflare to enable internet access.";
         }
 
         if (string.IsNullOrWhiteSpace(savedToken))
@@ -509,22 +380,20 @@ public sealed class CloudflareTunnelService(
 
         if (serviceRunning)
         {
-            return !string.IsNullOrWhiteSpace(publicUrl)
-                ? $"Cloudflare Tunnel is running. Open {publicUrl} from outside your network."
-                : "Cloudflare Tunnel is running. Add the public hostname here if you want a quick link in the UI.";
+            return "Tunnel is running. Open the hostname you configured in Cloudflare to reach this device.";
         }
 
         if (string.Equals(activeState, "activating", StringComparison.OrdinalIgnoreCase))
         {
-            return "Cloudflare Tunnel is starting.";
+            return "Tunnel is starting.";
         }
 
         if (string.Equals(serviceResult, "condition-failed", StringComparison.OrdinalIgnoreCase))
         {
-            return "Cloudflare Tunnel is enabled, but the service does not have a saved token yet.";
+            return "Tunnel is enabled, but the managed service does not have a token available yet.";
         }
 
-        return "Cloudflare Tunnel is configured, but the service is not running.";
+        return "Tunnel is configured, but the service is not running.";
     }
 
     private static string BuildCommandFailureMessage(CommandResult result)
@@ -541,21 +410,6 @@ public sealed class CloudflareTunnelService(
 
         return "Check the cloudflared service status on the device for more detail.";
     }
-
-    private static bool TryParseEnvironmentValue(string line, string key, out string? value)
-    {
-        var prefix = key + "=";
-        if (line.StartsWith(prefix, StringComparison.Ordinal))
-        {
-            value = line[prefix.Length..].Trim().Trim('"', '\'');
-            return !string.IsNullOrWhiteSpace(value);
-        }
-
-        value = null;
-        return false;
-    }
-
-    private sealed record TunnelSettings(string TunnelProvider, string? PublicUrl);
 }
 
 public interface ICommandRunner

@@ -8,9 +8,9 @@ public sealed record class CloudflareTunnelStatusSnapshot
 
     public required string TunnelProvider { get; init; }
 
-    public string? PublicUrl { get; init; }
-
     public bool HasStoredToken { get; init; }
+
+    public string? MaskedToken { get; init; }
 
     public bool Configured { get; init; }
 
@@ -40,8 +40,6 @@ public sealed record class SaveCloudflareTunnelRequest
     public bool Enabled { get; init; }
 
     public string? TunnelTokenOrCommand { get; init; }
-
-    public string? PublicUrl { get; init; }
 }
 
 public sealed record class SaveCloudflareTunnelResponse

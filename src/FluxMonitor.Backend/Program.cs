@@ -50,6 +50,7 @@ builder.Services.AddSingleton<FluxMonitor.Backend.Services.BluetoothManagementSe
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.HostServicesCatalogService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.ICommandRunner, FluxMonitor.Backend.Services.ProcessCommandRunner>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.ManagedRestartService>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.CloudflareTunnelStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.CloudflareTunnelService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.UpdateProgressBroadcaster>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.SystemUpdateService>();
@@ -158,6 +159,12 @@ using (var scope = app.Services.CreateScope())
 
     var wifiCredentialStore = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.WifiCredentialStore>();
     await wifiCredentialStore.InitializeAsync(CancellationToken.None);
+
+    var cloudflareTunnelStore = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.CloudflareTunnelStore>();
+    await cloudflareTunnelStore.InitializeAsync(CancellationToken.None);
+
+    var cloudflareTunnelService = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.CloudflareTunnelService>();
+    await cloudflareTunnelService.InitializeAsync(CancellationToken.None);
 }
 
 app.UseDefaultFiles();
