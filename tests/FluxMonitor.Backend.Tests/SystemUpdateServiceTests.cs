@@ -105,6 +105,7 @@ public class SystemUpdateServiceTests
             }),
             managedRestartService,
             lifetime,
+            new UpdateProgressBroadcaster(),
             NullLogger<SystemUpdateService>.Instance);
     }
 

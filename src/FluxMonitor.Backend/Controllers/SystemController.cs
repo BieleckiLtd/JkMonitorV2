@@ -2,6 +2,7 @@
 using FluxMonitor.Backend.Models;
 using FluxMonitor.Backend.Services;
 using Microsoft.AspNetCore.Mvc;
+using System.Text.Json;
 
 namespace FluxMonitor.Backend.Controllers;
 
@@ -9,6 +10,7 @@ namespace FluxMonitor.Backend.Controllers;
 [Route("api/system")]
 public sealed class SystemController(
     SystemUpdateService updateService,
+    UpdateProgressBroadcaster updateProgressBroadcaster,
     NetworkManagementService networkManagementService,
     BluetoothManagementService bluetoothManagementService,
     HostServicesCatalogService hostServicesCatalogService) : ControllerBase
@@ -153,6 +155,34 @@ public sealed class SystemController(
         var progress = updateService.GetProgress();
         if (progress is null) return NoContent();
         return Ok(progress);
+    }
+
+    [HttpGet("update/stream")]
+    public async Task GetUpdateStream(CancellationToken cancellationToken)
+    {
+        Response.Headers.Append("Cache-Control", "no-cache");
+        Response.Headers.Append("X-Accel-Buffering", "no");
+        Response.ContentType = "text/event-stream";
+
+        await using var subscription = updateProgressBroadcaster.Subscribe(updateService.GetProgress());
+
+        try
+        {
+            await foreach (var progress in subscription.Reader.ReadAllAsync(cancellationToken))
+            {
+                var payload = JsonSerializer.Serialize(new UpdateProgressStreamEnvelope
+                {
+                    Progress = progress
+                });
+
+                await Response.WriteAsync($"data: {payload}\n\n", cancellationToken);
+                await Response.Body.FlushAsync(cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The client disconnected.
+        }
     }
 
     [HttpGet("interfaces")]
@@ -378,3 +408,8 @@ public sealed record WifiPowerRequest(bool Enabled);
 public sealed record EthernetDisconnectRequest(string InterfaceName);
 
 public sealed record BluetoothPowerRequest(bool Enabled);
+
+file sealed class UpdateProgressStreamEnvelope
+{
+    public UpdateProgress? Progress { get; set; }
+}

@@ -7,6 +7,7 @@ const initialState = useAppStore.getState();
 
 describe('useAppStore update restart recovery', () => {
   const originalLocation = window.location;
+  const originalEventSource = globalThis.EventSource;
 
   beforeEach(() => {
     useAppStore.setState({
@@ -18,6 +19,8 @@ describe('useAppStore update restart recovery', () => {
   });
 
   afterEach(() => {
+    useAppStore.getState().disconnectUpdateProgressStream();
+
     useAppStore.setState({
       ...initialState,
       updateProgress: null,
@@ -29,6 +32,13 @@ describe('useAppStore update restart recovery', () => {
       configurable: true,
       value: originalLocation,
     });
+
+    if (originalEventSource) {
+      globalThis.EventSource = originalEventSource;
+    } else {
+      // eslint-disable-next-line @typescript-eslint/no-dynamic-delete
+      delete (globalThis as typeof globalThis & { EventSource?: typeof EventSource }).EventSource;
+    }
 
     vi.restoreAllMocks();
   });
@@ -85,5 +95,58 @@ describe('useAppStore update restart recovery', () => {
 
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain('/api/health?nocache=');
     expect(String(locationReplace.mock.calls[0]?.[0])).toContain('_reload=');
+  });
+
+  it('applies pushed update progress from the event stream immediately', async () => {
+    class FakeEventSource {
+      static instances: FakeEventSource[] = [];
+
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onerror: (() => void) | null = null;
+
+      constructor(public readonly url: string) {
+        FakeEventSource.instances.push(this);
+      }
+
+      close() {
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }));
+      }
+    }
+
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+
+    useAppStore.getState().connectUpdateProgressStream();
+
+    expect(FakeEventSource.instances).toHaveLength(1);
+    expect(FakeEventSource.instances[0]?.url).toBe('/api/system/update/stream');
+
+    FakeEventSource.instances[0]?.emit({
+      progress: {
+        sessionId: 'pushed123',
+        status: 'running',
+        isRunning: true,
+        stage: 'Preparing update…',
+        detail: 'Flux Monitor is getting the installer ready.',
+        success: null,
+        canCancel: true,
+        cancelUnavailableReason: null,
+        stepIndex: 1,
+        stepCount: 9,
+        percentComplete: 8,
+        startedAt: '2026-03-29T12:00:00.000Z',
+        updatedAt: '2026-03-29T12:00:01.000Z',
+      } satisfies UpdateProgress,
+    });
+
+    await waitFor(() => {
+      expect(useAppStore.getState().updateProgress).toMatchObject({
+        sessionId: 'pushed123',
+        status: 'running',
+        isRunning: true,
+      });
+    });
   });
 });

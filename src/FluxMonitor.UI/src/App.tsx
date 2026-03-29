@@ -11,12 +11,21 @@ import { ServicesPage } from './pages/ServicesPage';
 
 function App() {
   const loadExternalTheme = useAppStore((state) => state.loadExternalTheme);
+  const connectUpdateProgressStream = useAppStore((state) => state.connectUpdateProgressStream);
+  const disconnectUpdateProgressStream = useAppStore((state) => state.disconnectUpdateProgressStream);
   const fetchUpdateProgress = useAppStore((state) => state.fetchUpdateProgress);
   const updateRunning = useAppStore((state) => state.updateProgress?.isRunning ?? false);
 
   useEffect(() => {
     void loadExternalTheme();
   }, [loadExternalTheme]);
+
+  useEffect(() => {
+    connectUpdateProgressStream();
+    return () => {
+      disconnectUpdateProgressStream();
+    };
+  }, [connectUpdateProgressStream, disconnectUpdateProgressStream]);
 
   useEffect(() => {
     void fetchUpdateProgress();

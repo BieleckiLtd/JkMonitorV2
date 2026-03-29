@@ -9,6 +9,7 @@ public sealed class SystemUpdateService(
     IBuildMetadataProvider buildMetadataProvider,
     ManagedRestartService managedRestartService,
     IHostApplicationLifetime applicationLifetime,
+    UpdateProgressBroadcaster updateProgressBroadcaster,
     ILogger<SystemUpdateService> logger)
 {
     private const string Repository = "BieleckiLtd/JkMonitorV2";
@@ -273,7 +274,7 @@ public sealed class SystemUpdateService(
     {
         lock (_stateGate)
         {
-            return _currentProgress;
+            return UpdateProgressBroadcaster.Clone(_currentProgress);
         }
     }
 
@@ -323,6 +324,7 @@ public sealed class SystemUpdateService(
         }
 
         logger.LogInformation("Starting in-app update session {SessionId}.", sessionId);
+        updateProgressBroadcaster.Publish(progress);
         _ = Task.Run(() => RunUpdateAsync(sessionId, cancellationToken));
 
         return UpdateCommandResult.Ok(progress);
@@ -377,6 +379,7 @@ public sealed class SystemUpdateService(
         }
 
         logger.LogInformation("Cancellation requested for update session {SessionId}.", progress?.SessionId);
+        updateProgressBroadcaster.Publish(progress);
 
         try
         {
@@ -572,6 +575,8 @@ public sealed class SystemUpdateService(
         bool isRunning,
         bool? success)
     {
+        UpdateProgress? progress;
+
         lock (_stateGate)
         {
             if (_currentProgress is null || !string.Equals(_currentProgress.SessionId, sessionId, StringComparison.Ordinal))
@@ -592,6 +597,8 @@ public sealed class SystemUpdateService(
                 stepIndex: stage.StepIndex,
                 stepCount: stage.StepCount,
                 percentComplete: stage.PercentComplete);
+
+            progress = _currentProgress;
         }
 
         logger.LogInformation(
@@ -599,10 +606,13 @@ public sealed class SystemUpdateService(
             sessionId,
             stage.Stage,
             stage.PercentComplete);
+        updateProgressBroadcaster.Publish(progress);
     }
 
     private void UpdateProgressDetail(string sessionId, string detail)
     {
+        UpdateProgress? progress;
+
         lock (_stateGate)
         {
             if (_currentProgress is null || !string.Equals(_currentProgress.SessionId, sessionId, StringComparison.Ordinal))
@@ -623,11 +633,17 @@ public sealed class SystemUpdateService(
                 stepIndex: _currentProgress.StepIndex,
                 stepCount: _currentProgress.StepCount,
                 percentComplete: _currentProgress.PercentComplete);
+
+            progress = _currentProgress;
         }
+
+        updateProgressBroadcaster.Publish(progress);
     }
 
     private void SetCancelledProgress(string sessionId)
     {
+        UpdateProgress? progress;
+
         lock (_stateGate)
         {
             if (_currentProgress is null || !string.Equals(_currentProgress.SessionId, sessionId, StringComparison.Ordinal))
@@ -648,9 +664,12 @@ public sealed class SystemUpdateService(
                 stepIndex: _currentProgress.StepIndex,
                 stepCount: _currentProgress.StepCount,
                 percentComplete: _currentProgress.PercentComplete);
+
+            progress = _currentProgress;
         }
 
         logger.LogInformation("Update session {SessionId} was cancelled before the install point of no return.", sessionId);
+        updateProgressBroadcaster.Publish(progress);
     }
 
     private void SetFailedProgress(
@@ -660,6 +679,8 @@ public sealed class SystemUpdateService(
         FixedLineBuffer outputTail,
         FixedLineBuffer errorTail)
     {
+        UpdateProgress? progress;
+
         lock (_stateGate)
         {
             if (_currentProgress is null || !string.Equals(_currentProgress.SessionId, sessionId, StringComparison.Ordinal))
@@ -680,6 +701,8 @@ public sealed class SystemUpdateService(
                 stepIndex: _currentProgress.StepIndex,
                 stepCount: _currentProgress.StepCount,
                 percentComplete: _currentProgress.PercentComplete);
+
+            progress = _currentProgress;
         }
 
         logger.LogWarning(
@@ -687,6 +710,7 @@ public sealed class SystemUpdateService(
             sessionId,
             outputTail.ToMultilineString(),
             errorTail.ToMultilineString());
+        updateProgressBroadcaster.Publish(progress);
     }
 
     private void SetCurrentInstallerProcess(string sessionId, Process process)

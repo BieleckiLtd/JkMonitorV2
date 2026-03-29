@@ -7,6 +7,11 @@ const updateReloadingFrontendDetail = 'Flux Monitor is back online. Reloading th
 const updateHeartbeatPollIntervalMs = 1500;
 
 let restartRecoveryPromise: Promise<void> | null = null;
+let updateProgressEventSource: EventSource | null = null;
+
+type UpdateProgressStreamEnvelope = {
+  progress: UpdateProgress | null;
+};
 
 function isUpdateProgress(value: unknown): value is UpdateProgress {
   return typeof value === 'object'
@@ -36,6 +41,44 @@ function createFrontendReloadProgress(progress: UpdateProgress): UpdateProgress 
     stage: 'Reloading updated interface…',
     detail: updateReloadingFrontendDetail,
   };
+}
+
+function applyUpdateProgressSnapshot(
+  progress: UpdateProgress | null,
+  set: (partial:
+    | Partial<AppState>
+    | ((state: AppState) => Partial<AppState> | AppState),
+  ) => void,
+  get: () => AppState,
+): void {
+  if (!progress) {
+    set((state) => {
+      if (state.updateProgress?.status === 'restarting') {
+        return {
+          updateProgress: createRestartHeartbeatProgress(state.updateProgress),
+        };
+      }
+
+      return { updateProgress: null };
+    });
+
+    if (get().updateProgress?.status === 'restarting') {
+      beginRestartRecovery(set, get);
+    }
+
+    return;
+  }
+
+  set((state) => {
+    if (!progress.isRunning && state.dismissedUpdateSessionId === progress.sessionId) {
+      return state;
+    }
+
+    return {
+      updateProgress: progress,
+      dismissedUpdateSessionId: progress.isRunning ? null : state.dismissedUpdateSessionId,
+    };
+  });
 }
 
 async function clearFrontendRuntimeCaches(): Promise<void> {
@@ -134,6 +177,45 @@ function beginRestartRecovery(
     });
 }
 
+function connectUpdateProgressStream(
+  set: (partial:
+    | Partial<AppState>
+    | ((state: AppState) => Partial<AppState> | AppState),
+  ) => void,
+  get: () => AppState,
+): void {
+  if (typeof window === 'undefined' || typeof EventSource === 'undefined' || updateProgressEventSource) {
+    return;
+  }
+
+  const eventSource = new EventSource('/api/system/update/stream');
+  updateProgressEventSource = eventSource;
+
+  eventSource.onmessage = (event) => {
+    try {
+      const payload = JSON.parse(event.data) as UpdateProgressStreamEnvelope;
+      applyUpdateProgressSnapshot(payload.progress, set, get);
+    } catch (error) {
+      console.error('Failed to parse pushed update progress:', error);
+    }
+  };
+
+  eventSource.onerror = () => {
+    if (get().updateProgress?.status === 'restarting') {
+      beginRestartRecovery(set, get);
+    }
+  };
+}
+
+function disconnectUpdateProgressStream(): void {
+  if (!updateProgressEventSource) {
+    return;
+  }
+
+  updateProgressEventSource.close();
+  updateProgressEventSource = null;
+}
+
 interface AppState {
   isDesktopSidebarOpen: boolean;
   isMobileSidebarOpen: boolean;
@@ -147,6 +229,8 @@ interface AppState {
   updateProgress: UpdateProgress | null;
   updateActionPending: 'starting' | 'cancelling' | null;
   dismissedUpdateSessionId: string | null;
+  connectUpdateProgressStream: () => void;
+  disconnectUpdateProgressStream: () => void;
   fetchUpdateProgress: () => Promise<void>;
   startSystemUpdate: () => Promise<UpdateActionResult>;
   cancelSystemUpdate: () => Promise<UpdateActionResult>;
@@ -229,25 +313,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateProgress: null,
   updateActionPending: null,
   dismissedUpdateSessionId: null,
+  connectUpdateProgressStream: () => {
+    connectUpdateProgressStream(set, get);
+  },
+  disconnectUpdateProgressStream: () => {
+    disconnectUpdateProgressStream();
+  },
 
   fetchUpdateProgress: async () => {
     try {
       const response = await fetch('/api/system/update/progress', { cache: 'no-store' });
       if (response.status === 204) {
-        set((state) => {
-          if (state.updateProgress?.status === 'restarting') {
-            return {
-              updateProgress: createRestartHeartbeatProgress(state.updateProgress),
-            };
-          }
-
-          return { updateProgress: null };
-        });
-
-        if (get().updateProgress?.status === 'restarting') {
-          beginRestartRecovery(set, get);
-        }
-
+        applyUpdateProgressSnapshot(null, set, get);
         return;
       }
 
@@ -256,16 +333,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
 
       const progress = await response.json() as UpdateProgress;
-      set((state) => {
-        if (!progress.isRunning && state.dismissedUpdateSessionId === progress.sessionId) {
-          return state;
-        }
-
-        return {
-          updateProgress: progress,
-          dismissedUpdateSessionId: progress.isRunning ? null : state.dismissedUpdateSessionId,
-        };
-      });
+      applyUpdateProgressSnapshot(progress, set, get);
     } catch (error) {
       const current = get().updateProgress;
       if (current?.status === 'restarting') {
