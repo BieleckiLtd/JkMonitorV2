@@ -17,7 +17,12 @@ INSTALL_SCRIPT="${TMPDIR:-/tmp}/dotnet-install-fluxmonitor-runtime.sh"
 SERVICE_NAME='fluxmonitor.service'
 SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
 NETWORKMANAGER_POLKIT_RULE_PATH='/etc/polkit-1/rules.d/50-fluxmonitor-networkmanager.rules'
+SYSTEMD_POLKIT_RULE_PATH='/etc/polkit-1/rules.d/51-fluxmonitor-systemd.rules'
+TUNNEL_SERVICE_NAME='cloudflared.service'
+TUNNEL_SERVICE_PATH="/etc/systemd/system/$TUNNEL_SERVICE_NAME"
 ENV_PATH="$DESTINATION/fluxmonitor.env"
+TUNNEL_ENV_PATH="$DESTINATION/cloudflared.env"
+CLOUDFLARED_START_SCRIPT_PATH="$DESTINATION/cloudflared-run.sh"
 RELEASE_INFO_PATH="$DESTINATION/release-info.env"
 NONINTERACTIVE_CONNECTION_STRING="${FLUXMONITOR_CONNECTION_STRING:-}"
 NONINTERACTIVE_INSTALL_RUNTIME="${FLUXMONITOR_INSTALL_RUNTIME:-}"
@@ -249,6 +254,7 @@ preserve_existing_state() {
 
   copy_if_exists "$source_root/.dotnet" "$preserve_root/.dotnet"
   copy_if_exists "$source_root/fluxmonitor.env" "$preserve_root/fluxmonitor.env"
+  copy_if_exists "$source_root/cloudflared.env" "$preserve_root/cloudflared.env"
   copy_if_exists "$source_root/app/notifications.json" "$preserve_root/app/notifications.json"
 
   for file_name in \
@@ -275,6 +281,10 @@ restore_preserved_state() {
 
   if [ -f "$preserve_root/fluxmonitor.env" ]; then
     cp "$preserve_root/fluxmonitor.env" "$destination_root/fluxmonitor.env"
+  fi
+
+  if [ -f "$preserve_root/cloudflared.env" ]; then
+    cp "$preserve_root/cloudflared.env" "$destination_root/cloudflared.env"
   fi
 
   if [ -f "$preserve_root/app/notifications.json" ]; then
@@ -875,6 +885,54 @@ install_local_runtime() {
   bash "$INSTALL_SCRIPT" --channel 10.0 --runtime aspnetcore --install-dir "$LOCAL_DOTNET_ROOT"
 }
 
+install_or_update_cloudflared_package() {
+  local architecture
+  local package_path
+
+  if ! command -v dpkg >/dev/null 2>&1; then
+    echo 'Automatic cloudflared installation requires dpkg on this Linux host.' >&2
+    exit 1
+  fi
+
+  architecture="$(dpkg --print-architecture)"
+  package_path="$TEMP_ROOT/cloudflared-linux-$architecture.deb"
+
+  section 'Installing Cloudflare Tunnel connector'
+  info 'Fetching the latest cloudflared package from Cloudflare.'
+  download_file "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$architecture.deb" "$package_path"
+
+  if ! run_elevated dpkg -i "$package_path" >&2; then
+    if command -v apt-get >/dev/null 2>&1; then
+      info 'Resolving cloudflared package dependencies.'
+      run_elevated apt-get install -f -y >&2
+      run_elevated dpkg -i "$package_path" >&2
+    else
+      exit 1
+    fi
+  fi
+}
+
+write_cloudflared_start_script() {
+  cat > "$CLOUDFLARED_START_SCRIPT_PATH" <<'EOF'
+#!/usr/bin/env bash
+set -euo pipefail
+
+if [ -z "${CLOUDFLARED_TUNNEL_TOKEN:-}" ]; then
+  echo 'Cloudflare Tunnel token is not configured.' >&2
+  exit 64
+fi
+
+if ! command -v cloudflared >/dev/null 2>&1; then
+  echo 'cloudflared is not installed.' >&2
+  exit 127
+fi
+
+exec "$(command -v cloudflared)" tunnel --no-autoupdate run --token "$CLOUDFLARED_TUNNEL_TOKEN"
+EOF
+
+  chmod +x "$CLOUDFLARED_START_SCRIPT_PATH"
+}
+
 write_configure_script() {
   cat > "$CONFIGURE_SCRIPT_PATH" <<'EOF'
 #!/usr/bin/env bash
@@ -1017,6 +1075,52 @@ write_env_file() {
 ASPNETCORE_ENVIRONMENT=$environment_name
 ASPNETCORE_URLS=$APP_BIND_URL
 EOF
+}
+
+install_cloudflared_service() {
+  local current_user
+  current_user="$(id -un)"
+
+  if [ -d /etc/polkit-1/rules.d ]; then
+    run_elevated tee "$SYSTEMD_POLKIT_RULE_PATH" >/dev/null <<EOF
+polkit.addRule(function(action, subject) {
+  if (subject.user === '$current_user'
+      && action.id === 'org.freedesktop.systemd1.manage-units') {
+    var unit = action.lookup('unit');
+    var verb = action.lookup('verb');
+    if (unit === '$TUNNEL_SERVICE_NAME'
+        && ['start', 'stop', 'restart', 'reload-or-restart'].indexOf(verb) >= 0) {
+      return polkit.Result.YES;
+    }
+  }
+});
+EOF
+  fi
+
+  run_elevated tee "$TUNNEL_SERVICE_PATH" >/dev/null <<EOF
+[Unit]
+Description=Cloudflare Tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=notify
+User=$current_user
+WorkingDirectory=$DESTINATION
+EnvironmentFile=-$TUNNEL_ENV_PATH
+ExecCondition=/bin/bash -lc '[ -n "\${CLOUDFLARED_TUNNEL_TOKEN:-}" ]'
+ExecStart=$CLOUDFLARED_START_SCRIPT_PATH
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
+EOF
+
+  run_elevated systemctl daemon-reload
+  run_elevated systemctl enable "$TUNNEL_SERVICE_NAME" >/dev/null 2>&1 || true
+  run_elevated systemctl stop "$TUNNEL_SERVICE_NAME" >/dev/null 2>&1 || true
 }
 
 install_systemd_service() {
@@ -1173,6 +1277,9 @@ if [ "$IS_FIRST_INSTALL" = 'true' ]; then
 fi
 write_start_script
 write_configure_script
+write_cloudflared_start_script
+
+install_or_update_cloudflared_package
 
 section 'Checking ASP.NET Core runtime'
 DOTNET_CMD="$(get_dotnet)"
@@ -1239,19 +1346,22 @@ if command -v systemctl >/dev/null 2>&1; then
   fi
 fi
 
-section 'Starting Flux Monitor'
-info "Environment: $ENVIRONMENT"
-muted "Installed app root: $APP_ROOT"
-muted "Reusable launch command: $DESTINATION/start.sh"
-muted "Service file path: $SERVICE_PATH"
-success "Local access URL: $APP_LOCAL_URL"
-success "LAN access URL: $ACCESS_URL"
-muted 'Tip: most terminals let you Ctrl+Click the URL to open it.'
-muted 'No devices are preconfigured. Add them from the app after the first start.'
-
 if [ "${INSTALL_SERVICE,,}" = 'y' ]; then
+  section 'Installing Cloudflare Tunnel service'
+  install_cloudflared_service
+
   section 'Installing systemd service'
   install_systemd_service
+
+  section 'Starting Flux Monitor'
+  info "Environment: $ENVIRONMENT"
+  muted "Installed app root: $APP_ROOT"
+  muted "Reusable launch command: $DESTINATION/start.sh"
+  muted "Service file path: $SERVICE_PATH"
+  success "Local access URL: $APP_LOCAL_URL"
+  success "LAN access URL: $ACCESS_URL"
+  muted 'Tip: most terminals let you Ctrl+Click the URL to open it.'
+  muted 'No devices are preconfigured. Add them from the app after the first start.'
 
   if wait_for_health; then
     success "Flux Monitor is running under systemd. Open $ACCESS_URL from your PC."
@@ -1263,6 +1373,16 @@ if [ "${INSTALL_SERVICE,,}" = 'y' ]; then
 
   exit 0
 fi
+
+section 'Starting Flux Monitor'
+info "Environment: $ENVIRONMENT"
+muted "Installed app root: $APP_ROOT"
+muted "Reusable launch command: $DESTINATION/start.sh"
+muted "Service file path: $SERVICE_PATH"
+success "Local access URL: $APP_LOCAL_URL"
+success "LAN access URL: $ACCESS_URL"
+muted 'Tip: most terminals let you Ctrl+Click the URL to open it.'
+muted 'No devices are preconfigured. Add them from the app after the first start.'
 
 info "Opening $APP_LOCAL_URL on the device after the backend is ready."
 success "From your PC, open $ACCESS_URL once the device is reachable on your network."

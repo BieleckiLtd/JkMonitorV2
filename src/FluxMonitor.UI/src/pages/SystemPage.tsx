@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSignal, type IconDefinition } from '@fortawesome/free-solid-svg-icons';
-import { Bluetooth, Cable, ChevronDown, ChevronRight, CircleAlert, Cpu, Database, Download, HardDrive, Leaf, LoaderCircle, Lock, MemoryStick, RefreshCcw, CheckCircle2, Upload, Usb, Wifi, XCircle } from 'lucide-react';
+import { Bluetooth, Cable, ChevronDown, ChevronRight, CircleAlert, Cloud, Cpu, Database, Download, ExternalLink, HardDrive, Leaf, LoaderCircle, Lock, MemoryStick, RefreshCcw, CheckCircle2, Upload, Usb, Wifi, XCircle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { Switch } from '../components/ui/switch';
@@ -254,6 +254,31 @@ type SystemConnectivitySnapshot = {
   bluetooth: BluetoothRuntimeSnapshot;
 };
 
+type CloudflareTunnelStatusSnapshot = {
+  supported: boolean;
+  statusMessage?: string | null;
+  tunnelProvider: string;
+  publicUrl?: string | null;
+  hasStoredToken: boolean;
+  configured: boolean;
+  packageInstalled: boolean;
+  packageVersion?: string | null;
+  serviceInstalled: boolean;
+  serviceRunning: boolean;
+  serviceEnabled: boolean;
+  serviceLoadState?: string | null;
+  serviceActiveState?: string | null;
+  serviceSubState?: string | null;
+  serviceUnitFileState?: string | null;
+  serviceResult?: string | null;
+};
+
+type SaveCloudflareTunnelResponse = {
+  success: boolean;
+  message: string;
+  status: CloudflareTunnelStatusSnapshot;
+};
+
 type InlineFeedback = {
   message: string;
   isError: boolean;
@@ -300,6 +325,14 @@ export function SystemPage() {
   const [connectivity, setConnectivity] = useState<SystemConnectivitySnapshot | null>(null);
   const [connectivityLoading, setConnectivityLoading] = useState(true);
   const [connectivityError, setConnectivityError] = useState<string | null>(null);
+  const [cloudflareTunnelStatus, setCloudflareTunnelStatus] = useState<CloudflareTunnelStatusSnapshot | null>(null);
+  const [cloudflareTunnelLoading, setCloudflareTunnelLoading] = useState(true);
+  const [cloudflareTunnelError, setCloudflareTunnelError] = useState<string | null>(null);
+  const [cloudflareTunnelFeedback, setCloudflareTunnelFeedback] = useState<InlineFeedback | null>(null);
+  const [cloudflareTunnelSaving, setCloudflareTunnelSaving] = useState(false);
+  const [cloudflareTunnelEnabled, setCloudflareTunnelEnabled] = useState(false);
+  const [cloudflareTunnelPublicUrl, setCloudflareTunnelPublicUrl] = useState('');
+  const [cloudflareTunnelTokenOrCommand, setCloudflareTunnelTokenOrCommand] = useState('');
   const [wifiScanLoading, setWifiScanLoading] = useState<string | null>(null);
   const [wifiAccessPoints, setWifiAccessPoints] = useState<Record<string, WifiAccessPointInfo[]>>({});
   const [wifiTargetInterface, setWifiTargetInterface] = useState('');
@@ -322,6 +355,29 @@ export function SystemPage() {
   const [expandedConnectivitySection, setExpandedConnectivitySection] = useState<'wifi' | 'bluetooth' | 'ethernet' | null>(null);
   const previousUpdateStatusRef = useRef<UpdateProgress['status'] | null>(null);
   const wifiCredentialRequestRef = useRef(0);
+  const cloudflareTunnelDirtyRef = useRef(false);
+
+  const loadCloudflareTunnelStatus = useCallback(async () => {
+    try {
+      const response = await fetch('/api/system/cloudflare-tunnel', { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error('Unable to load Cloudflare Tunnel status.');
+      }
+
+      const data = await response.json() as CloudflareTunnelStatusSnapshot;
+      setCloudflareTunnelStatus(data);
+      setCloudflareTunnelError(null);
+
+      if (!cloudflareTunnelDirtyRef.current) {
+        setCloudflareTunnelEnabled(stringEqualsIgnoreCase(data.tunnelProvider, 'cloudflared'));
+        setCloudflareTunnelPublicUrl(data.publicUrl ?? '');
+      }
+    } catch (error) {
+      setCloudflareTunnelError(error instanceof Error ? error.message : 'Unable to load Cloudflare Tunnel status.');
+    } finally {
+      setCloudflareTunnelLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -487,6 +543,12 @@ export function SystemPage() {
     const id = window.setInterval(() => void loadConnectivity(), 15000);
     return () => window.clearInterval(id);
   }, [loadConnectivity]);
+
+  useEffect(() => {
+    void loadCloudflareTunnelStatus();
+    const id = window.setInterval(() => void loadCloudflareTunnelStatus(), 15000);
+    return () => window.clearInterval(id);
+  }, [loadCloudflareTunnelStatus]);
 
   useEffect(() => {
     const firstWifiInterface = connectivity?.network.wifiInterfaces[0];
@@ -902,6 +964,41 @@ export function SystemPage() {
     window.location.href = '/api/database/export';
   };
 
+  const saveCloudflareTunnel = async () => {
+    setCloudflareTunnelSaving(true);
+    setCloudflareTunnelFeedback(null);
+
+    try {
+      const response = await fetch('/api/system/cloudflare-tunnel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          enabled: cloudflareTunnelEnabled,
+          publicUrl: cloudflareTunnelPublicUrl.trim() || null,
+          tunnelTokenOrCommand: cloudflareTunnelTokenOrCommand.trim() || null,
+        }),
+      });
+
+      const data = await response.json() as SaveCloudflareTunnelResponse;
+      setCloudflareTunnelStatus(data.status);
+      setCloudflareTunnelFeedback({ message: data.message, isError: !response.ok || !data.success });
+
+      if (response.ok && data.success) {
+        cloudflareTunnelDirtyRef.current = false;
+        setCloudflareTunnelEnabled(stringEqualsIgnoreCase(data.status.tunnelProvider, 'cloudflared'));
+        setCloudflareTunnelPublicUrl(data.status.publicUrl ?? '');
+        setCloudflareTunnelTokenOrCommand('');
+      }
+    } catch (error) {
+      setCloudflareTunnelFeedback({
+        message: error instanceof Error ? error.message : 'Unable to save Cloudflare Tunnel settings.',
+        isError: true,
+      });
+    } finally {
+      setCloudflareTunnelSaving(false);
+    }
+  };
+
   const handleImport = async (file: File) => {
     setImporting(true);
     setImportResult(null);
@@ -957,6 +1054,22 @@ export function SystemPage() {
   const hasInternetAccess = connectivity?.network.hasInternetAccess ?? null;
   const activeBluetoothDevice = visibleBluetoothDevices.find((device) => device.isConnected) ?? visibleBluetoothDevices[0] ?? null;
   const activeEthernetInterface = ethernetInterfaces.find((ethernetInterface) => isEthernetInterfaceActive(ethernetInterface)) ?? ethernetInterfaces[0] ?? null;
+  const cloudflareTunnelRunning = cloudflareTunnelStatus?.serviceRunning ?? false;
+  const cloudflareTunnelSupported = cloudflareTunnelStatus?.supported ?? false;
+  const cloudflareTunnelSummary = !cloudflareTunnelSupported
+    ? cloudflareTunnelStatus?.statusMessage ?? 'Unavailable'
+    : cloudflareTunnelRunning
+      ? cloudflareTunnelStatus?.publicUrl ?? 'Connected to Cloudflare'
+      : cloudflareTunnelStatus?.configured
+        ? 'Configured but not connected'
+        : 'Not configured';
+  const cloudflareTunnelStateLabel = !cloudflareTunnelSupported
+    ? 'Unavailable'
+    : cloudflareTunnelRunning
+      ? 'Online'
+      : cloudflareTunnelStatus?.configured
+        ? 'Configured'
+        : 'Off';
   const wifiSectionOpen = expandedConnectivitySection === 'wifi';
   const bluetoothSectionOpen = expandedConnectivitySection === 'bluetooth';
   const ethernetSectionOpen = expandedConnectivitySection === 'ethernet';
@@ -1245,6 +1358,166 @@ export function SystemPage() {
           </div>
 
           <div className='min-w-0 space-y-6'>
+            <Card className='border border-border/80 bg-card/85 shadow-sm'>
+              <CardHeader className='border-b border-border/60 pb-4'>
+                <div className='flex items-start gap-3'>
+                  <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
+                    <Cloud className='h-4 w-4 text-muted-foreground' />
+                  </div>
+                  <div className='min-w-0 flex-1'>
+                    <CardTitle>Cloudflare tunnel</CardTitle>
+                    <CardDescription>Expose Flux Monitor on the internet through a managed cloudflared service on this device.</CardDescription>
+                  </div>
+                  <div className='shrink-0 rounded-full border border-border/70 bg-background/70 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground'>
+                    {cloudflareTunnelStateLabel}
+                  </div>
+                </div>
+              </CardHeader>
+              <CardContent className='space-y-4 pt-5'>
+                {cloudflareTunnelLoading && !cloudflareTunnelStatus ? (
+                  <div className='flex items-center justify-center py-6'>
+                    <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
+                  </div>
+                ) : (
+                  <>
+                    {cloudflareTunnelError ? (
+                      <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
+                        {cloudflareTunnelError}
+                      </div>
+                    ) : null}
+
+                    {cloudflareTunnelFeedback ? (
+                      <div className={cn(
+                        'rounded-xl border px-3 py-2 text-xs',
+                        cloudflareTunnelFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                      )}>
+                        {cloudflareTunnelFeedback.message}
+                      </div>
+                    ) : null}
+
+                    {cloudflareTunnelStatus?.statusMessage ? (
+                      <div className='rounded-xl border border-border/70 bg-background/50 px-4 py-3'>
+                        <div className='text-sm font-medium text-foreground'>{cloudflareTunnelSummary}</div>
+                        <div className='mt-1 text-xs text-muted-foreground'>{cloudflareTunnelStatus.statusMessage}</div>
+                      </div>
+                    ) : null}
+
+                    <div className='grid gap-3 sm:grid-cols-2'>
+                      <DetailTile
+                        label='Package'
+                        value={cloudflareTunnelStatus?.packageInstalled
+                          ? cloudflareTunnelStatus.packageVersion ?? 'Installed'
+                          : 'Missing'}
+                      />
+                      <DetailTile
+                        label='Service'
+                        value={cloudflareTunnelStatus?.serviceInstalled
+                          ? formatCompactState(cloudflareTunnelStatus.serviceActiveState, cloudflareTunnelStatus.serviceSubState)
+                          : 'Missing'}
+                      />
+                      <DetailTile label='Provider' value={cloudflareTunnelStatus?.tunnelProvider ?? 'none'} />
+                      <DetailTile label='Token' value={cloudflareTunnelStatus?.hasStoredToken ? 'Saved' : 'Not saved'} />
+                    </div>
+
+                    <div className='flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/70 bg-background/35 px-4 py-3'>
+                      <div className='min-w-0'>
+                        <div className='text-sm font-semibold text-foreground'>Enable internet access through Cloudflare</div>
+                        <div className='mt-1 text-xs text-muted-foreground'>
+                          Paste the full `cloudflared service install ...` command from Cloudflare, or paste only the tunnel token.
+                        </div>
+                      </div>
+                      <Switch
+                        checked={cloudflareTunnelEnabled}
+                        disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
+                        onCheckedChange={(checked) => {
+                          cloudflareTunnelDirtyRef.current = true;
+                          setCloudflareTunnelEnabled(checked);
+                          setCloudflareTunnelFeedback(null);
+                        }}
+                        aria-label='Toggle Cloudflare Tunnel'
+                      />
+                    </div>
+
+                    <div className='space-y-2'>
+                      <label className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground' htmlFor='cloudflare-public-url'>
+                        Public URL
+                      </label>
+                      <Input
+                        id='cloudflare-public-url'
+                        value={cloudflareTunnelPublicUrl}
+                        onChange={(event) => {
+                          cloudflareTunnelDirtyRef.current = true;
+                          setCloudflareTunnelPublicUrl(event.target.value);
+                        }}
+                        placeholder='https://monitor.example.com'
+                        disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
+                        className='h-10 rounded-xl bg-background/70'
+                      />
+                      <div className='text-xs text-muted-foreground'>
+                        Optional. This gives the System page a quick link once the tunnel is running.
+                      </div>
+                    </div>
+
+                    <div className='space-y-2'>
+                      <label className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground' htmlFor='cloudflare-token'>
+                        Tunnel token or install command
+                      </label>
+                      <textarea
+                        id='cloudflare-token'
+                        value={cloudflareTunnelTokenOrCommand}
+                        onChange={(event) => {
+                          cloudflareTunnelDirtyRef.current = true;
+                          setCloudflareTunnelTokenOrCommand(event.target.value);
+                        }}
+                        placeholder={cloudflareTunnelStatus?.hasStoredToken
+                          ? 'Leave blank to keep the saved token.'
+                          : 'cloudflared service install <token>'}
+                        disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
+                        className='min-h-24 w-full rounded-xl border border-input bg-background/70 px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50'
+                      />
+                      <div className='text-xs text-muted-foreground'>
+                        In Cloudflare, point the public hostname at `http://127.0.0.1:5074`. Saving with the switch off disables the tunnel and clears the saved token.
+                      </div>
+                    </div>
+
+                    <div className='flex flex-col gap-2 sm:flex-row'>
+                      <button
+                        type='button'
+                        disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
+                        onClick={() => void saveCloudflareTunnel()}
+                        className='inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
+                      >
+                        {cloudflareTunnelSaving ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Cloud className='h-4 w-4' />}
+                        Save tunnel settings
+                      </button>
+
+                      <button
+                        type='button'
+                        disabled={cloudflareTunnelSaving}
+                        onClick={() => void loadCloudflareTunnelStatus()}
+                        className='inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
+                      >
+                        <RefreshCcw className='h-4 w-4' />
+                        Refresh status
+                      </button>
+                    </div>
+
+                    {cloudflareTunnelRunning && cloudflareTunnelStatus?.publicUrl ? (
+                      <a
+                        href={cloudflareTunnelStatus.publicUrl}
+                        target='_blank'
+                        rel='noreferrer'
+                        className='inline-flex items-center gap-2 text-sm font-medium text-primary hover:underline'
+                      >
+                        <ExternalLink className='h-4 w-4' />
+                        Open {cloudflareTunnelStatus.publicUrl}
+                      </a>
+                    ) : null}
+                  </>
+                )}
+              </CardContent>
+            </Card>
+
             <Card className='border border-border/80 bg-card/85 shadow-sm'>
               <CardHeader className='border-b border-border/60 pb-4'>
                 <div className='flex items-center gap-2'>
@@ -2335,6 +2608,18 @@ function formatWorkflowRun(runNumber: string | null | undefined, runAttempt: str
   }
 
   return `#${runNumber} · attempt ${runAttempt}`;
+}
+
+function formatCompactState(primary: string | null | undefined, secondary: string | null | undefined) {
+  const segments = [primary, secondary]
+    .filter((value): value is string => Boolean(value))
+    .map((value) => value
+      .split('-')
+      .filter(Boolean)
+      .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
+      .join(' '));
+
+  return segments.length > 0 ? segments.join(' • ') : noDataLabel;
 }
 
 function formatDuration(startedAt: string, reportedAt: string) {

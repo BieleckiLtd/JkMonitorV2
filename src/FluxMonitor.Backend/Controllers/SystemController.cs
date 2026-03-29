@@ -11,6 +11,7 @@ namespace FluxMonitor.Backend.Controllers;
 public sealed class SystemController(
     SystemUpdateService updateService,
     UpdateProgressBroadcaster updateProgressBroadcaster,
+    CloudflareTunnelService cloudflareTunnelService,
     NetworkManagementService networkManagementService,
     WifiCredentialStore wifiCredentialStore,
     BluetoothManagementService bluetoothManagementService,
@@ -45,6 +46,22 @@ public sealed class SystemController(
             Network = network,
             Bluetooth = bluetooth
         });
+    }
+
+    [HttpGet("cloudflare-tunnel")]
+    public async Task<ActionResult<CloudflareTunnelStatusSnapshot>> GetCloudflareTunnelStatus(CancellationToken cancellationToken)
+    {
+        var result = await cloudflareTunnelService.GetStatusAsync(cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpPost("cloudflare-tunnel")]
+    public async Task<ActionResult<SaveCloudflareTunnelResponse>> SaveCloudflareTunnel(
+        [FromBody] SaveCloudflareTunnelRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await cloudflareTunnelService.SaveAsync(request, cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
     }
 
     [HttpGet("network/wifi/scan")]

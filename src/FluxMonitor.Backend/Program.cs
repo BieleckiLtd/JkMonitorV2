@@ -48,7 +48,9 @@ builder.Services.AddSingleton<FluxMonitor.Backend.Services.NetworkManagementServ
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.WifiCredentialStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.BluetoothManagementService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.HostServicesCatalogService>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.ICommandRunner, FluxMonitor.Backend.Services.ProcessCommandRunner>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.ManagedRestartService>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.CloudflareTunnelService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.UpdateProgressBroadcaster>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.SystemUpdateService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.PollTrigger>();

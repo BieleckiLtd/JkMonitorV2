@@ -37,6 +37,13 @@ public sealed class ApiSecurityConfiguration
     public bool RequireAuthentication { get; init; } = true;
 
     public required string TunnelProvider { get; init; }
+
+    public CloudflareTunnelConfiguration CloudflareTunnel { get; init; } = new();
+}
+
+public sealed class CloudflareTunnelConfiguration
+{
+    public string PublicUrl { get; init; } = string.Empty;
 }
 
 public sealed class DeviceConfiguration
