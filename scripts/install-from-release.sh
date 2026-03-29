@@ -28,6 +28,7 @@ NONINTERACTIVE_CONNECTION_STRING="${FLUXMONITOR_CONNECTION_STRING:-}"
 NONINTERACTIVE_INSTALL_RUNTIME="${FLUXMONITOR_INSTALL_RUNTIME:-}"
 NONINTERACTIVE_INSTALL_SERVICE="${FLUXMONITOR_INSTALL_SERVICE:-}"
 NONINTERACTIVE_REUSE_EXISTING_CONFIGURATION="${FLUXMONITOR_REUSE_EXISTING_CONFIGURATION:-}"
+NONINTERACTIVE_REFRESH_CLOUDFLARED="${FLUXMONITOR_REFRESH_CLOUDFLARED:-}"
 EXPECTED_RELEASE_SHA256="${FLUXMONITOR_EXPECTED_RELEASE_SHA256:-}"
 CONFIGURE_SCRIPT_PATH="$DESTINATION/configure.sh"
 TIMESCALE_REPOSITORY_SETUP_URL='https://packagecloud.io/install/repositories/timescale/timescaledb/script.deb.sh'
@@ -916,7 +917,23 @@ install_local_runtime() {
 
 install_or_update_cloudflared_package() {
   local architecture
+  local installed_version
   local package_path
+
+  section 'Installing Cloudflare Tunnel connector'
+
+  if command -v cloudflared >/dev/null 2>&1 && ! is_truthy "$NONINTERACTIVE_REFRESH_CLOUDFLARED"; then
+    installed_version="$(cloudflared --version 2>/dev/null | head -n 1 || true)"
+
+    if [ -n "$installed_version" ]; then
+      info "cloudflared is already installed ($installed_version). Skipping package refresh."
+    else
+      info 'cloudflared is already installed. Skipping package refresh.'
+    fi
+
+    muted 'Set FLUXMONITOR_REFRESH_CLOUDFLARED=yes to force a package refresh.'
+    return 0
+  fi
 
   if ! command -v dpkg >/dev/null 2>&1; then
     echo 'Automatic cloudflared installation requires dpkg on this Linux host.' >&2
@@ -926,7 +943,10 @@ install_or_update_cloudflared_package() {
   architecture="$(dpkg --print-architecture)"
   package_path="$TEMP_ROOT/cloudflared-linux-$architecture.deb"
 
-  section 'Installing Cloudflare Tunnel connector'
+  if is_truthy "$NONINTERACTIVE_REFRESH_CLOUDFLARED"; then
+    info 'Forcing a cloudflared package refresh because FLUXMONITOR_REFRESH_CLOUDFLARED is enabled.'
+  fi
+
   info 'Fetching the latest cloudflared package from Cloudflare.'
   download_file "https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-linux-$architecture.deb" "$package_path"
 

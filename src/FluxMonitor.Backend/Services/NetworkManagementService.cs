@@ -93,10 +93,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         if (!accessPointsResult.Succeeded)
         {
             var message = BuildCommandFailureMessage(accessPointsResult.Result, "Unable to scan for Wi-Fi access points.");
-            logger.LogWarning(
-                "Wi-Fi scan failed for interface {InterfaceName}: {ErrorMessage}",
-                resolvedInterfaceName,
-                message);
+            logger.LogWarning("Wi-Fi scan failed while collecting access points.");
             return new WifiScanResult
             {
                 Supported = false,
@@ -105,8 +102,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         }
 
         logger.LogInformation(
-            "Wi-Fi scan for interface {InterfaceName} returned {AccessPointCount} access points.",
-            resolvedInterfaceName,
+            "Wi-Fi scan returned {AccessPointCount} access points.",
             accessPointsResult.AccessPoints.Length);
 
         return new WifiScanResult
@@ -167,10 +163,9 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         var trimmedSsid = ssid.Trim();
         var trimmedBssid = string.IsNullOrWhiteSpace(bssid) ? null : bssid.Trim().ToUpperInvariant();
         logger.LogInformation(
-            "Connecting Wi-Fi interface {InterfaceName} to SSID {Ssid}. Bssid={Bssid}",
-            resolvedInterfaceName,
-            trimmedSsid,
-            trimmedBssid ?? "<none>");
+            "Connecting Wi-Fi. PasswordProvided={PasswordProvided}, BssidProvided={BssidProvided}.",
+            !string.IsNullOrWhiteSpace(password),
+            trimmedBssid is not null);
 
         var result = await ConnectWifiWithProfileRecoveryAsync(
             resolvedInterfaceName,
@@ -183,17 +178,12 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             var observation = await ObserveWifiConnectionStateAsync(resolvedInterfaceName, trimmedSsid, trimmedBssid, attempts: 1, cancellationToken);
             var message = BuildWifiConnectFailureMessage(trimmedSsid, result, observation);
             logger.LogWarning(
-                "Wi-Fi connect failed for interface {InterfaceName} and SSID {Ssid}. Bssid={Bssid}. ExitCode={ExitCode}. StdOut={StdOut}. StdErr={StdErr}. ObservationState={ConnectionState}. ObservationSsid={ConnectedSsid}. ObservationBssid={ConnectedBssid}. Message={ErrorMessage}",
-                resolvedInterfaceName,
-                trimmedSsid,
-                trimmedBssid ?? "<none>",
+                "Wi-Fi connect failed. ExitCode={ExitCode}. HasObservationState={HasObservationState}. HasObservedSsid={HasObservedSsid}. HasObservedBssid={HasObservedBssid}. HasInternetAccess={HasInternetAccess}.",
                 result.ExitCode,
-                result.StandardOutput,
-                result.ErrorOutput,
-                observation.ConnectionState,
-                observation.ConnectedSsid,
-                observation.ConnectedBssid,
-                message);
+                !string.IsNullOrWhiteSpace(observation.ConnectionState),
+                !string.IsNullOrWhiteSpace(observation.ConnectedSsid),
+                !string.IsNullOrWhiteSpace(observation.ConnectedBssid),
+                observation.HasInternetAccess);
             return new WifiConnectResult
             {
                 Success = false,
@@ -209,16 +199,12 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         {
             var message = BuildWifiConnectUnverifiedMessage(trimmedSsid, verification, result);
             logger.LogWarning(
-                "Wi-Fi connect command succeeded for interface {InterfaceName} and SSID {Ssid}, but the connection could not be verified. Bssid={Bssid}. ExitCode={ExitCode}. StdOut={StdOut}. StdErr={StdErr}. State={ConnectionState}. ConnectedSsid={ConnectedSsid}. ConnectedBssid={ConnectedBssid}",
-                resolvedInterfaceName,
-                trimmedSsid,
-                trimmedBssid ?? "<none>",
+                "Wi-Fi connect command succeeded, but the connection could not be verified. ExitCode={ExitCode}. HasObservationState={HasObservationState}. HasObservedSsid={HasObservedSsid}. HasObservedBssid={HasObservedBssid}. HasInternetAccess={HasInternetAccess}.",
                 result.ExitCode,
-                result.StandardOutput,
-                result.ErrorOutput,
-                verification.ConnectionState,
-                verification.ConnectedSsid,
-                verification.ConnectedBssid);
+                !string.IsNullOrWhiteSpace(verification.ConnectionState),
+                !string.IsNullOrWhiteSpace(verification.ConnectedSsid),
+                !string.IsNullOrWhiteSpace(verification.ConnectedBssid),
+                verification.HasInternetAccess);
 
             return new WifiConnectResult
             {
@@ -318,16 +304,13 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             };
         }
 
-        logger.LogInformation("Disconnecting Ethernet interface {InterfaceName}.", resolvedInterfaceName);
+        logger.LogInformation("Disconnecting Ethernet interface.");
 
         var result = await RunNmcliAsync(["device", "disconnect", resolvedInterfaceName], cancellationToken);
         if (!result.Succeeded)
         {
             var message = BuildCommandFailureMessage(result, $"Unable to disconnect Ethernet interface '{resolvedInterfaceName}'.");
-            logger.LogWarning(
-                "Failed to disconnect Ethernet interface {InterfaceName}: {ErrorMessage}",
-                resolvedInterfaceName,
-                message);
+            logger.LogWarning("Failed to disconnect Ethernet interface.");
 
             return new EthernetDisconnectResult
             {
@@ -337,7 +320,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             };
         }
 
-        logger.LogInformation("Ethernet interface {InterfaceName} disconnected successfully.", resolvedInterfaceName);
+        logger.LogInformation("Ethernet interface disconnected successfully.");
         return new EthernetDisconnectResult
         {
             Success = true,
@@ -745,8 +728,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         }
 
         logger.LogWarning(
-            "Recovered from an invalid saved Wi-Fi profile for SSID {Ssid} by deleting {ProfileCount} saved profile(s) before retrying the connection.",
-            ssid,
+            "Recovered from an invalid saved Wi-Fi profile by deleting {ProfileCount} saved profile(s) before retrying the connection.",
             deletedProfiles);
 
         return await RunNmcliAsync(arguments, cancellationToken);
@@ -759,10 +741,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             cancellationToken);
         if (!result.Succeeded)
         {
-            logger.LogWarning(
-                "Unable to inspect saved Wi-Fi profiles for SSID {Ssid}: {ErrorMessage}",
-                ssid,
-                BuildCommandFailureMessage(result, "Unable to inspect saved Wi-Fi profiles."));
+            logger.LogWarning("Unable to inspect saved Wi-Fi profiles before retrying the connection.");
             return 0;
         }
 
@@ -774,10 +753,8 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             if (!deleteResult.Succeeded)
             {
                 logger.LogWarning(
-                    "Unable to delete saved Wi-Fi profile {ProfileUuid} for SSID {Ssid}: {ErrorMessage}",
-                    profileUuid,
-                    ssid,
-                    BuildCommandFailureMessage(deleteResult, "Unable to delete the saved Wi-Fi profile."));
+                    "Unable to delete a saved Wi-Fi profile while recovering the connection. ExitCode={ExitCode}.",
+                    deleteResult.ExitCode);
                 continue;
             }
 
@@ -829,9 +806,8 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         if (!result.Succeeded)
         {
             logger.LogDebug(
-                "Unable to read current Wi-Fi access point for interface {InterfaceName}: {ErrorOutput}",
-                interfaceName,
-                result.ErrorOutput);
+                "Unable to read the current Wi-Fi access point. ExitCode={ExitCode}.",
+                result.ExitCode);
             return null;
         }
 
@@ -939,8 +915,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             if (fallbackResult.Succeeded && IsBetterWifiAccessPointRead(fallbackResult.AccessPoints, bestAccessPoints))
             {
                 logger.LogInformation(
-                    "Using iw fallback for interface {InterfaceName}. nmcli visible networks={NmcliVisibleCount}, iw visible networks={IwVisibleCount}.",
-                    interfaceName,
+                    "Using iw fallback for Wi-Fi scan. nmcli visible networks={NmcliVisibleCount}, iw visible networks={IwVisibleCount}.",
                     CountVisibleWifiNetworks(bestAccessPoints),
                     CountVisibleWifiNetworks(fallbackResult.AccessPoints));
                 return fallbackResult;
@@ -960,10 +935,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
 
         if (!result.Succeeded)
         {
-            logger.LogDebug(
-                "Explicit Wi-Fi rescan request failed for interface {InterfaceName}: {ErrorOutput}",
-                interfaceName,
-                result.ErrorOutput ?? result.StandardOutput);
+            logger.LogDebug("Explicit Wi-Fi rescan request failed. ExitCode={ExitCode}.", result.ExitCode);
         }
     }
 
@@ -984,10 +956,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             cancellationToken);
         if (!result.Succeeded)
         {
-            logger.LogDebug(
-                "iw Wi-Fi scan fallback failed for interface {InterfaceName}: {ErrorOutput}",
-                interfaceName,
-                result.ErrorOutput ?? result.StandardOutput);
+            logger.LogDebug("iw Wi-Fi scan fallback failed. ExitCode={ExitCode}.", result.ExitCode);
             return new WifiAccessPointCollectionResult(result, []);
         }
 

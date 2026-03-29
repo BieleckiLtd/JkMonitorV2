@@ -207,7 +207,7 @@ describe('useAppStore update restart recovery', () => {
       status: 'running',
       isRunning: true,
       stage: 'Updating tunnel connector…',
-      detail: 'Installing or refreshing the cloudflared package used for internet access.',
+      detail: 'Checking that the cloudflared package used for internet access is installed.',
       success: null,
       canCancel: false,
       cancelUnavailableReason: 'Cancellation is no longer available because the installed files are being replaced.',

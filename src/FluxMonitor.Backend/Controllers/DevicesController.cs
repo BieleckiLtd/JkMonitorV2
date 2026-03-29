@@ -56,12 +56,12 @@ public sealed class DevicesController(
 
             if (added.Length > 0)
             {
-                logger.LogInformation("Adding device(s): {DeviceIds}.", string.Join(", ", added));
+                logger.LogInformation("Adding {AddedCount} device(s).", added.Length);
             }
 
             if (removed.Length > 0)
             {
-                logger.LogInformation("Removing device(s): {DeviceIds}.", string.Join(", ", removed));
+                logger.LogInformation("Removing {RemovedCount} device(s).", removed.Length);
             }
 
             var devices = await deviceConfigStore.SaveDevicesAsync(request.Devices, cancellationToken);
@@ -188,11 +188,7 @@ public sealed class DevicesController(
         }
         catch (Exception ex)
         {
-            logger.LogError(
-                ex,
-                "Parameter write failed for device {DeviceId}, parameter {ParameterKey}.",
-                deviceId,
-                parameterKey);
+            logger.LogError(ex, "Parameter write failed for a configured device.");
             return StatusCode(500, new { message = "Failed to write parameter." });
         }
     }
@@ -219,16 +215,17 @@ public sealed class DevicesController(
     {
         try
         {
+            var hasDefinitionFilter = !string.IsNullOrWhiteSpace(definitionId);
             logger.LogInformation(
-                "BLE scan requested. DefinitionId={DefinitionId}, TimeoutMs={TimeoutMs}.",
-                string.IsNullOrWhiteSpace(definitionId) ? "<none>" : definitionId.Trim(),
+                "BLE scan requested. HasDefinitionFilter={HasDefinitionFilter}, TimeoutMs={TimeoutMs}.",
+                hasDefinitionFilter,
                 timeoutMs);
 
             Contracts.DeviceDefinition.DeviceDefinition? definition = null;
             if (!string.IsNullOrWhiteSpace(definitionId) &&
                 (!definitionLoader.TryGet(definitionId.Trim(), out definition) || definition is null))
             {
-                logger.LogWarning("BLE scan requested with unknown definition '{DefinitionId}'.", definitionId);
+                logger.LogWarning("BLE scan requested with an unknown definition filter.");
                 return Ok(new
                 {
                     devices = Array.Empty<object>(),
@@ -239,10 +236,7 @@ public sealed class DevicesController(
             if (definition is not null &&
                 !string.Equals(definition.Connection.Transport.Type, "ble", StringComparison.OrdinalIgnoreCase))
             {
-                logger.LogWarning(
-                    "BLE scan requested for non-BLE definition '{DefinitionId}' ({TransportType}).",
-                    definition.Device.Id,
-                    definition.Connection.Transport.Type);
+                logger.LogWarning("BLE scan requested for a non-BLE device definition.");
                 return Ok(new
                 {
                     devices = Array.Empty<object>(),
@@ -256,8 +250,8 @@ public sealed class DevicesController(
 
             var devices = await genericBlePollingClient.DiscoverDevicesAsync(definition, timeout, cancellationToken);
             logger.LogInformation(
-                "BLE scan completed. DefinitionId={DefinitionId}, ResultCount={ResultCount}.",
-                definition?.Device.Id ?? "<none>",
+                "BLE scan completed. DefinitionFilterApplied={DefinitionFilterApplied}, ResultCount={ResultCount}.",
+                definition is not null,
                 devices.Count);
             return Ok(new { devices });
         }
@@ -268,7 +262,7 @@ public sealed class DevicesController(
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "BLE scan failed. DefinitionId={DefinitionId}.", definitionId);
+            logger.LogError(ex, "BLE scan failed. HasDefinitionFilter={HasDefinitionFilter}.", !string.IsNullOrWhiteSpace(definitionId));
             return Ok(new { devices = Array.Empty<object>(), error = ex.Message });
         }
     }
@@ -282,34 +276,25 @@ public sealed class DevicesController(
 
         if (device is null)
         {
-            logger.LogWarning("Start requested for unknown device '{DeviceId}'.", deviceId);
+            logger.LogWarning("Start requested for an unknown configured device.");
             return NotFound(new { message = $"Device '{deviceId}' not found in configuration." });
         }
 
         if (!device.TryResolveDefinition(definitionLoader, out var definition) || definition is null)
         {
-            logger.LogWarning(
-                "Start requested for device {DeviceId} but definition '{DefinitionId}' could not be loaded.",
-                deviceId,
-                device.DefinitionId);
+            logger.LogWarning("Start requested for a device whose definition could not be loaded.");
             return BadRequest(new { message = $"Device definition '{device.DefinitionId}' not found." });
         }
 
         logger.LogInformation(
-            "Starting device {DeviceId}. DefinitionId={DefinitionId}, TransportType={TransportType}, Target={TransportTarget}.",
-            deviceId,
-            device.DefinitionId,
-            definition.Connection.Transport.Type,
-            string.IsNullOrWhiteSpace(device.TransportPortName) ? "<none>" : device.TransportPortName);
+            "Starting configured device polling. HasTransportTarget={HasTransportTarget}.",
+            !string.IsNullOrWhiteSpace(device.TransportPortName));
 
         if (!pollingClientDispatcher.IsDefinitionSupported(definition))
         {
             var supportMessage = pollingClientDispatcher.GetUnsupportedDefinitionMessage(definition)
                 ?? "Device definition is not supported.";
-            logger.LogWarning(
-                "Start rejected for device {DeviceId}: unsupported transport. Reason={Reason}",
-                deviceId,
-                supportMessage);
+            logger.LogWarning("Start rejected because the configured transport is unsupported.");
             return Ok(new
             {
                 deviceId,
@@ -345,7 +330,7 @@ public sealed class DevicesController(
 
         // Apply using the in-memory device list (avoids config file-watcher race)
         await orchestrator.ApplyConfigurationAsync(allDevices, cancellationToken);
-        logger.LogInformation("Start configuration applied for device {DeviceId}; waiting for initial poll result.", deviceId);
+        logger.LogInformation("Start configuration applied; waiting for initial poll result.");
 
         // Wait for the first poll result (up to ~8 seconds)
         const int maxWaitMs = 8000;
@@ -366,10 +351,7 @@ public sealed class DevicesController(
 
                 if (IsSuccessfulStartOutcome(state.LastOutcome))
                 {
-                    logger.LogInformation(
-                        "Initial poll succeeded for device {DeviceId} after {ElapsedMs} ms.",
-                        deviceId,
-                        waited);
+                    logger.LogInformation("Initial poll succeeded after {ElapsedMs} ms.", waited);
 
                     return Ok(new
                     {
@@ -385,20 +367,18 @@ public sealed class DevicesController(
                 lastObservedError = error;
 
                 logger.LogDebug(
-                    "Initial poll attempt did not succeed for device {DeviceId}. Outcome={Outcome}, Error={Error}, ElapsedMs={ElapsedMs}. Waiting for successful poll within timeout.",
-                    deviceId,
-                    state.LastOutcome,
-                    error,
+                    "Initial poll attempt did not succeed. HasOutcome={HasOutcome}, HasError={HasError}, ElapsedMs={ElapsedMs}. Waiting for successful poll within timeout.",
+                    !string.IsNullOrWhiteSpace(state.LastOutcome),
+                    !string.IsNullOrWhiteSpace(error),
                     waited);
             }
         }
 
         logger.LogWarning(
-            "Device {DeviceId} start timed out waiting for successful initial poll result after {ElapsedMs} ms. LastOutcome={Outcome}, Error={Error}.",
-            deviceId,
+            "Device start timed out waiting for successful initial poll result after {ElapsedMs} ms. HasOutcome={HasOutcome}, HasError={HasError}.",
             waited,
-            lastObservedOutcome,
-            lastObservedError);
+            !string.IsNullOrWhiteSpace(lastObservedOutcome),
+            !string.IsNullOrWhiteSpace(lastObservedError));
         return Ok(new
         {
             deviceId,
@@ -418,7 +398,7 @@ public sealed class DevicesController(
 
         if (device is null)
         {
-            logger.LogWarning("Stop requested for unknown device '{DeviceId}'.", deviceId);
+            logger.LogWarning("Stop requested for an unknown configured device.");
             return NotFound(new { message = $"Device '{deviceId}' not found in configuration." });
         }
 
@@ -447,7 +427,7 @@ public sealed class DevicesController(
 
         // Apply using the in-memory device list (avoids config file-watcher race)
         await orchestrator.ApplyConfigurationAsync(allDevices, cancellationToken);
-        logger.LogInformation("Stopped device {DeviceId}.", deviceId);
+        logger.LogInformation("Stopped configured device.");
 
         return Ok(new { deviceId, stopped = true, message = "Device stopped." });
     }

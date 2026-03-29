@@ -153,7 +153,7 @@ public sealed class SystemController(
             }
             catch (Exception exception)
             {
-                logger.LogWarning(exception, "Wi-Fi password storage update failed for SSID {Ssid}.", request.Ssid);
+                logger.LogWarning(exception, "Wi-Fi password storage update failed after a connection attempt.");
             }
         }
 

@@ -187,10 +187,8 @@ public sealed class HostServicesCatalogService(ILogger<HostServicesCatalogServic
         if (!stopResult.Succeeded)
         {
             logger.LogWarning(
-                "Failed to stop service {ServiceName}. ExitCode={ExitCode}. StdErr={ErrorOutput}",
-                normalizedServiceName,
-                stopResult.ExitCode,
-                stopResult.ErrorOutput);
+                "Failed to stop the requested service. ExitCode={ExitCode}.",
+                stopResult.ExitCode);
 
             return new ServiceCommandResponse
             {
@@ -387,10 +385,8 @@ public sealed class HostServicesCatalogService(ILogger<HostServicesCatalogServic
         if (!statusResult.Succeeded)
         {
             logger.LogWarning(
-                "Failed to read package details for {PackageName}. ExitCode={ExitCode}. StdErr={ErrorOutput}",
-                packageName,
-                statusResult.ExitCode,
-                statusResult.ErrorOutput);
+                "Failed to read requested package details. ExitCode={ExitCode}.",
+                statusResult.ExitCode);
 
             return new SystemServiceInsight
             {
@@ -509,10 +505,8 @@ public sealed class HostServicesCatalogService(ILogger<HostServicesCatalogServic
         if (!showResult.Succeeded)
         {
             logger.LogWarning(
-                "Failed to read service details for {ServiceName}. ExitCode={ExitCode}. StdErr={ErrorOutput}",
-                serviceName,
-                showResult.ExitCode,
-                showResult.ErrorOutput);
+                "Failed to read requested service details. ExitCode={ExitCode}.",
+                showResult.ExitCode);
 
             return new SystemServiceInsight
             {

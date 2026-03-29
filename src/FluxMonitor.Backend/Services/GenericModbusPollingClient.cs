@@ -85,8 +85,7 @@ public sealed class GenericModbusPollingClient(
                     serialPort.DiscardInBuffer();
                 }
 
-                logger.LogDebug("Reading register bank '{BankId}' (0x{Address:X4}, {Count} regs) for device {DeviceId}.",
-                    bank.Id, bank.Address, bank.Count, device.DeviceId);
+                logger.LogDebug("Reading a configured register bank.");
 
                 var request = ModbusRtu.BuildReadHoldingRegistersRequest(slaveAddress, bank.Address, bank.Count);
                 var response = await SendAndReceiveAsync(serialPort, request,
@@ -161,8 +160,7 @@ public sealed class GenericModbusPollingClient(
             serialPort.DiscardInBuffer();
             serialPort.DiscardOutBuffer();
 
-            logger.LogInformation("Writing entity '{EntityId}' (0x{Register:X4}) = {Value} for device {DeviceId}.",
-                entityId, registerAddress, rawValue, device.DeviceId);
+            logger.LogInformation("Writing a configured register value. Register=0x{Register:X4}.", registerAddress);
 
             var writeRequest = ModbusRtu.BuildWriteMultipleRegistersRequest(slaveAddress, registerAddress, rawValue);
             var writeResponse = await SendAndReceiveAsync(serialPort, writeRequest,
@@ -182,8 +180,7 @@ public sealed class GenericModbusPollingClient(
             {
                 var readBack = (uint)((frame[3] << 24) | (frame[4] << 16) | (frame[5] << 8) | frame[6]);
                 var success = readBack == rawValue;
-                logger.LogInformation("Write verification for '{EntityId}': written={Written}, readBack={ReadBack}, success={Success}.",
-                    entityId, rawValue, readBack, success);
+                logger.LogInformation("Write verification completed. Success={Success}.", success);
 
                 // Invalidate cached bank data after a write
                 _bankCache.Remove(bank.Id);

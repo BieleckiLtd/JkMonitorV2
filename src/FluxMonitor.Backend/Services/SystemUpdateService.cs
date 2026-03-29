@@ -101,7 +101,7 @@ public sealed class SystemUpdateService(
         new(
             InstallerSection: "Installing Cloudflare Tunnel connector",
             Stage: "Updating tunnel connector…",
-            Detail: "Installing or refreshing the cloudflared package used for internet access.",
+            Detail: "Checking that the cloudflared package used for internet access is installed.",
             StepIndex: 6,
             StepCount: 11,
             PercentComplete: 61,
