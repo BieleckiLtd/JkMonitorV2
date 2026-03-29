@@ -13,6 +13,7 @@ function App() {
   const loadExternalTheme = useAppStore((state) => state.loadExternalTheme);
   const connectUpdateProgressStream = useAppStore((state) => state.connectUpdateProgressStream);
   const disconnectUpdateProgressStream = useAppStore((state) => state.disconnectUpdateProgressStream);
+  const fetchUpdateProgress = useAppStore((state) => state.fetchUpdateProgress);
 
   useEffect(() => {
     void loadExternalTheme();
@@ -24,6 +25,10 @@ function App() {
       disconnectUpdateProgressStream();
     };
   }, [connectUpdateProgressStream, disconnectUpdateProgressStream]);
+
+  useEffect(() => {
+    void fetchUpdateProgress();
+  }, [fetchUpdateProgress]);
 
   return (
     <Router>
