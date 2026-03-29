@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 
@@ -17,26 +17,154 @@ public sealed class SystemUpdateService(
     private const string ChecksumAssetName = AssetName + ".sha256";
     private const string InstallerScriptUrl = $"https://raw.githubusercontent.com/{Repository}/dev/scripts/install-from-release.sh";
     private const string ReleaseApiUrl = $"https://api.github.com/repos/{Repository}/releases/tags/{ReleaseTag}";
+    private const int InstallerOutputTailCapacity = 120;
 
-    private static readonly Dictionary<string, string> SectionProgressMap = new(StringComparer.OrdinalIgnoreCase)
+    private static readonly UpdateStageDefinition StartingStage = new(
+        InstallerSection: null,
+        Stage: "Preparing update…",
+        Detail: "Flux Monitor is getting the installer ready.",
+        StepIndex: 0,
+        StepCount: 9,
+        PercentComplete: 3,
+        CanCancel: true,
+        CancelUnavailableReason: null);
+
+    private static readonly UpdateStageDefinition CancellingStage = new(
+        InstallerSection: null,
+        Stage: "Cancelling update…",
+        Detail: "Stopping the updater before the installed files are replaced.",
+        StepIndex: 2,
+        StepCount: 9,
+        PercentComplete: 20,
+        CanCancel: false,
+        CancelUnavailableReason: "Cancellation is already being processed.");
+
+    private static readonly UpdateStageDefinition RestartingStage = new(
+        InstallerSection: null,
+        Stage: "Restarting Flux Monitor…",
+        Detail: "The new version is installed. The service is restarting now.",
+        StepIndex: 9,
+        StepCount: 9,
+        PercentComplete: 100,
+        CanCancel: false,
+        CancelUnavailableReason: "The update has already been installed and the service is restarting.");
+
+    private static readonly IReadOnlyList<UpdateStageDefinition> InstallerStages =
+    [
+        new(
+            InstallerSection: "Flux Monitor release bootstrap",
+            Stage: "Preparing update…",
+            Detail: "Checking the published release and preparing the installer.",
+            StepIndex: 1,
+            StepCount: 9,
+            PercentComplete: 8,
+            CanCancel: true,
+            CancelUnavailableReason: null),
+        new(
+            InstallerSection: "Downloading release artifact",
+            Stage: "Downloading update…",
+            Detail: "Downloading the published release package from GitHub. This can take a few minutes on slower links.",
+            StepIndex: 2,
+            StepCount: 9,
+            PercentComplete: 18,
+            CanCancel: true,
+            CancelUnavailableReason: null),
+        new(
+            InstallerSection: "Verifying release artifact",
+            Stage: "Verifying package…",
+            Detail: "Checking that the downloaded package matches the published checksum before anything is replaced.",
+            StepIndex: 3,
+            StepCount: 9,
+            PercentComplete: 30,
+            CanCancel: true,
+            CancelUnavailableReason: null),
+        new(
+            InstallerSection: "Extracting release artifact",
+            Stage: "Unpacking update…",
+            Detail: "Extracting the new release into a temporary folder.",
+            StepIndex: 4,
+            StepCount: 9,
+            PercentComplete: 42,
+            CanCancel: true,
+            CancelUnavailableReason: null),
+        new(
+            InstallerSection: "Preparing installation folder",
+            Stage: "Replacing installed files…",
+            Detail: "Switching the app over to the new release and preserving your local configuration.",
+            StepIndex: 5,
+            StepCount: 9,
+            PercentComplete: 58,
+            CanCancel: false,
+            CancelUnavailableReason: "Cancellation is no longer available because the installed files are being replaced."),
+        new(
+            InstallerSection: "Checking ASP.NET Core runtime",
+            Stage: "Checking runtime…",
+            Detail: "Making sure the required ASP.NET Core runtime is available on this device.",
+            StepIndex: 6,
+            StepCount: 9,
+            PercentComplete: 72,
+            CanCancel: false,
+            CancelUnavailableReason: "Cancellation is no longer available because the new installation is being finalized."),
+        new(
+            InstallerSection: "Installing local ASP.NET Core runtime",
+            Stage: "Installing runtime…",
+            Detail: "Installing the local ASP.NET Core runtime needed by the published build.",
+            StepIndex: 7,
+            StepCount: 9,
+            PercentComplete: 80,
+            CanCancel: false,
+            CancelUnavailableReason: "Cancellation is no longer available because the new installation is being finalized."),
+        new(
+            InstallerSection: "Configuring startup mode",
+            Stage: "Applying configuration…",
+            Detail: "Reapplying your saved runtime settings to the new installation.",
+            StepIndex: 8,
+            StepCount: 9,
+            PercentComplete: 88,
+            CanCancel: false,
+            CancelUnavailableReason: "Cancellation is no longer available because the new installation is being finalized."),
+        new(
+            InstallerSection: "Installing systemd service",
+            Stage: "Updating service…",
+            Detail: "Updating the system service so Flux Monitor starts the new version.",
+            StepIndex: 9,
+            StepCount: 9,
+            PercentComplete: 95,
+            CanCancel: false,
+            CancelUnavailableReason: "Cancellation is no longer available because Flux Monitor is already switching to the new version."),
+        new(
+            InstallerSection: "Starting Flux Monitor",
+            Stage: "Starting Flux Monitor…",
+            Detail: "Starting the updated service and checking that it comes back online.",
+            StepIndex: 9,
+            StepCount: 9,
+            PercentComplete: 98,
+            CanCancel: false,
+            CancelUnavailableReason: "Cancellation is no longer available because Flux Monitor is already switching to the new version.")
+    ];
+
+    private static readonly Dictionary<string, UpdateStageDefinition> InstallerStageMap = InstallerStages
+        .Where(stage => stage.InstallerSection is not null)
+        .ToDictionary(stage => stage.InstallerSection!, StringComparer.OrdinalIgnoreCase);
+
+    private static readonly Dictionary<string, string> InstallerDetailOverrides = new(StringComparer.OrdinalIgnoreCase)
     {
-        ["Flux Monitor release bootstrap"]         = "Starting installer…",
-        ["Downloading release artifact"]          = "Downloading update…",
-        ["Verifying release artifact"]            = "Verifying checksum…",
-        ["Extracting release artifact"]           = "Extracting update…",
-        ["Preparing installation folder"]         = "Preparing installation…",
-        ["Checking ASP.NET Core runtime"]         = "Checking runtime…",
-        ["Installing local ASP.NET Core runtime"] = "Installing runtime…",
-        ["Configuring startup mode"]              = "Configuring application…",
-        ["Installing systemd service"]            = "Installing service…",
-        ["Starting Flux Monitor"]                   = "Starting service…",
+        ["Fetching the published build from GitHub Releases via direct asset URL."] = "Downloading the published release package from GitHub.",
+        ["Checking the published checksum before install."] = "Verifying the package before anything is replaced.",
+        ["Unpacking the application files."] = "Extracting the new release into a temporary folder.",
+        ["Existing installation found. Preserving local config and cached runtime."] = "Keeping your saved settings and local runtime cache.",
+        ["Migrated release-local settings from Development to Production."] = "Refreshing configuration so the published build uses the managed runtime settings.",
+        ["No compatible ASP.NET Core 10 runtime was found. Install a local copy into this folder?"] = "The required ASP.NET Core runtime is missing on this device.",
+        ["Reusing the existing runtime configuration for Production."] = "Keeping the current production runtime configuration.",
+        ["Reusing the existing runtime configuration for Development."] = "Keeping the current development runtime configuration."
     };
 
     private UpdateProgress? _currentProgress;
-    private readonly Lock _lock = new();
+    private Process? _currentInstallerProcess;
+    private CancellationTokenSource? _updateCancellationSource;
+    private bool _cancelRequested;
+    private readonly Lock _stateGate = new();
 
-    // ETag caching: store the last ETag returned by the release API so repeated
-    // checks return 304 Not Modified and don't count against the rate limit.
     private string? _releaseETag;
     private object? _cachedRelease;
 
@@ -64,11 +192,12 @@ public sealed class SystemUpdateService(
             using var client = httpClientFactory.CreateClient();
             client.DefaultRequestHeaders.Add("User-Agent", "FluxMonitor");
 
-            // Use ETag / If-None-Match so 304 responses don't count against the rate limit.
             var request = new HttpRequestMessage(HttpMethod.Get, ReleaseApiUrl);
             request.Headers.Add("Accept", "application/vnd.github+json");
             if (_releaseETag is not null)
+            {
                 request.Headers.TryAddWithoutValidation("If-None-Match", _releaseETag);
+            }
 
             var response = await client.SendAsync(request, cancellationToken);
 
@@ -106,7 +235,6 @@ public sealed class SystemUpdateService(
                     && localChecksum is not null
                     && !string.Equals(remoteChecksum, localChecksum, StringComparison.OrdinalIgnoreCase);
 
-                // Fetch commit list between installed and latest when update is available.
                 if (result.UpdateAvailable && !string.IsNullOrEmpty(result.CurrentSourceRevision))
                 {
                     try
@@ -125,17 +253,17 @@ public sealed class SystemUpdateService(
                                 .ToList();
                         }
                     }
-                    catch (Exception ex)
+                    catch (Exception exception)
                     {
-                        logger.LogDebug(ex, "Failed to fetch commit comparison from GitHub.");
+                        logger.LogDebug(exception, "Failed to fetch update comparison for {Repository}.", Repository);
                     }
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            logger.LogWarning(ex, "Failed to check for updates from GitHub.");
-            result.CheckError = ex.Message;
+            logger.LogWarning(exception, "Failed to check for updates from GitHub.");
+            result.CheckError = exception.Message;
         }
 
         return result;
@@ -143,53 +271,153 @@ public sealed class SystemUpdateService(
 
     public UpdateProgress? GetProgress()
     {
-        lock (_lock) return _currentProgress;
+        lock (_stateGate)
+        {
+            return _currentProgress;
+        }
     }
 
-    public bool StartUpdate()
+    public UpdateCommandResult StartUpdate()
     {
         if (!managedRestartService.IsManagedInstall || !OperatingSystem.IsLinux())
         {
-            return false;
+            return UpdateCommandResult.Fail("In-app update is only available on managed Linux installs.");
         }
 
-        lock (_lock)
+        string sessionId;
+        UpdateProgress progress;
+        CancellationToken cancellationToken;
+
+        lock (_stateGate)
         {
             if (_currentProgress is { IsRunning: true })
             {
-                return false;
+                return UpdateCommandResult.Fail(
+                    _currentProgress.CanCancel
+                        ? "An update is already in progress."
+                        : "An update is already in progress and has passed the point where it can be cancelled.",
+                    _currentProgress);
             }
 
-            _currentProgress = new UpdateProgress { IsRunning = true, Stage = "Starting update…" };
+            _updateCancellationSource?.Dispose();
+            _updateCancellationSource = new CancellationTokenSource();
+            _cancelRequested = false;
+
+            sessionId = Guid.NewGuid().ToString("N")[..8];
+            progress = CreateProgress(
+                sessionId,
+                startedAt: DateTimeOffset.UtcNow,
+                status: UpdateStatus.Running,
+                isRunning: true,
+                success: null,
+                stage: StartingStage.Stage,
+                detail: StartingStage.Detail,
+                canCancel: StartingStage.CanCancel,
+                cancelUnavailableReason: StartingStage.CancelUnavailableReason,
+                stepIndex: StartingStage.StepIndex,
+                stepCount: StartingStage.StepCount,
+                percentComplete: StartingStage.PercentComplete);
+
+            _currentProgress = progress;
+            cancellationToken = _updateCancellationSource.Token;
         }
 
-        _ = Task.Run(RunUpdateAsync);
-        return true;
+        logger.LogInformation("Starting in-app update session {SessionId}.", sessionId);
+        _ = Task.Run(() => RunUpdateAsync(sessionId, cancellationToken));
+
+        return UpdateCommandResult.Ok(progress);
     }
 
-    private async Task RunUpdateAsync()
+    public UpdateCommandResult CancelUpdate()
     {
+        Process? installerProcess = null;
+        CancellationTokenSource? cancellationSource = null;
+        UpdateProgress? progress;
+
+        lock (_stateGate)
+        {
+            progress = _currentProgress;
+
+            if (progress is null || !progress.IsRunning)
+            {
+                return UpdateCommandResult.Fail("There is no update in progress.", progress);
+            }
+
+            if (!progress.CanCancel)
+            {
+                return UpdateCommandResult.Fail(
+                    progress.CancelUnavailableReason ?? "This update can no longer be cancelled.",
+                    progress);
+            }
+
+            if (_cancelRequested)
+            {
+                return UpdateCommandResult.Ok(progress);
+            }
+
+            _cancelRequested = true;
+            cancellationSource = _updateCancellationSource;
+            installerProcess = _currentInstallerProcess;
+
+            _currentProgress = CreateProgress(
+                progress.SessionId,
+                startedAt: progress.StartedAt,
+                status: UpdateStatus.Cancelling,
+                isRunning: true,
+                success: null,
+                stage: CancellingStage.Stage,
+                detail: CancellingStage.Detail,
+                canCancel: false,
+                cancelUnavailableReason: CancellingStage.CancelUnavailableReason,
+                stepIndex: Math.Max(progress.StepIndex ?? CancellingStage.StepIndex ?? 0, CancellingStage.StepIndex ?? 0),
+                stepCount: progress.StepCount ?? CancellingStage.StepCount,
+                percentComplete: Math.Max(progress.PercentComplete ?? CancellingStage.PercentComplete ?? 0, CancellingStage.PercentComplete ?? 0));
+
+            progress = _currentProgress;
+        }
+
+        logger.LogInformation("Cancellation requested for update session {SessionId}.", progress?.SessionId);
+
         try
         {
-            SetProgress("Starting update…");
+            cancellationSource?.Cancel();
+        }
+        catch (ObjectDisposedException)
+        {
+            // The updater finished between the request and the cancel attempt.
+        }
+
+        TryKillInstallerProcess(installerProcess);
+        return UpdateCommandResult.Ok(progress);
+    }
+
+    private async Task RunUpdateAsync(string sessionId, CancellationToken cancellationToken)
+    {
+        var outputTail = new FixedLineBuffer(InstallerOutputTailCapacity);
+        var errorTail = new FixedLineBuffer(InstallerOutputTailCapacity);
+
+        try
+        {
+            if (cancellationToken.IsCancellationRequested)
+            {
+                SetCancelledProgress(sessionId);
+                return;
+            }
 
             var installRoot = GetInstallRoot();
             if (installRoot is null)
             {
-                SetProgress("Failed: cannot determine install root.", done: true, success: false);
+                SetFailedProgress(sessionId, "Update could not start.", "Flux Monitor could not determine the managed install location.", outputTail, errorTail);
                 return;
             }
 
             var destination = Directory.GetParent(installRoot)?.FullName ?? installRoot;
 
-            SetProgress("Downloading installer script…");
-
-            var env = new Dictionary<string, string>
-            {
-                ["FLUXMONITOR_REUSE_EXISTING_CONFIGURATION"] = "yes",
-                ["FLUXMONITOR_INSTALL_RUNTIME"] = "no",
-                ["FLUXMONITOR_INSTALL_SERVICE"] = "yes"
-            };
+            logger.LogInformation(
+                "Update session {SessionId} will install release {ReleaseTag} into {Destination}.",
+                sessionId,
+                ReleaseTag,
+                destination);
 
             var psi = new ProcessStartInfo
             {
@@ -202,93 +430,443 @@ public sealed class SystemUpdateService(
                 WorkingDirectory = destination
             };
 
-            foreach (var kv in env)
-            {
-                psi.Environment[kv.Key] = kv.Value;
-            }
+            psi.Environment["FLUXMONITOR_REUSE_EXISTING_CONFIGURATION"] = "yes";
+            psi.Environment["FLUXMONITOR_INSTALL_RUNTIME"] = "no";
+            psi.Environment["FLUXMONITOR_INSTALL_SERVICE"] = "yes";
 
             using var process = Process.Start(psi);
             if (process is null)
             {
-                SetProgress("Failed: could not start installer process.", done: true, success: false);
+                SetFailedProgress(sessionId, "Update could not start.", "Flux Monitor could not start the installer process.", outputTail, errorTail);
                 return;
             }
 
-            var outputLines = new List<string>();
-            var errorLines = new List<string>();
+            SetCurrentInstallerProcess(sessionId, process);
 
-            var stdoutTask = Task.Run(async () =>
+            var stdoutTask = CaptureInstallerStreamAsync(
+                process.StandardOutput,
+                sessionId,
+                outputTail,
+                isErrorStream: false,
+                cancellationToken);
+
+            var stderrTask = CaptureInstallerStreamAsync(
+                process.StandardError,
+                sessionId,
+                errorTail,
+                isErrorStream: true,
+                cancellationToken);
+
+            await Task.WhenAll(
+                stdoutTask,
+                stderrTask,
+                process.WaitForExitAsync(CancellationToken.None));
+
+            if (WasCancellationRequested(sessionId))
             {
-                string? line;
-                while ((line = await process.StandardOutput.ReadLineAsync()) is not null)
-                {
-                    outputLines.Add(line);
-                    var trimmed = line.Trim();
-                    if (SectionProgressMap.TryGetValue(trimmed, out var friendlyMessage))
-                    {
-                        SetProgress(friendlyMessage);
-                    }
-                }
-            });
-
-            var stderrTask = Task.Run(async () =>
-            {
-                string? line;
-                while ((line = await process.StandardError.ReadLineAsync()) is not null)
-                {
-                    errorLines.Add(line);
-                }
-            });
-
-            await Task.WhenAll(stdoutTask, stderrTask);
-            await process.WaitForExitAsync();
-
-            var output = string.Join('\n', outputLines);
-            var errors = string.Join('\n', errorLines);
+                SetCancelledProgress(sessionId);
+                return;
+            }
 
             if (process.ExitCode != 0)
             {
-                var lastLines = string.Join('\n', (output + "\n" + errors).Split('\n').TakeLast(5));
-                logger.LogError("Update installer failed with exit code {ExitCode}. Output: {Output}", process.ExitCode, output + "\n" + errors);
-                SetProgress($"Failed (exit code {process.ExitCode}): {lastLines}", done: true, success: false);
+                logger.LogError(
+                    "Update installer failed for session {SessionId} with exit code {ExitCode}. STDOUT: {Stdout} STDERR: {Stderr}",
+                    sessionId,
+                    process.ExitCode,
+                    outputTail.ToMultilineString(),
+                    errorTail.ToMultilineString());
+
+                SetFailedProgress(
+                    sessionId,
+                    title: "Update failed.",
+                    detail: CreateFriendlyFailureDetail(outputTail, errorTail),
+                    outputTail,
+                    errorTail);
                 return;
             }
 
-            SetProgress("Update installed. Restarting service…", done: true, success: true);
-            logger.LogInformation("Update installed successfully. Scheduling restart.");
+            logger.LogInformation("Update session {SessionId} installed successfully. Restarting the service.", sessionId);
 
-            await Task.Delay(TimeSpan.FromSeconds(1));
+            ApplyStageProgress(sessionId, RestartingStage, UpdateStatus.Restarting, isRunning: true, success: null);
+            await Task.Delay(TimeSpan.FromSeconds(1), CancellationToken.None);
             applicationLifetime.StopApplication();
         }
-        catch (Exception ex)
+        catch (Exception exception)
         {
-            logger.LogError(ex, "In-app update failed.");
-            SetProgress($"Failed: {ex.Message}", done: true, success: false);
+            logger.LogError(exception, "In-app update failed for session {SessionId}.", sessionId);
+            SetFailedProgress(
+                sessionId,
+                title: "Update failed.",
+                detail: "Flux Monitor hit an unexpected problem while applying the update. The current version should still be available.",
+                outputTail,
+                errorTail);
+        }
+        finally
+        {
+            ClearInstallerState(sessionId);
         }
     }
 
-    private void SetProgress(string stage, bool done = false, bool? success = null)
+    private async Task CaptureInstallerStreamAsync(
+        StreamReader reader,
+        string sessionId,
+        FixedLineBuffer tail,
+        bool isErrorStream,
+        CancellationToken cancellationToken)
     {
-        lock (_lock)
+        while (true)
         {
-            _currentProgress = new UpdateProgress
+            string? line;
+            try
             {
-                IsRunning = !done,
-                Stage = stage,
-                Success = success
-            };
+                line = await reader.ReadLineAsync(cancellationToken);
+            }
+            catch (OperationCanceledException) when (WasCancellationRequested(sessionId))
+            {
+                return;
+            }
+
+            if (line is null)
+            {
+                return;
+            }
+
+            tail.Add(line);
+
+            if (isErrorStream)
+            {
+                logger.LogTrace("Update installer stderr [{SessionId}]: {Line}", sessionId, line);
+                continue;
+            }
+
+            logger.LogTrace("Update installer stdout [{SessionId}]: {Line}", sessionId, line);
+            HandleInstallerOutputLine(sessionId, line);
         }
+    }
+
+    private void HandleInstallerOutputLine(string sessionId, string line)
+    {
+        var trimmed = line.Trim();
+        if (string.IsNullOrWhiteSpace(trimmed))
+        {
+            return;
+        }
+
+        if (TryGetStageDefinition(trimmed, out var stage))
+        {
+            ApplyStageProgress(sessionId, stage, UpdateStatus.Running, isRunning: true, success: null);
+            return;
+        }
+
+        if (InstallerDetailOverrides.TryGetValue(trimmed, out var detail))
+        {
+            UpdateProgressDetail(sessionId, detail);
+        }
+    }
+
+    private void ApplyStageProgress(
+        string sessionId,
+        UpdateStageDefinition stage,
+        string status,
+        bool isRunning,
+        bool? success)
+    {
+        lock (_stateGate)
+        {
+            if (_currentProgress is null || !string.Equals(_currentProgress.SessionId, sessionId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _currentProgress = CreateProgress(
+                sessionId,
+                startedAt: _currentProgress.StartedAt,
+                status: status,
+                isRunning: isRunning,
+                success: success,
+                stage: stage.Stage,
+                detail: stage.Detail,
+                canCancel: stage.CanCancel,
+                cancelUnavailableReason: stage.CancelUnavailableReason,
+                stepIndex: stage.StepIndex,
+                stepCount: stage.StepCount,
+                percentComplete: stage.PercentComplete);
+        }
+
+        logger.LogInformation(
+            "Update session {SessionId} advanced to stage '{Stage}' ({PercentComplete}%).",
+            sessionId,
+            stage.Stage,
+            stage.PercentComplete);
+    }
+
+    private void UpdateProgressDetail(string sessionId, string detail)
+    {
+        lock (_stateGate)
+        {
+            if (_currentProgress is null || !string.Equals(_currentProgress.SessionId, sessionId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _currentProgress = CreateProgress(
+                sessionId,
+                startedAt: _currentProgress.StartedAt,
+                status: _currentProgress.Status,
+                isRunning: _currentProgress.IsRunning,
+                success: _currentProgress.Success,
+                stage: _currentProgress.Stage,
+                detail: detail,
+                canCancel: _currentProgress.CanCancel,
+                cancelUnavailableReason: _currentProgress.CancelUnavailableReason,
+                stepIndex: _currentProgress.StepIndex,
+                stepCount: _currentProgress.StepCount,
+                percentComplete: _currentProgress.PercentComplete);
+        }
+    }
+
+    private void SetCancelledProgress(string sessionId)
+    {
+        lock (_stateGate)
+        {
+            if (_currentProgress is null || !string.Equals(_currentProgress.SessionId, sessionId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _currentProgress = CreateProgress(
+                sessionId,
+                startedAt: _currentProgress.StartedAt,
+                status: UpdateStatus.Cancelled,
+                isRunning: false,
+                success: false,
+                stage: "Update cancelled.",
+                detail: "The update was stopped before Flux Monitor replaced the installed files. The current version should still be available.",
+                canCancel: false,
+                cancelUnavailableReason: null,
+                stepIndex: _currentProgress.StepIndex,
+                stepCount: _currentProgress.StepCount,
+                percentComplete: _currentProgress.PercentComplete);
+        }
+
+        logger.LogInformation("Update session {SessionId} was cancelled before the install point of no return.", sessionId);
+    }
+
+    private void SetFailedProgress(
+        string sessionId,
+        string title,
+        string detail,
+        FixedLineBuffer outputTail,
+        FixedLineBuffer errorTail)
+    {
+        lock (_stateGate)
+        {
+            if (_currentProgress is null || !string.Equals(_currentProgress.SessionId, sessionId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _currentProgress = CreateProgress(
+                sessionId,
+                startedAt: _currentProgress.StartedAt,
+                status: UpdateStatus.Failed,
+                isRunning: false,
+                success: false,
+                stage: title,
+                detail: detail,
+                canCancel: false,
+                cancelUnavailableReason: null,
+                stepIndex: _currentProgress.StepIndex,
+                stepCount: _currentProgress.StepCount,
+                percentComplete: _currentProgress.PercentComplete);
+        }
+
+        logger.LogWarning(
+            "Update session {SessionId} ended in failure. Recent stdout: {Stdout} Recent stderr: {Stderr}",
+            sessionId,
+            outputTail.ToMultilineString(),
+            errorTail.ToMultilineString());
+    }
+
+    private void SetCurrentInstallerProcess(string sessionId, Process process)
+    {
+        lock (_stateGate)
+        {
+            if (_currentProgress is null || !string.Equals(_currentProgress.SessionId, sessionId, StringComparison.Ordinal))
+            {
+                process.Dispose();
+                return;
+            }
+
+            _currentInstallerProcess = process;
+        }
+    }
+
+    private void ClearInstallerState(string sessionId)
+    {
+        CancellationTokenSource? cancellationSource = null;
+        Process? installerProcess = null;
+
+        lock (_stateGate)
+        {
+            if (_currentProgress is not null && !string.Equals(_currentProgress.SessionId, sessionId, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            installerProcess = _currentInstallerProcess;
+            _currentInstallerProcess = null;
+
+            cancellationSource = _updateCancellationSource;
+            _updateCancellationSource = null;
+            _cancelRequested = false;
+        }
+
+        installerProcess?.Dispose();
+        cancellationSource?.Dispose();
+    }
+
+    private bool WasCancellationRequested(string sessionId)
+    {
+        lock (_stateGate)
+        {
+            return _currentProgress is not null
+                && string.Equals(_currentProgress.SessionId, sessionId, StringComparison.Ordinal)
+                && _cancelRequested;
+        }
+    }
+
+    private static void TryKillInstallerProcess(Process? process)
+    {
+        if (process is null)
+        {
+            return;
+        }
+
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch (InvalidOperationException)
+        {
+            // The process already exited.
+        }
+        catch (Exception)
+        {
+            // Best effort. The runner will still observe the cancellation token.
+        }
+    }
+
+    private UpdateProgress CreateProgress(
+        string sessionId,
+        DateTimeOffset startedAt,
+        string status,
+        bool isRunning,
+        bool? success,
+        string stage,
+        string detail,
+        bool canCancel,
+        string? cancelUnavailableReason,
+        int? stepIndex,
+        int? stepCount,
+        int? percentComplete)
+    {
+        return new UpdateProgress
+        {
+            SessionId = sessionId,
+            Status = status,
+            IsRunning = isRunning,
+            Success = success,
+            Stage = stage,
+            Detail = detail,
+            CanCancel = canCancel,
+            CancelUnavailableReason = cancelUnavailableReason,
+            StepIndex = stepIndex,
+            StepCount = stepCount,
+            PercentComplete = percentComplete,
+            StartedAt = startedAt,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
     }
 
     private string? GetLocalChecksum()
     {
         var installRoot = GetInstallRoot();
-        if (installRoot is null) return null;
+        if (installRoot is null)
+        {
+            return null;
+        }
 
         var releaseInfoPath = Path.Combine(Directory.GetParent(installRoot)?.FullName ?? installRoot, "release-info.env");
-        if (!File.Exists(releaseInfoPath)) return null;
+        if (!File.Exists(releaseInfoPath))
+        {
+            return null;
+        }
 
         return ParseReleaseChecksum(File.ReadLines(releaseInfoPath));
+    }
+
+    internal static bool TryGetStageDefinition(string installerSection, out UpdateStageDefinition stage)
+    {
+        return InstallerStageMap.TryGetValue(installerSection, out stage!);
+    }
+
+    internal static string CreateFriendlyFailureDetail(IEnumerable<string> stdoutLines, IEnumerable<string> stderrLines)
+    {
+        var combinedLines = stdoutLines
+            .Concat(stderrLines)
+            .Select(line => line.Trim())
+            .Where(line => !string.IsNullOrWhiteSpace(line))
+            .ToList();
+
+        if (combinedLines.Any(line =>
+                line.Contains("Could not resolve host", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("unable to resolve host", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("Temporary failure in name resolution", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("Network is unreachable", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("No route to host", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("Connection timed out", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("Failed to connect", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("Name or service not known", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "Flux Monitor could not reach GitHub to download the update. Check the device internet connection and try again.";
+        }
+
+        if (combinedLines.Any(line =>
+                line.Contains("checksum mismatch", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("did not contain a valid SHA-256 value", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "The downloaded package did not pass verification, so the update was stopped before it was installed.";
+        }
+
+        if (combinedLines.Any(line =>
+                line.Contains("No compatible ASP.NET Core 10 runtime was found", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("An ASP.NET Core 10 runtime is required", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "This device is missing the ASP.NET Core runtime required by the published build.";
+        }
+
+        if (combinedLines.Any(line =>
+                line.Contains("health endpoint did not become ready in time", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("did not come back online", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "The update finished installing, but Flux Monitor did not come back online in time. Check the service logs before trying again.";
+        }
+
+        var recentLine = combinedLines.LastOrDefault(line =>
+            !TryGetStageDefinition(line, out _)
+            && !InstallerDetailOverrides.ContainsKey(line)
+            && !line.StartsWith("Repository:", StringComparison.OrdinalIgnoreCase)
+            && !line.StartsWith("Release tag:", StringComparison.OrdinalIgnoreCase)
+            && !line.StartsWith("Destination:", StringComparison.OrdinalIgnoreCase));
+
+        return recentLine is not null
+            ? $"Flux Monitor could not finish the update. {recentLine}"
+            : "Flux Monitor could not finish the update. Check the application logs for more detail.";
     }
 
     private static string? ParseReleaseChecksum(IEnumerable<string> lines)
@@ -319,9 +897,7 @@ public sealed class SystemUpdateService(
 
     private string? GetInstallRoot()
     {
-        var contentRoot = Path.GetDirectoryName(typeof(Program).Assembly.Location);
-        if (contentRoot is null) return null;
-        return contentRoot;
+        return Path.GetDirectoryName(typeof(Program).Assembly.Location);
     }
 }
 
@@ -349,9 +925,85 @@ public sealed class CommitInfo
 
 public sealed class UpdateProgress
 {
+    public string SessionId { get; set; } = "";
+    public string Status { get; set; } = UpdateStatus.Running;
     public bool IsRunning { get; set; }
     public string Stage { get; set; } = "";
+    public string Detail { get; set; } = "";
     public bool? Success { get; set; }
+    public bool CanCancel { get; set; }
+    public string? CancelUnavailableReason { get; set; }
+    public int? StepIndex { get; set; }
+    public int? StepCount { get; set; }
+    public int? PercentComplete { get; set; }
+    public DateTimeOffset StartedAt { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; }
+}
+
+public sealed class UpdateCommandResult
+{
+    public bool Succeeded { get; init; }
+    public string? Error { get; init; }
+    public UpdateProgress? Progress { get; init; }
+
+    public static UpdateCommandResult Ok(UpdateProgress? progress) => new()
+    {
+        Succeeded = true,
+        Progress = progress
+    };
+
+    public static UpdateCommandResult Fail(string error, UpdateProgress? progress = null) => new()
+    {
+        Succeeded = false,
+        Error = error,
+        Progress = progress
+    };
+}
+
+internal sealed record UpdateStageDefinition(
+    string? InstallerSection,
+    string Stage,
+    string Detail,
+    int? StepIndex,
+    int? StepCount,
+    int? PercentComplete,
+    bool CanCancel,
+    string? CancelUnavailableReason);
+
+internal static class UpdateStatus
+{
+    public const string Running = "running";
+    public const string Cancelling = "cancelling";
+    public const string Restarting = "restarting";
+    public const string Cancelled = "cancelled";
+    public const string Failed = "failed";
+    public const string Succeeded = "succeeded";
+}
+
+internal sealed class FixedLineBuffer(int capacity) : IEnumerable<string>
+{
+    private readonly Queue<string> _lines = new();
+
+    public void Add(string line)
+    {
+        if (_lines.Count == capacity)
+        {
+            _lines.Dequeue();
+        }
+
+        _lines.Enqueue(line);
+    }
+
+    public string ToMultilineString()
+    {
+        return _lines.Count == 0
+            ? "(no output)"
+            : string.Join(Environment.NewLine, _lines);
+    }
+
+    public IEnumerator<string> GetEnumerator() => _lines.GetEnumerator();
+
+    System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 }
 
 file sealed class GitHubRelease

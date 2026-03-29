@@ -10,8 +10,26 @@ namespace FluxMonitor.Backend.Controllers;
 public sealed class SystemController(
     SystemUpdateService updateService,
     NetworkManagementService networkManagementService,
-    BluetoothManagementService bluetoothManagementService) : ControllerBase
+    BluetoothManagementService bluetoothManagementService,
+    HostServicesCatalogService hostServicesCatalogService) : ControllerBase
 {
+    [HttpGet("services/catalog")]
+    public async Task<ActionResult<SystemServicesCatalogSnapshot>> GetServicesCatalog(CancellationToken cancellationToken)
+    {
+        var result = await hostServicesCatalogService.GetCatalogAsync(cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpGet("services/insight")]
+    public async Task<ActionResult<SystemServiceInsight>> GetServiceInsight(
+        [FromQuery] string kind,
+        [FromQuery] string id,
+        CancellationToken cancellationToken)
+    {
+        var result = await hostServicesCatalogService.GetInsightAsync(kind, id, cancellationToken);
+        return Ok(result);
+    }
+
     [HttpGet("connectivity")]
     public async Task<ActionResult<SystemConnectivitySnapshot>> GetConnectivity(CancellationToken cancellationToken)
     {
@@ -97,13 +115,35 @@ public sealed class SystemController(
     [HttpPost("update/install")]
     public IActionResult InstallUpdate()
     {
-        var started = updateService.StartUpdate();
-        if (!started)
+        var result = updateService.StartUpdate();
+        if (!result.Succeeded)
         {
-            return BadRequest(new { error = "Update cannot be started. Either already running or not a managed install." });
+            return BadRequest(new { error = result.Error, progress = result.Progress });
+        }
+
+        if (result.Progress is not null)
+        {
+            return Ok(result.Progress);
         }
 
         return Ok(new { message = "Update started." });
+    }
+
+    [HttpPost("update/cancel")]
+    public IActionResult CancelUpdate()
+    {
+        var result = updateService.CancelUpdate();
+        if (!result.Succeeded)
+        {
+            return BadRequest(new { error = result.Error, progress = result.Progress });
+        }
+
+        if (result.Progress is not null)
+        {
+            return Ok(result.Progress);
+        }
+
+        return Ok(new { message = "Update cancellation requested." });
     }
 
     [HttpGet("update/progress")]

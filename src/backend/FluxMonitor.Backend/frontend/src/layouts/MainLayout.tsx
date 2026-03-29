@@ -1,9 +1,10 @@
-﻿import { useEffect, type ReactNode } from 'react';
+import { useEffect, type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
-import { useAppStore } from '../store/useAppStore';
-import { Bell, Cable, Settings, Menu, Activity, Monitor, Gauge, X } from 'lucide-react';
+import { Bell, Cable, Settings, Menu, Activity, Monitor, Gauge, X, Sparkles } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
+import { UpdateLockOverlay } from '../components/UpdateLockOverlay';
+import { useAppStore } from '../store/useAppStore';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -18,6 +19,7 @@ export function Sidebar() {
     { name: 'System', path: '/', icon: Monitor },
     { name: 'Monitor', path: '/monitor', icon: Gauge },
     { name: 'Devices', path: '/devices', icon: Cable },
+    { name: 'Services', path: '/services', icon: Sparkles },
     { name: 'Notifications', path: '/notifications', icon: Bell },
     { name: 'Settings', path: '/settings', icon: Settings },
   ];
@@ -76,18 +78,16 @@ export function Header() {
   return (
     <header className="h-14 bg-background/50 backdrop-blur-md border-b border-border flex items-center justify-between px-4 sticky top-0 z-10 shrink-0">
       <div className="flex items-center gap-4">
-        <button 
+        <button
           onClick={toggleSidebar}
           className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
         >
           <Menu className="h-5 w-5" />
         </button>
-        {/* Breadcrumb could go here */}
         <h1 className="text-sm font-medium text-foreground/90 hidden sm:block">Command Center</h1>
       </div>
-      
+
       <div className="flex items-center gap-3">
-        {/* Status Indicators */}
         <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/20">
           <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
           <span className="text-xs font-medium text-primary">System Healthy</span>
@@ -99,14 +99,15 @@ export function Header() {
 
 export function MainLayout({ children }: { children: ReactNode }) {
   const isMobileSidebarOpen = useAppStore((state) => state.isMobileSidebarOpen);
+  const hasUpdateOverlay = useAppStore((state) => state.updateProgress !== null);
 
   useEffect(() => {
-    document.body.style.overflow = isMobileSidebarOpen ? 'hidden' : '';
+    document.body.style.overflow = isMobileSidebarOpen || hasUpdateOverlay ? 'hidden' : '';
 
     return () => {
       document.body.style.overflow = '';
     };
-  }, [isMobileSidebarOpen]);
+  }, [hasUpdateOverlay, isMobileSidebarOpen]);
 
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-background font-sans text-foreground">
@@ -119,6 +120,7 @@ export function MainLayout({ children }: { children: ReactNode }) {
           </div>
         </main>
       </div>
+      <UpdateLockOverlay />
     </div>
   );
 }

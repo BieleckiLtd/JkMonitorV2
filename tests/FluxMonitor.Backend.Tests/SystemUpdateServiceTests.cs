@@ -54,6 +54,39 @@ public class SystemUpdateServiceTests
         Assert.Null(result.CheckError);
     }
 
+    [Fact]
+    public void TryGetStageDefinition_TracksSafeCancellationWindow()
+    {
+        Assert.True(SystemUpdateService.TryGetStageDefinition("Downloading release artifact", out var downloadingStage));
+        Assert.True(downloadingStage.CanCancel);
+        Assert.Equal(2, downloadingStage.StepIndex);
+
+        Assert.True(SystemUpdateService.TryGetStageDefinition("Preparing installation folder", out var prepareStage));
+        Assert.False(prepareStage.CanCancel);
+        Assert.Contains("installed files are being replaced", prepareStage.CancelUnavailableReason, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CreateFriendlyFailureDetail_ReportsConnectivityProblemsClearly()
+    {
+        var detail = SystemUpdateService.CreateFriendlyFailureDetail(
+            ["Downloading release artifact"],
+            ["wget: unable to resolve host address 'github.com'"]);
+
+        Assert.Contains("could not reach GitHub", detail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void CancelUpdate_WhenNoUpdateIsRunning_ReturnsFriendlyError()
+    {
+        var service = CreateService(new StubHttpClientFactory(new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound))));
+
+        var result = service.CancelUpdate();
+
+        Assert.False(result.Succeeded);
+        Assert.Equal("There is no update in progress.", result.Error);
+    }
+
     private static SystemUpdateService CreateService(IHttpClientFactory httpClientFactory)
     {
         var environment = new TestHostEnvironment();

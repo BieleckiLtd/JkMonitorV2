@@ -5,8 +5,10 @@ import { Bluetooth, Cable, ChevronDown, ChevronRight, CircleAlert, Cpu, Database
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { Switch } from '../components/ui/switch';
+import { type UpdateProgress, getUpdateStateTone } from '../lib/systemUpdate';
 import { cn } from '../lib/utils';
 import { LogsPanel } from '../components/LogsPanel';
+import { useAppStore } from '../store/useAppStore';
 
 type DeviceTelemetrySnapshot = {
   totalVoltageVolts?: number | null;
@@ -100,12 +102,6 @@ type UpdateCheckResult = {
   localChecksum?: string | null;
   checkError?: string | null;
   commits?: CommitInfo[] | null;
-};
-
-type UpdateProgress = {
-  isRunning: boolean;
-  stage: string;
-  success?: boolean | null;
 };
 
 type SerialPortInfo = {
@@ -268,6 +264,9 @@ type WifiConnectDialogState = {
 };
 
 export function SystemPage() {
+  const updateProgress = useAppStore((state) => state.updateProgress);
+  const updateActionPending = useAppStore((state) => state.updateActionPending);
+  const startSystemUpdate = useAppStore((state) => state.startSystemUpdate);
   const [status, setStatus] = useState<MonitorRuntimeStatus | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -278,8 +277,7 @@ export function SystemPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
-  const [updateProgress, setUpdateProgress] = useState<UpdateProgress | null>(null);
-  const [updateInstalling, setUpdateInstalling] = useState(false);
+  const [updateActionError, setUpdateActionError] = useState<string | null>(null);
   const [interfaces, setInterfaces] = useState<SystemInterfacesResponse | null>(null);
   const [connectivity, setConnectivity] = useState<SystemConnectivitySnapshot | null>(null);
   const [connectivityLoading, setConnectivityLoading] = useState(true);
@@ -301,6 +299,7 @@ export function SystemPage() {
   const [ethernetFeedback, setEthernetFeedback] = useState<InlineFeedback | null>(null);
   const [pendingConnectivityAction, setPendingConnectivityAction] = useState<PendingConnectivityAction | null>(null);
   const [expandedConnectivitySection, setExpandedConnectivitySection] = useState<'wifi' | 'bluetooth' | 'ethernet' | null>(null);
+  const previousUpdateStatusRef = useRef<UpdateProgress['status'] | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -435,63 +434,24 @@ export function SystemPage() {
   }, [connectivity]);
 
   const installUpdate = async () => {
-    setUpdateInstalling(true);
-    try {
-      const response = await fetch('/api/system/update/install', { method: 'POST' });
-      if (!response.ok) {
-        const body = await response.json().catch(() => null) as { error?: string } | null;
-        setUpdateProgress({ isRunning: false, stage: body?.error ?? 'Failed to start update.', success: false });
-        return;
-      }
-      // Poll progress
-      const pollProgress = async () => {
-        let installerStarted = false;
-        for (let i = 0; i < 120; i++) {
-          await new Promise((resolve) => setTimeout(resolve, 2000));
-          try {
-            const resp = await fetch('/api/system/update/progress', { cache: 'no-store' });
-            if (resp.status === 204) {
-              // Service restarted — in-memory progress is gone, install succeeded.
-              if (installerStarted) {
-                setUpdateProgress({ isRunning: false, stage: 'Update installed successfully.', success: true });
-                await checkForUpdate();
-              }
-              return;
-            }
-            if (resp.ok) {
-              const progress = await resp.json() as UpdateProgress;
-              setUpdateProgress(progress);
-              if (!progress.isRunning) {
-                if (progress.success === true) await checkForUpdate();
-                return;
-              }
-              installerStarted = true;
-            }
-          } catch {
-            // Service is restarting — wait for it to come back.
-            setUpdateProgress({ isRunning: false, stage: 'Service restarting…', success: true });
-            for (let j = 0; j < 30; j++) {
-              await new Promise((resolve) => setTimeout(resolve, 2000));
-              try {
-                await fetch('/api/system/update/progress', { cache: 'no-store' });
-                setUpdateProgress({ isRunning: false, stage: 'Update installed successfully.', success: true });
-                await checkForUpdate();
-                return;
-              } catch {
-                // Still restarting.
-              }
-            }
-            return;
-          }
-        }
-      };
-      void pollProgress();
-    } catch {
-      setUpdateProgress({ isRunning: false, stage: 'Network error starting update.', success: false });
-    } finally {
-      setUpdateInstalling(false);
+    setUpdateActionError(null);
+    const result = await startSystemUpdate();
+    if (!result.ok) {
+      setUpdateActionError(result.error ?? 'Unable to start the update.');
     }
   };
+
+  useEffect(() => {
+    if (updateProgress?.isRunning) {
+      setUpdateActionError(null);
+    }
+
+    if (previousUpdateStatusRef.current !== 'succeeded' && updateProgress?.status === 'succeeded') {
+      void checkForUpdate();
+    }
+
+    previousUpdateStatusRef.current = updateProgress?.status ?? null;
+  }, [checkForUpdate, updateProgress]);
 
   useEffect(() => {
     const loadInterfaces = async () => {
@@ -513,6 +473,7 @@ export function SystemPage() {
     setWifiScanLoading(interfaceName);
     setWifiFeedback(null);
     setWifiTargetInterface(interfaceName);
+    setWifiAccessPoints((current) => ({ ...current, [interfaceName]: [] }));
 
     try {
       const response = await fetch(`/api/system/network/wifi/scan?interfaceName=${encodeURIComponent(interfaceName)}`, { cache: 'no-store' });
@@ -771,9 +732,7 @@ export function SystemPage() {
     if (section === 'wifi' && connectivity?.network.supported && wifiPowered !== false && selectedWifiInterface) {
       setWifiTargetInterface(selectedWifiInterface.name);
       setWifiTargetSsid(selectedWifiInterface.connectedSsid || '');
-      if (connectivity.network.hasInternetAccess === false) {
-        await scanWifi(selectedWifiInterface.name);
-      }
+      await scanWifi(selectedWifiInterface.name);
     }
   };
 
@@ -1073,22 +1032,50 @@ export function SystemPage() {
                       </div>
                     ) : null}
 
+                    {updateActionError ? (
+                      <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
+                        {updateActionError}
+                      </div>
+                    ) : null}
+
                     {updateProgress ? (
                       <div className={cn(
                         'rounded-xl border px-3 py-2 text-xs',
-                        updateProgress.success === true ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-                          : updateProgress.success === false ? 'border-rose-500/20 bg-rose-500/10 text-rose-200'
-                          : 'border-primary/20 bg-primary/10 text-primary'
+                        getUpdateStateTone(updateProgress.status) === 'success'
+                          ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                          : getUpdateStateTone(updateProgress.status) === 'error'
+                            ? 'border-rose-500/20 bg-rose-500/10 text-rose-200'
+                            : getUpdateStateTone(updateProgress.status) === 'warning'
+                              ? 'border-amber-500/20 bg-amber-500/10 text-amber-200'
+                              : 'border-primary/20 bg-primary/10 text-primary'
                       )}>
                         <div className='flex items-center gap-2'>
-                          {updateProgress.isRunning ? <LoaderCircle className='h-3.5 w-3.5 animate-spin shrink-0' /> : updateProgress.success ? <CheckCircle2 className='h-3.5 w-3.5 shrink-0' /> : <XCircle className='h-3.5 w-3.5 shrink-0' />}
+                          {updateProgress.isRunning ? <LoaderCircle className='h-3.5 w-3.5 animate-spin shrink-0' /> : updateProgress.status === 'succeeded' ? <CheckCircle2 className='h-3.5 w-3.5 shrink-0' /> : updateProgress.status === 'cancelled' ? <CircleAlert className='h-3.5 w-3.5 shrink-0' /> : <XCircle className='h-3.5 w-3.5 shrink-0' />}
                           {updateProgress.stage}
                         </div>
-                        {updateProgress.isRunning && (
-                          <div className='mt-1.5 text-primary/70'>
-                            Do not turn off the device while the update is in progress.
+                        <div className='mt-1.5 opacity-90'>
+                          {updateProgress.detail}
+                        </div>
+                        {updateProgress.percentComplete != null ? (
+                          <div className='mt-3'>
+                            <div className='mb-1 flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.16em] opacity-70'>
+                              <span>
+                                {updateProgress.stepIndex && updateProgress.stepCount ? `Step ${updateProgress.stepIndex} of ${updateProgress.stepCount}` : 'Progress'}
+                              </span>
+                              <span>{updateProgress.percentComplete}%</span>
+                            </div>
+                            <div className='h-1.5 overflow-hidden rounded-full bg-background/40'>
+                              <div className='h-full rounded-full bg-current transition-[width] duration-500 ease-out' style={{ width: `${Math.max(updateProgress.percentComplete, 4)}%` }} />
+                            </div>
                           </div>
-                        )}
+                        ) : null}
+                        {updateProgress.isRunning ? (
+                          <div className='mt-2 opacity-80'>
+                            {updateProgress.canCancel
+                              ? 'You can still cancel now if you need to stop the update.'
+                              : updateProgress.cancelUnavailableReason ?? 'Do not turn off the device while the update is being finalized.'}
+                          </div>
+                        ) : null}
                       </div>
                     ) : null}
                   </>
@@ -1110,11 +1097,11 @@ export function SystemPage() {
                   {updateCheck?.canUpdate && updateCheck?.updateAvailable ? (
                     <button
                       type='button'
-                      disabled={updateInstalling || (updateProgress?.isRunning ?? false)}
+                      disabled={updateActionPending === 'starting' || (updateProgress?.isRunning ?? false)}
                       onClick={() => void installUpdate()}
                       className='inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
                     >
-                      {updateInstalling || updateProgress?.isRunning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Download className='h-4 w-4' />}
+                      {updateActionPending === 'starting' || updateProgress?.isRunning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Download className='h-4 w-4' />}
                       Install update
                     </button>
                   ) : null}
@@ -1300,6 +1287,10 @@ export function SystemPage() {
                                           />
                                         </button>
                                       ))}
+                                    </div>
+                                  ) : wifiScanLoading === selectedWifiInterface.name ? (
+                                    <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
+                                      Scanning nearby networks...
                                     </div>
                                   ) : wifiScanLoading !== selectedWifiInterface.name ? (
                                     <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
