@@ -1,10 +1,16 @@
-import { useEffect, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import { NavLink } from 'react-router-dom';
 import { Bell, Cable, Settings, Menu, Activity, Monitor, Gauge, X, Sparkles } from 'lucide-react';
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
 import { UpdateLockOverlay } from '../components/UpdateLockOverlay';
 import { useAppStore } from '../store/useAppStore';
+
+type DeviceClockSnapshot = {
+  localDateTime: string;
+  timeZoneId: string;
+  utcOffsetMinutes: number;
+};
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -114,8 +120,8 @@ export function MainLayout({ children }: { children: ReactNode }) {
       <Sidebar />
       <div className="flex h-full min-w-0 flex-1 flex-col">
         <Header />
-        <main className="flex-1 w-full overflow-y-auto px-1 py-2 sm:p-4 md:p-6 safe-area-bottom">
-          <div className="mx-auto w-full max-w-7xl">
+        <main className="safe-area-bottom flex min-h-0 flex-1 w-full overflow-y-auto px-1 py-2 sm:p-4 md:p-6">
+          <div className="mx-auto flex min-h-full w-full max-w-7xl flex-col">
             {children}
           </div>
         </main>
@@ -168,10 +174,116 @@ function SidebarContent({ navItems, isCollapsed, onNavigate, hideHeader }: { nav
       </nav>
 
       <div className='border-t border-border p-4'>
-        <div className='text-center font-mono text-xs text-muted-foreground/50'>
-          {isCollapsed ? '·' : 'Open for Extensions'}
-        </div>
+        <DeviceClockFooter isCollapsed={isCollapsed} />
       </div>
     </>
   );
+}
+
+function DeviceClockFooter({ isCollapsed }: { isCollapsed: boolean }) {
+  const [clockSnapshot, setClockSnapshot] = useState<{ wallClockMs: number; syncedAtMs: number } | null>(null);
+  const [renderedAtMs, setRenderedAtMs] = useState(() => Date.now());
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const loadClock = async () => {
+      try {
+        const response = await fetch('/api/system/clock', { cache: 'no-store' });
+        if (!response.ok) {
+          throw new Error('Unable to load device time.');
+        }
+
+        const data = await response.json() as DeviceClockSnapshot;
+        const wallClockMs = parseDeviceWallClockMs(data.localDateTime);
+        if (!isMounted || wallClockMs === null) {
+          return;
+        }
+
+        const syncedAtMs = Date.now();
+        setClockSnapshot({ wallClockMs, syncedAtMs });
+        setRenderedAtMs(syncedAtMs);
+      } catch {
+        return;
+      }
+    };
+
+    void loadClock();
+    const refreshHandle = window.setInterval(() => {
+      void loadClock();
+    }, 60000);
+
+    return () => {
+      isMounted = false;
+      window.clearInterval(refreshHandle);
+    };
+  }, []);
+
+  useEffect(() => {
+    const tickHandle = window.setInterval(() => {
+      setRenderedAtMs(Date.now());
+    }, 1000);
+
+    return () => {
+      window.clearInterval(tickHandle);
+    };
+  }, []);
+
+  if (!clockSnapshot) {
+    return (
+      <div className={cn('text-center font-mono text-xs text-muted-foreground/50', isCollapsed && 'text-[11px]')}>
+        {isCollapsed ? '--:--' : 'Loading time...'}
+      </div>
+    );
+  }
+
+  const wallClockNow = new Date(clockSnapshot.wallClockMs + (renderedAtMs - clockSnapshot.syncedAtMs));
+
+  return (
+    <div className={cn('text-center font-mono text-muted-foreground/70', isCollapsed ? 'text-[11px]' : 'space-y-1')}>
+      <div className='tabular-nums'>{formatDeviceTime(wallClockNow, !isCollapsed)}</div>
+      {!isCollapsed && (
+        <div className='text-[10px] uppercase tracking-[0.18em] text-muted-foreground/50'>
+          {formatDeviceDate(wallClockNow)}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function parseDeviceWallClockMs(value: string) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.(\d{1,3}))?$/.exec(value);
+  if (!match) {
+    return null;
+  }
+
+  const [, year, month, day, hour, minute, second, millisecond = '0'] = match;
+  return Date.UTC(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
+    Number(hour),
+    Number(minute),
+    Number(second),
+    Number(millisecond.padEnd(3, '0'))
+  );
+}
+
+function formatDeviceTime(value: Date, includeSeconds: boolean) {
+  return new Intl.DateTimeFormat('en-GB', {
+    hour: '2-digit',
+    minute: '2-digit',
+    ...(includeSeconds ? { second: '2-digit' } : {}),
+    hour12: false,
+    timeZone: 'UTC',
+  }).format(value);
+}
+
+function formatDeviceDate(value: Date) {
+  return new Intl.DateTimeFormat('en-GB', {
+    day: '2-digit',
+    month: 'short',
+    year: 'numeric',
+    timeZone: 'UTC',
+  }).format(value);
 }

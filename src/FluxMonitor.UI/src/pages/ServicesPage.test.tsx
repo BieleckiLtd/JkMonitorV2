@@ -128,6 +128,7 @@ describe('ServicesPage', () => {
     render(<ServicesPage />);
 
     expect(await screen.findByText('Flux Monitor')).toBeInTheDocument();
+    expect(screen.queryByText('What this does')).not.toBeInTheDocument();
     expect(await screen.findByText(/running right now/i)).toBeInTheDocument();
 
     const packageCard = screen.getByText('Installed packages').closest('[data-slot="card"]');

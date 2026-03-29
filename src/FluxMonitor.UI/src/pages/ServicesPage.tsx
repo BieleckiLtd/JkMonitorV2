@@ -242,32 +242,56 @@ export function ServicesPage() {
     : null;
 
   return (
-    <div className='space-y-6 pb-12'>
-      <section className='overflow-hidden rounded-[2rem] border border-border/70 bg-[radial-gradient(circle_at_top_left,rgba(184,115,51,0.16),transparent_32%),linear-gradient(135deg,rgba(255,252,245,0.92),rgba(250,246,237,0.98))] p-6 shadow-sm'>
-        <div className='flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between'>
-          <div className='max-w-2xl space-y-2'>
-            <div className='inline-flex items-center gap-2 rounded-full border border-border/70 bg-background/70 px-3 py-1 text-xs font-medium tracking-[0.18em] text-muted-foreground uppercase'>
+    <div className='flex min-h-full flex-col gap-6 pb-6'>
+      <section className='overflow-hidden rounded-[2rem] border border-amber-200/70 bg-[radial-gradient(circle_at_top_left,rgba(221,164,116,0.34),transparent_34%),linear-gradient(135deg,rgba(255,251,244,0.98),rgba(243,235,223,0.98))] p-6 shadow-sm'>
+        <div className='flex flex-col gap-6 xl:flex-row xl:items-end xl:justify-between'>
+          <div className='max-w-3xl space-y-3'>
+            <div className='inline-flex items-center gap-2 rounded-full border border-black/10 bg-white/70 px-3 py-1 text-xs font-medium tracking-[0.18em] text-zinc-700 uppercase backdrop-blur'>
               <Sparkles className='h-3.5 w-3.5' />
               Services
             </div>
-            <h2 className='font-heading text-3xl font-semibold tracking-tight text-foreground sm:text-4xl'>
+            <h2 className='max-w-3xl font-heading text-3xl font-semibold tracking-tight text-zinc-950 sm:text-4xl'>
               Browse what is installed and what keeps the system moving.
             </h2>
-            <p className='max-w-xl text-sm leading-6 text-muted-foreground sm:text-base'>
+            <p className='max-w-2xl text-sm leading-6 text-zinc-600 sm:text-base'>
               Explore installed packages, background services, and plain-English insights without dropping into a terminal.
             </p>
           </div>
 
-          <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
-            <SummaryTile label='Installed items' value={catalog?.summary.packageCount ?? 0} />
-            <SummaryTile label='Added by dependencies' value={catalog?.summary.automaticPackageCount ?? 0} />
-            <SummaryTile label='Services' value={catalog?.summary.serviceCount ?? 0} />
-            <SummaryTile label='Running now' value={catalog?.summary.runningServiceCount ?? 0} />
+          <div className='grid grid-cols-2 gap-3 self-stretch sm:grid-cols-4 xl:min-w-[34rem]'>
+            <SummaryTile
+              label='Installed items'
+              value={catalog?.summary.packageCount ?? 0}
+              className='border-zinc-900/10 bg-zinc-950/78 text-white shadow-sm'
+              labelClassName='text-white/60'
+              valueClassName='text-white'
+            />
+            <SummaryTile
+              label='Added by dependencies'
+              value={catalog?.summary.automaticPackageCount ?? 0}
+              className='border-zinc-900/10 bg-zinc-950/78 text-white shadow-sm'
+              labelClassName='text-white/60'
+              valueClassName='text-white'
+            />
+            <SummaryTile
+              label='Services'
+              value={catalog?.summary.serviceCount ?? 0}
+              className='border-zinc-900/10 bg-zinc-950/78 text-white shadow-sm'
+              labelClassName='text-white/60'
+              valueClassName='text-white'
+            />
+            <SummaryTile
+              label='Running now'
+              value={catalog?.summary.runningServiceCount ?? 0}
+              className='border-zinc-900/10 bg-zinc-950/78 text-white shadow-sm'
+              labelClassName='text-white/60'
+              valueClassName='text-white'
+            />
           </div>
         </div>
 
         {catalog?.statusMessage ? (
-          <div className='mt-4 rounded-2xl border border-border/70 bg-background/75 px-4 py-3 text-sm text-muted-foreground'>
+          <div className='mt-5 rounded-2xl border border-black/10 bg-white/70 px-4 py-3 text-sm text-zinc-700'>
             {catalog.statusMessage}
           </div>
         ) : null}
@@ -300,7 +324,7 @@ export function ServicesPage() {
               </CardHeader>
             </Card>
           ) : (
-            <div className='grid gap-6 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(22rem,0.95fr)]'>
+            <div className='grid items-stretch gap-6 xl:min-h-[max(32rem,calc(100dvh-22rem))] xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(22rem,0.95fr)]'>
               <BrowserCard
                 title='Installed packages'
                 description='Apps, libraries, and platform pieces currently present on the device.'
@@ -436,8 +460,8 @@ function BrowserCard({
   children: ReactNode;
 }) {
   return (
-    <Card className='min-h-[38rem]'>
-      <CardHeader className='space-y-4 border-b border-border/70 pb-4'>
+    <Card className='flex h-full min-h-[38rem] min-w-0'>
+      <CardHeader className='shrink-0 space-y-4 border-b border-border/70 pb-4'>
         <div className='space-y-1'>
           <CardTitle>{title}</CardTitle>
           <CardDescription>{description}</CardDescription>
@@ -458,11 +482,13 @@ function BrowserCard({
         </div>
       </CardHeader>
 
-      <CardContent className='flex h-[31rem] flex-col gap-3 overflow-y-auto py-4'>
-        <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>
+      <CardContent className='flex min-h-0 flex-1 flex-col gap-3 overflow-hidden py-4'>
+        <div className='shrink-0 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>
           {resultCount.toLocaleString()} visible
         </div>
-        {children}
+        <div className='min-h-0 flex-1 space-y-3 overflow-y-auto pr-1'>
+          {children}
+        </div>
       </CardContent>
     </Card>
   );
@@ -492,138 +518,145 @@ function InsightCard({
   ];
 
   return (
-    <Card className='xl:sticky xl:top-20'>
-      <CardHeader className='space-y-3 border-b border-border/70 pb-4'>
-        <div className='space-y-1'>
-          <CardTitle>What this does</CardTitle>
-          <CardDescription>
-            Select a package or service to see a simpler explanation, key facts, and related items.
-          </CardDescription>
-        </div>
-
+    <Card className='flex h-full min-h-[38rem] min-w-0 xl:sticky xl:top-20 xl:max-h-[calc(100dvh-6.5rem)]'>
+      <CardContent className='flex min-h-0 flex-1 flex-col gap-5 overflow-hidden py-5'>
         {selectedItem ? (
-          <div className='inline-flex w-fit items-center gap-2 rounded-full border border-border/70 bg-muted/50 px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>
+          <div className='shrink-0 inline-flex w-fit items-center gap-2 rounded-full border border-border/70 bg-muted/50 px-3 py-1 text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>
             {selectedItem.kind === 'package' ? 'Package' : 'Service'}
           </div>
         ) : null}
-      </CardHeader>
 
-      <CardContent className='space-y-6 py-5'>
-        {!selectedItem ? (
-          <EmptyInsightState />
-        ) : isLoading && !insight ? (
-          <div className='flex items-center gap-3 rounded-2xl border border-border/70 bg-muted/35 px-4 py-4 text-sm text-muted-foreground'>
-            <LoaderCircle className='h-4 w-4 animate-spin' />
-            Loading insight…
-          </div>
-        ) : insightError ? (
-          <div className='rounded-2xl border border-destructive/25 bg-destructive/5 px-4 py-4 text-sm text-destructive'>
-            {insightError}
-          </div>
-        ) : insight ? (
-          <>
-            <div className='space-y-2'>
-              <div className='text-2xl font-semibold tracking-tight text-foreground'>{insight.title}</div>
-              {insight.subtitle ? (
-                <div className='text-sm text-muted-foreground'>{insight.subtitle}</div>
+        <div className='min-h-0 flex-1 overflow-y-auto pr-1'>
+          {!selectedItem ? (
+            <EmptyInsightState />
+          ) : isLoading && !insight ? (
+            <div className='flex items-center gap-3 rounded-2xl border border-border/70 bg-muted/35 px-4 py-4 text-sm text-muted-foreground'>
+              <LoaderCircle className='h-4 w-4 animate-spin' />
+              Loading insight…
+            </div>
+          ) : insightError ? (
+            <div className='rounded-2xl border border-destructive/25 bg-destructive/5 px-4 py-4 text-sm text-destructive'>
+              {insightError}
+            </div>
+          ) : insight ? (
+            <div className='space-y-6'>
+              <div className='space-y-2'>
+                <div className='break-words text-2xl font-semibold tracking-tight text-foreground'>{insight.title}</div>
+                {insight.subtitle ? (
+                  <div className='break-words text-sm text-muted-foreground'>{insight.subtitle}</div>
+                ) : null}
+                {insight.summary ? (
+                  <p className='text-sm leading-6 text-foreground/88'>{insight.summary}</p>
+                ) : null}
+                {insight.narrative ? (
+                  <p className='text-sm leading-6 text-muted-foreground'>{insight.narrative}</p>
+                ) : null}
+              </div>
+
+              {!insight.supported ? (
+                <div className='rounded-2xl border border-border/70 bg-muted/35 px-4 py-4 text-sm text-muted-foreground'>
+                  {insight.statusMessage ?? 'No additional insight is available for this selection.'}
+                </div>
               ) : null}
-              {insight.summary ? (
-                <p className='text-sm leading-6 text-foreground/88'>{insight.summary}</p>
+
+              {insight.metrics.length > 0 ? (
+                <div className='grid gap-3 sm:grid-cols-3'>
+                  {insight.metrics.map((metric) => (
+                    <MetricTile key={metric.label} label={metric.label} value={metric.value} />
+                  ))}
+                </div>
               ) : null}
-              {insight.narrative ? (
-                <p className='text-sm leading-6 text-muted-foreground'>{insight.narrative}</p>
+
+              {contextualHighlights.length > 0 ? (
+                <div className='space-y-3'>
+                  <SectionLabel>At a glance</SectionLabel>
+                  <div className='space-y-2'>
+                    {contextualHighlights.map((highlight) => (
+                      <div key={highlight} className='rounded-2xl border border-border/70 bg-background/80 px-4 py-3 text-sm text-foreground/90'>
+                        {highlight}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {insight.facts.length > 0 ? (
+                <div className='space-y-3'>
+                  <SectionLabel>Key facts</SectionLabel>
+                  <div className='space-y-2'>
+                    {insight.facts.map((fact) => (
+                      <div key={fact.label} className='rounded-2xl border border-border/70 bg-background/80 px-4 py-3'>
+                        <div className='flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between sm:gap-4'>
+                          <div className='text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground'>{fact.label}</div>
+                          <div className='w-full break-words text-left text-sm text-foreground sm:max-w-[65%] sm:text-right'>{fact.value}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+
+              {insight.relatedItems.length > 0 ? (
+                <div className='space-y-3'>
+                  <SectionLabel>Related</SectionLabel>
+                  <div className='space-y-2'>
+                    {insight.relatedItems.map((item) => (
+                      <button
+                        key={`${item.kind}:${item.id}`}
+                        type='button'
+                        onClick={() => onSelectRelated({ kind: item.kind, id: item.id })}
+                        className='w-full rounded-2xl border border-border/70 bg-background/80 px-4 py-3 text-left transition-colors hover:bg-accent/45'
+                      >
+                        <div className='flex items-start justify-between gap-3'>
+                          <div className='min-w-0'>
+                            <div className='truncate text-sm font-semibold text-foreground'>{item.title}</div>
+                            {item.subtitle ? (
+                              <div className='mt-1 break-words text-xs text-muted-foreground'>{item.subtitle}</div>
+                            ) : null}
+                          </div>
+                          <Badge variant='outline'>{item.kind === 'package' ? 'Package' : 'Service'}</Badge>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
               ) : null}
             </div>
-
-            {!insight.supported ? (
-              <div className='rounded-2xl border border-border/70 bg-muted/35 px-4 py-4 text-sm text-muted-foreground'>
-                {insight.statusMessage ?? 'No additional insight is available for this selection.'}
-              </div>
-            ) : null}
-
-            {insight.metrics.length > 0 ? (
-              <div className='grid gap-3 sm:grid-cols-3'>
-                {insight.metrics.map((metric) => (
-                  <MetricTile key={metric.label} label={metric.label} value={metric.value} />
-                ))}
-              </div>
-            ) : null}
-
-            {contextualHighlights.length > 0 ? (
-              <div className='space-y-3'>
-                <SectionLabel>At a glance</SectionLabel>
-                <div className='space-y-2'>
-                  {contextualHighlights.map((highlight) => (
-                    <div key={highlight} className='rounded-2xl border border-border/70 bg-background/80 px-4 py-3 text-sm text-foreground/90'>
-                      {highlight}
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {insight.facts.length > 0 ? (
-              <div className='space-y-3'>
-                <SectionLabel>Key facts</SectionLabel>
-                <div className='space-y-2'>
-                  {insight.facts.map((fact) => (
-                    <div key={fact.label} className='flex items-start justify-between gap-4 rounded-2xl border border-border/70 bg-background/80 px-4 py-3'>
-                      <div className='text-xs font-medium uppercase tracking-[0.16em] text-muted-foreground'>{fact.label}</div>
-                      <div className='max-w-[65%] text-right text-sm text-foreground'>{fact.value}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-
-            {insight.relatedItems.length > 0 ? (
-              <div className='space-y-3'>
-                <SectionLabel>Related</SectionLabel>
-                <div className='space-y-2'>
-                  {insight.relatedItems.map((item) => (
-                    <button
-                      key={`${item.kind}:${item.id}`}
-                      type='button'
-                      onClick={() => onSelectRelated({ kind: item.kind, id: item.id })}
-                      className='w-full rounded-2xl border border-border/70 bg-background/80 px-4 py-3 text-left transition-colors hover:bg-accent/45'
-                    >
-                      <div className='flex items-start justify-between gap-3'>
-                        <div className='min-w-0'>
-                          <div className='truncate text-sm font-semibold text-foreground'>{item.title}</div>
-                          {item.subtitle ? (
-                            <div className='mt-1 text-xs text-muted-foreground'>{item.subtitle}</div>
-                          ) : null}
-                        </div>
-                        <Badge variant='outline'>{item.kind === 'package' ? 'Package' : 'Service'}</Badge>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-          </>
-        ) : (
-          <EmptyInsightState />
-        )}
+          ) : (
+            <EmptyInsightState />
+          )}
+        </div>
       </CardContent>
     </Card>
   );
 }
 
-function SummaryTile({ label, value }: { label: string; value: number }) {
+function SummaryTile({
+  label,
+  value,
+  className,
+  labelClassName,
+  valueClassName,
+}: {
+  label: string;
+  value: number;
+  className?: string;
+  labelClassName?: string;
+  valueClassName?: string;
+}) {
   return (
-    <div className='rounded-2xl border border-border/70 bg-background/75 px-4 py-3'>
-      <div className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>{label}</div>
-      <div className='mt-2 text-2xl font-semibold tracking-tight text-foreground'>{value.toLocaleString()}</div>
+    <div className={cn('min-w-0 rounded-2xl border border-border/70 bg-background/75 px-4 py-3', className)}>
+      <div className={cn('text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground', labelClassName)}>{label}</div>
+      <div className={cn('mt-2 break-words text-2xl font-semibold tracking-tight text-foreground', valueClassName)}>{value.toLocaleString()}</div>
     </div>
   );
 }
 
 function MetricTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className='rounded-2xl border border-border/70 bg-muted/35 px-4 py-4'>
+    <div className='min-w-0 rounded-2xl border border-border/70 bg-muted/35 px-4 py-4'>
       <div className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>{label}</div>
-      <div className='mt-2 text-base font-semibold text-foreground'>{value}</div>
+      <div className='mt-2 break-words text-base font-semibold text-foreground'>{value}</div>
     </div>
   );
 }
