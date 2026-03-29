@@ -700,7 +700,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
 
             if (!ShouldRetryWifiAccessPointRead(bestAccessPoints, attempt))
             {
-                return new WifiAccessPointCollectionResult(lastResult, bestAccessPoints);
+                break;
             }
 
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
