@@ -88,12 +88,10 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             };
         }
 
-        var result = await RunNmcliAsync(
-            ["--terse", "--fields", "IN-USE,BSSID,SSID,SIGNAL,SECURITY,BARS", "device", "wifi", "list", "ifname", resolvedInterfaceName, "--rescan", "yes"],
-            cancellationToken);
-        if (!result.Succeeded)
+        var accessPointsResult = await GetWifiAccessPointsAsync(resolvedInterfaceName, requestRescan: true, cancellationToken);
+        if (!accessPointsResult.Succeeded)
         {
-            var message = BuildCommandFailureMessage(result, "Unable to scan for Wi-Fi access points.");
+            var message = BuildCommandFailureMessage(accessPointsResult.Result, "Unable to scan for Wi-Fi access points.");
             logger.LogWarning(
                 "Wi-Fi scan failed for interface {InterfaceName}: {ErrorMessage}",
                 resolvedInterfaceName,
@@ -105,25 +103,15 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             };
         }
 
-        var accessPoints = result.StandardOutput
-            .Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => ParseWifiAccessPointLine(line, resolvedInterfaceName))
-            .Where(accessPoint => accessPoint is not null)
-            .Cast<WifiAccessPointInfo>()
-            .GroupBy(accessPoint => $"{accessPoint.Bssid}|{accessPoint.Ssid}", StringComparer.OrdinalIgnoreCase)
-            .Select(group => group
-                .OrderByDescending(accessPoint => accessPoint.SignalPercent ?? int.MinValue)
-                .ThenByDescending(accessPoint => accessPoint.IsActive)
-                .First())
-            .OrderByDescending(accessPoint => accessPoint.SignalPercent ?? int.MinValue)
-            .ThenByDescending(accessPoint => accessPoint.IsActive)
-            .ThenBy(accessPoint => accessPoint.Ssid, StringComparer.OrdinalIgnoreCase)
-            .ToArray();
+        logger.LogInformation(
+            "Wi-Fi scan for interface {InterfaceName} returned {AccessPointCount} access points.",
+            resolvedInterfaceName,
+            accessPointsResult.AccessPoints.Length);
 
         return new WifiScanResult
         {
             Supported = true,
-            AccessPoints = accessPoints
+            AccessPoints = accessPointsResult.AccessPoints
         };
     }
 
@@ -383,6 +371,24 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             SignalBars = NormalizeNmcliValue(fields[5]),
             IsActive = string.Equals(fields[0].Trim(), "*", StringComparison.Ordinal)
         };
+    }
+
+    internal static WifiAccessPointInfo[] ParseWifiAccessPoints(string output, string interfaceName)
+    {
+        return output
+            .Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Select(line => ParseWifiAccessPointLine(line, interfaceName))
+            .Where(accessPoint => accessPoint is not null)
+            .Cast<WifiAccessPointInfo>()
+            .GroupBy(accessPoint => $"{accessPoint.Bssid}|{accessPoint.Ssid}", StringComparer.OrdinalIgnoreCase)
+            .Select(group => group
+                .OrderByDescending(accessPoint => accessPoint.SignalPercent ?? int.MinValue)
+                .ThenByDescending(accessPoint => accessPoint.IsActive)
+                .First())
+            .OrderByDescending(accessPoint => accessPoint.SignalPercent ?? int.MinValue)
+            .ThenByDescending(accessPoint => accessPoint.IsActive)
+            .ThenBy(accessPoint => accessPoint.Ssid, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
     }
 
     internal static string? ResolveInterfaceKind(
@@ -647,9 +653,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
 
     private async Task<WifiAccessPointInfo?> TryGetCurrentAccessPointAsync(string interfaceName, CancellationToken cancellationToken)
     {
-        var result = await RunNmcliAsync(
-            ["--terse", "--fields", "IN-USE,BSSID,SSID,SIGNAL,SECURITY,BARS", "device", "wifi", "list", "ifname", interfaceName, "--rescan", "no"],
-            cancellationToken);
+        var result = await ListWifiAccessPointsAsync(interfaceName, cancellationToken);
         if (!result.Succeeded)
         {
             logger.LogDebug(
@@ -659,10 +663,73 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             return null;
         }
 
-        return result.StandardOutput
-            .Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
-            .Select(line => ParseWifiAccessPointLine(line, interfaceName))
-            .FirstOrDefault(accessPoint => accessPoint?.IsActive == true);
+        return ParseWifiAccessPoints(result.StandardOutput, interfaceName)
+            .FirstOrDefault(accessPoint => accessPoint.IsActive);
+    }
+
+    private async Task<WifiAccessPointCollectionResult> GetWifiAccessPointsAsync(
+        string interfaceName,
+        bool requestRescan,
+        CancellationToken cancellationToken)
+    {
+        if (requestRescan)
+        {
+            await RequestWifiRescanAsync(interfaceName, cancellationToken);
+        }
+
+        ProcessResult? lastResult = null;
+        WifiAccessPointInfo[] lastAccessPoints = [];
+
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            lastResult = await ListWifiAccessPointsAsync(interfaceName, cancellationToken);
+            if (!lastResult.Succeeded)
+            {
+                return new WifiAccessPointCollectionResult(lastResult, []);
+            }
+
+            lastAccessPoints = ParseWifiAccessPoints(lastResult.StandardOutput, interfaceName);
+            if (!ShouldRetryWifiAccessPointRead(lastAccessPoints, attempt))
+            {
+                return new WifiAccessPointCollectionResult(lastResult, lastAccessPoints);
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(750), cancellationToken);
+        }
+
+        return new WifiAccessPointCollectionResult(lastResult ?? new ProcessResult(false, string.Empty, string.Empty, null), lastAccessPoints);
+    }
+
+    private async Task RequestWifiRescanAsync(string interfaceName, CancellationToken cancellationToken)
+    {
+        var result = await RunNmcliAsync(
+            ["--wait", "10", "device", "wifi", "rescan", "ifname", interfaceName],
+            cancellationToken);
+
+        if (!result.Succeeded)
+        {
+            logger.LogDebug(
+                "Explicit Wi-Fi rescan request failed for interface {InterfaceName}: {ErrorOutput}",
+                interfaceName,
+                result.ErrorOutput ?? result.StandardOutput);
+        }
+    }
+
+    private async Task<ProcessResult> ListWifiAccessPointsAsync(string interfaceName, CancellationToken cancellationToken)
+    {
+        return await RunNmcliAsync(
+            ["--terse", "--fields", "IN-USE,BSSID,SSID,SIGNAL,SECURITY,BARS", "device", "wifi", "list", "ifname", interfaceName, "--rescan", "no"],
+            cancellationToken);
+    }
+
+    private static bool ShouldRetryWifiAccessPointRead(IReadOnlyList<WifiAccessPointInfo> accessPoints, int attempt)
+    {
+        if (attempt >= 2)
+        {
+            return false;
+        }
+
+        return accessPoints.Count <= 1;
     }
 
     private async Task<string?> ResolveWifiInterfaceNameAsync(string? interfaceName, CancellationToken cancellationToken)
@@ -918,4 +985,11 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         string StandardOutput,
         string ErrorOutput,
         int? ExitCode);
+
+    private sealed record WifiAccessPointCollectionResult(
+        ProcessResult Result,
+        WifiAccessPointInfo[] AccessPoints)
+    {
+        public bool Succeeded => Result.Succeeded;
+    }
 }

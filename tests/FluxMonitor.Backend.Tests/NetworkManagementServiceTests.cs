@@ -9,12 +9,12 @@ public sealed class NetworkManagementServiceTests
     [Fact]
     public void SplitNmcliFields_UnescapesColonsAndBackslashes()
     {
-        var fields = NetworkManagementService.SplitNmcliFields(@"*\:AA\:BB\:CC\:DD\:EE\:FF:My\\:WiFi:78:WPA2:▂▄▆_");
+        var fields = NetworkManagementService.SplitNmcliFields(@"*:AA\:BB\:CC\:DD\:EE\:FF:My\\WiFi:78:WPA2:▂▄▆_");
 
         Assert.Equal(6, fields.Length);
-        Assert.Equal("*:AA:BB:CC:DD:EE:FF", fields[0]);
-        Assert.Equal("My\\", fields[1]);
-        Assert.Equal("WiFi", fields[2]);
+        Assert.Equal("*", fields[0]);
+        Assert.Equal("AA:BB:CC:DD:EE:FF", fields[1]);
+        Assert.Equal(@"My\WiFi", fields[2]);
         Assert.Equal("78", fields[3]);
         Assert.Equal("WPA2", fields[4]);
     }
@@ -42,6 +42,45 @@ public sealed class NetworkManagementServiceTests
         Assert.Equal("<hidden>", accessPoint!.Ssid);
         Assert.Null(accessPoint.Security);
         Assert.False(accessPoint.IsActive);
+    }
+
+    [Fact]
+    public void ParseWifiAccessPoints_KeepsDistinctNetworksAndDeduplicatesByBssidAndSsid()
+    {
+        var output = string.Join('\n', [
+            @":AA\:AA\:AA\:AA\:AA\:AA:FIVE_EXT:34:WPA2:▂▄__",
+            @":BB\:BB\:BB\:BB\:BB\:BB:FIVE:71:WPA2:▂___",
+            @"*:CC\:CC\:CC\:CC\:CC\:CC:FIVE_5G_EXT:36:WPA2:▂▄▆_",
+            @":DD\:DD\:DD\:DD\:DD\:DD:FIVE_5G:57:WPA2:▂▄▆_",
+            @":DD\:DD\:DD\:DD\:DD\:DD:FIVE_5G:43:WPA2:▂▄__"
+        ]);
+
+        var accessPoints = NetworkManagementService.ParseWifiAccessPoints(output, "wlan0");
+
+        Assert.Collection(
+            accessPoints,
+            accessPoint =>
+            {
+                Assert.Equal("FIVE", accessPoint.Ssid);
+                Assert.Equal(71, accessPoint.SignalPercent);
+            },
+            accessPoint =>
+            {
+                Assert.Equal("FIVE_5G", accessPoint.Ssid);
+                Assert.Equal("DD:DD:DD:DD:DD:DD", accessPoint.Bssid);
+                Assert.Equal(57, accessPoint.SignalPercent);
+            },
+            accessPoint =>
+            {
+                Assert.Equal("FIVE_5G_EXT", accessPoint.Ssid);
+                Assert.True(accessPoint.IsActive);
+                Assert.Equal(36, accessPoint.SignalPercent);
+            },
+            accessPoint =>
+            {
+                Assert.Equal("FIVE_EXT", accessPoint.Ssid);
+                Assert.Equal(34, accessPoint.SignalPercent);
+            });
     }
 
     [Fact]
