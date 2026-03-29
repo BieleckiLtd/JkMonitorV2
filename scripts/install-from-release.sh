@@ -1223,7 +1223,7 @@ After=network-online.target
 Wants=network-online.target
 
 [Service]
-Type=notify
+Type=simple
 User=$current_user
 WorkingDirectory=$DESTINATION
 EnvironmentFile=-$TUNNEL_ENV_PATH

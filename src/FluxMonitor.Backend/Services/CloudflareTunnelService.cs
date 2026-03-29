@@ -16,6 +16,7 @@ public sealed class CloudflareTunnelService(
     private const string CloudflareTunnelProvider = "cloudflared";
     private const string NoTunnelProvider = "none";
     private const string TunnelTokenVariableName = "CLOUDFLARED_TUNNEL_TOKEN";
+    private static readonly TimeSpan StartupReconciliationTimeout = TimeSpan.FromSeconds(5);
 
     private static readonly Regex CommandTokenRegex = new(
         @"(?:--token|service\s+install)\s+['""]?(?<token>[^\s'""]+)['""]?",
@@ -261,10 +262,12 @@ public sealed class CloudflareTunnelService(
 
         try
         {
+            using var timeoutCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCancellation.CancelAfter(StartupReconciliationTimeout);
             var result = await commandRunner.RunAsync(
                 "systemctl",
-                [command, CloudflaredServiceName],
-                cancellationToken);
+                BuildStartupReconcileArguments(command),
+                timeoutCancellation.Token);
 
             if (!result.Succeeded)
             {
@@ -276,10 +279,22 @@ public sealed class CloudflareTunnelService(
                     string.IsNullOrWhiteSpace(result.StandardError) ? "<none>" : result.StandardError.Trim());
             }
         }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(
+                "Tunnel startup reconciliation timed out while trying to {Command} {ServiceName}. Startup will continue without waiting for the tunnel.",
+                command,
+                CloudflaredServiceName);
+        }
         catch (Exception exception)
         {
             logger.LogWarning(exception, "Tunnel startup reconciliation failed while trying to {Command} {ServiceName}.", command, CloudflaredServiceName);
         }
+    }
+
+    internal static string[] BuildStartupReconcileArguments(string command)
+    {
+        return ["--no-block", command, CloudflaredServiceName];
     }
 
     internal static string? NormalizeTunnelToken(string? value)

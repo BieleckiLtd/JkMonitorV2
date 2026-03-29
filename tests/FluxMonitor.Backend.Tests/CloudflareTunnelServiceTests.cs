@@ -6,6 +6,14 @@ namespace FluxMonitor.Backend.Tests;
 public sealed class CloudflareTunnelServiceTests
 {
     [Fact]
+    public void BuildStartupReconcileArguments_UsesNoBlockSystemctlInvocation()
+    {
+        var arguments = CloudflareTunnelService.BuildStartupReconcileArguments("start");
+
+        Assert.Equal(["--no-block", "start", "cloudflared.service"], arguments);
+    }
+
+    [Fact]
     public void NormalizeTunnelToken_ExtractsTokenFromInstallCommand()
     {
         var token = CloudflareTunnelService.NormalizeTunnelToken(
