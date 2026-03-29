@@ -13,7 +13,7 @@ APP_LOCAL_URL="http://127.0.0.1:$APP_PORT"
 HEALTH_URL="$APP_LOCAL_URL/api/health"
 ASSET_NAME='fluxmonitor-backend-linux-arm64.tar.gz'
 CHECKSUM_ASSET_NAME="$ASSET_NAME.sha256"
-INSTALL_SCRIPT="${TMPDIR:-/tmp}/dotnet-install-fluxmonitor-runtime.sh"
+INSTALL_SCRIPT=''
 SERVICE_NAME='fluxmonitor.service'
 SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
 NETWORKMANAGER_POLKIT_RULE_PATH='/etc/polkit-1/rules.d/50-fluxmonitor-networkmanager.rules'
@@ -56,6 +56,43 @@ paint() {
 section() {
   echo
   paint "$COLOR_SECTION" "$1"
+}
+
+get_existing_writable_directory() {
+  local path="$1"
+
+  while [ -n "$path" ] && [ ! -d "$path" ]; do
+    local next_path
+    next_path="$(dirname "$path")"
+    if [ "$next_path" = "$path" ]; then
+      break
+    fi
+    path="$next_path"
+  done
+
+  if [ -d "$path" ] && [ -w "$path" ]; then
+    echo "$path"
+    return 0
+  fi
+
+  return 1
+}
+
+get_installer_temp_base() {
+  local destination_root="$1"
+  local preferred_parent
+  preferred_parent="$(get_existing_writable_directory "$(dirname "$destination_root")" || true)"
+  if [ -n "$preferred_parent" ]; then
+    echo "$preferred_parent/.fluxmonitor-installer"
+    return
+  fi
+
+  if [ -n "${HOME:-}" ] && [ -d "$HOME" ] && [ -w "$HOME" ]; then
+    echo "$HOME/.fluxmonitor-installer"
+    return
+  fi
+
+  echo "${TMPDIR:-/tmp}/.fluxmonitor-installer"
 }
 
 info() {
@@ -1282,13 +1319,15 @@ open_browser_when_ready() {
 }
 
 NORMALIZED_REPOSITORY="$(normalize_repository "$REPOSITORY")"
-TEMP_ROOT="${TMPDIR:-/tmp}/FluxMonitor-release-install-$(date +%s)-$$"
+TEMP_BASE="$(get_installer_temp_base "$DESTINATION")"
+TEMP_ROOT="$TEMP_BASE/FluxMonitor-release-install-$(date +%s)-$$"
 ARCHIVE_PATH="$TEMP_ROOT/$ASSET_NAME"
 CHECKSUM_PATH="$TEMP_ROOT/$CHECKSUM_ASSET_NAME"
 EXTRACT_PATH="$TEMP_ROOT/extract"
 PRESERVE_PATH="$TEMP_ROOT/preserve"
+INSTALL_SCRIPT="$TEMP_ROOT/dotnet-install-fluxmonitor-runtime.sh"
 
-mkdir -p "$TEMP_ROOT" "$EXTRACT_PATH" "$PRESERVE_PATH"
+mkdir -p "$TEMP_BASE" "$TEMP_ROOT" "$EXTRACT_PATH" "$PRESERVE_PATH"
 
 cleanup() {
   rm -rf "$TEMP_ROOT"
@@ -1300,6 +1339,7 @@ section 'Flux Monitor release bootstrap'
 muted "Repository: $NORMALIZED_REPOSITORY"
 muted "Release tag: $RELEASE_TAG"
 muted "Destination: $DESTINATION"
+muted "Working folder: $TEMP_ROOT"
 
 get_release_asset_download_url() {
   local asset_name="$1"

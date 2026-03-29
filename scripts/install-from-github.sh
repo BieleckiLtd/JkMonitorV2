@@ -10,6 +10,43 @@ section() {
   echo "$1"
 }
 
+get_existing_writable_directory() {
+  local path="$1"
+
+  while [ -n "$path" ] && [ ! -d "$path" ]; do
+    local next_path
+    next_path="$(dirname "$path")"
+    if [ "$next_path" = "$path" ]; then
+      break
+    fi
+    path="$next_path"
+  done
+
+  if [ -d "$path" ] && [ -w "$path" ]; then
+    echo "$path"
+    return 0
+  fi
+
+  return 1
+}
+
+get_installer_temp_base() {
+  local destination_root="$1"
+  local preferred_parent
+  preferred_parent="$(get_existing_writable_directory "$(dirname "$destination_root")" || true)"
+  if [ -n "$preferred_parent" ]; then
+    echo "$preferred_parent/.fluxmonitor-installer"
+    return
+  fi
+
+  if [ -n "${HOME:-}" ] && [ -d "$HOME" ] && [ -w "$HOME" ]; then
+    echo "$HOME/.fluxmonitor-installer"
+    return
+  fi
+
+  echo "${TMPDIR:-/tmp}/.fluxmonitor-installer"
+}
+
 normalize_repository() {
   local input="$1"
 
@@ -106,12 +143,13 @@ restore_preserved_state() {
 NORMALIZED_REPOSITORY="$(normalize_repository "$REPOSITORY")"
 
 ZIP_URL="https://github.com/$NORMALIZED_REPOSITORY/archive/refs/heads/$BRANCH.zip"
-TEMP_ROOT="${TMPDIR:-/tmp}/FluxMonitor-install-$(date +%s)-$$"
+TEMP_BASE="$(get_installer_temp_base "$DESTINATION")"
+TEMP_ROOT="$TEMP_BASE/FluxMonitor-install-$(date +%s)-$$"
 ZIP_PATH="$TEMP_ROOT/repo.zip"
 EXTRACT_PATH="$TEMP_ROOT/extract"
 PRESERVE_PATH="$TEMP_ROOT/preserve"
 
-mkdir -p "$TEMP_ROOT" "$EXTRACT_PATH" "$PRESERVE_PATH"
+mkdir -p "$TEMP_BASE" "$TEMP_ROOT" "$EXTRACT_PATH" "$PRESERVE_PATH"
 
 cleanup() {
   rm -rf "$TEMP_ROOT"
@@ -123,6 +161,7 @@ section "Flux Monitor GitHub bootstrap"
 echo "Repository: $NORMALIZED_REPOSITORY"
 echo "Branch: $BRANCH"
 echo "Destination: $DESTINATION"
+echo "Working folder: $TEMP_ROOT"
 
 section "Downloading source archive"
 curl -fsSL "$ZIP_URL" -o "$ZIP_PATH"

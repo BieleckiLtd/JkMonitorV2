@@ -15,7 +15,7 @@ $appPort = 5074
 $appBindUrl = "http://[::]:$appPort"
 $appLocalUrl = "http://127.0.0.1:$appPort"
 $assetName = 'fluxmonitor-backend-win-x64.zip'
-$installScript = Join-Path $env:TEMP 'dotnet-install-fluxmonitor-runtime.ps1'
+$installScript = $null
 $envPath = Join-Path $Destination 'fluxmonitor.env'
 $taskName = 'Flux Monitor'
 
@@ -38,6 +38,52 @@ function Write-WarningText([string]$Text) {
 
 function Write-Muted([string]$Text) {
     Write-Host $Text -ForegroundColor DarkGray
+}
+
+function Get-InstallerTempBase([string]$DestinationPath) {
+    $candidates = [System.Collections.Generic.List[string]]::new()
+    $parentPath = Split-Path -Path $DestinationPath -Parent
+
+    while (-not [string]::IsNullOrWhiteSpace($parentPath) -and -not (Test-Path $parentPath)) {
+        $nextPath = Split-Path -Path $parentPath -Parent
+        if ($nextPath -eq $parentPath) {
+            break
+        }
+
+        $parentPath = $nextPath
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($parentPath)) {
+        $candidates.Add($parentPath)
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($HOME)) {
+        $candidates.Add($HOME)
+    }
+
+    if (-not [string]::IsNullOrWhiteSpace($env:TEMP)) {
+        $candidates.Add($env:TEMP)
+    }
+
+    foreach ($candidate in $candidates | Select-Object -Unique) {
+        if ([string]::IsNullOrWhiteSpace($candidate) -or -not (Test-Path $candidate)) {
+            continue
+        }
+
+        try {
+            $probePath = Join-Path $candidate ('.fluxmonitor-write-test-' + [guid]::NewGuid().ToString('N'))
+            New-Item -ItemType Directory -Path $probePath -Force | Out-Null
+            Remove-Item -Path $probePath -Recurse -Force
+
+            $installerBase = Join-Path $candidate '.fluxmonitor-installer'
+            New-Item -ItemType Directory -Path $installerBase -Force | Out-Null
+            return $installerBase
+        }
+        catch {
+        }
+    }
+
+    throw 'Unable to find a writable working folder for the installer.'
 }
 
 function Get-NormalizedRepository([string]$RepositoryInput) {
@@ -318,10 +364,12 @@ function Write-InstallAudit {
 
 $normalizedRepository = Get-NormalizedRepository $Repository
 $assetUrl = "https://github.com/$normalizedRepository/releases/download/$ReleaseTag/$assetName"
-$tempRoot = Join-Path $env:TEMP ("FluxMonitor-release-install-{0}" -f ([Guid]::NewGuid().ToString('N')))
+$tempBase = Get-InstallerTempBase -DestinationPath $Destination
+$tempRoot = Join-Path $tempBase ("FluxMonitor-release-install-{0}" -f ([Guid]::NewGuid().ToString('N')))
 $archivePath = Join-Path $tempRoot $assetName
 $extractPath = Join-Path $tempRoot 'extract'
 $preservePath = Join-Path $tempRoot 'preserve'
+$installScript = Join-Path $tempRoot 'dotnet-install-fluxmonitor-runtime.ps1'
 $accessUrl = Get-AccessUrl
 
 New-Item -ItemType Directory -Path $tempRoot, $extractPath, $preservePath -Force | Out-Null
@@ -331,6 +379,7 @@ try {
     Write-Muted "Repository: $normalizedRepository"
     Write-Muted "Release tag: $ReleaseTag"
     Write-Muted "Destination: $Destination"
+    Write-Muted "Working folder: $tempRoot"
 
     Write-Section 'Downloading release artifact'
     Write-Info 'Fetching the published Windows build from GitHub Releases.'
