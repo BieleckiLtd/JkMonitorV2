@@ -106,7 +106,9 @@ export function Header() {
 export function MainLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
   const isMobileSidebarOpen = useAppStore((state) => state.isMobileSidebarOpen);
-  const hasUpdateOverlay = useAppStore((state) => state.updateProgress !== null);
+  const updateProgress = useAppStore((state) => state.updateProgress);
+  const hasUpdateOverlay = updateProgress !== null;
+  const hasBlockingUpdateOverlay = updateProgress?.isRunning ?? false;
   const isFullWidthRoute = location.pathname === '/' || location.pathname === '/services';
 
   useEffect(() => {
@@ -119,15 +121,19 @@ export function MainLayout({ children }: { children: ReactNode }) {
 
   return (
     <div className="flex h-dvh w-full overflow-hidden bg-background font-sans text-foreground">
-      <Sidebar />
-      <div className="flex h-full min-w-0 flex-1 flex-col">
-        <Header />
-        <main className="safe-area-bottom flex min-h-0 flex-1 w-full overflow-y-auto px-1 py-2 sm:p-4 md:p-6">
-          <div className={cn('flex min-h-full w-full flex-col', isFullWidthRoute ? 'max-w-none' : 'mx-auto max-w-7xl')}>
-            {children}
+      {!hasBlockingUpdateOverlay ? (
+        <>
+          <Sidebar />
+          <div className="flex h-full min-w-0 flex-1 flex-col">
+            <Header />
+            <main className="safe-area-bottom flex min-h-0 flex-1 w-full overflow-y-auto px-1 py-2 sm:p-4 md:p-6">
+              <div className={cn('flex min-h-full w-full flex-col', isFullWidthRoute ? 'max-w-none' : 'mx-auto max-w-7xl')}>
+                {children}
+              </div>
+            </main>
           </div>
-        </main>
-      </div>
+        </>
+      ) : null}
       <UpdateLockOverlay />
     </div>
   );

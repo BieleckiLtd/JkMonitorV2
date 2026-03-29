@@ -34,8 +34,8 @@ export function UpdateLockOverlay() {
 
   return (
     <div className={cn(
-      'fixed inset-0 z-[70] flex items-center justify-center px-4 backdrop-blur-sm',
-      blocking ? 'bg-background/82' : 'bg-background/72',
+      'fixed inset-0 z-[70] flex items-center justify-center px-4',
+      blocking ? 'bg-background/94' : 'bg-background/88',
     )}>
       <div className={cn('w-full max-w-lg rounded-3xl border p-5 shadow-2xl', panelClassName)}>
         <div className='flex items-start gap-3'>
