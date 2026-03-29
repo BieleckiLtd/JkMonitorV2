@@ -1347,7 +1347,7 @@ export function SystemPage() {
                     <DetailTile label='Channel' value={formatReleaseChannel(updateChannel)} />
                     <DetailTile label='Commit' value={formatCommit(installedCommit)} />
                     <DetailTile label='Workflow run' value={workflowRun} />
-                    <DetailTile label='Published' value={formatTimestamp(updateCheck?.remoteReleasePublishedAt)} />
+                    <DetailTile label='Published' value={installedReleasePublishedLabel} />
                   </div>
                   {updateCheck ? (
                     <>
