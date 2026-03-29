@@ -131,6 +131,61 @@ public sealed class NetworkManagementServiceTests
     }
 
     [Fact]
+    public void ParseIwAccessPoints_ParsesVisibleAndHiddenNetworks()
+    {
+        var output = """
+            BSS 90:9a:4a:16:de:b4(on wlan0) -- associated
+            	signal: -34.00 dBm
+            	SSID: FIVE_EXT
+            	RSN:
+            		 * Version: 1
+            		 * Authentication suites: PSK
+            BSS 16:11:32:ab:4f:fe(on wlan0)
+            	signal: -70.00 dBm
+            	capability: ESS Privacy ShortPreamble (0x0031)
+            BSS 92:03:71:45:57:31(on wlan0)
+            	signal: -67.00 dBm
+            	SSID: TeslaPW_EWJRDG
+            	WPA:
+            		 * Version: 1
+            """;
+
+        var accessPoints = NetworkManagementService.ParseIwAccessPoints(output, "wlan0");
+
+        Assert.Collection(
+            accessPoints,
+            accessPoint =>
+            {
+                Assert.Equal("FIVE_EXT", accessPoint.Ssid);
+                Assert.Equal("90:9A:4A:16:DE:B4", accessPoint.Bssid);
+                Assert.True(accessPoint.IsActive);
+                Assert.Equal("WPA2", accessPoint.Security);
+                Assert.Equal("▂▄▆█", accessPoint.SignalBars);
+            },
+            accessPoint =>
+            {
+                Assert.Equal("TeslaPW_EWJRDG", accessPoint.Ssid);
+                Assert.Equal("WPA", accessPoint.Security);
+                Assert.False(accessPoint.IsActive);
+            },
+            accessPoint =>
+            {
+                Assert.Equal("<hidden>", accessPoint.Ssid);
+                Assert.Equal("WEP", accessPoint.Security);
+                Assert.False(accessPoint.IsActive);
+            });
+    }
+
+    [Theory]
+    [InlineData(-34, 100)]
+    [InlineData(-67, 66)]
+    [InlineData(-80, 40)]
+    public void ConvertSignalDbmToPercent_MapsExpectedRanges(double signalDbm, int expected)
+    {
+        Assert.Equal(expected, NetworkManagementService.ConvertSignalDbmToPercent(signalDbm));
+    }
+
+    [Fact]
     public void ResolveInterfaceKind_UsesInterfaceNameHeuristicsForWifi()
     {
         var kind = NetworkManagementService.ResolveInterfaceKind(

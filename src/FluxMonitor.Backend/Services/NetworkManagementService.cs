@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
+using System.Text.RegularExpressions;
 using FluxMonitor.Backend.Models;
 
 namespace FluxMonitor.Backend.Services;
@@ -705,6 +706,20 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
         }
 
+        if (CountVisibleWifiNetworks(bestAccessPoints) <= 1)
+        {
+            var fallbackResult = await ListWifiAccessPointsWithIwAsync(interfaceName, cancellationToken);
+            if (fallbackResult.Succeeded && IsBetterWifiAccessPointRead(fallbackResult.AccessPoints, bestAccessPoints))
+            {
+                logger.LogInformation(
+                    "Using iw fallback for interface {InterfaceName}. nmcli visible networks={NmcliVisibleCount}, iw visible networks={IwVisibleCount}.",
+                    interfaceName,
+                    CountVisibleWifiNetworks(bestAccessPoints),
+                    CountVisibleWifiNetworks(fallbackResult.AccessPoints));
+                return fallbackResult;
+            }
+        }
+
         return new WifiAccessPointCollectionResult(
             lastResult ?? new ProcessResult(false, string.Empty, string.Empty, null),
             bestAccessPoints.Length > 0 ? bestAccessPoints : lastAccessPoints);
@@ -730,6 +745,26 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         return await RunNmcliAsync(
             ["--terse", "--fields", "IN-USE,BSSID,SSID,SIGNAL,SECURITY,BARS", "device", "wifi", "list", "ifname", interfaceName, "--rescan", "no"],
             cancellationToken);
+    }
+
+    private async Task<WifiAccessPointCollectionResult> ListWifiAccessPointsWithIwAsync(
+        string interfaceName,
+        CancellationToken cancellationToken)
+    {
+        var result = await RunProcessAsync(
+            "sudo",
+            ["-n", "iw", "dev", interfaceName, "scan", "ap-force"],
+            cancellationToken);
+        if (!result.Succeeded)
+        {
+            logger.LogDebug(
+                "iw Wi-Fi scan fallback failed for interface {InterfaceName}: {ErrorOutput}",
+                interfaceName,
+                result.ErrorOutput ?? result.StandardOutput);
+            return new WifiAccessPointCollectionResult(result, []);
+        }
+
+        return new WifiAccessPointCollectionResult(result, ParseIwAccessPoints(result.StandardOutput, interfaceName));
     }
 
     internal static bool ShouldRetryWifiAccessPointRead(IReadOnlyList<WifiAccessPointInfo> accessPoints, int attempt)
@@ -769,6 +804,141 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         }
 
         return false;
+    }
+
+    internal static WifiAccessPointInfo[] ParseIwAccessPoints(string output, string interfaceName)
+    {
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return [];
+        }
+
+        var accessPoints = new List<WifiAccessPointInfo>();
+        var blocks = Regex.Split(output.Trim(), @"(?=^BSS\s+)", RegexOptions.Multiline);
+        foreach (var block in blocks)
+        {
+            var accessPoint = ParseIwAccessPointBlock(block, interfaceName);
+            if (accessPoint is not null)
+            {
+                accessPoints.Add(accessPoint);
+            }
+        }
+
+        return accessPoints
+            .GroupBy(accessPoint => $"{accessPoint.Bssid}|{accessPoint.Ssid}", StringComparer.OrdinalIgnoreCase)
+            .Select(group => group
+                .OrderByDescending(accessPoint => accessPoint.SignalPercent ?? int.MinValue)
+                .ThenByDescending(accessPoint => accessPoint.IsActive)
+                .First())
+            .OrderByDescending(accessPoint => accessPoint.SignalPercent ?? int.MinValue)
+            .ThenByDescending(accessPoint => accessPoint.IsActive)
+            .ThenBy(accessPoint => accessPoint.Ssid, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    internal static WifiAccessPointInfo? ParseIwAccessPointBlock(string block, string interfaceName)
+    {
+        if (string.IsNullOrWhiteSpace(block))
+        {
+            return null;
+        }
+
+        var lines = block
+            .Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+        if (lines.Length == 0 || !lines[0].StartsWith("BSS ", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var headerMatch = Regex.Match(lines[0], @"^BSS\s+(?<bssid>[0-9a-f:]{17})\b(?<rest>.*)$", RegexOptions.IgnoreCase);
+        if (!headerMatch.Success)
+        {
+            return null;
+        }
+
+        var signalLine = lines.FirstOrDefault(line => line.StartsWith("signal:", StringComparison.Ordinal));
+        var ssidLine = lines.FirstOrDefault(line => line.StartsWith("SSID:", StringComparison.Ordinal));
+
+        var signalDbm = TryParseIwSignal(signalLine);
+        var security = InferIwSecurity(lines);
+
+        return new WifiAccessPointInfo
+        {
+            InterfaceName = interfaceName,
+            Ssid = ssidLine is null
+                ? "<hidden>"
+                : string.IsNullOrWhiteSpace(ssidLine["SSID:".Length..]) ? "<hidden>" : ssidLine["SSID:".Length..].Trim(),
+            Bssid = headerMatch.Groups["bssid"].Value.ToUpperInvariant(),
+            SignalPercent = signalDbm is null ? null : ConvertSignalDbmToPercent(signalDbm.Value),
+            Security = security,
+            SignalBars = signalDbm is null ? null : ConvertSignalPercentToBars(ConvertSignalDbmToPercent(signalDbm.Value)),
+            IsActive = headerMatch.Groups["rest"].Value.Contains("associated", StringComparison.OrdinalIgnoreCase)
+        };
+    }
+
+    internal static double? TryParseIwSignal(string? line)
+    {
+        if (string.IsNullOrWhiteSpace(line))
+        {
+            return null;
+        }
+
+        var match = Regex.Match(line, @"signal:\s*(?<signal>-?\d+(?:\.\d+)?)\s*dBm", RegexOptions.IgnoreCase);
+        return match.Success && double.TryParse(match.Groups["signal"].Value, NumberStyles.Float, CultureInfo.InvariantCulture, out var value)
+            ? value
+            : null;
+    }
+
+    internal static int ConvertSignalDbmToPercent(double signalDbm)
+    {
+        return Math.Clamp((int)Math.Round((signalDbm + 100d) * 2d, MidpointRounding.AwayFromZero), 0, 100);
+    }
+
+    internal static string ConvertSignalPercentToBars(int signalPercent)
+    {
+        return signalPercent switch
+        {
+            >= 75 => "▂▄▆█",
+            >= 50 => "▂▄▆_",
+            >= 25 => "▂▄__",
+            > 0 => "▂___",
+            _ => "____"
+        };
+    }
+
+    internal static string? InferIwSecurity(IReadOnlyList<string> lines)
+    {
+        var hasRsn = lines.Any(line => line.StartsWith("RSN:", StringComparison.Ordinal));
+        var hasWpa = lines.Any(line => line.StartsWith("WPA:", StringComparison.Ordinal));
+        var hasSae = lines.Any(line => line.Contains("Authentication suites: SAE", StringComparison.Ordinal));
+        var hasPrivacy = lines.Any(line => line.Contains("Privacy", StringComparison.Ordinal));
+
+        if (hasRsn && hasSae)
+        {
+            return "WPA2 WPA3";
+        }
+
+        if (hasRsn && hasWpa)
+        {
+            return "WPA WPA2";
+        }
+
+        if (hasRsn)
+        {
+            return "WPA2";
+        }
+
+        if (hasWpa)
+        {
+            return "WPA";
+        }
+
+        if (hasPrivacy)
+        {
+            return "WEP";
+        }
+
+        return null;
     }
 
     private async Task<string?> ResolveWifiInterfaceNameAsync(string? interfaceName, CancellationToken cancellationToken)
