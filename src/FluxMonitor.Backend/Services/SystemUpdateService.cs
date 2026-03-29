@@ -13,11 +13,12 @@ public sealed class SystemUpdateService(
     ILogger<SystemUpdateService> logger)
 {
     private const string Repository = "BieleckiLtd/JkMonitorV2";
-    private const string ReleaseTag = "dev-latest";
+    private const string DevChannel = "dev";
+    private const string MainChannel = "main";
+    private const string DevReleaseTag = "dev-latest";
     private const string AssetName = "fluxmonitor-backend-linux-arm64.tar.gz";
     private const string ChecksumAssetName = AssetName + ".sha256";
-    private const string InstallerScriptUrl = $"https://raw.githubusercontent.com/{Repository}/dev/scripts/install-from-release.sh";
-    private const string ReleaseApiUrl = $"https://api.github.com/repos/{Repository}/releases/tags/{ReleaseTag}";
+    private const string ReleaseApiBaseUrl = $"https://api.github.com/repos/{Repository}/releases";
     private const int InstallerOutputTailCapacity = 120;
 
     private static readonly UpdateStageDefinition StartingStage = new(
@@ -166,19 +167,20 @@ public sealed class SystemUpdateService(
     private bool _cancelRequested;
     private readonly Lock _stateGate = new();
 
-    private string? _releaseETag;
-    private object? _cachedRelease;
-
     public UpdateCheckResult CheckForUpdate()
     {
         var build = buildMetadataProvider.GetBuildInfo();
         var canUpdate = managedRestartService.IsManagedInstall && OperatingSystem.IsLinux();
+        var currentChannel = ResolveReleaseChannel(build.ReleaseTag);
 
         return new UpdateCheckResult
         {
             CurrentReleaseTag = build.ReleaseTag,
             CurrentSourceRevision = build.SourceRevisionId,
             CurrentBuiltAt = build.BuiltAt,
+            CurrentChannel = currentChannel,
+            TargetChannel = currentChannel,
+            TargetReleaseTag = GetDefaultTargetReleaseTag(currentChannel, build.ReleaseTag),
             CanUpdate = canUpdate,
             Reason = canUpdate ? null : "In-app update is only available on managed Linux installs."
         };
@@ -190,30 +192,13 @@ public sealed class SystemUpdateService(
 
         try
         {
-            using var client = httpClientFactory.CreateClient();
-            client.DefaultRequestHeaders.Add("User-Agent", "FluxMonitor");
+            using var client = CreateGitHubClient();
+            var releaseResolution = await ResolveReleaseAsync(client, result.CurrentChannel, cancellationToken);
+            var release = releaseResolution.Release;
 
-            var request = new HttpRequestMessage(HttpMethod.Get, ReleaseApiUrl);
-            request.Headers.Add("Accept", "application/vnd.github+json");
-            if (_releaseETag is not null)
-            {
-                request.Headers.TryAddWithoutValidation("If-None-Match", _releaseETag);
-            }
-
-            var response = await client.SendAsync(request, cancellationToken);
-
-            GitHubRelease? release;
-            if (response.StatusCode == System.Net.HttpStatusCode.NotModified)
-            {
-                release = _cachedRelease as GitHubRelease;
-            }
-            else
-            {
-                response.EnsureSuccessStatusCode();
-                release = await response.Content.ReadFromJsonAsync<GitHubRelease>(cancellationToken);
-                _releaseETag = response.Headers.ETag?.Tag;
-                _cachedRelease = release;
-            }
+            result.CheckedAt = DateTimeOffset.UtcNow;
+            result.TargetChannel = releaseResolution.Channel;
+            result.TargetReleaseTag = release?.TagName ?? result.TargetReleaseTag;
 
             if (release is not null)
             {
@@ -240,7 +225,8 @@ public sealed class SystemUpdateService(
                 {
                     try
                     {
-                        var compareUrl = $"https://api.github.com/repos/{Repository}/compare/{result.CurrentSourceRevision}...dev";
+                        var compareTarget = ResolveCompareTarget(releaseResolution.Channel, release);
+                        var compareUrl = $"https://api.github.com/repos/{Repository}/compare/{result.CurrentSourceRevision}...{compareTarget}";
                         var comparison = await client.GetFromJsonAsync<GitHubComparison>(compareUrl, cancellationToken);
                         if (comparison?.Commits is { Count: > 0 })
                         {
@@ -256,7 +242,7 @@ public sealed class SystemUpdateService(
                     }
                     catch (Exception exception)
                     {
-                        logger.LogDebug(exception, "Failed to fetch update comparison for {Repository}.", Repository);
+                            logger.LogDebug(exception, "Failed to fetch update comparison for {Repository}.", Repository);
                     }
                 }
             }
@@ -278,16 +264,22 @@ public sealed class SystemUpdateService(
         }
     }
 
-    public UpdateCommandResult StartUpdate()
+    public async Task<UpdateCommandResult> StartUpdateAsync(CancellationToken cancellationToken)
     {
         if (!managedRestartService.IsManagedInstall || !OperatingSystem.IsLinux())
         {
             return UpdateCommandResult.Fail("In-app update is only available on managed Linux installs.");
         }
 
+        var updateTarget = await ResolveUpdateTargetAsync(cancellationToken);
+        if (!updateTarget.Succeeded)
+        {
+            return UpdateCommandResult.Fail(updateTarget.Error ?? "Flux Monitor could not determine which release to install.");
+        }
+
         string sessionId;
         UpdateProgress progress;
-        CancellationToken cancellationToken;
+        CancellationToken updateCancellationToken;
 
         lock (_stateGate)
         {
@@ -320,12 +312,17 @@ public sealed class SystemUpdateService(
                 percentComplete: StartingStage.PercentComplete);
 
             _currentProgress = progress;
-            cancellationToken = _updateCancellationSource.Token;
+            updateCancellationToken = _updateCancellationSource.Token;
         }
 
         logger.LogInformation("Starting in-app update session {SessionId}.", sessionId);
         updateProgressBroadcaster.Publish(progress);
-        _ = Task.Run(() => RunUpdateAsync(sessionId, cancellationToken));
+        _ = Task.Run(() => RunUpdateAsync(
+            sessionId,
+            updateTarget.ReleaseTag!,
+            updateTarget.Channel!,
+            updateTarget.InstallerScriptUrl!,
+            updateCancellationToken));
 
         return UpdateCommandResult.Ok(progress);
     }
@@ -394,7 +391,12 @@ public sealed class SystemUpdateService(
         return UpdateCommandResult.Ok(progress);
     }
 
-    private async Task RunUpdateAsync(string sessionId, CancellationToken cancellationToken)
+    private async Task RunUpdateAsync(
+        string sessionId,
+        string releaseTag,
+        string releaseChannel,
+        string installerScriptUrl,
+        CancellationToken cancellationToken)
     {
         var outputTail = new FixedLineBuffer(InstallerOutputTailCapacity);
         var errorTail = new FixedLineBuffer(InstallerOutputTailCapacity);
@@ -417,15 +419,16 @@ public sealed class SystemUpdateService(
             var destination = Directory.GetParent(installRoot)?.FullName ?? installRoot;
 
             logger.LogInformation(
-                "Update session {SessionId} will install release {ReleaseTag} into {Destination}.",
+                "Update session {SessionId} will install release {ReleaseTag} from channel {ReleaseChannel} into {Destination}.",
                 sessionId,
-                ReleaseTag,
+                releaseTag,
+                releaseChannel,
                 destination);
 
             var psi = new ProcessStartInfo
             {
                 FileName = "/bin/bash",
-                Arguments = $"-c \"wget -qO- '{InstallerScriptUrl}' | bash -s -- https://github.com/{Repository} {ReleaseTag} '{destination}'\"",
+                Arguments = $"-c \"wget -qO- '{installerScriptUrl}' | bash -s -- https://github.com/{Repository} {releaseTag} '{destination}'\"",
                 UseShellExecute = false,
                 RedirectStandardOutput = true,
                 RedirectStandardError = true,
@@ -923,6 +926,115 @@ public sealed class SystemUpdateService(
     {
         return Path.GetDirectoryName(typeof(Program).Assembly.Location);
     }
+
+    private HttpClient CreateGitHubClient()
+    {
+        var client = httpClientFactory.CreateClient();
+        client.DefaultRequestHeaders.Add("User-Agent", "FluxMonitor");
+        client.DefaultRequestHeaders.Add("Accept", "application/vnd.github+json");
+        return client;
+    }
+
+    private async Task<ResolvedReleaseInfo> ResolveReleaseAsync(HttpClient client, string? channel, CancellationToken cancellationToken)
+    {
+        var normalizedChannel = ResolveReleaseChannel(channel);
+        var releaseApiUrl = string.Equals(normalizedChannel, DevChannel, StringComparison.OrdinalIgnoreCase)
+            ? $"{ReleaseApiBaseUrl}/tags/{DevReleaseTag}"
+            : $"{ReleaseApiBaseUrl}/latest";
+
+        var release = await client.GetFromJsonAsync<GitHubRelease>(releaseApiUrl, cancellationToken);
+        return new ResolvedReleaseInfo(normalizedChannel, release);
+    }
+
+    private async Task<UpdateTargetResolution> ResolveUpdateTargetAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            var currentChannel = ResolveReleaseChannel(buildMetadataProvider.GetBuildInfo().ReleaseTag);
+            using var client = CreateGitHubClient();
+            var releaseResolution = await ResolveReleaseAsync(client, currentChannel, cancellationToken);
+            var releaseTag = releaseResolution.Release?.TagName;
+
+            if (string.IsNullOrWhiteSpace(releaseTag))
+            {
+                return UpdateTargetResolution.Fail("Flux Monitor could not determine which published release to install.");
+            }
+
+            return UpdateTargetResolution.Success(
+                releaseResolution.Channel,
+                releaseTag.Trim(),
+                GetInstallerScriptUrl(releaseResolution.Channel));
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Failed to resolve the update target release from GitHub.");
+            return UpdateTargetResolution.Fail("Flux Monitor could not determine which published release to install. Check the device internet connection and try again.");
+        }
+    }
+
+    private static string ResolveReleaseChannel(string? releaseTagOrChannel)
+    {
+        if (string.Equals(releaseTagOrChannel, DevChannel, StringComparison.OrdinalIgnoreCase)
+            || string.Equals(releaseTagOrChannel, DevReleaseTag, StringComparison.OrdinalIgnoreCase))
+        {
+            return DevChannel;
+        }
+
+        return MainChannel;
+    }
+
+    private static string? GetDefaultTargetReleaseTag(string channel, string? currentReleaseTag)
+    {
+        return string.Equals(channel, DevChannel, StringComparison.OrdinalIgnoreCase)
+            ? DevReleaseTag
+            : currentReleaseTag;
+    }
+
+    private static string ResolveCompareTarget(string channel, GitHubRelease release)
+    {
+        if (string.Equals(channel, DevChannel, StringComparison.OrdinalIgnoreCase))
+        {
+            return DevChannel;
+        }
+
+        return !string.IsNullOrWhiteSpace(release.TagName)
+            ? release.TagName
+            : MainChannel;
+    }
+
+    private static string GetInstallerScriptUrl(string channel)
+    {
+        var scriptRef = string.Equals(channel, DevChannel, StringComparison.OrdinalIgnoreCase)
+            ? DevChannel
+            : MainChannel;
+
+        return $"https://raw.githubusercontent.com/{Repository}/{scriptRef}/scripts/install-from-release.sh";
+    }
+}
+
+internal sealed record ResolvedReleaseInfo(string Channel, GitHubRelease? Release);
+
+internal sealed class UpdateTargetResolution
+{
+    public bool Succeeded { get; init; }
+    public string? Error { get; init; }
+    public string? Channel { get; init; }
+    public string? ReleaseTag { get; init; }
+    public string? InstallerScriptUrl { get; init; }
+
+    public static UpdateTargetResolution Success(string channel, string releaseTag, string installerScriptUrl) => new()
+    {
+        Succeeded = true,
+        Channel = channel,
+        ReleaseTag = releaseTag,
+        InstallerScriptUrl = installerScriptUrl
+    };
+
+    public static UpdateTargetResolution Fail(string error) => new()
+    {
+        Succeeded = false,
+        Error = error
+    };
 }
 
 public sealed class UpdateCheckResult
@@ -930,6 +1042,10 @@ public sealed class UpdateCheckResult
     public string? CurrentReleaseTag { get; set; }
     public string? CurrentSourceRevision { get; set; }
     public string? CurrentBuiltAt { get; set; }
+    public string? CurrentChannel { get; set; }
+    public string? TargetChannel { get; set; }
+    public string? TargetReleaseTag { get; set; }
+    public DateTimeOffset? CheckedAt { get; set; }
     public bool CanUpdate { get; set; }
     public string? Reason { get; set; }
     public bool UpdateAvailable { get; set; }
@@ -1030,7 +1146,7 @@ internal sealed class FixedLineBuffer(int capacity) : IEnumerable<string>
     System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => GetEnumerator();
 }
 
-file sealed class GitHubRelease
+internal sealed class GitHubRelease
 {
     [JsonPropertyName("tag_name")]
     public string? TagName { get; set; }
@@ -1042,7 +1158,7 @@ file sealed class GitHubRelease
     public List<GitHubAsset>? Assets { get; set; }
 }
 
-file sealed class GitHubAsset
+internal sealed class GitHubAsset
 {
     [JsonPropertyName("name")]
     public string? Name { get; set; }
@@ -1057,13 +1173,13 @@ file sealed class GitHubAsset
     public string? UpdatedAt { get; set; }
 }
 
-file sealed class GitHubComparison
+internal sealed class GitHubComparison
 {
     [JsonPropertyName("commits")]
     public List<GitHubCommit>? Commits { get; set; }
 }
 
-file sealed class GitHubCommit
+internal sealed class GitHubCommit
 {
     [JsonPropertyName("sha")]
     public string? Sha { get; set; }
@@ -1072,7 +1188,7 @@ file sealed class GitHubCommit
     public GitHubCommitDetail? Commit { get; set; }
 }
 
-file sealed class GitHubCommitDetail
+internal sealed class GitHubCommitDetail
 {
     [JsonPropertyName("message")]
     public string? Message { get; set; }
@@ -1081,7 +1197,7 @@ file sealed class GitHubCommitDetail
     public GitHubCommitAuthor? Author { get; set; }
 }
 
-file sealed class GitHubCommitAuthor
+internal sealed class GitHubCommitAuthor
 {
     [JsonPropertyName("date")]
     public string? Date { get; set; }

@@ -45,6 +45,7 @@ builder.Services.AddSingleton<FluxMonitor.Backend.Services.IBuildMetadataProvide
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.DeviceConfigStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.DeviceStateStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.NetworkManagementService>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.WifiCredentialStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.BluetoothManagementService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.HostServicesCatalogService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.ManagedRestartService>();
@@ -152,6 +153,9 @@ using (var scope = app.Services.CreateScope())
 
     var notificationConfigStore = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.NotificationConfigStore>();
     await notificationConfigStore.InitializeAsync(CancellationToken.None);
+
+    var wifiCredentialStore = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.WifiCredentialStore>();
+    await wifiCredentialStore.InitializeAsync(CancellationToken.None);
 }
 
 app.UseDefaultFiles();

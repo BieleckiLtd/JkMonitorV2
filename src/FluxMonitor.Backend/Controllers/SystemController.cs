@@ -12,8 +12,10 @@ public sealed class SystemController(
     SystemUpdateService updateService,
     UpdateProgressBroadcaster updateProgressBroadcaster,
     NetworkManagementService networkManagementService,
+    WifiCredentialStore wifiCredentialStore,
     BluetoothManagementService bluetoothManagementService,
-    HostServicesCatalogService hostServicesCatalogService) : ControllerBase
+    HostServicesCatalogService hostServicesCatalogService,
+    ILogger<SystemController> logger) : ControllerBase
 {
     [HttpGet("services/catalog")]
     public async Task<ActionResult<SystemServicesCatalogSnapshot>> GetServicesCatalog(CancellationToken cancellationToken)
@@ -54,17 +56,51 @@ public sealed class SystemController(
         return Ok(result);
     }
 
+    [HttpGet("network/wifi/credential")]
+    public async Task<ActionResult<WifiStoredCredentialResult>> GetWifiCredential(
+        [FromQuery] string ssid,
+        CancellationToken cancellationToken = default)
+    {
+        var result = await wifiCredentialStore.GetCredentialAsync(ssid, cancellationToken);
+        return Ok(result);
+    }
+
     [HttpPost("network/wifi/connect")]
     public async Task<ActionResult<WifiConnectResult>> ConnectWifi(
         [FromBody] WifiConnectRequest request,
         CancellationToken cancellationToken)
     {
+        var password = request.Password;
+        if (string.IsNullOrWhiteSpace(password))
+        {
+            var storedCredential = await wifiCredentialStore.GetCredentialAsync(request.Ssid, cancellationToken);
+            if (storedCredential.HasStoredPassword)
+            {
+                password = storedCredential.Password;
+            }
+        }
+
         var result = await networkManagementService.ConnectWifiAsync(
             request.Ssid,
-            request.Password,
+            password,
             request.InterfaceName,
             request.Bssid,
             cancellationToken);
+
+        if (result.Success)
+        {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(request.Password))
+                {
+                    await wifiCredentialStore.SaveCredentialAsync(request.Ssid, request.Password, request.Bssid, cancellationToken);
+                }
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Wi-Fi password storage update failed for SSID {Ssid}.", request.Ssid);
+            }
+        }
 
         return result.Success ? Ok(result) : BadRequest(result);
     }
@@ -116,9 +152,9 @@ public sealed class SystemController(
     }
 
     [HttpPost("update/install")]
-    public IActionResult InstallUpdate()
+    public async Task<IActionResult> InstallUpdate(CancellationToken cancellationToken)
     {
-        var result = updateService.StartUpdate();
+        var result = await updateService.StartUpdateAsync(cancellationToken);
         if (!result.Succeeded)
         {
             return BadRequest(new { error = result.Error, progress = result.Progress });

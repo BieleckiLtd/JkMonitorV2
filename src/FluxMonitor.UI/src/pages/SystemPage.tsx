@@ -53,6 +53,7 @@ type BuildRuntimeInfo = {
   informationalVersion?: string | null;
   workflowRunNumber?: string | null;
   workflowRunAttempt?: string | null;
+  builtAt?: string | null;
 };
 
 type MonitorRuntimeStatus = {
@@ -94,6 +95,10 @@ type UpdateCheckResult = {
   currentReleaseTag?: string | null;
   currentSourceRevision?: string | null;
   currentBuiltAt?: string | null;
+  currentChannel?: string | null;
+  targetChannel?: string | null;
+  targetReleaseTag?: string | null;
+  checkedAt?: string | null;
   canUpdate: boolean;
   reason?: string | null;
   updateAvailable: boolean;
@@ -191,6 +196,14 @@ type WifiConnectResult = {
   interfaceName?: string | null;
   connectedSsid?: string | null;
   hasInternetAccess?: boolean | null;
+};
+
+type WifiStoredCredentialResult = {
+  storageAvailable: boolean;
+  ssid?: string | null;
+  hasStoredPassword: boolean;
+  password?: string | null;
+  lastBssid?: string | null;
 };
 
 type WifiPowerResult = {
@@ -293,6 +306,8 @@ export function SystemPage() {
   const [wifiTargetSsid, setWifiTargetSsid] = useState('');
   const [wifiTargetBssid, setWifiTargetBssid] = useState<string | null>(null);
   const [wifiPassword, setWifiPassword] = useState('');
+  const [wifiShowPassword, setWifiShowPassword] = useState(false);
+  const [wifiPasswordDirty, setWifiPasswordDirty] = useState(false);
   const [wifiConnectDialog, setWifiConnectDialog] = useState<WifiConnectDialogState | null>(null);
   const [wifiFeedback, setWifiFeedback] = useState<InlineFeedback | null>(null);
   const [wifiConnectLoading, setWifiConnectLoading] = useState(false);
@@ -306,6 +321,7 @@ export function SystemPage() {
   const [pendingConnectivityAction, setPendingConnectivityAction] = useState<PendingConnectivityAction | null>(null);
   const [expandedConnectivitySection, setExpandedConnectivitySection] = useState<'wifi' | 'bluetooth' | 'ethernet' | null>(null);
   const previousUpdateStatusRef = useRef<UpdateProgress['status'] | null>(null);
+  const wifiCredentialRequestRef = useRef(0);
 
   useEffect(() => {
     let isMounted = true;
@@ -393,6 +409,53 @@ export function SystemPage() {
       setUpdateChecking(false);
     }
   }, []);
+
+  useEffect(() => {
+    if (!wifiConnectDialog?.requiresPassword) {
+      return;
+    }
+
+    const trimmedSsid = wifiTargetSsid.trim();
+    if (!trimmedSsid) {
+      if (!wifiPasswordDirty) {
+        setWifiPassword('');
+      }
+
+      return;
+    }
+
+    let isCancelled = false;
+    const requestId = ++wifiCredentialRequestRef.current;
+
+    const loadWifiCredential = async () => {
+      try {
+        const response = await fetch(`/api/system/network/wifi/credential?ssid=${encodeURIComponent(trimmedSsid)}`, {
+          cache: 'no-store',
+        });
+
+        if (!response.ok) {
+          return;
+        }
+
+        const data = await response.json() as WifiStoredCredentialResult;
+        if (isCancelled || requestId !== wifiCredentialRequestRef.current) {
+          return;
+        }
+
+        if (!wifiPasswordDirty) {
+          setWifiPassword(data.password ?? '');
+        }
+      } catch {
+        // Best effort. Leave the current password field unchanged on lookup failures.
+      }
+    };
+
+    void loadWifiCredential();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [wifiConnectDialog, wifiPasswordDirty, wifiTargetSsid]);
 
   useEffect(() => {
     if (!softwareUpdateSectionOpen) {
@@ -560,6 +623,8 @@ export function SystemPage() {
 
       if (response.ok && data.success) {
         setWifiPassword('');
+        setWifiShowPassword(false);
+        setWifiPasswordDirty(false);
         setWifiConnectDialog(null);
         setExpandedConnectivitySection('wifi');
         if (data.interfaceName) {
@@ -599,6 +664,8 @@ export function SystemPage() {
         if (!data.powered) {
           setWifiAccessPoints({});
           setWifiPassword('');
+          setWifiShowPassword(false);
+          setWifiPasswordDirty(false);
           setExpandedConnectivitySection((current) => current === 'wifi' ? null : current);
         } else {
           setExpandedConnectivitySection('wifi');
@@ -670,6 +737,8 @@ export function SystemPage() {
     setWifiTargetSsid(ssid);
     setWifiTargetBssid(bssid ?? null);
     setWifiPassword('');
+    setWifiShowPassword(false);
+    setWifiPasswordDirty(false);
     setWifiConnectDialog({ interfaceName, ssid, bssid, requiresPassword, allowSsidEdit, title });
   };
 
@@ -690,6 +759,8 @@ export function SystemPage() {
     setWifiTargetSsid(accessPoint.ssid);
     setWifiTargetBssid(accessPoint.bssid ?? null);
     setWifiPassword('');
+    setWifiShowPassword(false);
+    setWifiPasswordDirty(false);
     await connectWifi({
       ssid: accessPoint.ssid,
       interfaceName: accessPoint.interfaceName,
@@ -870,6 +941,10 @@ export function SystemPage() {
   const storageUsagePercent = getUsagePercent(storageUsed, storageTotal);
   const applicationUptime = status ? formatDuration(status.startedAt, status.reportedAt) : noDataLabel;
   const workflowRun = formatWorkflowRun(status?.build?.workflowRunNumber, status?.build?.workflowRunAttempt);
+  const updateChannel = updateCheck?.currentChannel ?? getReleaseChannel(status?.build?.releaseTag);
+  const installedReleaseTag = updateCheck?.currentReleaseTag ?? status?.build?.releaseTag ?? null;
+  const installedCommit = updateCheck?.currentSourceRevision ?? status?.build?.sourceRevisionId ?? null;
+  const installedBuiltAt = updateCheck?.currentBuiltAt ?? status?.build?.builtAt ?? null;
   const ethernetInterfaces = connectivity?.network.ethernetInterfaces ?? [];
   const wifiInterfaces = connectivity?.network.wifiInterfaces ?? [];
   const wifiPowered = connectivity?.network.wifiPowered ?? null;
@@ -888,13 +963,13 @@ export function SystemPage() {
   const softwareUpdateSummary = updateProgress?.isRunning
     ? updateProgress.stage
     : updateChecking
-      ? 'Checking for updates'
+      ? `Checking ${formatReleaseChannel(updateChannel)} channel`
       : updateCheck?.checkError
         ? 'Update check failed'
         : updateCheck?.updateAvailable
-          ? 'Update available'
-          : updateCheck?.currentReleaseTag
-            ? `Installed ${updateCheck.currentReleaseTag}`
+          ? `${updateCheck.targetReleaseTag ?? 'Update'} available`
+          : installedReleaseTag
+            ? `Installed ${installedReleaseTag}`
             : 'Expand to check for updates';
   const wifiSummary = !connectivity?.network.supported
     ? connectivity?.network.statusMessage ?? 'Wi-Fi unavailable'
@@ -1033,16 +1108,18 @@ export function SystemPage() {
               </CardHeader>
               {softwareUpdateSectionOpen ? (
                 <CardContent className='space-y-4 border-t border-border/60 pt-5'>
-                  <DetailTile label='Workflow' value={workflowRun} />
-                  {updateChecking && !updateCheck ? (
-                    <div className='flex items-center justify-center py-6'>
-                      <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
-                    </div>
-                  ) : updateCheck ? (
+                  <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-3'>
+                    <DetailTile label='Channel' value={formatReleaseChannel(updateChannel)} />
+                    <DetailTile label='Installed release' value={installedReleaseTag ?? noDataLabel} />
+                    <DetailTile label='Installed commit' value={formatCommit(installedCommit)} />
+                    <DetailTile label='Built at' value={formatTimestamp(installedBuiltAt)} />
+                    <DetailTile label='Last checked' value={updateCheck?.checkedAt ? formatTimestamp(updateCheck.checkedAt) : 'Not checked yet'} />
+                    <DetailTile label='Workflow run' value={workflowRun} />
+                    {updateCheck?.targetReleaseTag ? <DetailTile label='Latest release' value={updateCheck.targetReleaseTag} /> : null}
+                    {updateCheck?.remoteReleasePublishedAt ? <DetailTile label='Published' value={formatTimestamp(updateCheck.remoteReleasePublishedAt)} /> : null}
+                  </div>
+                  {updateCheck ? (
                     <>
-                      <DetailTile label='Installed release' value={updateCheck.currentReleaseTag ?? noDataLabel} />
-                      <DetailTile label='Installed commit' value={formatCommit(updateCheck.currentSourceRevision)} />
-                      {updateCheck.currentBuiltAt ? <DetailTile label='Built at' value={formatTimestamp(updateCheck.currentBuiltAt)} /> : null}
                       {updateCheck.checkError ? (
                         <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
                           Update check failed: {updateCheck.checkError}
@@ -1053,8 +1130,13 @@ export function SystemPage() {
                             <Download className='h-4 w-4' />
                             A new version is available.
                           </div>
+                          {updateCheck.targetReleaseTag ? (
+                            <div className='mt-1 text-xs text-primary/80'>
+                              {updateCheck.targetReleaseTag} on the {formatReleaseChannel(updateCheck.targetChannel)} channel
+                            </div>
+                          ) : null}
                           {updateCheck.remoteReleasePublishedAt ? (
-                            <div className='mt-1 text-xs text-primary/80'>Built {formatTimestamp(updateCheck.remoteReleasePublishedAt)}</div>
+                            <div className='mt-1 text-xs text-primary/80'>Published {formatTimestamp(updateCheck.remoteReleasePublishedAt)}</div>
                           ) : null}
                           {updateCheck.commits && updateCheck.commits.length > 0 ? (
                             <div className='mt-2 space-y-1'>
@@ -1131,7 +1213,7 @@ export function SystemPage() {
                       ) : null}
                     </>
                   ) : (
-                    <div className='text-sm text-muted-foreground'>Unable to check for updates.</div>
+                    <div className='text-sm text-muted-foreground'>Use the button below to check the current release channel for updates.</div>
                   )}
 
                   <div className='flex flex-col gap-2 pt-2'>
@@ -1714,11 +1796,23 @@ export function SystemPage() {
                 disabled={!wifiConnectDialog.allowSsidEdit}
               />
               <Input
-                type='password'
+                type={wifiShowPassword ? 'text' : 'password'}
                 value={wifiPassword}
-                onChange={(event) => setWifiPassword(event.target.value)}
+                onChange={(event) => {
+                  setWifiPassword(event.target.value);
+                  setWifiPasswordDirty(true);
+                }}
                 placeholder={wifiConnectDialog.requiresPassword ? 'Password' : 'Password (optional)'}
               />
+              <label className='flex items-center gap-2 text-xs text-muted-foreground'>
+                <input
+                  type='checkbox'
+                  checked={wifiShowPassword}
+                  onChange={(event) => setWifiShowPassword(event.target.checked)}
+                  className='h-4 w-4 rounded border border-input bg-background/70'
+                />
+                <span>Show password</span>
+              </label>
             </div>
 
             <div className='mt-5 flex justify-end gap-2'>
@@ -1727,6 +1821,8 @@ export function SystemPage() {
                 onClick={() => {
                   setWifiConnectDialog(null);
                   setWifiPassword('');
+                  setWifiShowPassword(false);
+                  setWifiPasswordDirty(false);
                   setWifiFeedback(null);
                 }}
                 className='inline-flex items-center justify-center rounded-xl border border-border bg-background/70 px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
@@ -2215,6 +2311,18 @@ function formatCommit(value: string | null | undefined) {
   }
 
   return value.slice(0, 12);
+}
+
+function getReleaseChannel(releaseTag: string | null | undefined) {
+  return releaseTag === 'dev-latest' ? 'dev' : 'main';
+}
+
+function formatReleaseChannel(channel: string | null | undefined) {
+  if (!channel) {
+    return noDataLabel;
+  }
+
+  return channel === 'dev' ? 'Dev' : channel === 'main' ? 'Main' : channel;
 }
 
 function formatWorkflowRun(runNumber: string | null | undefined, runAttempt: string | null | undefined) {

@@ -109,6 +109,19 @@ public sealed record class WifiConnectResult
     public bool? HasInternetAccess { get; init; }
 }
 
+public sealed record class WifiStoredCredentialResult
+{
+    public bool StorageAvailable { get; init; }
+
+    public string? Ssid { get; init; }
+
+    public bool HasStoredPassword { get; init; }
+
+    public string? Password { get; init; }
+
+    public string? LastBssid { get; init; }
+}
+
 public sealed record class WifiPowerResult
 {
     public bool Success { get; init; }

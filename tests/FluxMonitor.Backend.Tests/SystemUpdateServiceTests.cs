@@ -52,6 +52,58 @@ public class SystemUpdateServiceTests
         Assert.Equal("2222222222222222222222222222222222222222222222222222222222222222", result.RemoteChecksum);
         Assert.True(result.UpdateAvailable);
         Assert.Null(result.CheckError);
+        Assert.Equal("dev", result.CurrentChannel);
+        Assert.Equal("dev-latest", result.TargetReleaseTag);
+        Assert.NotNull(result.CheckedAt);
+    }
+
+    [Fact]
+    public async Task CheckForUpdateAsync_UsesLatestStableReleaseForMainChannel()
+    {
+        using var releaseInfoScope = TemporaryReleaseInfoScope.Create(
+            "FLUXMONITOR_RELEASE_SHA256=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa");
+
+        var service = CreateService(
+            new StubHttpClientFactory(new StubHttpMessageHandler(request =>
+            {
+                if (request.RequestUri?.AbsoluteUri == "https://api.github.com/repos/BieleckiLtd/JkMonitorV2/releases/latest")
+                {
+                    return CreateJsonResponse("""
+                        {
+                          "tag_name": "v1.2.3",
+                          "published_at": "2026-03-29T09:00:00Z",
+                          "assets": [
+                            {
+                              "name": "fluxmonitor-backend-linux-arm64.tar.gz.sha256",
+                              "browser_download_url": "https://example.test/stable.sha256"
+                            }
+                          ]
+                        }
+                        """);
+                }
+
+                if (request.RequestUri?.AbsoluteUri == "https://example.test/stable.sha256")
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb  fluxmonitor-backend-linux-arm64.tar.gz")
+                    };
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            })),
+            new BuildRuntimeInfo
+            {
+                ReleaseTag = "v1.0.0",
+                SourceRevisionId = "stable-local-sha"
+            });
+
+        var result = await service.CheckForUpdateAsync(CancellationToken.None);
+
+        Assert.Equal("main", result.CurrentChannel);
+        Assert.Equal("main", result.TargetChannel);
+        Assert.Equal("v1.2.3", result.TargetReleaseTag);
+        Assert.True(result.UpdateAvailable);
     }
 
     [Fact]
@@ -87,7 +139,7 @@ public class SystemUpdateServiceTests
         Assert.Equal("There is no update in progress.", result.Error);
     }
 
-    private static SystemUpdateService CreateService(IHttpClientFactory httpClientFactory)
+    private static SystemUpdateService CreateService(IHttpClientFactory httpClientFactory, BuildRuntimeInfo? buildInfo = null)
     {
         var environment = new TestHostEnvironment();
         var lifetime = new TestHostApplicationLifetime();
@@ -98,7 +150,7 @@ public class SystemUpdateServiceTests
 
         return new SystemUpdateService(
             httpClientFactory,
-            new FakeBuildMetadataProvider(new BuildRuntimeInfo
+            new FakeBuildMetadataProvider(buildInfo ?? new BuildRuntimeInfo
             {
                 ReleaseTag = "dev-latest",
                 SourceRevisionId = "local-sha"
