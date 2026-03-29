@@ -261,6 +261,7 @@ type PendingConnectivityAction =
 type WifiConnectDialogState = {
   interfaceName: string;
   ssid: string;
+  bssid?: string | null;
   requiresPassword: boolean;
   allowSsidEdit: boolean;
   title: string;
@@ -290,6 +291,7 @@ export function SystemPage() {
   const [wifiAccessPoints, setWifiAccessPoints] = useState<Record<string, WifiAccessPointInfo[]>>({});
   const [wifiTargetInterface, setWifiTargetInterface] = useState('');
   const [wifiTargetSsid, setWifiTargetSsid] = useState('');
+  const [wifiTargetBssid, setWifiTargetBssid] = useState<string | null>(null);
   const [wifiPassword, setWifiPassword] = useState('');
   const [wifiConnectDialog, setWifiConnectDialog] = useState<WifiConnectDialogState | null>(null);
   const [wifiFeedback, setWifiFeedback] = useState<InlineFeedback | null>(null);
@@ -428,6 +430,7 @@ export function SystemPage() {
     if (!firstWifiInterface) {
       setWifiTargetInterface('');
       setWifiTargetSsid('');
+      setWifiTargetBssid(null);
       return;
     }
 
@@ -439,6 +442,7 @@ export function SystemPage() {
       return firstWifiInterface.name;
     });
     setWifiTargetSsid((current) => current || firstWifiInterface.connectedSsid || '');
+    setWifiTargetBssid((current) => current || firstWifiInterface.connectedBssid || null);
   }, [connectivity]);
 
   const installUpdate = async () => {
@@ -497,8 +501,10 @@ export function SystemPage() {
       const activeAccessPoint = data.accessPoints.find((accessPoint) => accessPoint.isActive);
       if (activeAccessPoint) {
         setWifiTargetSsid(activeAccessPoint.ssid);
+        setWifiTargetBssid(activeAccessPoint.bssid ?? null);
       } else if (data.accessPoints.length > 0) {
         setWifiTargetSsid((current) => current || data.accessPoints[0].ssid);
+        setWifiTargetBssid((current) => current ?? data.accessPoints[0].bssid ?? null);
       }
 
       if (data.statusMessage) {
@@ -518,10 +524,11 @@ export function SystemPage() {
     }
   };
 
-  const connectWifi = async (request?: { ssid?: string; interfaceName?: string; password?: string | null }) => {
+  const connectWifi = async (request?: { ssid?: string; interfaceName?: string; password?: string | null; bssid?: string | null }) => {
     const ssid = request?.ssid ?? wifiTargetSsid;
     const interfaceName = request?.interfaceName ?? wifiTargetInterface;
     const password = request?.password ?? wifiPassword;
+    const bssid = request?.bssid ?? wifiTargetBssid;
 
     if (!ssid.trim()) {
       setWifiFeedback({ message: 'Enter or select an SSID before connecting.', isError: true });
@@ -544,6 +551,7 @@ export function SystemPage() {
           ssid: ssid.trim(),
           password: password || null,
           interfaceName,
+          bssid,
         }),
       });
 
@@ -655,12 +663,14 @@ export function SystemPage() {
     requiresPassword,
     allowSsidEdit,
     title,
+    bssid,
   }: WifiConnectDialogState) => {
     setWifiFeedback(null);
     setWifiTargetInterface(interfaceName);
     setWifiTargetSsid(ssid);
+    setWifiTargetBssid(bssid ?? null);
     setWifiPassword('');
-    setWifiConnectDialog({ interfaceName, ssid, requiresPassword, allowSsidEdit, title });
+    setWifiConnectDialog({ interfaceName, ssid, bssid, requiresPassword, allowSsidEdit, title });
   };
 
   const selectWifiAccessPoint = async (accessPoint: WifiAccessPointInfo) => {
@@ -668,6 +678,7 @@ export function SystemPage() {
       openWifiConnectDialog({
         interfaceName: accessPoint.interfaceName,
         ssid: accessPoint.ssid,
+        bssid: accessPoint.bssid,
         requiresPassword: true,
         allowSsidEdit: false,
         title: accessPoint.ssid,
@@ -677,11 +688,13 @@ export function SystemPage() {
 
     setWifiTargetInterface(accessPoint.interfaceName);
     setWifiTargetSsid(accessPoint.ssid);
+    setWifiTargetBssid(accessPoint.bssid ?? null);
     setWifiPassword('');
     await connectWifi({
       ssid: accessPoint.ssid,
       interfaceName: accessPoint.interfaceName,
       password: null,
+      bssid: accessPoint.bssid,
     });
   };
 
@@ -694,6 +707,7 @@ export function SystemPage() {
     openWifiConnectDialog({
       interfaceName: selectedWifiInterface.name,
       ssid: '',
+      bssid: null,
       requiresPassword: true,
       allowSsidEdit: true,
       title: 'Other network',
@@ -732,6 +746,7 @@ export function SystemPage() {
   const selectWifiInterface = async (wifiInterface: WifiInterfaceSnapshot) => {
     setWifiTargetInterface(wifiInterface.name);
     setWifiTargetSsid(wifiInterface.connectedSsid || '');
+    setWifiTargetBssid(wifiInterface.connectedBssid || null);
     await scanWifi(wifiInterface.name);
   };
 
@@ -747,6 +762,7 @@ export function SystemPage() {
     if (section === 'wifi' && connectivity?.network.supported && wifiPowered !== false && selectedWifiInterface) {
       setWifiTargetInterface(selectedWifiInterface.name);
       setWifiTargetSsid(selectedWifiInterface.connectedSsid || '');
+      setWifiTargetBssid(selectedWifiInterface.connectedBssid || null);
       await scanWifi(selectedWifiInterface.name);
     }
   };
@@ -1688,7 +1704,12 @@ export function SystemPage() {
               ) : null}
               <Input
                 value={wifiTargetSsid}
-                onChange={(event) => setWifiTargetSsid(event.target.value)}
+                onChange={(event) => {
+                  setWifiTargetSsid(event.target.value);
+                  if (wifiConnectDialog.allowSsidEdit) {
+                    setWifiTargetBssid(null);
+                  }
+                }}
                 placeholder='SSID'
                 disabled={!wifiConnectDialog.allowSsidEdit}
               />

@@ -61,6 +61,7 @@ public sealed class SystemController(
             request.Ssid,
             request.Password,
             request.InterfaceName,
+            request.Bssid,
             cancellationToken);
 
         return result.Success ? Ok(result) : BadRequest(result);
@@ -372,7 +373,7 @@ public sealed class NetworkInterfaceInfo
     public long? SpeedMbps { get; set; }
 }
 
-public sealed record WifiConnectRequest(string Ssid, string? Password, string? InterfaceName);
+public sealed record WifiConnectRequest(string Ssid, string? Password, string? InterfaceName, string? Bssid);
 public sealed record WifiPowerRequest(bool Enabled);
 public sealed record EthernetDisconnectRequest(string InterfaceName);
 

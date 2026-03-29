@@ -120,6 +120,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         string ssid,
         string? password,
         string? interfaceName,
+        string? bssid,
         CancellationToken cancellationToken = default)
     {
         if (!OperatingSystem.IsLinux())
@@ -164,10 +165,12 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         }
 
         var trimmedSsid = ssid.Trim();
+        var trimmedBssid = string.IsNullOrWhiteSpace(bssid) ? null : bssid.Trim().ToUpperInvariant();
         logger.LogInformation(
-            "Connecting Wi-Fi interface {InterfaceName} to SSID {Ssid}.",
+            "Connecting Wi-Fi interface {InterfaceName} to SSID {Ssid}. Bssid={Bssid}",
             resolvedInterfaceName,
-            trimmedSsid);
+            trimmedSsid,
+            trimmedBssid ?? "<none>");
 
         var arguments = new List<string>
         {
@@ -181,6 +184,12 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             resolvedInterfaceName
         };
 
+        if (!string.IsNullOrWhiteSpace(trimmedBssid))
+        {
+            arguments.Add("bssid");
+            arguments.Add(trimmedBssid);
+        }
+
         if (!string.IsNullOrWhiteSpace(password))
         {
             arguments.Add("password");
@@ -190,12 +199,19 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         var result = await RunNmcliAsync(arguments, cancellationToken);
         if (!result.Succeeded)
         {
-            var observation = await ObserveWifiConnectionStateAsync(resolvedInterfaceName, trimmedSsid, attempts: 1, cancellationToken);
+            var observation = await ObserveWifiConnectionStateAsync(resolvedInterfaceName, trimmedSsid, trimmedBssid, attempts: 1, cancellationToken);
             var message = BuildWifiConnectFailureMessage(trimmedSsid, result, observation);
             logger.LogWarning(
-                "Wi-Fi connect failed for interface {InterfaceName} and SSID {Ssid}: {ErrorMessage}",
+                "Wi-Fi connect failed for interface {InterfaceName} and SSID {Ssid}. Bssid={Bssid}. ExitCode={ExitCode}. StdOut={StdOut}. StdErr={StdErr}. ObservationState={ConnectionState}. ObservationSsid={ConnectedSsid}. ObservationBssid={ConnectedBssid}. Message={ErrorMessage}",
                 resolvedInterfaceName,
                 trimmedSsid,
+                trimmedBssid ?? "<none>",
+                result.ExitCode,
+                result.StandardOutput,
+                result.ErrorOutput,
+                observation.ConnectionState,
+                observation.ConnectedSsid,
+                observation.ConnectedBssid,
                 message);
             return new WifiConnectResult
             {
@@ -207,16 +223,21 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             };
         }
 
-        var verification = await ObserveWifiConnectionStateAsync(resolvedInterfaceName, trimmedSsid, attempts: 12, cancellationToken);
+        var verification = await ObserveWifiConnectionStateAsync(resolvedInterfaceName, trimmedSsid, trimmedBssid, attempts: 12, cancellationToken);
         if (!verification.IsConnectedToTarget)
         {
             var message = BuildWifiConnectUnverifiedMessage(trimmedSsid, verification, result);
             logger.LogWarning(
-                "Wi-Fi connect command succeeded for interface {InterfaceName} and SSID {Ssid}, but the connection could not be verified. State={ConnectionState}, ConnectedSsid={ConnectedSsid}",
+                "Wi-Fi connect command succeeded for interface {InterfaceName} and SSID {Ssid}, but the connection could not be verified. Bssid={Bssid}. ExitCode={ExitCode}. StdOut={StdOut}. StdErr={StdErr}. State={ConnectionState}. ConnectedSsid={ConnectedSsid}. ConnectedBssid={ConnectedBssid}",
                 resolvedInterfaceName,
                 trimmedSsid,
+                trimmedBssid ?? "<none>",
+                result.ExitCode,
+                result.StandardOutput,
+                result.ErrorOutput,
                 verification.ConnectionState,
-                verification.ConnectedSsid);
+                verification.ConnectedSsid,
+                verification.ConnectedBssid);
 
             return new WifiConnectResult
             {
@@ -703,6 +724,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
     private async Task<WifiConnectionObservation> ObserveWifiConnectionStateAsync(
         string interfaceName,
         string targetSsid,
+        string? targetBssid,
         int attempts,
         CancellationToken cancellationToken)
     {
@@ -710,6 +732,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             interfaceName,
             ConnectionState: null,
             ConnectedSsid: null,
+            ConnectedBssid: null,
             HasInternetAccess: null,
             IsConnectedToTarget: false);
 
@@ -721,7 +744,11 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
 
             var currentAccessPoint = await TryGetCurrentAccessPointAsync(interfaceName, cancellationToken);
             var connectedSsid = currentAccessPoint?.Ssid;
-            var isConnectedToTarget = string.Equals(connectedSsid, targetSsid, StringComparison.Ordinal);
+            var connectedBssid = currentAccessPoint?.Bssid;
+            var matchesSsid = string.Equals(connectedSsid, targetSsid, StringComparison.Ordinal);
+            var matchesBssid = string.IsNullOrWhiteSpace(targetBssid)
+                || string.Equals(connectedBssid, targetBssid, StringComparison.OrdinalIgnoreCase);
+            var isConnectedToTarget = matchesSsid && matchesBssid;
             bool? hasInternetAccess = null;
             if (isConnectedToTarget)
             {
@@ -732,6 +759,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
                 interfaceName,
                 deviceStatus?.State,
                 connectedSsid,
+                connectedBssid,
                 hasInternetAccess,
                 isConnectedToTarget);
 
@@ -1206,7 +1234,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             && !string.IsNullOrWhiteSpace(observation.ConnectedSsid)
             && !string.Equals(observation.ConnectedSsid, ssid, StringComparison.Ordinal))
         {
-            return $"Unable to connect to '{ssid}'. The adapter is still on '{observation.ConnectedSsid}'.";
+            return $"Unable to connect to '{ssid}'. NetworkManager reported: {message} The adapter is still on '{observation.ConnectedSsid}'.";
         }
 
         return message;
@@ -1237,7 +1265,8 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         if (!string.IsNullOrWhiteSpace(observation.ConnectedSsid)
             && !string.Equals(observation.ConnectedSsid, ssid, StringComparison.Ordinal))
         {
-            return $"Unable to connect to '{ssid}'. The adapter is still on '{observation.ConnectedSsid}'.";
+            var baseMessage = BuildCommandFailureMessage(result, $"Unable to confirm a connection to '{ssid}'.");
+            return $"Unable to connect to '{ssid}'. NetworkManager reported: {baseMessage} The adapter is still on '{observation.ConnectedSsid}'.";
         }
 
         if (string.Equals(observation.ConnectionState, "disconnected", StringComparison.OrdinalIgnoreCase))
@@ -1360,6 +1389,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         string InterfaceName,
         string? ConnectionState,
         string? ConnectedSsid,
+        string? ConnectedBssid,
         bool? HasInternetAccess,
         bool IsConnectedToTarget);
 
