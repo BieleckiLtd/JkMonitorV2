@@ -1763,6 +1763,8 @@ function UsagePanel({
   details?: string[];
   iconClassName?: string;
 }) {
+  const footerSegments = [secondary, ...(details ?? [])];
+
   return (
     <div className='space-y-3'>
       <div className='flex items-center justify-between gap-3'>
@@ -1778,11 +1780,13 @@ function UsagePanel({
       <div className='h-2 overflow-hidden rounded-full bg-muted'>
         <div className='h-full rounded-full bg-primary transition-[width] duration-500 ease-out' style={{ width: `${Math.max(percent ?? 0, 4)}%` }} />
       </div>
-      <div className='space-y-1'>
-        <div className='text-xs text-muted-foreground'>{secondary}</div>
-        {details?.length ? (
-          <div className='text-xs text-muted-foreground'>{details.join(' • ')}</div>
-        ) : null}
+      <div className='flex flex-wrap items-center gap-y-1 text-xs text-muted-foreground'>
+        {footerSegments.map((segment, index) => (
+          <span key={`${index}-${segment}`} className='whitespace-nowrap'>
+            {index > 0 ? <span className='px-1 text-muted-foreground/70'>•</span> : null}
+            {segment}
+          </span>
+        ))}
       </div>
     </div>
   );

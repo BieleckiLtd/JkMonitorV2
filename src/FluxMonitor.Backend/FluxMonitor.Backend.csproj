@@ -74,14 +74,6 @@
     <ProjectReference Include="..\shared\FluxMonitor.Contracts\FluxMonitor.Contracts.csproj" />
   </ItemGroup>
 
-  <!-- Copy device definition JSON files to output so the runtime can find them -->
-  <ItemGroup>
-    <Content Include="..\..\devices\**\*.json" Link="devices\%(RecursiveDir)%(Filename)%(Extension)">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
-    </Content>
-  </ItemGroup>
-
   <ItemGroup>
     <FrontendRestoreInputs Include="$(FluxMonitorFrontendRoot)\package.json" />
     <FrontendRestoreInputs Include="$(FluxMonitorFrontendRoot)\package-lock.json" />

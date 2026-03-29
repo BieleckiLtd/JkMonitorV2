@@ -107,7 +107,7 @@ export function MainLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
   const isMobileSidebarOpen = useAppStore((state) => state.isMobileSidebarOpen);
   const hasUpdateOverlay = useAppStore((state) => state.updateProgress !== null);
-  const isFullWidthRoute = location.pathname === '/';
+  const isFullWidthRoute = location.pathname === '/' || location.pathname === '/services';
 
   useEffect(() => {
     document.body.style.overflow = isMobileSidebarOpen || hasUpdateOverlay ? 'hidden' : '';

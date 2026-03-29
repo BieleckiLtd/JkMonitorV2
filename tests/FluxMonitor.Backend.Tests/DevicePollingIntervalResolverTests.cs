@@ -9,6 +9,9 @@ namespace FluxMonitor.Backend.Tests;
 
 public sealed class DevicePollingIntervalResolverTests
 {
+    private static readonly string RepositoryRoot = Path.GetFullPath(
+        Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+
     [Fact]
     public void Resolve_UsesFastestPollGroupInterval()
     {
@@ -51,10 +54,10 @@ public sealed class DevicePollingIntervalResolverTests
     {
         var definitionLoader = new DeviceDefinitionLoader(
             "devices",
-            Directory.GetCurrentDirectory(),
+            RepositoryRoot,
             new StubHttpClientFactory(),
             NullLogger<DeviceDefinitionLoader>.Instance);
-        definitionLoader.LoadAll();
+        definitionLoader.LoadFromJson(File.ReadAllText(Path.Combine(RepositoryRoot, "devices", "jk-inverter-bms.json")));
 
         var device = new DeviceConfiguration
         {

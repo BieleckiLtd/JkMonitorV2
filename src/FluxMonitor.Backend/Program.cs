@@ -14,10 +14,14 @@ var storageConnectionString = monitorSection.GetValue<string>("Storage:Connectio
 var storageConfigured =
     string.Equals(storageProvider, "TimescaleDb", StringComparison.OrdinalIgnoreCase) &&
     !string.IsNullOrWhiteSpace(storageConnectionString);
-var logStorageOptions = builder.Configuration.GetSection("Monitor:LogStorage").Get<LogStorageOptions>() ?? new LogStorageOptions();
+var configuredLogStorageOptions = builder.Configuration.GetSection("Monitor:LogStorage").Get<LogStorageOptions>();
+var logStorageOptions = LogStorageOptions.Resolve(
+    configuredLogStorageOptions,
+    storageConfigured ? storageConnectionString : null);
 var logStore = new PostgresLogStore(logStorageOptions);
 
 await logStore.InitializeAsync(CancellationToken.None);
+await ManagedInstallAudit.TryPersistPendingAuditAsync(builder.Environment.ContentRootPath, logStore, CancellationToken.None);
 
 builder.Services
     .AddOptions<FluxMonitor.Contracts.Configuration.MonitorConfiguration>()
@@ -91,6 +95,36 @@ if (storageConfigured)
 }
 
 var app = builder.Build();
+var buildInfo = app.Services.GetRequiredService<FluxMonitor.Backend.Services.IBuildMetadataProvider>().GetBuildInfo();
+var lifecycleLogger = app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("FluxMonitor.Lifecycle");
+
+lifecycleLogger.LogInformation(
+    "Flux Monitor application starting. Environment={EnvironmentName}, ReleaseTag={ReleaseTag}, InformationalVersion={InformationalVersion}, MachineName={MachineName}.",
+    app.Environment.EnvironmentName,
+    buildInfo.ReleaseTag ?? "<none>",
+    buildInfo.InformationalVersion ?? "<none>",
+    Environment.MachineName);
+
+app.Lifetime.ApplicationStarted.Register(() =>
+    lifecycleLogger.LogInformation(
+        "Flux Monitor application started. Environment={EnvironmentName}, ReleaseTag={ReleaseTag}, InformationalVersion={InformationalVersion}.",
+        app.Environment.EnvironmentName,
+        buildInfo.ReleaseTag ?? "<none>",
+        buildInfo.InformationalVersion ?? "<none>"));
+
+app.Lifetime.ApplicationStopping.Register(() =>
+    lifecycleLogger.LogInformation(
+        "Flux Monitor application stopping. Environment={EnvironmentName}, ReleaseTag={ReleaseTag}, InformationalVersion={InformationalVersion}.",
+        app.Environment.EnvironmentName,
+        buildInfo.ReleaseTag ?? "<none>",
+        buildInfo.InformationalVersion ?? "<none>"));
+
+app.Lifetime.ApplicationStopped.Register(() =>
+    lifecycleLogger.LogInformation(
+        "Flux Monitor application stopped. Environment={EnvironmentName}, ReleaseTag={ReleaseTag}, InformationalVersion={InformationalVersion}.",
+        app.Environment.EnvironmentName,
+        buildInfo.ReleaseTag ?? "<none>",
+        buildInfo.InformationalVersion ?? "<none>"));
 
 if (!storageConfigured)
 {

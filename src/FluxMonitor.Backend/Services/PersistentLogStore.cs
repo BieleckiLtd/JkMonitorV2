@@ -149,6 +149,42 @@ CREATE INDEX IF NOT EXISTS {QuoteIdentifier($"ix_{_options.TableName}_level_time
             timestamp.UtcDateTime, level, category, message, exception));
     }
 
+    public async Task<bool> PersistRecordAsync(
+        DateTimeOffset timestamp,
+        string level,
+        string category,
+        string message,
+        string? exception,
+        CancellationToken cancellationToken)
+    {
+        _fallbackStore.Add(timestamp, ParseLevel(level), category, message, exception);
+
+        if (_dataSource is null)
+        {
+            return false;
+        }
+
+        await InitializeAsync(cancellationToken);
+        if (!_postgresAvailable)
+        {
+            return false;
+        }
+
+        try
+        {
+            await WriteEntriesToPostgresAsync(
+                [new PendingLogEntry(timestamp.UtcDateTime, level, category, message, exception)],
+                cancellationToken);
+            return true;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _postgresAvailable = false;
+            WriteDiagnostic("Failed to persist direct log record to PostgreSQL", ex);
+            return false;
+        }
+    }
+
     private async void FlushCallback(object? state)
     {
         if (Interlocked.CompareExchange(ref _flushing, 1, 0) != 0)
@@ -208,26 +244,7 @@ CREATE INDEX IF NOT EXISTS {QuoteIdentifier($"ix_{_options.TableName}_level_time
 
         try
         {
-            await using var connection = await _dataSource.OpenConnectionAsync();
-            await using var transaction = await connection.BeginTransactionAsync();
-
-            foreach (var entry in entries)
-            {
-                await using var command = new NpgsqlCommand(
-                    $"INSERT INTO {_qualifiedTableName} (timestamp_utc, level, category, message, exception) VALUES (@ts, @lv, @cat, @msg, @ex);",
-                    connection,
-                    transaction);
-
-                command.Parameters.AddWithValue("ts", entry.TimestampUtc);
-                command.Parameters.AddWithValue("lv", entry.Level);
-                command.Parameters.AddWithValue("cat", entry.Category);
-                command.Parameters.AddWithValue("msg", entry.Message);
-                command.Parameters.AddWithValue("ex", (object?)entry.Exception ?? DBNull.Value);
-
-                await command.ExecuteNonQueryAsync();
-            }
-
-            await transaction.CommitAsync();
+            await WriteEntriesToPostgresAsync(entries, CancellationToken.None);
         }
         catch (Exception ex)
         {
@@ -240,6 +257,37 @@ CREATE INDEX IF NOT EXISTS {QuoteIdentifier($"ix_{_options.TableName}_level_time
                 Interlocked.Increment(ref _pendingCount);
             }
         }
+    }
+
+    private async Task WriteEntriesToPostgresAsync(
+        IReadOnlyList<PendingLogEntry> entries,
+        CancellationToken cancellationToken)
+    {
+        if (_dataSource is null || entries.Count == 0)
+        {
+            return;
+        }
+
+        await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+
+        foreach (var entry in entries)
+        {
+            await using var command = new NpgsqlCommand(
+                $"INSERT INTO {_qualifiedTableName} (timestamp_utc, level, category, message, exception) VALUES (@ts, @lv, @cat, @msg, @ex);",
+                connection,
+                transaction);
+
+            command.Parameters.AddWithValue("ts", entry.TimestampUtc);
+            command.Parameters.AddWithValue("lv", entry.Level);
+            command.Parameters.AddWithValue("cat", entry.Category);
+            command.Parameters.AddWithValue("msg", entry.Message);
+            command.Parameters.AddWithValue("ex", (object?)entry.Exception ?? DBNull.Value);
+
+            await command.ExecuteNonQueryAsync(cancellationToken);
+        }
+
+        await transaction.CommitAsync(cancellationToken);
     }
 
     private async Task TryRecoverConnectionAsync()

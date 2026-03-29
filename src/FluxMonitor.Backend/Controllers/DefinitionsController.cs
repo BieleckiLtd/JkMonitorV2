@@ -68,7 +68,7 @@ public sealed class DefinitionsController(
 
         try
         {
-            var definition = definitionLoader.SaveAndLoad(json);
+            var definition = definitionLoader.LoadFromJson(json);
             return Ok(new
             {
                 definition.Device.Id,

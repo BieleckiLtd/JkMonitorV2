@@ -6,15 +6,18 @@ namespace FluxMonitor.Backend.Tests;
 
 public sealed class DefinitionDrivenTelemetryBuilderTests
 {
+    private static readonly string RepositoryRoot = Path.GetFullPath(
+        Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+
     [Fact]
     public void BuildPollResult_ParsesLittleEndianBleBanks()
     {
         var loader = new DeviceDefinitionLoader(
             "devices",
-            Directory.GetCurrentDirectory(),
+            RepositoryRoot,
             new StubHttpClientFactory(),
             NullLogger<DeviceDefinitionLoader>.Instance);
-        loader.LoadAll();
+        loader.LoadFromJson(File.ReadAllText(Path.Combine(RepositoryRoot, "devices", "jk-inverter-bms-ble.json")));
 
         var definition = loader.Get("jk-inverter-bms-ble");
         var live = new byte[293];

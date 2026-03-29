@@ -5,7 +5,7 @@ using FluxMonitor.Contracts.DeviceDefinition;
 namespace FluxMonitor.Backend.Services;
 
 /// <summary>
-/// Loads and caches device definition JSON files from the configured directory
+/// Loads and caches device definition JSON files from an optional local directory
 /// and from the canonical GitHub repository.
 /// </summary>
 public sealed class DeviceDefinitionLoader
@@ -18,7 +18,7 @@ public sealed class DeviceDefinitionLoader
         AllowTrailingCommas = true
     };
 
-    // Hardwired source of built-in device definitions.
+    // Hardwired source of the catalog definitions browsed from GitHub.
     private const string GitHubRepository = "BieleckiLtd/JkMonitorV2";
     private const string GitHubBranch = "dev";
     private const string GitHubDevicesFolder = "devices";
@@ -35,36 +35,13 @@ public sealed class DeviceDefinitionLoader
         IHttpClientFactory httpClientFactory,
         ILogger<DeviceDefinitionLoader> logger)
     {
-        var configuredPath = ResolveConfiguredPath(definitionsPath, contentRootPath);
         _definitionsPath = ResolveDefinitionsPath(definitionsPath, contentRootPath);
         _httpClientFactory = httpClientFactory;
         _logger = logger;
-
-        if (!string.Equals(_definitionsPath, configuredPath, StringComparison.OrdinalIgnoreCase))
-        {
-            _logger.LogWarning(
-                "Configured device definitions path {ConfiguredPath} does not exist. Falling back to bundled definitions at {ResolvedPath}.",
-                configuredPath,
-                _definitionsPath);
-        }
     }
 
     internal static string ResolveDefinitionsPath(string? definitionsPath, string? contentRootPath)
-    {
-        var configuredPath = ResolveConfiguredPath(definitionsPath, contentRootPath);
-        if (Directory.Exists(configuredPath))
-        {
-            return configuredPath;
-        }
-
-        var bundledPath = ResolveConfiguredPath("devices", contentRootPath);
-        if (Directory.Exists(bundledPath))
-        {
-            return bundledPath;
-        }
-
-        return configuredPath;
-    }
+        => ResolveConfiguredPath(definitionsPath, contentRootPath);
 
     internal static string ResolveConfiguredPath(string? definitionsPath, string? contentRootPath)
     {
@@ -77,14 +54,16 @@ public sealed class DeviceDefinitionLoader
     }
 
     /// <summary>
-    /// Load all device definitions from the definitions directory.
+    /// Load all device definitions from the optional local definitions directory.
     /// Call once at startup; definitions are cached in memory.
     /// </summary>
     public void LoadAll()
     {
         if (!Directory.Exists(_definitionsPath))
         {
-            _logger.LogWarning("Device definitions directory does not exist: {Path}", _definitionsPath);
+            _logger.LogInformation(
+                "No local device definitions directory found at {Path}. Continuing without local definition files.",
+                _definitionsPath);
             return;
         }
 
@@ -120,15 +99,15 @@ public sealed class DeviceDefinitionLoader
     }
 
     /// <summary>
-    /// Fetch built-in device definitions from the canonical GitHub repository.
+    /// Fetch catalog device definitions from the canonical GitHub repository.
     /// Uses a manifest stored on raw.githubusercontent.com so startup does not
     /// depend on the GitHub REST API rate limit.
-    /// Already-loaded definitions (e.g. user-uploaded local files) are not overwritten.
+    /// Already-loaded definitions (e.g. user-provided local files or in-memory uploads) are not overwritten.
     /// </summary>
     public async Task LoadFromGitHubAsync(CancellationToken cancellationToken = default)
     {
         var manifestUrl = $"https://raw.githubusercontent.com/{GitHubRepository}/{GitHubBranch}/{GitHubDevicesFolder}/{GitHubDevicesManifest}";
-        _logger.LogInformation("Fetching built-in device definitions list from GitHub.");
+        _logger.LogInformation("Fetching device definitions catalog from GitHub.");
 
         try
         {
@@ -210,9 +189,10 @@ public sealed class DeviceDefinitionLoader
         => _definitions;
 
     /// <summary>
-    /// Save a device definition JSON to the definitions directory and load it into the cache.
+    /// Load a device definition JSON into the in-memory catalog.
+    /// This does not write to disk; configured device snapshots are persisted in the database.
     /// </summary>
-    public DeviceDefinition SaveAndLoad(string json)
+    public DeviceDefinition LoadFromJson(string json)
     {
         var definition = JsonSerializer.Deserialize<DeviceDefinition>(json, JsonOptions)
             ?? throw new InvalidOperationException("Invalid device definition JSON.");
@@ -220,18 +200,8 @@ public sealed class DeviceDefinitionLoader
         if (string.IsNullOrWhiteSpace(definition.Device.Id))
             throw new InvalidOperationException("Device definition must have a device.id.");
 
-        var fileName = $"{definition.Device.Id}.json";
-        if (fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
-            throw new InvalidOperationException("Device definition id contains invalid file name characters.");
-
-        if (!Directory.Exists(_definitionsPath))
-            Directory.CreateDirectory(_definitionsPath);
-
-        var path = Path.Combine(_definitionsPath, fileName);
-        File.WriteAllText(path, json);
-
         _definitions[definition.Device.Id] = definition;
-        _logger.LogInformation("Saved and loaded device definition '{Id}' to {File}.", definition.Device.Id, fileName);
+        _logger.LogInformation("Loaded device definition '{Id}' into the in-memory catalog.", definition.Device.Id);
 
         return definition;
     }

@@ -288,6 +288,34 @@ function Normalize-ReleaseConfiguration {
     }
 }
 
+function Write-InstallAudit {
+    param(
+        [string]$TargetPath,
+        [string]$InstallKind,
+        [string]$Repository,
+        [string]$Branch,
+        [string]$ReleaseTagValue,
+        [string]$AssetNameValue,
+        [string]$Checksum,
+        [string]$InstalledDestination
+    )
+
+    $payload = [ordered]@{
+        installKind = $InstallKind
+        repository = $Repository
+        branch = $Branch
+        releaseTag = $ReleaseTagValue
+        assetName = $AssetNameValue
+        checksum = $Checksum
+        destination = $InstalledDestination
+        installedBy = [Environment]::UserName
+        installedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
+        machineName = [Environment]::MachineName
+    }
+
+    $payload | ConvertTo-Json -Depth 5 | Set-Content -Path $TargetPath -Encoding UTF8
+}
+
 $normalizedRepository = Get-NormalizedRepository $Repository
 $assetUrl = "https://github.com/$normalizedRepository/releases/download/$ReleaseTag/$assetName"
 $tempRoot = Join-Path $env:TEMP ("FluxMonitor-release-install-{0}" -f ([Guid]::NewGuid().ToString('N')))
@@ -313,6 +341,7 @@ try {
     Expand-Archive -Path $archivePath -DestinationPath $extractPath -Force
 
     Write-Section 'Preparing installation folder'
+    $isFirstInstall = -not (Test-Path $Destination)
     if (Test-Path $Destination) {
         Write-WarningText 'Existing installation found. Preserving local config and cached runtime.'
         Preserve-ExistingState -SourceRoot $Destination -PreserveRoot $preservePath
@@ -325,6 +354,17 @@ try {
     Move-Item -Path (Join-Path $extractPath 'win-x64') -Destination $appRoot
     Restore-PreservedState -PreserveRoot $preservePath -DestinationRoot $Destination
     Normalize-ReleaseConfiguration
+    if ($isFirstInstall) {
+        Write-InstallAudit `
+            -TargetPath (Join-Path $Destination 'install-audit.json') `
+            -InstallKind 'release' `
+            -Repository $normalizedRepository `
+            -Branch '' `
+            -ReleaseTagValue $ReleaseTag `
+            -AssetNameValue $assetName `
+            -Checksum '' `
+            -InstalledDestination $Destination
+    }
     Write-StartScript
 
     Write-Section 'Checking ASP.NET Core runtime'
@@ -339,7 +379,7 @@ try {
     }
 
     Write-Section 'Preparing first run'
-    Write-Info 'Starting in simulator mode so the web UI is available immediately.'
+    Write-Info 'Configuring PostgreSQL-backed startup with no preloaded devices.'
     $connectionString = Read-RequiredConnectionString
     @'
 {
@@ -362,7 +402,7 @@ try {
     Write-Success "Local access URL: $appLocalUrl"
     Write-Success "LAN access URL: $accessUrl"
     Write-Muted 'Tip: Ctrl+Click usually opens the URL directly from Windows Terminal.'
-    Write-Muted 'Use the hardware configuration flow later when you are ready to switch from simulator mode.'
+    Write-Muted 'No devices are preconfigured. Add them from the app after the first start.'
 }
 finally {
     Remove-Item -Path $tempRoot -Recurse -Force -ErrorAction SilentlyContinue

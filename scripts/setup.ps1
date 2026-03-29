@@ -97,83 +97,33 @@ function Start-BrowserWhenReady([string]$TargetUrl, [string]$ProbeUrl) {
     } -ArgumentList $TargetUrl, $ProbeUrl
 }
 
-function Get-WindowsSerialPorts {
-    $ports = @()
+function Write-InstallAudit {
+    param(
+        [string]$TargetPath,
+        [string]$InstallKind,
+        [string]$Repository,
+        [string]$Branch,
+        [string]$InstalledDestination
+    )
 
-    try {
-        $ports = Get-CimInstance Win32_SerialPort |
-            Sort-Object DeviceID |
-            ForEach-Object {
-                [pscustomobject]@{
-                    PortName = $_.DeviceID
-                    Label = if ([string]::IsNullOrWhiteSpace($_.Description)) { $_.DeviceID } else { "$($_.DeviceID) - $($_.Description)" }
-                }
-            }
-    }
-    catch {
-    }
-
-    if ($ports.Count -eq 0) {
-        $ports = [System.IO.Ports.SerialPort]::GetPortNames() |
-            Sort-Object |
-            ForEach-Object {
-                [pscustomobject]@{
-                    PortName = $_
-                    Label = $_
-                }
-            }
+    $payload = [ordered]@{
+        installKind = $InstallKind
+        repository = $Repository
+        branch = $Branch
+        releaseTag = ''
+        assetName = ''
+        checksum = ''
+        destination = $InstalledDestination
+        installedBy = [Environment]::UserName
+        installedAtUtc = [DateTimeOffset]::UtcNow.ToString('O')
+        machineName = [Environment]::MachineName
     }
 
-    return $ports
-}
-
-function Select-SerialPort {
-    $ports = Get-WindowsSerialPorts
-
-    if ($ports.Count -eq 0) {
-        Write-Host 'No COM ports were auto-detected. Falling back to manual entry.' -ForegroundColor Yellow
-        $serialPort = Read-Host 'RS485 serial port (example: COM3)'
-        if ([string]::IsNullOrWhiteSpace($serialPort)) {
-            throw 'A serial port is required for hardware mode.'
-        }
-
-        return $serialPort
-    }
-
-    Write-Host 'Detected serial ports:' -ForegroundColor DarkGray
-    for ($index = 0; $index -lt $ports.Count; $index++) {
-        Write-Host "  $($index + 1). $($ports[$index].Label)"
-    }
-    Write-Host '  M. Enter a port manually'
-
-    while ($true) {
-        $selection = Read-Host 'Choose a serial port by number or M'
-        if ([string]::IsNullOrWhiteSpace($selection)) {
-            $selection = '1'
-        }
-
-        $normalized = $selection.Trim().ToLowerInvariant()
-        if ($normalized -eq 'm' -or $normalized -eq 'manual') {
-            $manualPort = Read-Host 'RS485 serial port (example: COM3)'
-            if ([string]::IsNullOrWhiteSpace($manualPort)) {
-                Write-Host 'A serial port is required.' -ForegroundColor Yellow
-                continue
-            }
-
-            return $manualPort
-        }
-
-        $choice = 0
-        if ([int]::TryParse($selection, [ref]$choice) -and $choice -ge 1 -and $choice -le $ports.Count) {
-            return $ports[$choice - 1].PortName
-        }
-
-        Write-Host 'Enter a listed number or M for manual entry.' -ForegroundColor Yellow
-    }
+    $payload | ConvertTo-Json -Depth 5 | Set-Content -Path $TargetPath -Encoding UTF8
 }
 
 Write-Section 'Flux Monitor setup'
-Write-Host 'This script will prepare a local toolchain if needed, require PostgreSQL configuration, guide the startup mode, and launch the app.' -ForegroundColor DarkGray
+Write-Host 'This script will prepare a local toolchain if needed, configure PostgreSQL storage, and launch the app without preloading any devices.' -ForegroundColor DarkGray
 
 $dotnet = Get-DotnetCommand
 if (-not $dotnet) {
@@ -185,70 +135,39 @@ if (-not $dotnet) {
     $dotnet = Install-LocalDotnet
 }
 
-$mode = Read-Choice 'Choose startup mode: 1 = simulator, 2 = hardware' @{
-    '1' = '1'
-    'sim' = '1'
-    'simulator' = '1'
-    '2' = '2'
-    'hw' = '2'
-    'hardware' = '2'
-} '1'
 $environment = 'Development'
 $config = @{}
 
-if ($mode -eq '1') {
-    Write-Section 'Configuring simulator mode'
-    $connectionString = Read-Host 'PostgreSQL connection string'
-    if ([string]::IsNullOrWhiteSpace($connectionString)) {
-        throw 'A PostgreSQL connection string is required.'
-    }
-
-    $config['Monitor'] = @{
-        Storage = @{
-            Provider = 'TimescaleDb'
-            ConnectionString = $connectionString
-        }
-    }
+Write-Section 'Configuring first run'
+$connectionString = Read-Host 'PostgreSQL connection string'
+if ([string]::IsNullOrWhiteSpace($connectionString)) {
+    throw 'A PostgreSQL connection string is required.'
 }
-else {
-    Write-Section 'Configuring hardware mode'
-    $environment = 'Production'
-    $serialPort = Select-SerialPort
 
-    $connectionString = Read-Host 'PostgreSQL connection string'
-    if ([string]::IsNullOrWhiteSpace($connectionString)) {
-        throw 'A PostgreSQL connection string is required.'
-    }
-
-    $config['Monitor'] = @{
-        SerialBus = @{
-            PortName = $serialPort
-        }
-        Storage = @{
-            Provider = 'TimescaleDb'
-            ConnectionString = $connectionString
-        }
-        Devices = @(
-            @{
-                DeviceId = 'jk-master-01'
-                DisplayName = 'Main Battery Rack'
-                DefinitionId = 'jk-inverter-bms'
-                TransportPortName = $serialPort
-                Address = 1
-                IsMaster = $true
-                PollIntervalMilliseconds = 1000
-                Enabled = $true
-            }
-        )
+$config['Monitor'] = @{
+    Storage = @{
+        Provider = 'TimescaleDb'
+        ConnectionString = $connectionString
     }
 }
 
 $targetConfig = Join-Path $backendPath "appsettings.$environment.Local.json"
+$auditPath = Join-Path (Join-Path $repoRoot 'src') 'install-audit.json'
+$isFirstInstall = -not (Test-Path $targetConfig) -and -not (Test-Path $auditPath)
 Set-Content -Path $targetConfig -Value (New-Json $config) -Encoding UTF8
+if ($isFirstInstall) {
+    Write-InstallAudit `
+        -TargetPath $auditPath `
+        -InstallKind 'source' `
+        -Repository (& git -C $repoRoot remote get-url origin 2>$null) `
+        -Branch (& git -C $repoRoot rev-parse --abbrev-ref HEAD 2>$null) `
+        -InstalledDestination $repoRoot
+}
 
 Write-Section 'Starting Flux Monitor'
 Write-Host "Environment: $environment" -ForegroundColor Green
 Write-Host "Opening browser at $appUrl after the backend is ready." -ForegroundColor DarkGray
+Write-Host 'No devices are preconfigured. Add them from the app after it starts.' -ForegroundColor DarkGray
 
 $browserJob = Start-BrowserWhenReady -TargetUrl $appUrl -ProbeUrl $healthUrl
 

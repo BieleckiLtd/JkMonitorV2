@@ -6,15 +6,18 @@ namespace FluxMonitor.Backend.Tests;
 
 public sealed class JkBleDefinitionTests
 {
+    private static readonly string RepositoryRoot = Path.GetFullPath(
+        Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
+
     [Fact]
     public void JkBleLiveBank_RemainsCommandDriven()
     {
         var loader = new DeviceDefinitionLoader(
             "devices",
-            Directory.GetCurrentDirectory(),
+            RepositoryRoot,
             new HttpClientFactoryStub(),
             NullLogger<DeviceDefinitionLoader>.Instance);
-        loader.LoadAll();
+        loader.LoadFromJson(File.ReadAllText(Path.Combine(RepositoryRoot, "devices", "jk-inverter-bms-ble.json")));
 
         var definition = loader.Get("jk-inverter-bms-ble");
         var liveBank = Assert.Single(definition.DataSources, bank => bank.Id == "live");

@@ -18,15 +18,13 @@ SERVICE_NAME='fluxmonitor.service'
 SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
 ENV_PATH="$DESTINATION/fluxmonitor.env"
 RELEASE_INFO_PATH="$DESTINATION/release-info.env"
-NONINTERACTIVE_MODE="${FLUXMONITOR_MODE:-}"
-NONINTERACTIVE_USE_DB="${FLUXMONITOR_USE_DB:-}"
 NONINTERACTIVE_CONNECTION_STRING="${FLUXMONITOR_CONNECTION_STRING:-}"
-NONINTERACTIVE_SERIAL_PORT="${FLUXMONITOR_SERIAL_PORT:-}"
 NONINTERACTIVE_INSTALL_RUNTIME="${FLUXMONITOR_INSTALL_RUNTIME:-}"
 NONINTERACTIVE_INSTALL_SERVICE="${FLUXMONITOR_INSTALL_SERVICE:-}"
 NONINTERACTIVE_REUSE_EXISTING_CONFIGURATION="${FLUXMONITOR_REUSE_EXISTING_CONFIGURATION:-}"
 EXPECTED_RELEASE_SHA256="${FLUXMONITOR_EXPECTED_RELEASE_SHA256:-}"
 CONFIGURE_SCRIPT_PATH="$DESTINATION/configure.sh"
+TIMESCALE_REPOSITORY_SETUP_URL='https://packagecloud.io/install/repositories/timescale/timescaledb/script.deb.sh'
 
 if [ -t 1 ]; then
   COLOR_RESET='\033[0m'
@@ -204,6 +202,34 @@ FLUXMONITOR_RELEASE_SHA256=$checksum
 EOF
 }
 
+write_install_audit() {
+  local install_kind="$1"
+  local repository="$2"
+  local branch="$3"
+  local release_tag="$4"
+  local asset_name="$5"
+  local checksum="$6"
+  local destination="$7"
+  local installed_by="$8"
+  local installed_at_utc="$9"
+  local machine_name="${10}"
+
+  cat > "$DESTINATION/install-audit.json" <<EOF
+{
+  "installKind": "$install_kind",
+  "repository": "$repository",
+  "branch": "$branch",
+  "releaseTag": "$release_tag",
+  "assetName": "$asset_name",
+  "checksum": "$checksum",
+  "destination": "$destination",
+  "installedBy": "$installed_by",
+  "installedAtUtc": "$installed_at_utc",
+  "machineName": "$machine_name"
+}
+EOF
+}
+
 copy_if_exists() {
   local source_path="$1"
   local target_path="$2"
@@ -223,8 +249,6 @@ preserve_existing_state() {
   copy_if_exists "$source_root/.dotnet" "$preserve_root/.dotnet"
   copy_if_exists "$source_root/fluxmonitor.env" "$preserve_root/fluxmonitor.env"
   copy_if_exists "$source_root/app/notifications.json" "$preserve_root/app/notifications.json"
-  copy_if_exists "$source_root/app/devices.json" "$preserve_root/app/devices.json"
-  copy_if_exists "$source_root/app/devices" "$preserve_root/app/devices"
 
   for file_name in \
     appsettings.Local.json \
@@ -255,17 +279,6 @@ restore_preserved_state() {
   if [ -f "$preserve_root/app/notifications.json" ]; then
     mkdir -p "$destination_root/app"
     cp "$preserve_root/app/notifications.json" "$destination_root/app/notifications.json"
-  fi
-
-  if [ -f "$preserve_root/app/devices.json" ]; then
-    mkdir -p "$destination_root/app"
-    cp "$preserve_root/app/devices.json" "$destination_root/app/devices.json"
-  fi
-
-  # Merge back user-added device definitions without overwriting bundled ones.
-  if [ -d "$preserve_root/app/devices" ]; then
-    mkdir -p "$destination_root/app/devices"
-    cp -n "$preserve_root/app/devices"/*.json "$destination_root/app/devices/" 2>/dev/null || true
   fi
 
   for file_name in \
@@ -349,7 +362,7 @@ has_existing_runtime_configuration() {
     return 0
   fi
 
-  if [ -n "$NONINTERACTIVE_MODE" ] || [ -n "$NONINTERACTIVE_SERIAL_PORT" ] || [ -n "$NONINTERACTIVE_USE_DB" ] || [ -n "$NONINTERACTIVE_CONNECTION_STRING" ]; then
+  if [ -n "$NONINTERACTIVE_CONNECTION_STRING" ]; then
     return 0
   fi
 
@@ -457,50 +470,33 @@ EOF
 
 read_choice() {
   local prompt="$1"
-  local mode="$2"
-  local default_value="$3"
+  local default_value="$2"
   local value
   read -r -p "$prompt [$default_value] " value
   if [ -z "$value" ]; then
     echo "$default_value"
   else
-    local normalized="${value,,}"
-    if [ "$mode" = 'startup' ]; then
-      case "$normalized" in
-        1|sim|simulator) echo '1' ;;
-        2|hw|hardware) echo '2' ;;
-        *) echo "" ;;
-      esac
-    elif [ "$mode" = 'yesno' ]; then
-      case "$normalized" in
-        y|yes) echo 'y' ;;
-        n|no) echo 'n' ;;
-        *) echo "" ;;
-      esac
-    else
-      echo "$value"
-    fi
+    case "${value,,}" in
+      y|yes) echo 'y' ;;
+      n|no) echo 'n' ;;
+      *) echo "" ;;
+    esac
   fi
 }
 
 read_validated_choice() {
   local prompt="$1"
-  local type="$2"
-  local default_value="$3"
+  local default_value="$2"
 
   while true; do
     local chosen
-    chosen="$(read_choice "$prompt" "$type" "$default_value")"
+    chosen="$(read_choice "$prompt" "$default_value")"
     if [ -n "$chosen" ]; then
       echo "$chosen"
       return
     fi
 
-    if [ "$type" = 'startup' ]; then
-      echo 'Accepted values: 1, 2, simulator, hardware'
-    else
-      echo 'Accepted values: y, n, yes, no'
-    fi
+    echo 'Accepted values: y, n, yes, no'
   done
 }
 
@@ -537,6 +533,75 @@ get_required_connection_string() {
   read_required_value 'PostgreSQL connection string: '
 }
 
+read_connection_string_field() {
+  local connection_string="$1"
+  local field_name="$2"
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$connection_string" "$field_name" <<'PY'
+import sys
+
+connection_string, field_name = sys.argv[1], sys.argv[2].lower()
+
+for segment in connection_string.split(';'):
+    if '=' not in segment:
+        continue
+    key, value = segment.split('=', 1)
+    if key.strip().lower() == field_name:
+        print(value.strip())
+        raise SystemExit(0)
+PY
+    return
+  fi
+
+  printf '%s\n' "$connection_string" | tr ';' '\n' | awk -F= -v field_name="$field_name" '
+    BEGIN { IGNORECASE = 1 }
+    $1 ~ ("^[[:space:]]*" field_name "[[:space:]]*$") {
+      value = substr($0, index($0, "=") + 1)
+      gsub(/^[[:space:]]+|[[:space:]]+$/, "", value)
+      print value
+      exit
+    }'
+}
+
+is_local_connection_string() {
+  local connection_string="$1"
+  local host
+
+  host="$(read_connection_string_field "$connection_string" 'Host')"
+  if [ -z "$host" ]; then
+    host="$(read_connection_string_field "$connection_string" 'Server')"
+  fi
+
+  case "${host,,}" in
+    ''|localhost|127.0.0.1|::1|[::1])
+      return 0
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
+read_connection_string_database_name() {
+  local connection_string="$1"
+  local database_name
+
+  database_name="$(read_connection_string_field "$connection_string" 'Database')"
+  if [ -n "$database_name" ]; then
+    printf '%s\n' "$database_name"
+    return
+  fi
+
+  database_name="$(read_connection_string_field "$connection_string" 'Initial Catalog')"
+  if [ -n "$database_name" ]; then
+    printf '%s\n' "$database_name"
+    return
+  fi
+
+  printf '%s\n' 'postgres'
+}
+
 generate_password() {
   if command -v python3 >/dev/null 2>&1; then
     python3 - <<'PY'
@@ -547,6 +612,199 @@ PY
   fi
 
   head -c 32 /dev/urandom | base64 | tr -d '\n=+/' | cut -c1-32
+}
+
+get_postgres_server_major_version() {
+  local version_num
+  version_num="$(run_as_postgres "psql -Atq -d postgres -c 'SHOW server_version_num;'" | tr -d '[:space:]')"
+  if [[ ! "$version_num" =~ ^[0-9]{5,6}$ ]]; then
+    return
+  fi
+
+  printf '%s\n' "${version_num%????}"
+}
+
+local_database_exists() {
+  local database_name="$1"
+  [ "$(run_as_postgres "psql -Atq -d postgres -c \"SELECT 1 FROM pg_database WHERE datname = '$database_name';\"" | tr -d '[:space:]')" = '1' ]
+}
+
+timescaledb_is_available_on_server() {
+  [ "$(run_as_postgres "psql -Atq -d postgres -c \"SELECT 1 FROM pg_available_extensions WHERE name = 'timescaledb';\"" | tr -d '[:space:]')" = '1' ]
+}
+
+timescaledb_is_enabled_for_database() {
+  local database_name="$1"
+  [ "$(run_as_postgres "psql -Atq -d \"$database_name\" -c \"SELECT 1 FROM pg_extension WHERE extname = 'timescaledb';\"" | tr -d '[:space:]')" = '1' ]
+}
+
+select_timescaledb_package_name() {
+  local postgres_major="$1"
+  local packages
+  packages="$(apt-cache search --names-only "timescaledb.*postgresql-$postgres_major" | awk '{ print $1 }' | sort -u)"
+
+  if [ -z "$packages" ]; then
+    return
+  fi
+
+  for preferred in \
+    "timescaledb-2-postgresql-$postgres_major" \
+    "timescaledb-2-oss-postgresql-$postgres_major" \
+    "timescaledb-postgresql-$postgres_major"
+  do
+    if printf '%s\n' "$packages" | grep -Fxq "$preferred"; then
+      printf '%s\n' "$preferred"
+      return
+    fi
+  done
+
+  printf '%s\n' "$packages" \
+    | grep -E "^timescaledb-.*postgresql-$postgres_major$" \
+    | sort -V \
+    | tail -n 1
+}
+
+install_timescaledb_package_for_local_postgres() {
+  local postgres_major="$1"
+  local repo_setup_script="$TEMP_ROOT/install-timescaledb-repository.sh"
+  local package_name
+
+  if timescaledb_is_available_on_server; then
+    return 0
+  fi
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    return 1
+  fi
+
+  section 'Installing TimescaleDB extension package' >&2
+  info "Preparing the TimescaleDB apt repository for PostgreSQL $postgres_major." >&2
+  download_file "$TIMESCALE_REPOSITORY_SETUP_URL" "$repo_setup_script"
+  run_elevated bash "$repo_setup_script" >&2
+  run_elevated apt-get update >&2
+
+  package_name="$(select_timescaledb_package_name "$postgres_major")"
+  if [ -z "$package_name" ]; then
+    warn "No TimescaleDB package matching PostgreSQL $postgres_major was found in the apt repository." >&2
+    return 1
+  fi
+
+  info "Installing package '$package_name'." >&2
+  run_elevated apt-get install -y "$package_name" >&2
+  if command -v systemctl >/dev/null 2>&1; then
+    run_elevated systemctl restart postgresql >/dev/null 2>&1 || true
+  fi
+
+  if timescaledb_is_available_on_server; then
+    success "TimescaleDB package '$package_name' is available to PostgreSQL." >&2
+    return 0
+  fi
+
+  warn "TimescaleDB package '$package_name' was installed, but PostgreSQL still does not list the extension as available." >&2
+  return 1
+}
+
+ensure_timescaledb_for_local_database() {
+  local database_name="$1"
+  local postgres_major
+
+  if ! command -v psql >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if ! local_database_exists "$database_name"; then
+    warn "Local PostgreSQL database '$database_name' does not exist, so TimescaleDB could not be enabled automatically." >&2
+    return 1
+  fi
+
+  if ! timescaledb_is_available_on_server; then
+    postgres_major="$(get_postgres_server_major_version)"
+    if [ -z "$postgres_major" ]; then
+      warn 'PostgreSQL is installed, but the server major version could not be detected for TimescaleDB package installation.' >&2
+      return 1
+    fi
+
+    install_timescaledb_package_for_local_postgres "$postgres_major" || return 1
+  fi
+
+  if timescaledb_is_enabled_for_database "$database_name"; then
+    success "TimescaleDB is already enabled for database '$database_name'." >&2
+    return 0
+  fi
+
+  run_as_postgres "psql -v ON_ERROR_STOP=1 -d \"$database_name\" -c \"CREATE EXTENSION IF NOT EXISTS timescaledb;\"" >/dev/null
+
+  if timescaledb_is_enabled_for_database "$database_name"; then
+    success "TimescaleDB was enabled for database '$database_name'." >&2
+    return 0
+  fi
+
+  warn "TimescaleDB could not be enabled for database '$database_name'. Flux Monitor will continue with plain PostgreSQL tables." >&2
+  return 1
+}
+
+maybe_provision_local_timescaledb_for_connection_string() {
+  local connection_string="$1"
+  local database_name
+
+  if [ -z "$connection_string" ] || ! is_local_connection_string "$connection_string"; then
+    return 0
+  fi
+
+  database_name="$(read_connection_string_database_name "$connection_string")"
+  ensure_timescaledb_for_local_database "$database_name"
+}
+
+read_connection_string_from_configuration_file() {
+  local config_path="$1"
+
+  if [ ! -f "$config_path" ]; then
+    return
+  fi
+
+  if command -v python3 >/dev/null 2>&1; then
+    python3 - "$config_path" <<'PY'
+import json
+import sys
+
+path = sys.argv[1]
+
+try:
+    with open(path, 'r', encoding='utf-8') as handle:
+        payload = json.load(handle)
+except Exception:
+    raise SystemExit(1)
+
+monitor = payload.get('Monitor') if isinstance(payload, dict) else None
+storage = monitor.get('Storage') if isinstance(monitor, dict) else None
+connection_string = storage.get('ConnectionString') if isinstance(storage, dict) else None
+
+if isinstance(connection_string, str) and connection_string.strip():
+    print(connection_string.strip())
+PY
+    return
+  fi
+
+  grep -Eo '"ConnectionString"[[:space:]]*:[[:space:]]*"[^"]+"' "$config_path" \
+    | head -n 1 \
+    | sed -E 's/.*"ConnectionString"[[:space:]]*:[[:space:]]*"([^"]+)"/\1/'
+}
+
+get_existing_runtime_connection_string() {
+  local config_path
+  local connection_string
+
+  for config_path in \
+    "$APP_ROOT/appsettings.Production.Local.json" \
+    "$APP_ROOT/appsettings.Local.json" \
+    "$APP_ROOT/appsettings.Development.Local.json"
+  do
+    connection_string="$(read_connection_string_from_configuration_file "$config_path")"
+    if [ -n "$connection_string" ]; then
+      printf '%s\n' "$connection_string"
+      return
+    fi
+  done
 }
 
 bootstrap_local_postgres_connection_string() {
@@ -580,7 +838,7 @@ bootstrap_local_postgres_connection_string() {
     run_as_postgres "createdb -O $role_name $database_name" >/dev/null 2>&1 || true
   fi
 
-  run_as_postgres "psql -d $database_name -c \"CREATE EXTENSION IF NOT EXISTS timescaledb;\"" >/dev/null 2>&1 || true
+  maybe_provision_local_timescaledb_for_connection_string "Host=127.0.0.1;Port=5432;Database=$database_name;Username=$role_name;Password=$password" || true
 
   printf 'Host=127.0.0.1;Port=5432;Database=%s;Username=%s;Password=%s\n' "$database_name" "$role_name" "$password"
 }
@@ -588,41 +846,25 @@ bootstrap_local_postgres_connection_string() {
 get_configured_choice() {
   local configured_value="$1"
   local prompt="$2"
-  local type="$3"
-  local default_value="$4"
+  local default_value="$3"
 
   if [ -n "$configured_value" ]; then
-    local normalized="${configured_value,,}"
-
-    if [ "$type" = 'startup' ]; then
-      case "$normalized" in
-        1|sim|simulator)
-          echo '1'
-          return
-          ;;
-        2|hw|hardware)
-          echo '2'
-          return
-          ;;
-      esac
-    elif [ "$type" = 'yesno' ]; then
-      case "$normalized" in
-        y|yes|true|1)
-          echo 'y'
-          return
-          ;;
-        n|no|false|0)
-          echo 'n'
-          return
-          ;;
-      esac
-    fi
+    case "${configured_value,,}" in
+      y|yes|true|1)
+        echo 'y'
+        return
+        ;;
+      n|no|false|0)
+        echo 'n'
+        return
+        ;;
+    esac
 
     echo "Unsupported configured value '$configured_value' for $prompt." >&2
     exit 1
   fi
 
-  read_validated_choice "$prompt" "$type" "$default_value"
+  read_validated_choice "$prompt" "$default_value"
 }
 
 install_local_runtime() {
@@ -684,14 +926,8 @@ get_access_url() {
 writable_config="$APP_ROOT/appsettings.Production.Local.json"
 
 echo
-echo 'Flux Monitor hardware configuration'
-echo 'This switches the install from simulator preview mode to your real RS485 setup and requires PostgreSQL.'
-
-read -r -p 'RS485 serial port (example: /dev/ttyUSB0): ' serial_port
-while [ -z "$serial_port" ]; do
-  echo 'A serial port is required.'
-  read -r -p 'RS485 serial port (example: /dev/ttyUSB0): ' serial_port
-done
+echo 'Flux Monitor runtime configuration'
+echo 'This helper updates the managed PostgreSQL connection string for the installed app.'
 
 read -r -p 'PostgreSQL connection string: ' connection_string
 while [ -z "$connection_string" ]; do
@@ -702,25 +938,10 @@ done
 cat > "$writable_config" <<JSON
 {
   "Monitor": {
-    "SerialBus": {
-      "PortName": "$serial_port"
-    },
     "Storage": {
       "Provider": "TimescaleDb",
       "ConnectionString": "$connection_string"
-    },
-    "Devices": [
-      {
-        "DeviceId": "jk-master-01",
-        "DisplayName": "Main Battery Rack",
-        "DefinitionId": "jk-inverter-bms",
-        "TransportPortName": "$serial_port",
-        "Address": 1,
-        "IsMaster": true,
-        "PollIntervalMilliseconds": 1000,
-        "Enabled": true
-      }
-    ]
+    }
   }
 }
 JSON
@@ -745,6 +966,7 @@ else
   echo 'Configuration saved. Start Flux Monitor again with ~/FluxMonitor/start.sh.'
 fi
 
+echo 'No devices are configured by this helper. Add them from the app after it starts.'
 echo "Open $(get_access_url) from your PC once the service is running."
 EOF
 
@@ -911,7 +1133,9 @@ info 'Unpacking the application files.'
 tar -xzf "$ARCHIVE_PATH" -C "$EXTRACT_PATH"
 
 section 'Preparing installation folder'
+IS_FIRST_INSTALL='true'
 if [ -d "$DESTINATION" ]; then
+  IS_FIRST_INSTALL='false'
   warn 'Existing installation found. Preserving local config and cached runtime.'
   preserve_existing_state "$DESTINATION" "$PRESERVE_PATH"
   rm -rf "$DESTINATION"
@@ -922,13 +1146,26 @@ mv "$EXTRACT_PATH/linux-arm64" "$APP_ROOT"
 restore_preserved_state "$PRESERVE_PATH" "$DESTINATION"
 normalize_release_runtime_configuration
 write_release_info "$DOWNLOADED_RELEASE_SHA256"
+if [ "$IS_FIRST_INSTALL" = 'true' ]; then
+  write_install_audit \
+    'release' \
+    "$NORMALIZED_REPOSITORY" \
+    '' \
+    "$RELEASE_TAG" \
+    "$ASSET_NAME" \
+    "$DOWNLOADED_RELEASE_SHA256" \
+    "$DESTINATION" \
+    "$(id -un 2>/dev/null || echo unknown)" \
+    "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    "$(hostname 2>/dev/null || echo unknown)"
+fi
 write_start_script
 write_configure_script
 
 section 'Checking ASP.NET Core runtime'
 DOTNET_CMD="$(get_dotnet)"
 if [ -z "$DOTNET_CMD" ]; then
-  answer="$(get_configured_choice "$NONINTERACTIVE_INSTALL_RUNTIME" 'No compatible ASP.NET Core 10 runtime was found. Install a local copy into this folder?' 'yesno' 'y')"
+  answer="$(get_configured_choice "$NONINTERACTIVE_INSTALL_RUNTIME" 'No compatible ASP.NET Core 10 runtime was found. Install a local copy into this folder?' 'y')"
   if [ "${answer,,}" != 'y' ]; then
     echo 'An ASP.NET Core 10 runtime is required to run this published build.'
     exit 1
@@ -938,7 +1175,7 @@ if [ -z "$DOTNET_CMD" ]; then
   DOTNET_CMD="$LOCAL_DOTNET"
 fi
 
-section 'Configuring startup mode'
+section 'Configuring first run'
 reused_existing_configuration='false'
 
 if has_reusable_runtime_configuration && { is_truthy "$NONINTERACTIVE_REUSE_EXISTING_CONFIGURATION" || ! [ -t 0 ]; }; then
@@ -948,23 +1185,17 @@ if has_reusable_runtime_configuration && { is_truthy "$NONINTERACTIVE_REUSE_EXIS
     ENVIRONMENT='Production'
   fi
   info "Reusing the existing runtime configuration for $ENVIRONMENT."
+  EXISTING_CONNECTION_STRING="$(get_existing_runtime_connection_string)"
 elif has_existing_runtime_configuration; then
   info 'Existing runtime settings were found, but PostgreSQL is not configured. Rebuilding managed production configuration.'
-
-  if ! [ -t 0 ]; then
-    MODE='1'
-  else
-    MODE="$(get_configured_choice "$NONINTERACTIVE_MODE" 'Choose startup mode: 1 = simulator, 2 = hardware' 'startup' '1')"
-  fi
 else
-  MODE='1'
-  info 'Starting in simulator mode for the first run so the web UI is available immediately.'
-  muted 'You can switch to real hardware later from the Setup panel in the app.'
+  info 'Starting with storage configured and no preloaded devices.'
+  muted 'Add devices later from the app once the web UI is running.'
 fi
 ENVIRONMENT="${ENVIRONMENT:-Production}"
 TARGET_CONFIG="$APP_ROOT/appsettings.Production.Local.json"
 
-if [ "$reused_existing_configuration" = 'false' ] && [ "$MODE" = '1' ]; then
+if [ "$reused_existing_configuration" = 'false' ]; then
   CONNECTION_STRING="$(get_required_connection_string)"
   cat > "$TARGET_CONFIG" <<EOF
 {
@@ -976,46 +1207,9 @@ if [ "$reused_existing_configuration" = 'false' ] && [ "$MODE" = '1' ]; then
   }
 }
 EOF
-elif [ "$reused_existing_configuration" = 'false' ]; then
-  ENVIRONMENT='Production'
-  TARGET_CONFIG="$APP_ROOT/appsettings.Production.Local.json"
-  if [ -n "$NONINTERACTIVE_SERIAL_PORT" ]; then
-    SERIAL_PORT="$NONINTERACTIVE_SERIAL_PORT"
-  else
-    SERIAL_PORT="$(read_required_value 'RS485 serial port (example: /dev/ttyUSB0): ')"
-  fi
-  if [ -z "$SERIAL_PORT" ]; then
-    echo 'A serial port is required for hardware mode, so Flux Monitor was not started and no access URL is available yet.' >&2
-    exit 1
-  fi
-
-  CONNECTION_STRING="$(get_required_connection_string)"
-
-  cat > "$TARGET_CONFIG" <<EOF
-{
-  "Monitor": {
-    "SerialBus": {
-      "PortName": "$SERIAL_PORT"
-    },
-    "Storage": {
-      "Provider": "TimescaleDb",
-      "ConnectionString": "$CONNECTION_STRING"
-    },
-    "Devices": [
-      {
-        "DeviceId": "jk-master-01",
-        "DisplayName": "Main Battery Rack",
-        "DefinitionId": "jk-inverter-bms",
-        "TransportPortName": "$SERIAL_PORT",
-        "Address": 1,
-        "IsMaster": true,
-        "PollIntervalMilliseconds": 1000,
-        "Enabled": true
-      }
-    ]
-  }
-}
-EOF
+  maybe_provision_local_timescaledb_for_connection_string "$CONNECTION_STRING" || true
+elif [ -n "${EXISTING_CONNECTION_STRING:-}" ]; then
+  maybe_provision_local_timescaledb_for_connection_string "$EXISTING_CONNECTION_STRING" || true
 fi
 
 if [ "$reused_existing_configuration" = 'false' ] || [ ! -f "$ENV_PATH" ]; then
@@ -1029,7 +1223,7 @@ if command -v systemctl >/dev/null 2>&1; then
   if ! [ -t 0 ] && [ -z "$NONINTERACTIVE_INSTALL_SERVICE" ]; then
     INSTALL_SERVICE='y'
   else
-    INSTALL_SERVICE="$(get_configured_choice "$NONINTERACTIVE_INSTALL_SERVICE" 'Install and start a systemd service for headless operation?' 'yesno' 'y')"
+    INSTALL_SERVICE="$(get_configured_choice "$NONINTERACTIVE_INSTALL_SERVICE" 'Install and start a systemd service for headless operation?' 'y')"
   fi
 fi
 
@@ -1041,6 +1235,7 @@ muted "Service file path: $SERVICE_PATH"
 success "Local access URL: $APP_LOCAL_URL"
 success "LAN access URL: $ACCESS_URL"
 muted 'Tip: most terminals let you Ctrl+Click the URL to open it.'
+muted 'No devices are preconfigured. Add them from the app after the first start.'
 
 if [ "${INSTALL_SERVICE,,}" = 'y' ]; then
   section 'Installing systemd service'
