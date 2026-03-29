@@ -35,6 +35,7 @@ public sealed class CloudflareTunnelService(
     {
         await cloudflareTunnelStore.InitializeAsync(cancellationToken);
         await SyncRuntimeStateAsync(cancellationToken);
+        await ReconcileServiceStateAsync(cancellationToken);
     }
 
     public async Task<CloudflareTunnelStatusSnapshot> GetStatusAsync(CancellationToken cancellationToken = default)
@@ -245,6 +246,40 @@ public sealed class CloudflareTunnelService(
     {
         var storedSettings = await cloudflareTunnelStore.GetSettingsAsync(cancellationToken);
         WriteStoredTunnelToken(storedSettings.Enabled ? storedSettings.TunnelToken : null);
+    }
+
+    private async Task ReconcileServiceStateAsync(CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsLinux() || !managedRestartService.IsManagedInstall)
+        {
+            return;
+        }
+
+        var storedSettings = await cloudflareTunnelStore.GetSettingsAsync(cancellationToken);
+        var shouldBeRunning = storedSettings.Enabled && !string.IsNullOrWhiteSpace(storedSettings.TunnelToken);
+        var command = shouldBeRunning ? "start" : "stop";
+
+        try
+        {
+            var result = await commandRunner.RunAsync(
+                "systemctl",
+                [command, CloudflaredServiceName],
+                cancellationToken);
+
+            if (!result.Succeeded)
+            {
+                logger.LogWarning(
+                    "Tunnel startup reconciliation could not {Command} {ServiceName}. Output={Output} Error={Error}",
+                    command,
+                    CloudflaredServiceName,
+                    string.IsNullOrWhiteSpace(result.StandardOutput) ? "<none>" : result.StandardOutput.Trim(),
+                    string.IsNullOrWhiteSpace(result.StandardError) ? "<none>" : result.StandardError.Trim());
+            }
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Tunnel startup reconciliation failed while trying to {Command} {ServiceName}.", command, CloudflaredServiceName);
+        }
     }
 
     internal static string? NormalizeTunnelToken(string? value)
