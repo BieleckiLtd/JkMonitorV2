@@ -1196,7 +1196,18 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
 
     private async Task<ProcessResult> RunNmcliAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken)
     {
-        return await RunProcessAsync("nmcli", arguments, cancellationToken);
+        var result = await RunProcessAsync("nmcli", arguments, cancellationToken);
+        if (result.Succeeded || !ShouldRetryNmcliWithSudo(result))
+        {
+            return result;
+        }
+
+        logger.LogInformation("Retrying NetworkManager command through sudo after authorization failure.");
+        var elevatedResult = await RunProcessAsync("sudo", ["-n", "nmcli", .. arguments], cancellationToken);
+
+        return IsSudoPasswordPromptResult(elevatedResult)
+            ? result
+            : elevatedResult;
     }
 
     private static string BuildCommandFailureMessage(ProcessResult result, string fallbackMessage)
@@ -1293,6 +1304,43 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             || message.Contains("wrong password", StringComparison.OrdinalIgnoreCase)
             || message.Contains("bad password", StringComparison.OrdinalIgnoreCase)
             || message.Contains("invalid secrets", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool ShouldRetryNmcliWithSudo(ProcessResult result)
+    {
+        if (result.Succeeded)
+        {
+            return false;
+        }
+
+        var message = BuildCommandFailureMessage(result, string.Empty);
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return false;
+        }
+
+        return message.Contains("Not authorized to control networking", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("insufficient privileges", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("authorization failed", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool IsSudoPasswordPromptResult(ProcessResult result)
+    {
+        if (result.Succeeded)
+        {
+            return false;
+        }
+
+        var message = BuildCommandFailureMessage(result, string.Empty);
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return false;
+        }
+
+        return message.Contains("a password is required", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("password is required", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("a terminal is required", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("must have a tty", StringComparison.OrdinalIgnoreCase);
     }
 
     private static async Task<ProcessResult> RunProcessAsync(

@@ -266,4 +266,35 @@ public sealed class NetworkManagementServiceTests
 
         Assert.Equal("Connected to 'Home WiFi', but internet access is unavailable.", message);
     }
+
+    [Theory]
+    [InlineData("Error: Failed to add/activate new connection: Not authorized to control networking.", true)]
+    [InlineData("Error: Connection activation failed: insufficient privileges.", true)]
+    [InlineData("Error: No network with SSID 'missing' found.", false)]
+    public void ShouldRetryNmcliWithSudo_DetectsAuthorizationFailures(string message, bool expected)
+    {
+        var result = new NetworkManagementService.ProcessResult(
+            Succeeded: false,
+            StandardOutput: string.Empty,
+            ErrorOutput: message,
+            ExitCode: 4);
+
+        Assert.Equal(expected, NetworkManagementService.ShouldRetryNmcliWithSudo(result));
+    }
+
+    [Theory]
+    [InlineData("sudo: a password is required", true)]
+    [InlineData("sudo: sorry, you must have a tty to run sudo", true)]
+    [InlineData("sudo: a terminal is required to read the password; either use the -S option to read from standard input or configure an askpass helper", true)]
+    [InlineData("Error: Failed to add/activate new connection: Not authorized to control networking.", false)]
+    public void IsSudoPasswordPromptResult_DetectsPasswordPromptFailures(string message, bool expected)
+    {
+        var result = new NetworkManagementService.ProcessResult(
+            Succeeded: false,
+            StandardOutput: string.Empty,
+            ErrorOutput: message,
+            ExitCode: 1);
+
+        Assert.Equal(expected, NetworkManagementService.IsSudoPasswordPromptResult(result));
+    }
 }
