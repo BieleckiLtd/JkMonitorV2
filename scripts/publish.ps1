@@ -360,22 +360,22 @@ repository_slug='__REPOSITORY_SLUG__'
 release_tag='__RELEASE_TAG__'
 asset_name='__LINUX_ASSET_NAME__'
 expected_source_revision_id='__CURRENT_COMMIT__'
-export FLUXMONITOR_EXPECTED_RELEASE_SHA256="\$expected_sha256"
+export FLUXMONITOR_EXPECTED_RELEASE_SHA256="$expected_sha256"
 export FLUXMONITOR_INSTALL_RUNTIME='y'
 export FLUXMONITOR_INSTALL_SERVICE='y'
 export FLUXMONITOR_REUSE_EXISTING_CONFIGURATION='1'
-wget -qO- https://raw.githubusercontent.com/__REPOSITORY_SLUG__/dev/scripts/install-from-release.sh | bash -s -- https://github.com/__REPOSITORY_SLUG__ \$release_tag
-if [ ! -f "\$HOME/fluxmonitor/release-info.env" ]; then
+wget -qO- https://raw.githubusercontent.com/__REPOSITORY_SLUG__/dev/scripts/install-from-release.sh | bash -s -- https://github.com/__REPOSITORY_SLUG__ $release_tag
+if [ ! -f "$HOME/fluxmonitor/release-info.env" ]; then
   echo 'The installer did not persist release-info.env.' >&2
   exit 1
 fi
 
 set -a
-. "\$HOME/fluxmonitor/release-info.env"
+. "$HOME/fluxmonitor/release-info.env"
 set +a
 
-if [[ "\${FLUXMONITOR_RELEASE_SHA256,,}" != "\$expected_sha256" ]]; then
-  echo "Installed checksum mismatch on device. Expected \$expected_sha256 but installer recorded \${FLUXMONITOR_RELEASE_SHA256:-missing}." >&2
+if [[ "${FLUXMONITOR_RELEASE_SHA256,,}" != "$expected_sha256" ]]; then
+  echo "Installed checksum mismatch on device. Expected $expected_sha256 but installer recorded ${FLUXMONITOR_RELEASE_SHA256:-missing}." >&2
   exit 1
 fi
 sleep 5
@@ -383,7 +383,7 @@ sudo systemctl is-active fluxmonitor.service
 health_json="$(curl -fsS http://127.0.0.1:5074/api/health)"
 
 if command -v python3 >/dev/null 2>&1; then
-  HEALTH_JSON="\$health_json" python3 - "\$release_tag" "\$expected_source_revision_id" <<'PY'
+  HEALTH_JSON="$health_json" python3 - "$release_tag" "$expected_source_revision_id" <<'PY'
 import json
 import os
 import sys
@@ -406,13 +406,13 @@ if source_revision_id != expected_source_revision_id:
     )
 PY
 else
-  printf '%s\n' "\$health_json" | grep -F "\"releaseTag\":\"\$release_tag\"" >/dev/null 2>&1 || {
-    echo "Runtime release tag mismatch. Expected \$release_tag." >&2
+  printf '%s\n' "$health_json" | grep -F "\"releaseTag\":\"$release_tag\"" >/dev/null 2>&1 || {
+    echo "Runtime release tag mismatch. Expected $release_tag." >&2
     exit 1
   }
 
-  printf '%s\n' "\$health_json" | grep -F "\"sourceRevisionId\":\"\$expected_source_revision_id\"" >/dev/null 2>&1 || {
-    echo "Runtime source revision mismatch. Expected \$expected_source_revision_id." >&2
+  printf '%s\n' "$health_json" | grep -F "\"sourceRevisionId\":\"$expected_source_revision_id\"" >/dev/null 2>&1 || {
+    echo "Runtime source revision mismatch. Expected $expected_source_revision_id." >&2
     exit 1
   }
 fi
