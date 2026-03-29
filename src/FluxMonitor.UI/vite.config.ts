@@ -13,6 +13,19 @@ export default defineConfig({
   build: {
     emptyOutDir: true,
     outDir: '../FluxMonitor.Backend/wwwroot',
+    rollupOptions: {
+      output: {
+        entryFileNames: 'assets/index.js',
+        chunkFileNames: 'assets/[name].js',
+        assetFileNames: (assetInfo) => {
+          if (assetInfo.names.includes('index.css')) {
+            return 'assets/index.css'
+          }
+
+          return 'assets/[name]-[hash][extname]'
+        },
+      },
+    },
   },
   resolve: {
     alias: {
