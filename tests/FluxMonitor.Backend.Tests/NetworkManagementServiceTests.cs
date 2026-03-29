@@ -229,4 +229,41 @@ public sealed class NetworkManagementServiceTests
     {
         Assert.Equal(expected, NetworkManagementService.ParseInternetAccessState(value));
     }
+
+    [Theory]
+    [InlineData("Error: Connection activation failed: Secrets were required, but not provided.", true)]
+    [InlineData("Error: Connection activation failed: invalid secrets.", true)]
+    [InlineData("Error: No network with SSID 'missing' found.", false)]
+    public void IsWrongWifiPasswordMessage_DetectsExpectedErrors(string message, bool expected)
+    {
+        Assert.Equal(expected, NetworkManagementService.IsWrongWifiPasswordMessage(message));
+    }
+
+    [Fact]
+    public void BuildWifiConnectFailureMessage_MapsWrongPasswordToFriendlyText()
+    {
+        var result = new NetworkManagementService.ProcessResult(
+            Succeeded: false,
+            StandardOutput: string.Empty,
+            ErrorOutput: "Error: Connection activation failed: Secrets were required, but not provided.",
+            ExitCode: 10);
+
+        var message = NetworkManagementService.BuildWifiConnectFailureMessage("Home WiFi", result);
+
+        Assert.Equal("Incorrect Wi-Fi password for 'Home WiFi'.", message);
+    }
+
+    [Fact]
+    public void BuildWifiConnectSuccessMessage_ReportsNoInternet()
+    {
+        var result = new NetworkManagementService.ProcessResult(
+            Succeeded: true,
+            StandardOutput: "Device 'wlan0' successfully activated.",
+            ErrorOutput: string.Empty,
+            ExitCode: 0);
+
+        var message = NetworkManagementService.BuildWifiConnectSuccessMessage("Home WiFi", false, result);
+
+        Assert.Equal("Connected to 'Home WiFi', but internet access is unavailable.", message);
+    }
 }

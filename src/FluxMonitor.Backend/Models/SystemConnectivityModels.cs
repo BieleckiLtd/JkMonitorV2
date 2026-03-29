@@ -101,6 +101,12 @@ public sealed record class WifiConnectResult
     public bool Success { get; init; }
 
     public required string Message { get; init; }
+
+    public string? InterfaceName { get; init; }
+
+    public string? ConnectedSsid { get; init; }
+
+    public bool? HasInternetAccess { get; init; }
 }
 
 public sealed record class WifiPowerResult

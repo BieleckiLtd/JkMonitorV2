@@ -127,7 +127,8 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             return new WifiConnectResult
             {
                 Success = false,
-                Message = "Wi-Fi access point changes are supported on Linux hosts with NetworkManager."
+                Message = "Wi-Fi access point changes are supported on Linux hosts with NetworkManager.",
+                InterfaceName = interfaceName?.Trim()
             };
         }
 
@@ -136,7 +137,8 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             return new WifiConnectResult
             {
                 Success = false,
-                Message = "An SSID is required."
+                Message = "An SSID is required.",
+                InterfaceName = interfaceName?.Trim()
             };
         }
 
@@ -145,7 +147,8 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             return new WifiConnectResult
             {
                 Success = false,
-                Message = "Wi-Fi is turned off."
+                Message = "Wi-Fi is turned off.",
+                InterfaceName = interfaceName?.Trim()
             };
         }
 
@@ -155,7 +158,8 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             return new WifiConnectResult
             {
                 Success = false,
-                Message = "No wireless interface was detected on this host."
+                Message = "No wireless interface was detected on this host.",
+                InterfaceName = interfaceName?.Trim()
             };
         }
 
@@ -167,6 +171,8 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
 
         var arguments = new List<string>
         {
+            "--wait",
+            "20",
             "device",
             "wifi",
             "connect",
@@ -184,7 +190,8 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         var result = await RunNmcliAsync(arguments, cancellationToken);
         if (!result.Succeeded)
         {
-            var message = BuildCommandFailureMessage(result, $"Unable to connect to Wi-Fi network '{trimmedSsid}'.");
+            var observation = await ObserveWifiConnectionStateAsync(resolvedInterfaceName, trimmedSsid, attempts: 1, cancellationToken);
+            var message = BuildWifiConnectFailureMessage(trimmedSsid, result, observation);
             logger.LogWarning(
                 "Wi-Fi connect failed for interface {InterfaceName} and SSID {Ssid}: {ErrorMessage}",
                 resolvedInterfaceName,
@@ -193,16 +200,41 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             return new WifiConnectResult
             {
                 Success = false,
-                Message = message
+                Message = message,
+                InterfaceName = resolvedInterfaceName,
+                ConnectedSsid = observation.ConnectedSsid,
+                HasInternetAccess = observation.HasInternetAccess
+            };
+        }
+
+        var verification = await ObserveWifiConnectionStateAsync(resolvedInterfaceName, trimmedSsid, attempts: 12, cancellationToken);
+        if (!verification.IsConnectedToTarget)
+        {
+            var message = BuildWifiConnectUnverifiedMessage(trimmedSsid, verification, result);
+            logger.LogWarning(
+                "Wi-Fi connect command succeeded for interface {InterfaceName} and SSID {Ssid}, but the connection could not be verified. State={ConnectionState}, ConnectedSsid={ConnectedSsid}",
+                resolvedInterfaceName,
+                trimmedSsid,
+                verification.ConnectionState,
+                verification.ConnectedSsid);
+
+            return new WifiConnectResult
+            {
+                Success = false,
+                Message = message,
+                InterfaceName = resolvedInterfaceName,
+                ConnectedSsid = verification.ConnectedSsid,
+                HasInternetAccess = verification.HasInternetAccess
             };
         }
 
         return new WifiConnectResult
         {
             Success = true,
-            Message = string.IsNullOrWhiteSpace(result.StandardOutput)
-                ? $"Connected to '{trimmedSsid}'."
-                : result.StandardOutput.Trim()
+            Message = BuildWifiConnectSuccessMessage(trimmedSsid, verification.HasInternetAccess, result),
+            InterfaceName = resolvedInterfaceName,
+            ConnectedSsid = verification.ConnectedSsid,
+            HasInternetAccess = verification.HasInternetAccess
         };
     }
 
@@ -668,6 +700,55 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             .FirstOrDefault(accessPoint => accessPoint.IsActive);
     }
 
+    private async Task<WifiConnectionObservation> ObserveWifiConnectionStateAsync(
+        string interfaceName,
+        string targetSsid,
+        int attempts,
+        CancellationToken cancellationToken)
+    {
+        WifiConnectionObservation lastObservation = new(
+            interfaceName,
+            ConnectionState: null,
+            ConnectedSsid: null,
+            HasInternetAccess: null,
+            IsConnectedToTarget: false);
+
+        var totalAttempts = Math.Max(1, attempts);
+        for (var attempt = 0; attempt < totalAttempts; attempt++)
+        {
+            var deviceStatuses = await GetDeviceStatusesAsync(cancellationToken);
+            deviceStatuses.TryGetValue(interfaceName, out var deviceStatus);
+
+            var currentAccessPoint = await TryGetCurrentAccessPointAsync(interfaceName, cancellationToken);
+            var connectedSsid = currentAccessPoint?.Ssid;
+            var isConnectedToTarget = string.Equals(connectedSsid, targetSsid, StringComparison.Ordinal);
+            bool? hasInternetAccess = null;
+            if (isConnectedToTarget)
+            {
+                hasInternetAccess = await GetInternetAccessAsync(cancellationToken);
+            }
+
+            lastObservation = new WifiConnectionObservation(
+                interfaceName,
+                deviceStatus?.State,
+                connectedSsid,
+                hasInternetAccess,
+                isConnectedToTarget);
+
+            if (isConnectedToTarget)
+            {
+                return lastObservation;
+            }
+
+            if (attempt + 1 < totalAttempts)
+            {
+                await Task.Delay(TimeSpan.FromSeconds(1), cancellationToken);
+            }
+        }
+
+        return lastObservation;
+    }
+
     private async Task<WifiAccessPointCollectionResult> GetWifiAccessPointsAsync(
         string interfaceName,
         bool requestRescan,
@@ -1105,6 +1186,86 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         return fallbackMessage;
     }
 
+    internal static string BuildWifiConnectFailureMessage(
+        string ssid,
+        ProcessResult result,
+        WifiConnectionObservation? observation = null)
+    {
+        var message = BuildCommandFailureMessage(result, $"Unable to connect to Wi-Fi network '{ssid}'.");
+        if (IsWrongWifiPasswordMessage(message))
+        {
+            return $"Incorrect Wi-Fi password for '{ssid}'.";
+        }
+
+        if (message.Contains("No network with SSID", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Wi-Fi network '{ssid}' is no longer in range.";
+        }
+
+        if (observation is not null
+            && !string.IsNullOrWhiteSpace(observation.ConnectedSsid)
+            && !string.Equals(observation.ConnectedSsid, ssid, StringComparison.Ordinal))
+        {
+            return $"Unable to connect to '{ssid}'. The adapter is still on '{observation.ConnectedSsid}'.";
+        }
+
+        return message;
+    }
+
+    internal static string BuildWifiConnectSuccessMessage(string ssid, bool? hasInternetAccess, ProcessResult result)
+    {
+        if (hasInternetAccess == false)
+        {
+            return $"Connected to '{ssid}', but internet access is unavailable.";
+        }
+
+        if (hasInternetAccess == true)
+        {
+            return $"Connected to '{ssid}'. Internet access is available.";
+        }
+
+        return string.IsNullOrWhiteSpace(result.StandardOutput)
+            ? $"Connected to '{ssid}'."
+            : result.StandardOutput.Trim();
+    }
+
+    internal static string BuildWifiConnectUnverifiedMessage(
+        string ssid,
+        WifiConnectionObservation observation,
+        ProcessResult result)
+    {
+        if (!string.IsNullOrWhiteSpace(observation.ConnectedSsid)
+            && !string.Equals(observation.ConnectedSsid, ssid, StringComparison.Ordinal))
+        {
+            return $"Unable to connect to '{ssid}'. The adapter is still on '{observation.ConnectedSsid}'.";
+        }
+
+        if (string.Equals(observation.ConnectionState, "disconnected", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Unable to connect to '{ssid}'. The wireless adapter reported a disconnected state.";
+        }
+
+        if (!string.IsNullOrWhiteSpace(observation.ConnectionState))
+        {
+            return $"Unable to confirm a connection to '{ssid}'. Current adapter state: {observation.ConnectionState}.";
+        }
+
+        return BuildCommandFailureMessage(result, $"Unable to confirm a connection to '{ssid}'.");
+    }
+
+    internal static bool IsWrongWifiPasswordMessage(string message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return false;
+        }
+
+        return message.Contains("Secrets were required, but not provided", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("wrong password", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("bad password", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("invalid secrets", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static async Task<ProcessResult> RunProcessAsync(
         string fileName,
         IReadOnlyList<string> arguments,
@@ -1189,11 +1350,18 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         string? State,
         string? ConnectionName);
 
-    private sealed record ProcessResult(
+    internal sealed record ProcessResult(
         bool Succeeded,
         string StandardOutput,
         string ErrorOutput,
         int? ExitCode);
+
+    internal sealed record WifiConnectionObservation(
+        string InterfaceName,
+        string? ConnectionState,
+        string? ConnectedSsid,
+        bool? HasInternetAccess,
+        bool IsConnectedToTarget);
 
     private sealed record WifiAccessPointCollectionResult(
         ProcessResult Result,

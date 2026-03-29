@@ -2,12 +2,136 @@ import { create } from 'zustand';
 import { type ThemeConfig, builtInThemes } from '../lib/themes';
 import { type UpdateActionResult, type UpdateProgress } from '../lib/systemUpdate';
 
+const updateRestartHeartbeatDetail = 'Flux Monitor is restarting. Waiting for the heartbeat before reloading the frontend.';
+const updateReloadingFrontendDetail = 'Flux Monitor is back online. Reloading the frontend to pick up the new JavaScript and styles.';
+const updateHeartbeatPollIntervalMs = 1500;
+
+let restartRecoveryPromise: Promise<void> | null = null;
+
 function isUpdateProgress(value: unknown): value is UpdateProgress {
   return typeof value === 'object'
     && value !== null
     && 'sessionId' in value
     && 'status' in value
     && 'isRunning' in value;
+}
+
+function createRestartHeartbeatProgress(progress: UpdateProgress): UpdateProgress {
+  return {
+    ...progress,
+    status: 'restarting',
+    isRunning: true,
+    success: null,
+    stage: 'Restarting Flux Monitor…',
+    detail: updateRestartHeartbeatDetail,
+  };
+}
+
+function createFrontendReloadProgress(progress: UpdateProgress): UpdateProgress {
+  return {
+    ...progress,
+    status: 'restarting',
+    isRunning: true,
+    success: null,
+    stage: 'Reloading updated interface…',
+    detail: updateReloadingFrontendDetail,
+  };
+}
+
+async function clearFrontendRuntimeCaches(): Promise<void> {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  if ('serviceWorker' in navigator) {
+    try {
+      const registrations = await navigator.serviceWorker.getRegistrations();
+      await Promise.all(registrations.map(async (registration) => {
+        try {
+          await registration.unregister();
+        } catch {
+          // Best effort; a full document reload still happens below.
+        }
+      }));
+    } catch {
+      // Best effort; cache cleanup is additive, not required for the reload.
+    }
+  }
+
+  if ('caches' in window) {
+    try {
+      const cacheKeys = await caches.keys();
+      await Promise.all(cacheKeys.map(async (cacheKey) => {
+        try {
+          await caches.delete(cacheKey);
+        } catch {
+          // Best effort; continue to the forced reload.
+        }
+      }));
+    } catch {
+      // Best effort; continue to the forced reload.
+    }
+  }
+}
+
+async function hardReloadFrontend(): Promise<void> {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  await clearFrontendRuntimeCaches();
+
+  const reloadUrl = new URL(window.location.href);
+  reloadUrl.searchParams.set('_reload', Date.now().toString());
+  window.location.replace(reloadUrl.toString());
+}
+
+function beginRestartRecovery(
+  set: (partial:
+    | Partial<AppState>
+    | ((state: AppState) => Partial<AppState> | AppState),
+  ) => void,
+  get: () => AppState,
+): void {
+  if (typeof window === 'undefined' || restartRecoveryPromise) {
+    return;
+  }
+
+  restartRecoveryPromise = (async () => {
+    while (true) {
+      try {
+        const response = await fetch(`/api/health?nocache=${Date.now()}`, {
+          cache: 'no-store',
+          headers: {
+            'Cache-Control': 'no-cache',
+            Pragma: 'no-cache',
+          },
+        });
+
+        if (response.ok) {
+          const current = get().updateProgress;
+          if (current?.status === 'restarting') {
+            set({ updateProgress: createFrontendReloadProgress(current) });
+          }
+
+          await hardReloadFrontend();
+          return;
+        }
+      } catch {
+        // The service is still restarting; keep polling.
+      }
+
+      await new Promise<void>((resolve) => {
+        window.setTimeout(resolve, updateHeartbeatPollIntervalMs);
+      });
+    }
+  })()
+    .catch((error) => {
+      console.error('Failed while waiting for Flux Monitor to restart:', error);
+    })
+    .finally(() => {
+      restartRecoveryPromise = null;
+    });
 }
 
 interface AppState {
@@ -113,19 +237,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         set((state) => {
           if (state.updateProgress?.status === 'restarting') {
             return {
-              updateProgress: {
-                ...state.updateProgress,
-                status: 'succeeded',
-                isRunning: false,
-                success: true,
-                stage: 'Update complete.',
-                detail: 'Flux Monitor restarted successfully and is serving the updated release.',
-              },
+              updateProgress: createRestartHeartbeatProgress(state.updateProgress),
             };
           }
 
           return { updateProgress: null };
         });
+
+        if (get().updateProgress?.status === 'restarting') {
+          beginRestartRecovery(set, get);
+        }
+
         return;
       }
 
@@ -148,15 +270,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       const current = get().updateProgress;
       if (current?.status === 'restarting') {
         set({
-          updateProgress: {
-            ...current,
-            stage: 'Restarting Flux Monitor…',
-            detail: 'The service is restarting. This page will reconnect automatically.',
-            isRunning: true,
-            success: null,
-            status: 'restarting',
-          },
+          updateProgress: createRestartHeartbeatProgress(current),
         });
+        beginRestartRecovery(set, get);
         return;
       }
 

@@ -188,6 +188,9 @@ type WifiScanResult = {
 type WifiConnectResult = {
   success: boolean;
   message: string;
+  interfaceName?: string | null;
+  connectedSsid?: string | null;
+  hasInternetAccess?: boolean | null;
 };
 
 type WifiPowerResult = {
@@ -550,12 +553,18 @@ export function SystemPage() {
       if (response.ok && data.success) {
         setWifiPassword('');
         setWifiConnectDialog(null);
-        setExpandedConnectivitySection((current) => current === 'wifi' ? null : current);
+        setExpandedConnectivitySection('wifi');
+        if (data.interfaceName) {
+          setWifiTargetInterface(data.interfaceName);
+        }
+        if (data.connectedSsid) {
+          setWifiTargetSsid(data.connectedSsid);
+        }
         await loadConnectivity();
       }
     } catch (error) {
       setWifiFeedback({
-        message: error instanceof Error ? error.message : 'Unable to connect to the selected Wi-Fi network.',
+        message: getWifiConnectRequestErrorMessage(error),
         isError: true,
       });
     } finally {
@@ -647,6 +656,7 @@ export function SystemPage() {
     allowSsidEdit,
     title,
   }: WifiConnectDialogState) => {
+    setWifiFeedback(null);
     setWifiTargetInterface(interfaceName);
     setWifiTargetSsid(ssid);
     setWifiPassword('');
@@ -1668,6 +1678,14 @@ export function SystemPage() {
             </div>
 
             <div className='mt-5 space-y-3'>
+              {wifiFeedback ? (
+                <div className={cn(
+                  'rounded-2xl border px-3 py-2 text-xs',
+                  wifiFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                )}>
+                  {wifiFeedback.message}
+                </div>
+              ) : null}
               <Input
                 value={wifiTargetSsid}
                 onChange={(event) => setWifiTargetSsid(event.target.value)}
@@ -1688,6 +1706,7 @@ export function SystemPage() {
                 onClick={() => {
                   setWifiConnectDialog(null);
                   setWifiPassword('');
+                  setWifiFeedback(null);
                 }}
                 className='inline-flex items-center justify-center rounded-xl border border-border bg-background/70 px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
               >
@@ -1996,6 +2015,14 @@ function normalizeBluetoothSignalPercent(rssi: number | null | undefined) {
 
 function isWifiNetworkSecured(accessPoint: WifiAccessPointInfo) {
   return Boolean(accessPoint.security && accessPoint.security.trim() && accessPoint.security.trim() !== '--');
+}
+
+function getWifiConnectRequestErrorMessage(error: unknown) {
+  if (error instanceof TypeError && error.message.toLowerCase().includes('fetch')) {
+    return 'The Wi-Fi change interrupted the request. If the device switched networks, reconnect to its new address and check Wi-Fi status again.';
+  }
+
+  return error instanceof Error ? error.message : 'Unable to connect to the selected Wi-Fi network.';
 }
 
 function getWifiSignalState(percent: number | null, disabled: boolean) {
