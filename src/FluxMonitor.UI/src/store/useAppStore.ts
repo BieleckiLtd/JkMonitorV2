@@ -5,9 +5,11 @@ import { type UpdateActionResult, type UpdateProgress } from '../lib/systemUpdat
 const updateRestartHeartbeatDetail = 'Flux Monitor is restarting. Waiting for the heartbeat before reloading the frontend.';
 const updateReloadingFrontendDetail = 'Flux Monitor is back online. Reloading the frontend to pick up the new JavaScript and styles.';
 const updateHeartbeatPollIntervalMs = 1500;
+const updateProgressReconnectDelayMs = 2000;
 
 let restartRecoveryPromise: Promise<void> | null = null;
 let updateProgressEventSource: EventSource | null = null;
+let updateProgressReconnectHandle: number | null = null;
 
 type UpdateProgressStreamEnvelope = {
   progress: UpdateProgress | null;
@@ -260,8 +262,14 @@ function connectUpdateProgressStream(
     return;
   }
 
+  clearUpdateProgressReconnect();
+
   const eventSource = new EventSource('/api/system/update/stream');
   updateProgressEventSource = eventSource;
+
+  eventSource.onopen = () => {
+    clearUpdateProgressReconnect();
+  };
 
   eventSource.onmessage = (event) => {
     try {
@@ -280,17 +288,51 @@ function connectUpdateProgressStream(
       }
 
       beginRestartRecovery(set, get);
+      disconnectUpdateProgressStream();
+      return;
     }
+
+    disconnectUpdateProgressStream();
+    scheduleUpdateProgressReconnect(set, get);
   };
 }
 
 function disconnectUpdateProgressStream(): void {
   if (!updateProgressEventSource) {
+    clearUpdateProgressReconnect();
     return;
   }
 
   updateProgressEventSource.close();
   updateProgressEventSource = null;
+  clearUpdateProgressReconnect();
+}
+
+function clearUpdateProgressReconnect(): void {
+  if (updateProgressReconnectHandle === null || typeof window === 'undefined') {
+    return;
+  }
+
+  window.clearTimeout(updateProgressReconnectHandle);
+  updateProgressReconnectHandle = null;
+}
+
+function scheduleUpdateProgressReconnect(
+  set: (partial:
+    | Partial<AppState>
+    | ((state: AppState) => Partial<AppState> | AppState),
+  ) => void,
+  get: () => AppState,
+): void {
+  if (typeof window === 'undefined' || updateProgressReconnectHandle !== null || restartRecoveryPromise) {
+    return;
+  }
+
+  updateProgressReconnectHandle = window.setTimeout(() => {
+    updateProgressReconnectHandle = null;
+    connectUpdateProgressStream(set, get);
+    void get().fetchUpdateProgress();
+  }, updateProgressReconnectDelayMs);
 }
 
 interface AppState {

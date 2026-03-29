@@ -10,6 +10,8 @@ describe('useAppStore update restart recovery', () => {
   const originalEventSource = globalThis.EventSource;
 
   beforeEach(() => {
+    vi.useRealTimers();
+
     useAppStore.setState({
       ...initialState,
       updateProgress: null,
@@ -199,6 +201,43 @@ describe('useAppStore update restart recovery', () => {
         isRunning: true,
       });
     });
+  });
+
+  it('reconnects the update stream and refreshes the snapshot after a non-restart stream failure', async () => {
+    vi.useFakeTimers();
+
+    class FakeEventSource {
+      static instances: FakeEventSource[] = [];
+
+      onopen: (() => void) | null = null;
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      close = vi.fn();
+
+      constructor(public readonly url: string) {
+        FakeEventSource.instances.push(this);
+      }
+    }
+
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+
+    const fetchMock = vi.fn()
+      .mockResolvedValue(new Response(null, { status: 204 }));
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    useAppStore.getState().connectUpdateProgressStream();
+
+    expect(FakeEventSource.instances).toHaveLength(1);
+
+    FakeEventSource.instances[0]?.onerror?.();
+
+    expect(FakeEventSource.instances[0]?.close).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(FakeEventSource.instances).toHaveLength(2);
+    expect(FakeEventSource.instances[1]?.url).toBe('/api/system/update/stream');
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 
   it('ignores an older polled snapshot for the active update session', async () => {
