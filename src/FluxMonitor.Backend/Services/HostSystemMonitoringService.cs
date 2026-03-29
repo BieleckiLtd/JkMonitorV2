@@ -25,6 +25,7 @@ public sealed class HostSystemMonitoringService(ILogger<HostSystemMonitoringServ
             CpuCoreCount = GetCpuCoreCount(),
             CpuMaxClockSpeedMegahertz = GetCpuMaxClockSpeedMegahertz(),
             CpuCurrentClockSpeedMegahertz = GetCpuCurrentClockSpeedMegahertz(),
+            CpuIsThrottled = GetCpuIsThrottled(),
             ProcessCount = GetProcessCount(),
             SystemUptimeSeconds = GetSystemUptimeSeconds(),
             MemoryAvailableBytes = memoryInfo.availableBytes,
@@ -238,6 +239,23 @@ public sealed class HostSystemMonitoringService(ILogger<HostSystemMonitoringServ
         catch (Exception exception)
         {
             logger.LogDebug(exception, "Failed to collect current CPU clock speed.");
+        }
+
+        return null;
+    }
+
+    private bool? GetCpuIsThrottled()
+    {
+        try
+        {
+            if (OperatingSystem.IsLinux())
+            {
+                return GetLinuxCpuIsThrottled();
+            }
+        }
+        catch (Exception exception)
+        {
+            logger.LogDebug(exception, "Failed to collect CPU throttle state.");
         }
 
         return null;
@@ -483,6 +501,12 @@ public sealed class HostSystemMonitoringService(ILogger<HostSystemMonitoringServ
 
     private static int? GetLinuxCpuCurrentClockSpeedMegahertz()
     {
+        var vcgencmdFrequencyMegahertz = GetLinuxVcgencmdClockSpeedMegahertz();
+        if (vcgencmdFrequencyMegahertz is > 0)
+        {
+            return vcgencmdFrequencyMegahertz;
+        }
+
         const string cpuRoot = "/sys/devices/system/cpu";
         const string cpuPolicyRoot = "/sys/devices/system/cpu/cpufreq";
 
@@ -515,6 +539,114 @@ public sealed class HostSystemMonitoringService(ILogger<HostSystemMonitoringServ
         }
 
         return maxKilohertz > 0 ? (int)Math.Round(maxKilohertz / 1000d) : null;
+    }
+
+    private static int? GetLinuxVcgencmdClockSpeedMegahertz()
+    {
+        var output = TryRunLinuxCommand("measure_clock", "arm");
+
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return null;
+        }
+
+        var separatorIndex = output.LastIndexOf('=');
+        var rawValue = separatorIndex >= 0 ? output[(separatorIndex + 1)..].Trim() : output.Trim();
+
+        if (!long.TryParse(rawValue, NumberStyles.Integer, CultureInfo.InvariantCulture, out var hertz) || hertz <= 0)
+        {
+            return null;
+        }
+
+        return (int)Math.Round(hertz / 1_000_000d);
+    }
+
+    private static bool? GetLinuxCpuIsThrottled()
+    {
+        var output = TryRunLinuxCommand("get_throttled");
+
+        if (string.IsNullOrWhiteSpace(output))
+        {
+            return null;
+        }
+
+        var separatorIndex = output.LastIndexOf("0x", StringComparison.OrdinalIgnoreCase);
+        var rawValue = separatorIndex >= 0 ? output[(separatorIndex + 2)..].Trim() : output.Trim();
+
+        if (!uint.TryParse(rawValue, NumberStyles.HexNumber, CultureInfo.InvariantCulture, out var flags))
+        {
+            return null;
+        }
+
+        const uint currentlyThrottledBit = 1u << 2;
+        const uint softTemperatureLimitBit = 1u << 3;
+
+        return (flags & (currentlyThrottledBit | softTemperatureLimitBit)) != 0;
+    }
+
+    private static string? TryRunLinuxCommand(params string[] arguments)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return null;
+        }
+
+        foreach (var fileName in new[] { "/usr/bin/vcgencmd", "/bin/vcgencmd", "vcgencmd" })
+        {
+            try
+            {
+                using var process = new Process
+                {
+                    StartInfo = new ProcessStartInfo
+                    {
+                        FileName = fileName,
+                        RedirectStandardOutput = true,
+                        RedirectStandardError = true,
+                        UseShellExecute = false,
+                        CreateNoWindow = true
+                    }
+                };
+
+                foreach (var argument in arguments)
+                {
+                    process.StartInfo.ArgumentList.Add(argument);
+                }
+
+                process.Start();
+
+                if (!process.WaitForExit(1500))
+                {
+                    try
+                    {
+                        process.Kill(entireProcessTree: true);
+                    }
+                    catch
+                    {
+                        // Best effort.
+                    }
+
+                    continue;
+                }
+
+                if (process.ExitCode != 0)
+                {
+                    continue;
+                }
+
+                var output = process.StandardOutput.ReadToEnd().Trim();
+
+                if (!string.IsNullOrWhiteSpace(output))
+                {
+                    return output;
+                }
+            }
+            catch
+            {
+                // Best effort. Fall back to sysfs-based sampling when vcgencmd is unavailable.
+            }
+        }
+
+        return null;
     }
 
     private double? GetSystemTemperatureCelsius()

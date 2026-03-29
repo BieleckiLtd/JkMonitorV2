@@ -81,6 +81,8 @@ public sealed record class SystemRuntimeMetrics
 
     public int? CpuCurrentClockSpeedMegahertz { get; init; }
 
+    public bool? CpuIsThrottled { get; init; }
+
     public int? ProcessCount { get; init; }
 
     public long? SystemUptimeSeconds { get; init; }

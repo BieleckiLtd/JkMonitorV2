@@ -213,8 +213,10 @@ public sealed class SystemUpdateService(
             using var client = CreateGitHubClient();
             var releaseResolution = await ResolveReleaseAsync(client, result.CurrentChannel, cancellationToken);
             var release = releaseResolution.Release;
+            var currentInstalledRelease = await ResolveCurrentInstalledReleaseAsync(client, result.CurrentReleaseTag, release, cancellationToken);
 
             result.CheckedAt = DateTimeOffset.UtcNow;
+            result.CurrentReleasePublishedAt = currentInstalledRelease?.PublishedAt;
             result.TargetChannel = releaseResolution.Channel;
             result.TargetReleaseTag = release?.TagName ?? result.TargetReleaseTag;
 
@@ -964,6 +966,35 @@ public sealed class SystemUpdateService(
         return new ResolvedReleaseInfo(normalizedChannel, release);
     }
 
+    private async Task<GitHubRelease?> ResolveCurrentInstalledReleaseAsync(
+        HttpClient client,
+        string? currentReleaseTag,
+        GitHubRelease? targetRelease,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(currentReleaseTag))
+            {
+                return null;
+            }
+
+            if (targetRelease is not null
+                && string.Equals(targetRelease.TagName, currentReleaseTag, StringComparison.OrdinalIgnoreCase))
+            {
+                return targetRelease;
+            }
+
+            var releaseApiUrl = $"{ReleaseApiBaseUrl}/tags/{currentReleaseTag.Trim()}";
+            return await client.GetFromJsonAsync<GitHubRelease>(releaseApiUrl, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            logger.LogDebug(exception, "Failed to resolve the current installed release metadata for tag {ReleaseTag}.", currentReleaseTag);
+            return null;
+        }
+    }
+
     private async Task<UpdateTargetResolution> ResolveUpdateTargetAsync(CancellationToken cancellationToken)
     {
         try
@@ -1060,6 +1091,7 @@ public sealed class UpdateCheckResult
     public string? CurrentReleaseTag { get; set; }
     public string? CurrentSourceRevision { get; set; }
     public string? CurrentBuiltAt { get; set; }
+    public string? CurrentReleasePublishedAt { get; set; }
     public string? CurrentChannel { get; set; }
     public string? TargetChannel { get; set; }
     public string? TargetReleaseTag { get; set; }
