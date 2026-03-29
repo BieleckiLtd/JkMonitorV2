@@ -6,18 +6,29 @@ namespace FluxMonitor.Backend.Services;
 
 public sealed class InternetSpeedTestService(
     ICommandRunner commandRunner,
+    IInternetSpeedTestStore internetSpeedTestStore,
     ILogger<InternetSpeedTestService> logger)
 {
     private static readonly TimeSpan CommandAvailabilityCacheDuration = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan SpeedTestTimeout = TimeSpan.FromMinutes(3);
     private readonly Lock _stateLock = new();
+    private readonly SemaphoreSlim _latestResultInitializationLock = new(1, 1);
     private InternetSpeedTestSnapshot _snapshot = BuildUnsupportedSnapshot(
         "Internet speed tests are supported on Linux hosts with speedtest-cli installed.");
     private bool? _commandAvailable;
     private DateTimeOffset? _lastAvailabilityCheckedAt;
+    private volatile bool _latestResultLoaded;
+
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    {
+        await internetSpeedTestStore.InitializeAsync(cancellationToken);
+        await EnsureLatestResultLoadedAsync(cancellationToken);
+    }
 
     public async Task<InternetSpeedTestSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
     {
+        await EnsureLatestResultLoadedAsync(cancellationToken);
+
         lock (_stateLock)
         {
             if (_snapshot.IsRunning
@@ -48,6 +59,8 @@ public sealed class InternetSpeedTestService(
 
     public async Task<InternetSpeedTestCommandResult> StartAsync(CancellationToken cancellationToken = default)
     {
+        await EnsureLatestResultLoadedAsync(cancellationToken);
+
         var capability = await ResolveCapabilityAsync(cancellationToken);
         if (!capability.Supported)
         {
@@ -147,6 +160,24 @@ public sealed class InternetSpeedTestService(
             }
 
             var completedAt = DateTimeOffset.UtcNow;
+            var persistedResult = parsedResult with
+            {
+                TestedAt = parsedResult.TestedAt ?? completedAt
+            };
+
+            try
+            {
+                await internetSpeedTestStore.SaveResultAsync(
+                    persistedResult,
+                    startedAt,
+                    completedAt,
+                    CancellationToken.None);
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Internet speed test completed, but storing the result in PostgreSQL failed.");
+            }
+
             lock (_stateLock)
             {
                 _snapshot = new InternetSpeedTestSnapshot
@@ -160,10 +191,7 @@ public sealed class InternetSpeedTestService(
                     StartedAt = startedAt,
                     CompletedAt = completedAt,
                     LastUpdatedAt = completedAt,
-                    Result = parsedResult with
-                    {
-                        TestedAt = parsedResult.TestedAt ?? completedAt
-                    }
+                    Result = persistedResult
                 };
             }
 
@@ -181,6 +209,54 @@ public sealed class InternetSpeedTestService(
         {
             logger.LogWarning(exception, "Internet speed test failed unexpectedly.");
             CompleteWithFailure(startedAt, "The internet speed test could not be completed on this device.");
+        }
+    }
+
+    private async Task EnsureLatestResultLoadedAsync(CancellationToken cancellationToken)
+    {
+        if (_latestResultLoaded)
+        {
+            return;
+        }
+
+        await _latestResultInitializationLock.WaitAsync(cancellationToken);
+
+        try
+        {
+            if (_latestResultLoaded)
+            {
+                return;
+            }
+
+            var latestRun = await internetSpeedTestStore.GetLatestResultAsync(cancellationToken);
+            if (latestRun is not null)
+            {
+                lock (_stateLock)
+                {
+                    if (!_snapshot.IsRunning && _snapshot.Result is null)
+                    {
+                        _snapshot = new InternetSpeedTestSnapshot
+                        {
+                            Supported = true,
+                            Status = "succeeded",
+                            Backend = "speedtest-cli",
+                            CanStart = true,
+                            IsRunning = false,
+                            StatusMessage = "Showing the latest stored internet speed test.",
+                            StartedAt = latestRun.StartedAt,
+                            CompletedAt = latestRun.CompletedAt,
+                            LastUpdatedAt = latestRun.CompletedAt ?? latestRun.Result.TestedAt ?? DateTimeOffset.UtcNow,
+                            Result = latestRun.Result
+                        };
+                    }
+                }
+            }
+
+            _latestResultLoaded = true;
+        }
+        finally
+        {
+            _latestResultInitializationLock.Release();
         }
     }
 

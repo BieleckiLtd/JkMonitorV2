@@ -52,6 +52,7 @@ builder.Services.AddSingleton<FluxMonitor.Backend.Services.ICommandRunner, FluxM
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.ManagedRestartService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.CloudflareTunnelStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.CloudflareTunnelService>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.IInternetSpeedTestStore, FluxMonitor.Backend.Services.InternetSpeedTestStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.InternetSpeedTestService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.UpdateProgressBroadcaster>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.SystemUpdateService>();
@@ -166,6 +167,12 @@ using (var scope = app.Services.CreateScope())
 
     var cloudflareTunnelService = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.CloudflareTunnelService>();
     await cloudflareTunnelService.InitializeAsync(CancellationToken.None);
+
+    var internetSpeedTestStore = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.IInternetSpeedTestStore>();
+    await internetSpeedTestStore.InitializeAsync(CancellationToken.None);
+
+    var internetSpeedTestService = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.InternetSpeedTestService>();
+    await internetSpeedTestService.InitializeAsync(CancellationToken.None);
 }
 
 app.UseDefaultFiles();

@@ -381,6 +381,7 @@ export function SystemPage() {
   const [cloudflareTunnelSaving, setCloudflareTunnelSaving] = useState(false);
   const [cloudflareTunnelEnabled, setCloudflareTunnelEnabled] = useState(false);
   const [cloudflareTunnelTokenOrCommand, setCloudflareTunnelTokenOrCommand] = useState('');
+  const [internetSpeedSectionOpen, setInternetSpeedSectionOpen] = useState(false);
   const [internetSpeedTest, setInternetSpeedTest] = useState<InternetSpeedTestSnapshot | null>(null);
   const [internetSpeedTestLoading, setInternetSpeedTestLoading] = useState(true);
   const [internetSpeedTestStarting, setInternetSpeedTestStarting] = useState(false);
@@ -659,6 +660,7 @@ export function SystemPage() {
   const startInternetSpeedTest = async () => {
     setInternetSpeedTestStarting(true);
     setInternetSpeedTestError(null);
+    setInternetSpeedSectionOpen(true);
 
     try {
       const response = await fetch('/api/system/internet-speed/run', {
@@ -1169,17 +1171,8 @@ export function SystemPage() {
     : internetSpeedTest.isRunning
       ? 'Test running'
       : internetSpeedResult
-        ? `Down ${formatSpeedMbps(internetSpeedResult.downloadBitsPerSecond)} • Up ${formatSpeedMbps(internetSpeedResult.uploadBitsPerSecond)}`
-        : 'No result yet';
-  const internetSpeedStateLabel = !internetSpeedTest?.supported
-    ? 'Unavailable'
-    : internetSpeedTest.isRunning
-      ? 'Running'
-      : internetSpeedTest.status === 'failed'
-        ? 'Retry'
-        : internetSpeedResult
-          ? 'Ready'
-          : 'Idle';
+        ? `⭡${formatSpeedMbps(internetSpeedResult.downloadBitsPerSecond)} • ⭣${formatSpeedMbps(internetSpeedResult.uploadBitsPerSecond)}`
+        : 'No stored result';
   const cloudflareTunnelRunning = cloudflareTunnelStatus?.serviceRunning ?? false;
   const cloudflareTunnelSupported = cloudflareTunnelStatus?.supported ?? false;
   const cloudflareTunnelMaskedToken = cloudflareTunnelStatus?.maskedToken ?? null;
@@ -1486,142 +1479,148 @@ export function SystemPage() {
 
           <div className='min-w-0 space-y-6'>
             <Card className='border border-border/80 bg-card/85 shadow-sm'>
-              <CardHeader className='border-b border-border/60 pb-4'>
-                <div className='flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between'>
+              <CardHeader className='pb-4'>
+                <button
+                  type='button'
+                  onClick={() => setInternetSpeedSectionOpen((current) => !current)}
+                  className='flex w-full items-center gap-3 text-left'
+                >
                   <div className='flex items-start gap-3'>
                     <Globe2 className='mt-1 h-5 w-5 shrink-0 text-muted-foreground' />
                     <div>
                       <CardTitle>Internet speed</CardTitle>
-                      <CardDescription>Run a live bandwidth check on this device using `speedtest-cli`.</CardDescription>
+                      <CardDescription>Run a live bandwidth check on this device.</CardDescription>
                     </div>
                   </div>
-                  <div className='flex min-w-0 items-center justify-between gap-3 rounded-xl border border-border/70 bg-background/60 px-4 py-3 text-sm text-muted-foreground lg:min-w-[16rem]'>
+                  <div className='ml-auto flex min-w-0 items-center gap-3 pl-3 text-sm text-muted-foreground'>
+                    {internetSpeedTest?.isRunning ? <LoaderCircle className='h-4 w-4 shrink-0 animate-spin text-primary' /> : null}
                     <span className='truncate'>{internetSpeedSummary}</span>
-                    <span className='rounded-full border border-border/70 bg-background/80 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-foreground'>
-                      {internetSpeedStateLabel}
-                    </span>
+                    {internetSpeedSectionOpen ? <ChevronDown className='h-4 w-4 shrink-0' /> : <ChevronRight className='h-4 w-4 shrink-0' />}
                   </div>
-                </div>
+                </button>
               </CardHeader>
-              <CardContent className='space-y-4 pt-5'>
-                {internetSpeedTestLoading && !internetSpeedTest ? (
-                  <div className='flex items-center justify-center py-8'>
-                    <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
-                  </div>
-                ) : (
-                  <>
-                    {internetSpeedTestError ? (
-                      <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
-                        {internetSpeedTestError}
-                      </div>
-                    ) : null}
+              {internetSpeedSectionOpen ? (
+                <CardContent className='space-y-4 border-t border-border/60 pt-5'>
+                  {internetSpeedTestLoading && !internetSpeedTest ? (
+                    <div className='flex items-center justify-center py-8'>
+                      <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
+                    </div>
+                  ) : (
+                    <>
+                      {internetSpeedTestError ? (
+                        <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
+                          {internetSpeedTestError}
+                        </div>
+                      ) : null}
 
-                    {internetSpeedTest?.statusMessage ? (
-                      <div className={cn(
-                        'rounded-2xl border px-4 py-4',
-                        internetSpeedTest.isRunning
-                          ? 'border-primary/20 bg-primary/10 text-primary'
-                          : internetSpeedTest.status === 'failed'
-                            ? 'border-rose-500/20 bg-rose-500/10 text-rose-200'
-                            : 'border-border/70 bg-background/40 text-foreground'
-                      )}>
-                        <div className='flex items-start gap-3'>
-                          {internetSpeedTest.isRunning ? (
-                            <LoaderCircle className='mt-0.5 h-4 w-4 shrink-0 animate-spin' />
-                          ) : !internetSpeedTest.supported ? (
-                            <CircleAlert className='mt-0.5 h-4 w-4 shrink-0' />
-                          ) : internetSpeedTest.status === 'failed' ? (
-                            <CircleAlert className='mt-0.5 h-4 w-4 shrink-0' />
-                          ) : (
-                            <CheckCircle2 className='mt-0.5 h-4 w-4 shrink-0 text-emerald-400' />
-                          )}
-                          <div className='min-w-0'>
-                            <div className='text-sm font-semibold'>
-                              {internetSpeedTest.isRunning
-                                ? 'Speed test running. Please wait.'
-                                : !internetSpeedTest.supported
-                                  ? 'Speed test unavailable'
-                                : internetSpeedTest.status === 'failed'
-                                  ? 'Speed test did not finish'
-                                  : 'Speed test status'}
-                            </div>
-                            <div className='mt-1 text-xs opacity-85'>
-                              {internetSpeedTest.statusMessage}
-                            </div>
+                      {internetSpeedTest?.statusMessage ? (
+                        <div className={cn(
+                          'rounded-2xl border px-4 py-4',
+                          internetSpeedTest.isRunning
+                            ? 'border-primary/20 bg-primary/10 text-primary'
+                            : internetSpeedTest.status === 'failed'
+                              ? 'border-rose-500/20 bg-rose-500/10 text-rose-200'
+                              : 'border-border/70 bg-background/40 text-foreground'
+                        )}>
+                          <div className='flex items-start gap-3'>
                             {internetSpeedTest.isRunning ? (
-                              <div className='mt-3'>
-                                <div className='mb-1.5 text-[10px] font-medium uppercase tracking-[0.18em] opacity-75'>
-                                  Measuring ping, download, then upload
-                                </div>
-                                <div className='h-2 overflow-hidden rounded-full bg-background/35'>
-                                  <div className='h-full w-2/3 rounded-full bg-current animate-pulse' />
-                                </div>
+                              <LoaderCircle className='mt-0.5 h-4 w-4 shrink-0 animate-spin' />
+                            ) : !internetSpeedTest.supported ? (
+                              <CircleAlert className='mt-0.5 h-4 w-4 shrink-0' />
+                            ) : internetSpeedTest.status === 'failed' ? (
+                              <CircleAlert className='mt-0.5 h-4 w-4 shrink-0' />
+                            ) : (
+                              <CheckCircle2 className='mt-0.5 h-4 w-4 shrink-0 text-emerald-400' />
+                            )}
+                            <div className='min-w-0'>
+                              <div className='text-sm font-semibold'>
+                                {internetSpeedTest.isRunning
+                                  ? 'Speed test running. Please wait.'
+                                  : !internetSpeedTest.supported
+                                    ? 'Speed test unavailable'
+                                  : internetSpeedTest.status === 'failed'
+                                    ? 'Speed test did not finish'
+                                    : 'Latest saved speed test'}
                               </div>
-                            ) : null}
+                              <div className='mt-1 text-xs opacity-85'>
+                                {internetSpeedTest.statusMessage}
+                              </div>
+                              {internetSpeedTest.isRunning ? (
+                                <div className='mt-3'>
+                                  <div className='mb-1.5 text-[10px] font-medium uppercase tracking-[0.18em] opacity-75'>
+                                    Measuring ping, download, then upload
+                                  </div>
+                                  <div className='h-2 overflow-hidden rounded-full bg-background/35'>
+                                    <div className='h-full w-2/3 rounded-full bg-current animate-pulse' />
+                                  </div>
+                                </div>
+                              ) : null}
+                            </div>
                           </div>
                         </div>
+                      ) : null}
+
+                      <div className='grid gap-3 sm:grid-cols-3'>
+                        <SpeedMetricCard
+                          icon={Download}
+                          label='Download'
+                          value={formatSpeedMbps(internetSpeedResult?.downloadBitsPerSecond)}
+                          dialValue={formatSpeedDialValue(internetSpeedResult?.downloadBitsPerSecond)}
+                          caption={formatTransferSize(internetSpeedResult?.bytesReceived, 'received')}
+                          gaugePercent={internetSpeedDownloadGauge}
+                          tone='emerald'
+                        />
+                        <SpeedMetricCard
+                          icon={Upload}
+                          label='Upload'
+                          value={formatSpeedMbps(internetSpeedResult?.uploadBitsPerSecond)}
+                          dialValue={formatSpeedDialValue(internetSpeedResult?.uploadBitsPerSecond)}
+                          caption={formatTransferSize(internetSpeedResult?.bytesSent, 'sent')}
+                          gaugePercent={internetSpeedUploadGauge}
+                          tone='sky'
+                        />
+                        <SpeedMetricCard
+                          icon={Gauge}
+                          label='Ping'
+                          value={formatLatency(internetSpeedResult?.pingMilliseconds)}
+                          dialValue={formatLatencyDialValue(internetSpeedResult?.pingMilliseconds)}
+                          gaugePercent={internetSpeedPingGauge}
+                          tone={getLatencyTone(internetSpeedPing)}
+                        />
                       </div>
-                    ) : null}
 
-                    <div className='grid gap-3 sm:grid-cols-3'>
-                      <SpeedMetricCard
-                        icon={Download}
-                        label='Download'
-                        value={formatSpeedMbps(internetSpeedResult?.downloadBitsPerSecond)}
-                        caption={formatTransferSize(internetSpeedResult?.bytesReceived, 'received')}
-                        gaugePercent={internetSpeedDownloadGauge}
-                        tone='emerald'
-                      />
-                      <SpeedMetricCard
-                        icon={Upload}
-                        label='Upload'
-                        value={formatSpeedMbps(internetSpeedResult?.uploadBitsPerSecond)}
-                        caption={formatTransferSize(internetSpeedResult?.bytesSent, 'sent')}
-                        gaugePercent={internetSpeedUploadGauge}
-                        tone='sky'
-                      />
-                      <SpeedMetricCard
-                        icon={Gauge}
-                        label='Ping'
-                        value={formatLatency(internetSpeedResult?.pingMilliseconds)}
-                        caption='Relative server latency'
-                        gaugePercent={internetSpeedPingGauge}
-                        tone={getLatencyTone(internetSpeedPing)}
-                      />
-                    </div>
+                      <div className='grid gap-3 sm:grid-cols-2'>
+                        <DetailTile
+                          label='Server'
+                          value={formatInternetSpeedServer(
+                            internetSpeedResult?.server?.sponsor,
+                            internetSpeedResult?.server?.name,
+                            internetSpeedResult?.server?.country
+                          )}
+                        />
+                        <DetailTile label='Distance' value={formatDistance(internetSpeedResult?.server?.distanceKilometers)} />
+                        <DetailTile label='Provider' value={internetSpeedResult?.client?.internetServiceProvider ?? noDataLabel} />
+                        <DetailTile label='IP address' value={internetSpeedResult?.client?.ipAddress ?? noDataLabel} />
+                        <DetailTile label='Measured at' value={formatTimestamp(internetSpeedResult?.testedAt ?? internetSpeedTest?.completedAt)} />
+                      </div>
 
-                    <div className='grid gap-3 sm:grid-cols-2'>
-                      <DetailTile
-                        label='Server'
-                        value={formatInternetSpeedServer(
-                          internetSpeedResult?.server?.sponsor,
-                          internetSpeedResult?.server?.name,
-                          internetSpeedResult?.server?.country
-                        )}
-                      />
-                      <DetailTile label='Distance' value={formatDistance(internetSpeedResult?.server?.distanceKilometers)} />
-                      <DetailTile label='Provider' value={internetSpeedResult?.client?.internetServiceProvider ?? noDataLabel} />
-                      <DetailTile label='IP address' value={internetSpeedResult?.client?.ipAddress ?? noDataLabel} />
-                      <DetailTile label='Measured at' value={formatTimestamp(internetSpeedResult?.testedAt ?? internetSpeedTest?.completedAt)} />
-                      <DetailTile label='Backend' value={internetSpeedTest?.backend ?? 'speedtest-cli'} />
-                    </div>
+                      <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-4 text-xs text-muted-foreground'>
+                        This test downloads and uploads real traffic from the device. While it runs, keep this panel open and wait for the full result before starting another test.
+                      </div>
 
-                    <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-4 text-xs text-muted-foreground'>
-                      This test downloads and uploads real traffic from the device. While it runs, keep this page open and wait for the full result before starting another test.
-                    </div>
-
-                    <button
-                      type='button'
-                      disabled={internetSpeedTestStarting || internetSpeedTest?.isRunning || !internetSpeedTest?.canStart}
-                      onClick={() => void startInternetSpeedTest()}
-                      className='inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
-                    >
-                      {internetSpeedTestStarting || internetSpeedTest?.isRunning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Wifi className='h-4 w-4' />}
-                      {internetSpeedTest?.isRunning ? 'Speed test running… please wait' : 'Run internet speed test'}
-                    </button>
-                  </>
-                )}
-              </CardContent>
+                      <button
+                        type='button'
+                        disabled={internetSpeedTestStarting || internetSpeedTest?.isRunning || !internetSpeedTest?.canStart}
+                        onClick={() => void startInternetSpeedTest()}
+                        className='inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
+                      >
+                        {internetSpeedTestStarting || internetSpeedTest?.isRunning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Wifi className='h-4 w-4' />}
+                        {internetSpeedTest?.isRunning ? 'Speed test running… please wait' : 'Run internet speed test'}
+                      </button>
+                    </>
+                  )}
+                </CardContent>
+              ) : null}
             </Card>
 
             <Card className='border border-border/80 bg-card/85 shadow-sm'>
@@ -2544,6 +2543,7 @@ function SpeedMetricCard({
   icon: Icon,
   label,
   value,
+  dialValue,
   caption,
   gaugePercent,
   tone,
@@ -2551,7 +2551,8 @@ function SpeedMetricCard({
   icon: typeof Cpu;
   label: string;
   value: string;
-  caption: string;
+  dialValue: string;
+  caption?: string;
   gaugePercent: number;
   tone: 'emerald' | 'sky' | 'emerald-soft' | 'amber' | 'rose';
 }) {
@@ -2596,13 +2597,13 @@ function SpeedMetricCard({
           </svg>
           <div className='pointer-events-none absolute inset-0 flex items-center justify-center'>
             <div className='text-center'>
-              <div className='text-lg font-semibold tracking-tight text-foreground'>{value}</div>
+              <div className='text-lg font-semibold tracking-tight text-foreground'>{dialValue}</div>
             </div>
           </div>
         </div>
         <div className='min-w-0'>
           <div className='text-sm font-semibold text-foreground'>{value}</div>
-          <div className='mt-1 text-xs leading-5 text-muted-foreground'>{caption}</div>
+          {caption ? <div className='mt-1 text-xs leading-5 text-muted-foreground'>{caption}</div> : null}
         </div>
       </div>
     </div>
@@ -2927,12 +2928,37 @@ function formatSpeedMbps(bitsPerSecond: number | null | undefined) {
   return `${megabitsPerSecond.toFixed(2)} Mbps`;
 }
 
+function formatSpeedDialValue(bitsPerSecond: number | null | undefined) {
+  const megabitsPerSecond = getMegabitsPerSecond(bitsPerSecond);
+  if (megabitsPerSecond == null) {
+    return '—';
+  }
+
+  if (megabitsPerSecond >= 100) {
+    return megabitsPerSecond.toFixed(0);
+  }
+
+  if (megabitsPerSecond >= 10) {
+    return megabitsPerSecond.toFixed(1);
+  }
+
+  return megabitsPerSecond.toFixed(2);
+}
+
 function formatLatency(milliseconds: number | null | undefined) {
   if (milliseconds == null || !Number.isFinite(milliseconds)) {
     return noDataLabel;
   }
 
   return `${milliseconds.toFixed(milliseconds >= 100 ? 0 : 1)} ms`;
+}
+
+function formatLatencyDialValue(milliseconds: number | null | undefined) {
+  if (milliseconds == null || !Number.isFinite(milliseconds)) {
+    return '—';
+  }
+
+  return milliseconds.toFixed(milliseconds >= 100 ? 0 : 1);
 }
 
 function formatTransferSize(bytes: number | null | undefined, suffix: string) {

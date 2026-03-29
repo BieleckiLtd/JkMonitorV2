@@ -52,6 +52,7 @@ public sealed class InternetSpeedTestServiceTests
     public async Task RunSpeedTestAsync_StoresCompletedSnapshot()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
+        var store = new StubInternetSpeedTestStore();
         var runner = new StubCommandRunner(new CommandResult(
             true,
             """
@@ -59,7 +60,7 @@ public sealed class InternetSpeedTestServiceTests
             """,
             string.Empty,
             0));
-        var service = new InternetSpeedTestService(runner, NullLogger<InternetSpeedTestService>.Instance);
+        var service = new InternetSpeedTestService(runner, store, NullLogger<InternetSpeedTestService>.Instance);
 
         await service.RunSpeedTestAsync(DateTimeOffset.Parse("2026-03-29T17:44:00Z"));
         var snapshot = await service.GetSnapshotAsync(cancellationToken);
@@ -72,18 +73,20 @@ public sealed class InternetSpeedTestServiceTests
         Assert.Equal(98_000_000.0, snapshot.Result?.DownloadBitsPerSecond);
         Assert.Equal(41_000_000.0, snapshot.Result?.UploadBitsPerSecond);
         Assert.Equal("Manchester", snapshot.Result?.Server?.Name);
+        Assert.Single(store.SavedRuns);
     }
 
     [Fact]
     public async Task RunSpeedTestAsync_StoresFailureSnapshot_WhenCommandFails()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
+        var store = new StubInternetSpeedTestStore();
         var runner = new StubCommandRunner(new CommandResult(
             false,
             string.Empty,
             "Cannot retrieve speedtest configuration",
             1));
-        var service = new InternetSpeedTestService(runner, NullLogger<InternetSpeedTestService>.Instance);
+        var service = new InternetSpeedTestService(runner, store, NullLogger<InternetSpeedTestService>.Instance);
 
         await service.RunSpeedTestAsync(DateTimeOffset.Parse("2026-03-29T17:44:00Z"));
         var snapshot = await service.GetSnapshotAsync(cancellationToken);
@@ -93,6 +96,39 @@ public sealed class InternetSpeedTestServiceTests
         Assert.False(snapshot.IsRunning);
         Assert.True(snapshot.CanStart);
         Assert.Contains("could not reach the speed test service", snapshot.StatusMessage ?? string.Empty, StringComparison.OrdinalIgnoreCase);
+        Assert.Empty(store.SavedRuns);
+    }
+
+    [Fact]
+    public async Task GetSnapshotAsync_LoadsLatestStoredResult_WithoutStartingNewTest()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var store = new StubInternetSpeedTestStore
+        {
+            LatestRun = new StoredInternetSpeedTestRun
+            {
+                StartedAt = DateTimeOffset.Parse("2026-03-29T17:40:00Z"),
+                CompletedAt = DateTimeOffset.Parse("2026-03-29T17:41:00Z"),
+                Result = new FluxMonitor.Backend.Models.InternetSpeedTestResult
+                {
+                    DownloadBitsPerSecond = 88_000_000,
+                    UploadBitsPerSecond = 32_000_000,
+                    PingMilliseconds = 21.5,
+                    TestedAt = DateTimeOffset.Parse("2026-03-29T17:41:00Z")
+                }
+            }
+        };
+        var service = new InternetSpeedTestService(
+            new StubCommandRunner(new CommandResult(true, "speedtest-cli 2.1.3", string.Empty, 0)),
+            store,
+            NullLogger<InternetSpeedTestService>.Instance);
+
+        var snapshot = await service.GetSnapshotAsync(cancellationToken);
+
+        Assert.Equal("succeeded", snapshot.Status);
+        Assert.Equal(88_000_000, snapshot.Result?.DownloadBitsPerSecond);
+        Assert.Equal(32_000_000, snapshot.Result?.UploadBitsPerSecond);
+        Assert.Equal(21.5, snapshot.Result?.PingMilliseconds);
     }
 
     private sealed class StubCommandRunner(CommandResult result) : ICommandRunner
@@ -100,6 +136,34 @@ public sealed class InternetSpeedTestServiceTests
         public Task<CommandResult> RunAsync(string fileName, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
         {
             return Task.FromResult(result);
+        }
+    }
+
+    private sealed class StubInternetSpeedTestStore : IInternetSpeedTestStore
+    {
+        public StoredInternetSpeedTestRun? LatestRun { get; set; }
+
+        public List<(FluxMonitor.Backend.Models.InternetSpeedTestResult Result, DateTimeOffset? StartedAt, DateTimeOffset? CompletedAt)> SavedRuns { get; } = [];
+
+        public Task InitializeAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<StoredInternetSpeedTestRun?> GetLatestResultAsync(CancellationToken cancellationToken) => Task.FromResult(LatestRun);
+
+        public Task SaveResultAsync(
+            FluxMonitor.Backend.Models.InternetSpeedTestResult result,
+            DateTimeOffset? startedAt,
+            DateTimeOffset? completedAt,
+            CancellationToken cancellationToken)
+        {
+            SavedRuns.Add((result, startedAt, completedAt));
+            LatestRun = new StoredInternetSpeedTestRun
+            {
+                StartedAt = startedAt,
+                CompletedAt = completedAt,
+                Result = result
+            };
+
+            return Task.CompletedTask;
         }
     }
 }
