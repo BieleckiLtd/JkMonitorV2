@@ -97,6 +97,57 @@ describe('useAppStore update restart recovery', () => {
     expect(String(locationReplace.mock.calls[0]?.[0])).toContain('_reload=');
   });
 
+  it('treats a missing final progress snapshot as restart recovery instead of clearing the overlay', async () => {
+    const locationReplace = vi.fn();
+
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        ...originalLocation,
+        href: 'http://localhost/system',
+        replace: locationReplace,
+      },
+    });
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response('{}', { status: 200 }));
+
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const finalizingProgress: UpdateProgress = {
+      sessionId: 'final123',
+      status: 'running',
+      isRunning: true,
+      stage: 'Starting Flux Monitor…',
+      detail: 'Starting the updated service and checking that it comes back online.',
+      success: null,
+      canCancel: false,
+      cancelUnavailableReason: 'Cancellation is no longer available because Flux Monitor is already switching to the new version.',
+      stepIndex: 11,
+      stepCount: 11,
+      percentComplete: 99,
+      startedAt: '2026-03-29T12:00:00.000Z',
+      updatedAt: '2026-03-29T12:00:01.000Z',
+    };
+
+    useAppStore.setState({ updateProgress: finalizingProgress });
+
+    await useAppStore.getState().fetchUpdateProgress();
+
+    expect(useAppStore.getState().updateProgress).toMatchObject({
+      sessionId: 'final123',
+      status: 'restarting',
+      isRunning: true,
+    });
+    expect(useAppStore.getState().updateProgress?.detail).toMatch(/heartbeat|Reloading the frontend/i);
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(locationReplace).toHaveBeenCalledTimes(1);
+    });
+  });
+
   it('applies pushed update progress from the event stream immediately', async () => {
     class FakeEventSource {
       static instances: FakeEventSource[] = [];

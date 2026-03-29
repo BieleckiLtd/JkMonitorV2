@@ -43,6 +43,26 @@ function createFrontendReloadProgress(progress: UpdateProgress): UpdateProgress 
   };
 }
 
+function shouldRecoverRestartFromProgressLoss(progress: UpdateProgress | null | undefined): progress is UpdateProgress {
+  if (!progress) {
+    return false;
+  }
+
+  if (progress.status === 'restarting') {
+    return true;
+  }
+
+  if (!progress.isRunning || progress.canCancel) {
+    return false;
+  }
+
+  if (progress.stepIndex != null && progress.stepCount != null && progress.stepCount > 0 && progress.stepIndex >= progress.stepCount) {
+    return true;
+  }
+
+  return (progress.percentComplete ?? 0) >= 96;
+}
+
 function applyUpdateProgressSnapshot(
   progress: UpdateProgress | null,
   set: (partial:
@@ -53,7 +73,7 @@ function applyUpdateProgressSnapshot(
 ): void {
   if (!progress) {
     set((state) => {
-      if (state.updateProgress?.status === 'restarting') {
+      if (shouldRecoverRestartFromProgressLoss(state.updateProgress)) {
         return {
           updateProgress: createRestartHeartbeatProgress(state.updateProgress),
         };
@@ -62,7 +82,7 @@ function applyUpdateProgressSnapshot(
       return { updateProgress: null };
     });
 
-    if (get().updateProgress?.status === 'restarting') {
+    if (shouldRecoverRestartFromProgressLoss(get().updateProgress)) {
       beginRestartRecovery(set, get);
     }
 
@@ -201,7 +221,12 @@ function connectUpdateProgressStream(
   };
 
   eventSource.onerror = () => {
-    if (get().updateProgress?.status === 'restarting') {
+    if (shouldRecoverRestartFromProgressLoss(get().updateProgress)) {
+      const current = get().updateProgress;
+      if (current) {
+        set({ updateProgress: createRestartHeartbeatProgress(current) });
+      }
+
       beginRestartRecovery(set, get);
     }
   };
@@ -336,7 +361,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       applyUpdateProgressSnapshot(progress, set, get);
     } catch (error) {
       const current = get().updateProgress;
-      if (current?.status === 'restarting') {
+      if (shouldRecoverRestartFromProgressLoss(current)) {
         set({
           updateProgress: createRestartHeartbeatProgress(current),
         });

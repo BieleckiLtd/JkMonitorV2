@@ -320,7 +320,6 @@ export function SystemPage() {
   const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateActionError, setUpdateActionError] = useState<string | null>(null);
-  const [softwareUpdateSectionOpen, setSoftwareUpdateSectionOpen] = useState(false);
   const [tunnelSectionOpen, setTunnelSectionOpen] = useState(false);
   const [interfaces, setInterfaces] = useState<SystemInterfacesResponse | null>(null);
   const [connectivity, setConnectivity] = useState<SystemConnectivitySnapshot | null>(null);
@@ -513,12 +512,8 @@ export function SystemPage() {
   }, [wifiConnectDialog, wifiPasswordDirty, wifiTargetSsid]);
 
   useEffect(() => {
-    if (!softwareUpdateSectionOpen) {
-      return;
-    }
-
     void checkForUpdate();
-  }, [checkForUpdate, softwareUpdateSectionOpen]);
+  }, [checkForUpdate]);
 
   const loadConnectivity = useCallback(async () => {
     try {
@@ -582,12 +577,12 @@ export function SystemPage() {
       setUpdateActionError(null);
     }
 
-    if (softwareUpdateSectionOpen && previousUpdateStatusRef.current !== 'succeeded' && updateProgress?.status === 'succeeded') {
+    if (previousUpdateStatusRef.current !== 'succeeded' && updateProgress?.status === 'succeeded') {
       void checkForUpdate();
     }
 
     previousUpdateStatusRef.current = updateProgress?.status ?? null;
-  }, [checkForUpdate, softwareUpdateSectionOpen, updateProgress]);
+  }, [checkForUpdate, updateProgress]);
 
   useEffect(() => {
     const loadInterfaces = async () => {
@@ -1038,7 +1033,7 @@ export function SystemPage() {
   const updateChannel = updateCheck?.currentChannel ?? getReleaseChannel(status?.build?.releaseTag);
   const installedReleaseTag = updateCheck?.currentReleaseTag ?? status?.build?.releaseTag ?? null;
   const installedCommit = updateCheck?.currentSourceRevision ?? status?.build?.sourceRevisionId ?? null;
-  const installedBuiltAt = updateCheck?.currentBuiltAt ?? status?.build?.builtAt ?? null;
+  const installedReleaseLabel = installedReleaseTag ?? noDataLabel;
   const ethernetInterfaces = connectivity?.network.ethernetInterfaces ?? [];
   const wifiInterfaces = connectivity?.network.wifiInterfaces ?? [];
   const wifiPowered = connectivity?.network.wifiPowered ?? null;
@@ -1082,17 +1077,6 @@ export function SystemPage() {
   const wifiSectionOpen = expandedConnectivitySection === 'wifi';
   const bluetoothSectionOpen = expandedConnectivitySection === 'bluetooth';
   const ethernetSectionOpen = expandedConnectivitySection === 'ethernet';
-  const softwareUpdateSummary = updateProgress?.isRunning
-    ? updateProgress.stage
-    : updateChecking
-      ? `Checking ${formatReleaseChannel(updateChannel)} channel`
-      : updateCheck?.checkError
-        ? 'Update check failed'
-        : updateCheck?.updateAvailable
-          ? `${updateCheck.targetReleaseTag ?? 'Update'} available`
-          : installedReleaseTag
-            ? `Installed ${installedReleaseTag}`
-            : 'Expand to check for updates';
   const wifiSummary = !connectivity?.network.supported
     ? connectivity?.network.statusMessage ?? 'Wi-Fi unavailable'
     : wifiPowered === false
@@ -1179,7 +1163,7 @@ export function SystemPage() {
               </CardHeader>
               <CardContent className='grid gap-5 pt-5'>
                 <UsagePanel
-                  icon={isCpuBelowBaseSpeed ? Leaf : Cpu}
+                  icon={Cpu}
                   label='CPU'
                   percent={cpuUsage}
                   summary={`Current ${formatFrequency(metrics?.cpuCurrentClockSpeedMegahertz)}`}
@@ -1189,7 +1173,8 @@ export function SystemPage() {
                     `System temperature ${formatDecimalValue(metrics?.systemTemperatureCelsius, '°C')}`,
                     `Fan speed ${formatRpm(metrics?.mainFanSpeedRpm)}`,
                   ]}
-                  iconClassName={isCpuBelowBaseSpeed ? 'text-emerald-400' : 'text-muted-foreground'}
+                  labelIcon={isCpuBelowBaseSpeed ? Leaf : undefined}
+                  labelIconClassName='text-emerald-400'
                 />
                 <UsagePanel
                   icon={MemoryStick}
@@ -1209,39 +1194,30 @@ export function SystemPage() {
             </Card>
 
             <Card className='border border-border/80 bg-card/85 shadow-sm'>
-              <CardHeader className='pb-4'>
-                <button
-                  type='button'
-                  onClick={() => setSoftwareUpdateSectionOpen((current) => !current)}
-                  className='flex w-full items-center gap-3 text-left'
-                >
-                  <div className='flex items-center gap-2'>
-                    <RefreshCcw className='h-4 w-4 text-muted-foreground' />
+              <CardHeader className='border-b border-border/60 pb-4'>
+                <div className='flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between'>
+                  <div className='flex items-start gap-3'>
+                    <RefreshCcw className='mt-1 h-5 w-5 shrink-0 text-muted-foreground' />
                     <div>
                       <CardTitle>Software update</CardTitle>
                       <CardDescription>Check for new releases and install updates from GitHub.</CardDescription>
                     </div>
                   </div>
-                  <div className='ml-auto flex items-center gap-2 pl-3 text-xs text-muted-foreground'>
-                    <span className='hidden sm:inline'>{softwareUpdateSummary}</span>
-                    {softwareUpdateSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
+                  <div className='flex min-w-0 items-center justify-between gap-3 rounded-xl border border-border/70 bg-background/60 px-4 py-3 text-sm text-muted-foreground lg:min-w-[18rem]'>
+                    <span className='truncate'>Installed {installedReleaseLabel}</span>
+                    <ChevronDown className='h-4 w-4 shrink-0' />
                   </div>
-                </button>
+                </div>
               </CardHeader>
-              {softwareUpdateSectionOpen ? (
-                <CardContent className='space-y-4 border-t border-border/60 pt-5'>
-                  <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-3'>
-                    <DetailTile label='Channel' value={formatReleaseChannel(updateChannel)} />
-                    <DetailTile label='Installed release' value={installedReleaseTag ?? noDataLabel} />
-                    <DetailTile label='Installed commit' value={formatCommit(installedCommit)} />
-                    <DetailTile label='Built at' value={formatTimestamp(installedBuiltAt)} />
-                    <DetailTile label='Last checked' value={updateCheck?.checkedAt ? formatTimestamp(updateCheck.checkedAt) : 'Not checked yet'} />
-                    <DetailTile label='Workflow run' value={workflowRun} />
-                    {updateCheck?.targetReleaseTag ? <DetailTile label='Latest release' value={updateCheck.targetReleaseTag} /> : null}
-                    {updateCheck?.remoteReleasePublishedAt ? <DetailTile label='Published' value={formatTimestamp(updateCheck.remoteReleasePublishedAt)} /> : null}
-                  </div>
-                  {updateCheck ? (
-                    <>
+              <CardContent className='space-y-4 pt-5'>
+                <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-3'>
+                  <DetailTile label='Channel' value={formatReleaseChannel(updateChannel)} />
+                  <DetailTile label='Installed commit' value={formatCommit(installedCommit)} />
+                  <DetailTile label='Workflow run' value={workflowRun} />
+                  <DetailTile label='Published' value={formatTimestamp(updateCheck?.remoteReleasePublishedAt)} />
+                </div>
+                {updateCheck ? (
+                  <>
                       {updateCheck.checkError ? (
                         <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
                           Update check failed: {updateCheck.checkError}
@@ -1333,36 +1309,35 @@ export function SystemPage() {
                           ) : null}
                         </div>
                       ) : null}
-                    </>
-                  ) : (
-                    <div className='text-sm text-muted-foreground'>Use the button below to check the current release channel for updates.</div>
-                  )}
+                  </>
+                ) : (
+                  <div className='text-sm text-muted-foreground'>Use the button below to check the installed release for updates.</div>
+                )}
 
-                  <div className='flex flex-col gap-2 pt-2'>
+                <div className='flex flex-col gap-2 pt-2'>
+                  <button
+                    type='button'
+                    disabled={updateChecking}
+                    onClick={() => void checkForUpdate()}
+                    className='inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
+                  >
+                    {updateChecking ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <RefreshCcw className='h-4 w-4' />}
+                    Check for updates
+                  </button>
+
+                  {updateCheck?.canUpdate && updateCheck?.updateAvailable ? (
                     <button
                       type='button'
-                      disabled={updateChecking}
-                      onClick={() => void checkForUpdate()}
-                      className='inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
+                      disabled={updateActionPending === 'starting' || (updateProgress?.isRunning ?? false)}
+                      onClick={() => void installUpdate()}
+                      className='inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
                     >
-                      {updateChecking ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <RefreshCcw className='h-4 w-4' />}
-                      Check for updates
+                      {updateActionPending === 'starting' || updateProgress?.isRunning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Download className='h-4 w-4' />}
+                      Install update
                     </button>
-
-                    {updateCheck?.canUpdate && updateCheck?.updateAvailable ? (
-                      <button
-                        type='button'
-                        disabled={updateActionPending === 'starting' || (updateProgress?.isRunning ?? false)}
-                        onClick={() => void installUpdate()}
-                        className='inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
-                      >
-                        {updateActionPending === 'starting' || updateProgress?.isRunning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Download className='h-4 w-4' />}
-                        Install update
-                      </button>
-                    ) : null}
-                  </div>
-                </CardContent>
-              ) : null}
+                  ) : null}
+                </div>
+              </CardContent>
             </Card>
           </div>
 
@@ -2230,7 +2205,8 @@ function UsagePanel({
   summary,
   secondary,
   details,
-  iconClassName,
+  labelIcon: LabelIcon,
+  labelIconClassName,
 }: {
   icon: typeof Cpu;
   label: string;
@@ -2238,7 +2214,8 @@ function UsagePanel({
   summary: string;
   secondary: string;
   details?: string[];
-  iconClassName?: string;
+  labelIcon?: typeof Cpu;
+  labelIconClassName?: string;
 }) {
   const footerSegments = [secondary, ...(details ?? [])];
 
@@ -2247,8 +2224,11 @@ function UsagePanel({
       <div className='flex items-center justify-between gap-3'>
         <div className='min-w-0'>
           <div className='flex items-center gap-2'>
-            <Icon className={cn('h-4 w-4 shrink-0 text-muted-foreground', iconClassName)} />
-            <div className='text-sm font-semibold text-foreground'>{label}</div>
+            <Icon className='h-4 w-4 shrink-0 text-muted-foreground' />
+            <div className='flex items-center gap-1.5 text-sm font-semibold text-foreground'>
+              <span>{label}</span>
+              {LabelIcon ? <LabelIcon className={cn('h-3.5 w-3.5 shrink-0', labelIconClassName)} /> : null}
+            </div>
           </div>
           <div className='text-sm text-muted-foreground'>{summary}</div>
         </div>

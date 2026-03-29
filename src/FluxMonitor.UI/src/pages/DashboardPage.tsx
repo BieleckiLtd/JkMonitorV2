@@ -1,5 +1,5 @@
 ﻿import { useEffect, useState } from 'react';
-import { Activity, CircleAlert, Cpu, Gauge, HardDrive, Leaf, LoaderCircle, MemoryStick } from 'lucide-react';
+import { Activity, CircleAlert, Cpu, Gauge, HardDrive, LoaderCircle, MemoryStick } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { cn } from '../lib/utils';
 
@@ -184,7 +184,7 @@ export function DashboardPage() {
 
       <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-4'>
         <MetricCard
-          icon={isCpuBelowBaseSpeed ? Leaf : Cpu}
+          icon={Cpu}
           title='CPU Utilisation'
           value={formatPercent(cpuUsage)}
           accentClass={isCpuBelowBaseSpeed ? 'text-emerald-400' : 'text-sky-400'}
