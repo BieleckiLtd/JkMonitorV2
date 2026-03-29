@@ -1157,7 +1157,19 @@ export function SystemPage() {
     : internetSpeedTest.isRunning
       ? 'Test running'
       : internetSpeedResult
-        ? `⭡${formatSpeedMbps(internetSpeedResult.downloadBitsPerSecond)} • ⭣${formatSpeedMbps(internetSpeedResult.uploadBitsPerSecond)}`
+        ? (
+            <>
+              <span className='inline-flex items-center gap-1'>
+                <Download className='h-3.5 w-3.5' />
+                {formatSpeedMbps(internetSpeedResult.downloadBitsPerSecond)}
+              </span>
+              <span aria-hidden='true' className='text-muted-foreground/70'>•</span>
+              <span className='inline-flex items-center gap-1'>
+                <Upload className='h-3.5 w-3.5' />
+                {formatSpeedMbps(internetSpeedResult.uploadBitsPerSecond)}
+              </span>
+            </>
+          )
         : 'No stored result';
   const cloudflareTunnelRunning = cloudflareTunnelStatus?.serviceRunning ?? false;
   const cloudflareTunnelSupported = cloudflareTunnelStatus?.supported ?? false;
@@ -1480,7 +1492,7 @@ export function SystemPage() {
                   </div>
                   <div className='ml-auto flex min-w-0 items-center gap-3 pl-3 text-sm text-muted-foreground'>
                     {internetSpeedTest?.isRunning ? <LoaderCircle className='h-4 w-4 shrink-0 animate-spin text-primary' /> : null}
-                    <span className='truncate'>{internetSpeedSummary}</span>
+                    <span className='inline-flex min-w-0 items-center gap-2 truncate'>{internetSpeedSummary}</span>
                     {internetSpeedSectionOpen ? <ChevronDown className='h-4 w-4 shrink-0' /> : <ChevronRight className='h-4 w-4 shrink-0' />}
                   </div>
                 </button>
