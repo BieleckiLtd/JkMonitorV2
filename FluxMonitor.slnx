@@ -1,7 +1,6 @@
 ﻿<Solution>
-  <Folder Name="/src/" />
-  <Folder Name="/src/backend/">
-    <Project Path="src/backend/FluxMonitor.Backend/FluxMonitor.Backend.csproj" />
+  <Folder Name="/src/">
+    <Project Path="src/FluxMonitor.Backend/FluxMonitor.Backend.csproj" />
   </Folder>
   <Folder Name="/src/shared/">
     <Project Path="src/shared/FluxMonitor.Contracts/FluxMonitor.Contracts.csproj" />

@@ -42,19 +42,30 @@ function Copy-IfExists([string]$Source, [string]$Target) {
     Copy-Item -Path $Source -Destination $Target -Recurse -Force
 }
 
-function Preserve-ExistingState([string]$SourceRoot, [string]$PreserveRoot) {
-    $itemsToPreserve = @(
-        '.dotnet',
-        'src\backend\FluxMonitor.Backend\notifications.json',
-        'src\backend\FluxMonitor.Backend\appsettings.Local.json',
-        'src\backend\FluxMonitor.Backend\appsettings.Development.Local.json',
-        'src\backend\FluxMonitor.Backend\appsettings.Production.Local.json'
-    )
+function Copy-FirstExisting([string[]]$Sources, [string]$Target) {
+    foreach ($source in $Sources) {
+        if (-not (Test-Path $source)) {
+            continue
+        }
 
-    foreach ($relativePath in $itemsToPreserve) {
-        $sourcePath = Join-Path $SourceRoot $relativePath
-        $targetPath = Join-Path $PreserveRoot $relativePath
-        Copy-IfExists -Source $sourcePath -Target $targetPath
+        Copy-IfExists -Source $source -Target $Target
+        return
+    }
+}
+
+function Preserve-ExistingState([string]$SourceRoot, [string]$PreserveRoot) {
+    Copy-IfExists -Source (Join-Path $SourceRoot '.dotnet') -Target (Join-Path $PreserveRoot '.dotnet')
+
+    $currentBackendPath = 'src\FluxMonitor.Backend'
+    $legacyBackendPath = 'src\backend\FluxMonitor.Backend'
+
+    foreach ($fileName in @('notifications.json', 'appsettings.Local.json', 'appsettings.Development.Local.json', 'appsettings.Production.Local.json')) {
+        Copy-FirstExisting `
+            -Sources @(
+                (Join-Path $SourceRoot (Join-Path $currentBackendPath $fileName)),
+                (Join-Path $SourceRoot (Join-Path $legacyBackendPath $fileName))
+            ) `
+            -Target (Join-Path $PreserveRoot (Join-Path $currentBackendPath $fileName))
     }
 }
 

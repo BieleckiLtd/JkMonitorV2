@@ -2,7 +2,7 @@
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 $repoRoot = Split-Path -Parent $scriptRoot
-$backendPath = Join-Path $repoRoot 'src\backend\FluxMonitor.Backend'
+$backendPath = Join-Path $repoRoot 'src\FluxMonitor.Backend'
 $localDotnetRoot = Join-Path $repoRoot '.dotnet'
 $localDotnet = Join-Path $localDotnetRoot 'dotnet.exe'
 $installScript = Join-Path $env:TEMP 'dotnet-install-FluxMonitor.ps1'
@@ -255,7 +255,7 @@ $browserJob = Start-BrowserWhenReady -TargetUrl $appUrl -ProbeUrl $healthUrl
 Push-Location $repoRoot
 try {
     $env:ASPNETCORE_ENVIRONMENT = $environment
-    & $dotnet run --project '.\src\backend\FluxMonitor.Backend' --launch-profile http
+    & $dotnet run --project '.\src\FluxMonitor.Backend' --launch-profile http
 }
 finally {
     if ($browserJob) {

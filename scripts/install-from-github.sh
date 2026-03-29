@@ -39,15 +39,37 @@ copy_if_exists() {
   cp -R "$source_path" "$target_path"
 }
 
+copy_first_existing() {
+  local target_path="$1"
+  shift
+
+  for source_path in "$@"; do
+    if [ ! -e "$source_path" ]; then
+      continue
+    fi
+
+    copy_if_exists "$source_path" "$target_path"
+    return
+  done
+}
+
 preserve_existing_state() {
   local source_root="$1"
   local preserve_root="$2"
 
   copy_if_exists "$source_root/.dotnet" "$preserve_root/.dotnet"
-  copy_if_exists "$source_root/src/backend/FluxMonitor.Backend/notifications.json" "$preserve_root/src/backend/FluxMonitor.Backend/notifications.json"
-  copy_if_exists "$source_root/src/backend/FluxMonitor.Backend/appsettings.Local.json" "$preserve_root/src/backend/FluxMonitor.Backend/appsettings.Local.json"
-  copy_if_exists "$source_root/src/backend/FluxMonitor.Backend/appsettings.Development.Local.json" "$preserve_root/src/backend/FluxMonitor.Backend/appsettings.Development.Local.json"
-  copy_if_exists "$source_root/src/backend/FluxMonitor.Backend/appsettings.Production.Local.json" "$preserve_root/src/backend/FluxMonitor.Backend/appsettings.Production.Local.json"
+  copy_first_existing "$preserve_root/src/FluxMonitor.Backend/notifications.json" \
+    "$source_root/src/FluxMonitor.Backend/notifications.json" \
+    "$source_root/src/backend/FluxMonitor.Backend/notifications.json"
+  copy_first_existing "$preserve_root/src/FluxMonitor.Backend/appsettings.Local.json" \
+    "$source_root/src/FluxMonitor.Backend/appsettings.Local.json" \
+    "$source_root/src/backend/FluxMonitor.Backend/appsettings.Local.json"
+  copy_first_existing "$preserve_root/src/FluxMonitor.Backend/appsettings.Development.Local.json" \
+    "$source_root/src/FluxMonitor.Backend/appsettings.Development.Local.json" \
+    "$source_root/src/backend/FluxMonitor.Backend/appsettings.Development.Local.json"
+  copy_first_existing "$preserve_root/src/FluxMonitor.Backend/appsettings.Production.Local.json" \
+    "$source_root/src/FluxMonitor.Backend/appsettings.Production.Local.json" \
+    "$source_root/src/backend/FluxMonitor.Backend/appsettings.Production.Local.json"
 }
 
 restore_preserved_state() {
@@ -63,15 +85,15 @@ restore_preserved_state() {
     cp -R "$preserve_root/.dotnet" "$destination_root/.dotnet"
   fi
 
-  if [ -f "$preserve_root/src/backend/FluxMonitor.Backend/notifications.json" ]; then
-    mkdir -p "$destination_root/src/backend/FluxMonitor.Backend"
-    cp "$preserve_root/src/backend/FluxMonitor.Backend/notifications.json" "$destination_root/src/backend/FluxMonitor.Backend/notifications.json"
+  if [ -f "$preserve_root/src/FluxMonitor.Backend/notifications.json" ]; then
+    mkdir -p "$destination_root/src/FluxMonitor.Backend"
+    cp "$preserve_root/src/FluxMonitor.Backend/notifications.json" "$destination_root/src/FluxMonitor.Backend/notifications.json"
   fi
 
   for file in \
-    "$preserve_root/src/backend/FluxMonitor.Backend/appsettings.Local.json" \
-    "$preserve_root/src/backend/FluxMonitor.Backend/appsettings.Development.Local.json" \
-    "$preserve_root/src/backend/FluxMonitor.Backend/appsettings.Production.Local.json"
+    "$preserve_root/src/FluxMonitor.Backend/appsettings.Local.json" \
+    "$preserve_root/src/FluxMonitor.Backend/appsettings.Development.Local.json" \
+    "$preserve_root/src/FluxMonitor.Backend/appsettings.Production.Local.json"
   do
     if [ -f "$file" ]; then
       local relative_path="${file#"$preserve_root"/}"

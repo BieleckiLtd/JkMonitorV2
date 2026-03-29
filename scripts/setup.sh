@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_ROOT/.." && pwd)"
-BACKEND_PATH="$REPO_ROOT/src/backend/FluxMonitor.Backend"
+BACKEND_PATH="$REPO_ROOT/src/FluxMonitor.Backend"
 LOCAL_DOTNET_ROOT="$REPO_ROOT/.dotnet"
 LOCAL_DOTNET="$LOCAL_DOTNET_ROOT/dotnet"
 INSTALL_SCRIPT="${TMPDIR:-/tmp}/dotnet-install-FluxMonitor.sh"
@@ -189,4 +189,4 @@ open_browser_when_ready
 
 cd "$REPO_ROOT"
 trap 'if [ -n "${BROWSER_PID:-}" ]; then kill "$BROWSER_PID" >/dev/null 2>&1 || true; fi' EXIT
-ASPNETCORE_ENVIRONMENT="$ENVIRONMENT" "$DOTNET_CMD" run --project ./src/backend/FluxMonitor.Backend --launch-profile http
+ASPNETCORE_ENVIRONMENT="$ENVIRONMENT" "$DOTNET_CMD" run --project ./src/FluxMonitor.Backend --launch-profile http

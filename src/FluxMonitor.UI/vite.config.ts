@@ -12,7 +12,7 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   build: {
     emptyOutDir: true,
-    outDir: '../wwwroot',
+    outDir: '../FluxMonitor.Backend/wwwroot',
   },
   resolve: {
     alias: {

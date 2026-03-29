@@ -18,8 +18,8 @@ concurrency:
 env:
   DOTNET_VERSION: 10.0.x
   NODE_VERSION: 24.x
-  PROJECT_PATH: src/backend/FluxMonitor.Backend/FluxMonitor.Backend.csproj
-  FRONTEND_PATH: src/backend/FluxMonitor.Backend/frontend
+  PROJECT_PATH: src/FluxMonitor.Backend/FluxMonitor.Backend.csproj
+  FRONTEND_PATH: src/FluxMonitor.UI
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 jobs:
@@ -64,14 +64,6 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
           cache-dependency-path: ${{ env.FRONTEND_PATH }}/package-lock.json
-
-      - name: Install frontend dependencies
-        working-directory: ${{ env.FRONTEND_PATH }}
-        run: npm ci
-
-      - name: Build frontend
-        working-directory: ${{ env.FRONTEND_PATH }}
-        run: npm run build
 
       - name: Restore
         run: dotnet restore ${{ env.PROJECT_PATH }}
@@ -125,14 +117,6 @@ jobs:
   #         node-version: ${{ env.NODE_VERSION }}
   #         cache: npm
   #         cache-dependency-path: ${{ env.FRONTEND_PATH }}/package-lock.json
-  #
-  #     - name: Install frontend dependencies
-  #       working-directory: ${{ env.FRONTEND_PATH }}
-  #       run: npm ci
-  #
-  #     - name: Build frontend
-  #       working-directory: ${{ env.FRONTEND_PATH }}
-  #       run: npm run build
   #
   #     - name: Restore
   #       run: dotnet restore ${{ env.PROJECT_PATH }}

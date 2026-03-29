@@ -4,6 +4,11 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <FluxMonitorFrontendRoot>$([System.IO.Path]::GetFullPath('$(MSBuildProjectDirectory)\..\FluxMonitor.UI'))</FluxMonitorFrontendRoot>
+    <FluxMonitorFrontendPackageJson>$(FluxMonitorFrontendRoot)\package.json</FluxMonitorFrontendPackageJson>
+    <FluxMonitorFrontendRestoreStamp>$(FluxMonitorFrontendRoot)\node_modules\.fluxmonitor-npm-ci.stamp</FluxMonitorFrontendRestoreStamp>
+    <FluxMonitorFrontendBuild Condition="'$(FluxMonitorFrontendBuild)' == ''">true</FluxMonitorFrontendBuild>
+    <FluxMonitorFrontendRestore Condition="'$(FluxMonitorFrontendRestore)' == ''">true</FluxMonitorFrontendRestore>
     <SourceRevisionId Condition="'$(FluxMonitorSourceRevisionId)' != ''">$(FluxMonitorSourceRevisionId)</SourceRevisionId>
     <InformationalVersion Condition="'$(FluxMonitorReleaseTag)' != '' and '$(FluxMonitorSourceRevisionId)' != ''">$(FluxMonitorReleaseTag)+$(FluxMonitorSourceRevisionId)</InformationalVersion>
     <InformationalVersion Condition="'$(FluxMonitorReleaseTag)' != '' and '$(FluxMonitorSourceRevisionId)' == ''">$(FluxMonitorReleaseTag)</InformationalVersion>
@@ -66,15 +71,51 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\..\shared\FluxMonitor.Contracts\FluxMonitor.Contracts.csproj" />
+    <ProjectReference Include="..\shared\FluxMonitor.Contracts\FluxMonitor.Contracts.csproj" />
   </ItemGroup>
 
   <!-- Copy device definition JSON files to output so the runtime can find them -->
   <ItemGroup>
-    <Content Include="..\..\..\devices\**\*.json" Link="devices\%(RecursiveDir)%(Filename)%(Extension)">
+    <Content Include="..\..\devices\**\*.json" Link="devices\%(RecursiveDir)%(Filename)%(Extension)">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
   </ItemGroup>
+
+  <ItemGroup>
+    <FrontendRestoreInputs Include="$(FluxMonitorFrontendRoot)\package.json" />
+    <FrontendRestoreInputs Include="$(FluxMonitorFrontendRoot)\package-lock.json" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\components.json" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\eslint.config.js" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\index.html" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\package.json" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\package-lock.json" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\tsconfig.app.json" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\tsconfig.json" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\tsconfig.node.json" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\vite.config.ts" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\public\**\*" />
+    <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\src\**\*" />
+  </ItemGroup>
+
+  <Target
+    Name="RestoreFrontendDependencies"
+    Condition="'$(FluxMonitorFrontendBuild)' == 'true' and '$(FluxMonitorFrontendRestore)' == 'true' and Exists('$(FluxMonitorFrontendPackageJson)')"
+    Inputs="@(FrontendRestoreInputs)"
+    Outputs="$(FluxMonitorFrontendRestoreStamp)"
+    BeforeTargets="Build;Publish">
+    <Exec Command="npm ci" WorkingDirectory="$(FluxMonitorFrontendRoot)" />
+    <Touch Files="$(FluxMonitorFrontendRestoreStamp)" AlwaysCreate="true" />
+  </Target>
+
+  <Target
+    Name="BuildFrontendAssets"
+    Condition="'$(FluxMonitorFrontendBuild)' == 'true' and Exists('$(FluxMonitorFrontendPackageJson)')"
+    Inputs="@(FrontendBuildInputs)"
+    Outputs="$(MSBuildProjectDirectory)\wwwroot\index.html"
+    DependsOnTargets="RestoreFrontendDependencies"
+    BeforeTargets="Build;Publish">
+    <Exec Command="npm run build" WorkingDirectory="$(FluxMonitorFrontendRoot)" />
+  </Target>
 
 </Project>

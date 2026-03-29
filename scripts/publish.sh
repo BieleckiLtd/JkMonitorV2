@@ -77,7 +77,7 @@ default_commit_message() {
   fi
 
   if printf '%s\n' "$staged" | grep -Ev '^(AGENTS\.md|README\.md|skills/.*|scripts/.*)$' >/dev/null 2>&1; then
-    if printf '%s\n' "$staged" | grep -Ev '^src/backend/FluxMonitor\.Backend/frontend/' >/dev/null 2>&1; then
+    if printf '%s\n' "$staged" | grep -Ev '^(src/FluxMonitor\.UI/|src/FluxMonitor\.Backend/wwwroot/)' >/dev/null 2>&1; then
       if printf '%s\n' "$staged" | grep -Ev '^tests/' >/dev/null 2>&1; then
         printf '%s\n' 'chore: publish current changes'
       else

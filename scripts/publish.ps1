@@ -108,7 +108,7 @@ function Get-DefaultCommitMessage([string[]]$ChangedFiles) {
         return 'chore: refine publish automation'
     }
 
-    if (($normalizedFiles | Where-Object { $_ -notmatch '^src/backend/FluxMonitor\.Backend/frontend/' }).Count -eq 0) {
+    if (($normalizedFiles | Where-Object { $_ -notmatch '^(src/FluxMonitor\.UI/|src/FluxMonitor\.Backend/wwwroot/)' }).Count -eq 0) {
         return 'feat: update frontend'
     }
 
