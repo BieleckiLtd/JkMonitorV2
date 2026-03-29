@@ -172,31 +172,12 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             trimmedSsid,
             trimmedBssid ?? "<none>");
 
-        var arguments = new List<string>
-        {
-            "--wait",
-            "20",
-            "device",
-            "wifi",
-            "connect",
+        var result = await ConnectWifiWithProfileRecoveryAsync(
+            resolvedInterfaceName,
             trimmedSsid,
-            "ifname",
-            resolvedInterfaceName
-        };
-
-        if (!string.IsNullOrWhiteSpace(trimmedBssid))
-        {
-            arguments.Add("bssid");
-            arguments.Add(trimmedBssid);
-        }
-
-        if (!string.IsNullOrWhiteSpace(password))
-        {
-            arguments.Add("password");
-            arguments.Add(password);
-        }
-
-        var result = await RunNmcliAsync(arguments, cancellationToken);
+            password,
+            trimmedBssid,
+            cancellationToken);
         if (!result.Succeeded)
         {
             var observation = await ObserveWifiConnectionStateAsync(resolvedInterfaceName, trimmedSsid, trimmedBssid, attempts: 1, cancellationToken);
@@ -607,6 +588,80 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             : null;
     }
 
+    internal static List<string> BuildWifiConnectArguments(
+        string interfaceName,
+        string ssid,
+        string? password,
+        string? bssid)
+    {
+        var arguments = new List<string>
+        {
+            "--wait",
+            "20",
+            "device",
+            "wifi",
+            "connect",
+            ssid,
+            "ifname",
+            interfaceName
+        };
+
+        if (!string.IsNullOrWhiteSpace(bssid))
+        {
+            arguments.Add("bssid");
+            arguments.Add(bssid);
+        }
+
+        if (!string.IsNullOrWhiteSpace(password))
+        {
+            arguments.Add("password");
+            arguments.Add(password);
+        }
+
+        return arguments;
+    }
+
+    internal static bool IsMissingWifiSecurityKeyManagementMessage(string? message)
+    {
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return false;
+        }
+
+        return message.Contains("802-11-wireless-security.key-mgmt", StringComparison.OrdinalIgnoreCase)
+            && message.Contains("property is missing", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static string[] FindSavedWifiConnectionProfileUuids(string output, string ssid)
+    {
+        if (string.IsNullOrWhiteSpace(output) || string.IsNullOrWhiteSpace(ssid))
+        {
+            return [];
+        }
+
+        return output
+            .Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
+            .Select(SplitNmcliFields)
+            .Where(fields => fields.Length >= 3)
+            .Select(fields => new
+            {
+                Name = NormalizeNmcliValue(fields[0]),
+                Uuid = NormalizeNmcliValue(fields[1]),
+                Type = NormalizeNmcliValue(fields[2])
+            })
+            .Where(connection =>
+                !string.IsNullOrWhiteSpace(connection.Uuid)
+                && string.Equals(connection.Name, ssid, StringComparison.Ordinal)
+                && IsWifiConnectionProfileType(connection.Type))
+            .Select(connection => connection.Uuid!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static bool IsWifiConnectionProfileType(string? value)
+        => string.Equals(value, "802-11-wireless", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(value, "wifi", StringComparison.OrdinalIgnoreCase);
+
     private static WifiInterfaceSnapshot ApplyDeviceStatus(
         WifiInterfaceSnapshot @interface,
         IReadOnlyDictionary<string, NetworkManagerDeviceStatus> deviceStatuses)
@@ -667,6 +722,69 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         }
 
         return statuses;
+    }
+
+    private async Task<ProcessResult> ConnectWifiWithProfileRecoveryAsync(
+        string interfaceName,
+        string ssid,
+        string? password,
+        string? bssid,
+        CancellationToken cancellationToken)
+    {
+        var arguments = BuildWifiConnectArguments(interfaceName, ssid, password, bssid);
+        var result = await RunNmcliAsync(arguments, cancellationToken);
+        if (result.Succeeded || !IsMissingWifiSecurityKeyManagementMessage(BuildCommandFailureMessage(result, string.Empty)))
+        {
+            return result;
+        }
+
+        var deletedProfiles = await DeleteSavedWifiConnectionProfilesAsync(ssid, cancellationToken);
+        if (deletedProfiles == 0)
+        {
+            return result;
+        }
+
+        logger.LogWarning(
+            "Recovered from an invalid saved Wi-Fi profile for SSID {Ssid} by deleting {ProfileCount} saved profile(s) before retrying the connection.",
+            ssid,
+            deletedProfiles);
+
+        return await RunNmcliAsync(arguments, cancellationToken);
+    }
+
+    private async Task<int> DeleteSavedWifiConnectionProfilesAsync(string ssid, CancellationToken cancellationToken)
+    {
+        var result = await RunNmcliAsync(
+            ["--terse", "--escape", "yes", "--fields", "NAME,UUID,TYPE", "connection", "show"],
+            cancellationToken);
+        if (!result.Succeeded)
+        {
+            logger.LogWarning(
+                "Unable to inspect saved Wi-Fi profiles for SSID {Ssid}: {ErrorMessage}",
+                ssid,
+                BuildCommandFailureMessage(result, "Unable to inspect saved Wi-Fi profiles."));
+            return 0;
+        }
+
+        var matchingProfileUuids = FindSavedWifiConnectionProfileUuids(result.StandardOutput, ssid);
+        var deletedProfiles = 0;
+        foreach (var profileUuid in matchingProfileUuids)
+        {
+            var deleteResult = await RunNmcliAsync(["connection", "delete", "uuid", profileUuid], cancellationToken);
+            if (!deleteResult.Succeeded)
+            {
+                logger.LogWarning(
+                    "Unable to delete saved Wi-Fi profile {ProfileUuid} for SSID {Ssid}: {ErrorMessage}",
+                    profileUuid,
+                    ssid,
+                    BuildCommandFailureMessage(deleteResult, "Unable to delete the saved Wi-Fi profile."));
+                continue;
+            }
+
+            deletedProfiles++;
+        }
+
+        return deletedProfiles;
     }
 
     private async Task<bool?> GetWifiRadioEnabledAsync(CancellationToken cancellationToken)

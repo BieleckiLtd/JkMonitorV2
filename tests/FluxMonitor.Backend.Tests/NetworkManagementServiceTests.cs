@@ -239,6 +239,58 @@ public sealed class NetworkManagementServiceTests
         Assert.Equal(expected, NetworkManagementService.IsWrongWifiPasswordMessage(message));
     }
 
+    [Theory]
+    [InlineData("Error: 802-11-wireless-security.key-mgmt: property is missing.", true)]
+    [InlineData("Error: 802-11-wireless-security.auth-alg: property is missing.", false)]
+    [InlineData("", false)]
+    public void IsMissingWifiSecurityKeyManagementMessage_DetectsExpectedErrors(string message, bool expected)
+    {
+        Assert.Equal(expected, NetworkManagementService.IsMissingWifiSecurityKeyManagementMessage(message));
+    }
+
+    [Fact]
+    public void FindSavedWifiConnectionProfileUuids_ReturnsMatchingWirelessProfilesForSsid()
+    {
+        var output = string.Join('\n', [
+            @"FIVE_EXT:11111111-1111-1111-1111-111111111111:802-11-wireless",
+            @"FIVE_EXT:22222222-2222-2222-2222-222222222222:ethernet",
+            @"FIVE_5G:33333333-3333-3333-3333-333333333333:802-11-wireless",
+            @"Cafe\:Guest:44444444-4444-4444-4444-444444444444:wifi",
+            @"FIVE_EXT:11111111-1111-1111-1111-111111111111:wifi"
+        ]);
+
+        var uuids = NetworkManagementService.FindSavedWifiConnectionProfileUuids(output, "FIVE_EXT");
+
+        Assert.Equal(["11111111-1111-1111-1111-111111111111"], uuids);
+    }
+
+    [Fact]
+    public void BuildWifiConnectArguments_IncludesInterfaceAndOptionalSecurityArguments()
+    {
+        var arguments = NetworkManagementService.BuildWifiConnectArguments(
+            "wlan0",
+            "FIVE_EXT",
+            "secret",
+            "90:9A:4A:16:DE:B4");
+
+        Assert.Equal(
+            [
+                "--wait",
+                "20",
+                "device",
+                "wifi",
+                "connect",
+                "FIVE_EXT",
+                "ifname",
+                "wlan0",
+                "bssid",
+                "90:9A:4A:16:DE:B4",
+                "password",
+                "secret"
+            ],
+            arguments);
+    }
+
     [Fact]
     public void BuildWifiConnectFailureMessage_MapsWrongPasswordToFriendlyText()
     {
