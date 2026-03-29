@@ -15,6 +15,8 @@ public sealed record class NetworkConnectivitySnapshot
 
     public bool? WifiPowered { get; init; }
 
+    public bool? HasInternetAccess { get; init; }
+
     public IReadOnlyList<EthernetInterfaceSnapshot> EthernetInterfaces { get; init; } = [];
 
     public IReadOnlyList<WifiInterfaceSnapshot> WifiInterfaces { get; init; } = [];

@@ -77,4 +77,15 @@ public sealed class NetworkManagementServiceTests
     {
         Assert.Equal(expected, NetworkManagementService.ParseWifiRadioState(value));
     }
+
+    [Theory]
+    [InlineData("full", true)]
+    [InlineData("limited", false)]
+    [InlineData("portal", false)]
+    [InlineData("none", false)]
+    [InlineData("unknown", null)]
+    public void ParseInternetAccessState_ParsesExpectedValues(string value, bool? expected)
+    {
+        Assert.Equal(expected, NetworkManagementService.ParseInternetAccessState(value));
+    }
 }

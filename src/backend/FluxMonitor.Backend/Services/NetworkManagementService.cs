@@ -21,6 +21,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
                 Supported = false,
                 StatusMessage = "Wi-Fi access point management is supported on Linux hosts with NetworkManager.",
                 WifiPowered = null,
+                HasInternetAccess = null,
                 EthernetInterfaces = ethernetInterfaces,
                 WifiInterfaces = wifiInterfaces
             };
@@ -35,6 +36,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
                 Supported = false,
                 StatusMessage = "NetworkManager command-line tools are not available on this host.",
                 WifiPowered = null,
+                HasInternetAccess = null,
                 EthernetInterfaces = ethernetInterfaces,
                 WifiInterfaces = wifiInterfaces
             };
@@ -42,6 +44,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
 
         var deviceStatuses = await GetDeviceStatusesAsync(cancellationToken);
         var wifiPowered = await GetWifiRadioEnabledAsync(cancellationToken);
+        var hasInternetAccess = await GetInternetAccessAsync(cancellationToken);
         ethernetInterfaces = BuildEthernetInterfaces(interfaces, deviceStatuses);
         wifiInterfaces = await BuildWifiInterfacesAsync(interfaces, deviceStatuses, wifiPowered != false, cancellationToken);
 
@@ -49,6 +52,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         {
             Supported = true,
             WifiPowered = wifiPowered,
+            HasInternetAccess = hasInternetAccess,
             EthernetInterfaces = ethernetInterfaces,
             WifiInterfaces = wifiInterfaces
         };
@@ -108,11 +112,11 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             .Cast<WifiAccessPointInfo>()
             .GroupBy(accessPoint => $"{accessPoint.Bssid}|{accessPoint.Ssid}", StringComparer.OrdinalIgnoreCase)
             .Select(group => group
-                .OrderByDescending(accessPoint => accessPoint.IsActive)
-                .ThenByDescending(accessPoint => accessPoint.SignalPercent ?? int.MinValue)
+                .OrderByDescending(accessPoint => accessPoint.SignalPercent ?? int.MinValue)
+                .ThenByDescending(accessPoint => accessPoint.IsActive)
                 .First())
-            .OrderByDescending(accessPoint => accessPoint.IsActive)
-            .ThenByDescending(accessPoint => accessPoint.SignalPercent ?? int.MinValue)
+            .OrderByDescending(accessPoint => accessPoint.SignalPercent ?? int.MinValue)
+            .ThenByDescending(accessPoint => accessPoint.IsActive)
             .ThenBy(accessPoint => accessPoint.Ssid, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
@@ -428,6 +432,23 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         return null;
     }
 
+    internal static bool? ParseInternetAccessState(string? value)
+    {
+        var normalized = NormalizeNmcliValue(value);
+        if (normalized is null)
+        {
+            return null;
+        }
+
+        return normalized.ToLowerInvariant() switch
+        {
+            "full" => true,
+            "limited" or "portal" or "none" => false,
+            "unknown" => null,
+            _ => null
+        };
+    }
+
     private static EthernetInterfaceSnapshot[] BuildEthernetInterfaces(
         IReadOnlyList<BaseInterfaceInfo> interfaces,
         IReadOnlyDictionary<string, NetworkManagerDeviceStatus>? deviceStatuses)
@@ -604,6 +625,24 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         }
 
         return powered;
+    }
+
+    private async Task<bool?> GetInternetAccessAsync(CancellationToken cancellationToken)
+    {
+        var result = await RunNmcliAsync(["--terse", "networking", "connectivity"], cancellationToken);
+        if (!result.Succeeded)
+        {
+            logger.LogDebug("Unable to read internet access state: {ErrorOutput}", result.ErrorOutput);
+            return null;
+        }
+
+        var hasInternetAccess = ParseInternetAccessState(result.StandardOutput);
+        if (hasInternetAccess is null)
+        {
+            logger.LogDebug("Unexpected internet access state output: {Output}", result.StandardOutput);
+        }
+
+        return hasInternetAccess;
     }
 
     private async Task<WifiAccessPointInfo?> TryGetCurrentAccessPointAsync(string interfaceName, CancellationToken cancellationToken)
