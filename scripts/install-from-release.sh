@@ -912,6 +912,34 @@ install_or_update_cloudflared_package() {
   fi
 }
 
+install_or_update_speedtest_cli() {
+  local fallback_path="$TEMP_ROOT/speedtest-cli"
+
+  section 'Installing internet speed test tool'
+
+  if command -v apt-get >/dev/null 2>&1; then
+    info 'Installing or updating speedtest-cli from the system package repository.'
+    run_elevated apt-get update >&2
+    if run_elevated apt-get install -y speedtest-cli >&2; then
+      return 0
+    fi
+
+    warn 'The package repository install failed. Falling back to the upstream speedtest-cli script.'
+  else
+    warn 'apt-get is not available on this host. Falling back to the upstream speedtest-cli script.'
+  fi
+
+  if ! command -v python3 >/dev/null 2>&1; then
+    warn 'python3 is required for the speedtest-cli fallback installation, but it is not available.'
+    return 1
+  fi
+
+  info 'Installing the upstream speedtest-cli helper script to /usr/local/bin.'
+  download_file 'https://raw.githubusercontent.com/sivel/speedtest-cli/master/speedtest.py' "$fallback_path"
+  chmod +x "$fallback_path"
+  run_elevated install -m 0755 "$fallback_path" /usr/local/bin/speedtest-cli
+}
+
 write_cloudflared_start_script() {
   cat > "$CLOUDFLARED_START_SCRIPT_PATH" <<'EOF'
 #!/usr/bin/env bash
@@ -1280,6 +1308,7 @@ write_configure_script
 write_cloudflared_start_script
 
 install_or_update_cloudflared_package
+install_or_update_speedtest_cli
 
 section 'Checking ASP.NET Core runtime'
 DOTNET_CMD="$(get_dotnet)"

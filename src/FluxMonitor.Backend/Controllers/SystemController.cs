@@ -12,6 +12,7 @@ public sealed class SystemController(
     SystemUpdateService updateService,
     UpdateProgressBroadcaster updateProgressBroadcaster,
     CloudflareTunnelService cloudflareTunnelService,
+    InternetSpeedTestService internetSpeedTestService,
     NetworkManagementService networkManagementService,
     WifiCredentialStore wifiCredentialStore,
     BluetoothManagementService bluetoothManagementService,
@@ -53,6 +54,20 @@ public sealed class SystemController(
     {
         var result = await cloudflareTunnelService.GetStatusAsync(cancellationToken);
         return Ok(result);
+    }
+
+    [HttpGet("internet-speed")]
+    public async Task<ActionResult<InternetSpeedTestSnapshot>> GetInternetSpeedSnapshot(CancellationToken cancellationToken)
+    {
+        var result = await internetSpeedTestService.GetSnapshotAsync(cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpPost("internet-speed/run")]
+    public async Task<ActionResult<InternetSpeedTestCommandResult>> RunInternetSpeedTest(CancellationToken cancellationToken)
+    {
+        var result = await internetSpeedTestService.StartAsync(cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
     }
 
     [HttpPost("cloudflare-tunnel")]

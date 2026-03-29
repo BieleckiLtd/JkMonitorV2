@@ -52,6 +52,7 @@ builder.Services.AddSingleton<FluxMonitor.Backend.Services.ICommandRunner, FluxM
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.ManagedRestartService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.CloudflareTunnelStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.CloudflareTunnelService>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.InternetSpeedTestService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.UpdateProgressBroadcaster>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.SystemUpdateService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.PollTrigger>();
