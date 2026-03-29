@@ -16,6 +16,7 @@ CHECKSUM_ASSET_NAME="$ASSET_NAME.sha256"
 INSTALL_SCRIPT="${TMPDIR:-/tmp}/dotnet-install-fluxmonitor-runtime.sh"
 SERVICE_NAME='fluxmonitor.service'
 SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
+NETWORKMANAGER_POLKIT_RULE_PATH='/etc/polkit-1/rules.d/50-fluxmonitor-networkmanager.rules'
 ENV_PATH="$DESTINATION/fluxmonitor.env"
 RELEASE_INFO_PATH="$DESTINATION/release-info.env"
 NONINTERACTIVE_CONNECTION_STRING="${FLUXMONITOR_CONNECTION_STRING:-}"
@@ -1021,6 +1022,17 @@ EOF
 install_systemd_service() {
   local current_user
   current_user="$(id -un)"
+
+  if [ -d /etc/polkit-1/rules.d ]; then
+    run_elevated tee "$NETWORKMANAGER_POLKIT_RULE_PATH" >/dev/null <<EOF
+polkit.addRule(function(action, subject) {
+  if (subject.user === '$current_user'
+      && action.id.indexOf('org.freedesktop.NetworkManager.') === 0) {
+    return polkit.Result.YES;
+  }
+});
+EOF
+  fi
 
   run_elevated tee "$SERVICE_PATH" >/dev/null <<EOF
 [Unit]

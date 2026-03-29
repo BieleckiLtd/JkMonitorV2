@@ -1197,7 +1197,9 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
     private async Task<ProcessResult> RunNmcliAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken)
     {
         var result = await RunProcessAsync("nmcli", arguments, cancellationToken);
-        if (result.Succeeded || !ShouldRetryNmcliWithSudo(result))
+        if (result.Succeeded
+            || !ShouldRetryNmcliWithSudo(result)
+            || ContainsSensitiveWifiSecrets(arguments))
         {
             return result;
         }
@@ -1341,6 +1343,20 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             || message.Contains("password is required", StringComparison.OrdinalIgnoreCase)
             || message.Contains("a terminal is required", StringComparison.OrdinalIgnoreCase)
             || message.Contains("must have a tty", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool ContainsSensitiveWifiSecrets(IReadOnlyList<string> arguments)
+    {
+        for (var index = 0; index < arguments.Count - 1; index++)
+        {
+            if (string.Equals(arguments[index], "password", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(arguments[index + 1]))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static async Task<ProcessResult> RunProcessAsync(

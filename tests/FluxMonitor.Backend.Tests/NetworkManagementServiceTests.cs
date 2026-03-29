@@ -297,4 +297,16 @@ public sealed class NetworkManagementServiceTests
 
         Assert.Equal(expected, NetworkManagementService.IsSudoPasswordPromptResult(result));
     }
+
+    [Fact]
+    public void ContainsSensitiveWifiSecrets_ReturnsTrueWhenPasswordArgumentPresent()
+    {
+        Assert.True(NetworkManagementService.ContainsSensitiveWifiSecrets(["device", "wifi", "connect", "Home WiFi", "password", "secret"]));
+    }
+
+    [Fact]
+    public void ContainsSensitiveWifiSecrets_ReturnsFalseWhenPasswordArgumentMissing()
+    {
+        Assert.False(NetworkManagementService.ContainsSensitiveWifiSecrets(["radio", "wifi", "on"]));
+    }
 }

@@ -353,18 +353,18 @@ if ($SkipDeploy) {
 
 Require-Command ssh
 
-$remoteScript = @"
+$remoteScript = @'
 set -euo pipefail
-expected_sha256='$expectedReleaseSha256'
-repository_slug='$repositorySlug'
-release_tag='$ReleaseTag'
-asset_name='$linuxAssetName'
-expected_source_revision_id='$currentCommit'
+expected_sha256='__EXPECTED_SHA256__'
+repository_slug='__REPOSITORY_SLUG__'
+release_tag='__RELEASE_TAG__'
+asset_name='__LINUX_ASSET_NAME__'
+expected_source_revision_id='__CURRENT_COMMIT__'
 export FLUXMONITOR_EXPECTED_RELEASE_SHA256="\$expected_sha256"
 export FLUXMONITOR_INSTALL_RUNTIME='y'
 export FLUXMONITOR_INSTALL_SERVICE='y'
 export FLUXMONITOR_REUSE_EXISTING_CONFIGURATION='1'
-wget -qO- https://raw.githubusercontent.com/$repositorySlug/dev/scripts/install-from-release.sh | bash -s -- https://github.com/$repositorySlug \$release_tag
+wget -qO- https://raw.githubusercontent.com/__REPOSITORY_SLUG__/dev/scripts/install-from-release.sh | bash -s -- https://github.com/__REPOSITORY_SLUG__ \$release_tag
 if [ ! -f "\$HOME/fluxmonitor/release-info.env" ]; then
   echo 'The installer did not persist release-info.env.' >&2
   exit 1
@@ -380,7 +380,7 @@ if [[ "\${FLUXMONITOR_RELEASE_SHA256,,}" != "\$expected_sha256" ]]; then
 fi
 sleep 5
 sudo systemctl is-active fluxmonitor.service
-health_json="`$(curl -fsS http://127.0.0.1:5074/api/health)"
+health_json="$(curl -fsS http://127.0.0.1:5074/api/health)"
 
 if command -v python3 >/dev/null 2>&1; then
   HEALTH_JSON="\$health_json" python3 - "\$release_tag" "\$expected_source_revision_id" <<'PY'
@@ -416,7 +416,12 @@ else
     exit 1
   }
 fi
-"@
+'@
+$remoteScript = $remoteScript.Replace('__EXPECTED_SHA256__', $expectedReleaseSha256)
+$remoteScript = $remoteScript.Replace('__REPOSITORY_SLUG__', $repositorySlug)
+$remoteScript = $remoteScript.Replace('__RELEASE_TAG__', $ReleaseTag)
+$remoteScript = $remoteScript.Replace('__LINUX_ASSET_NAME__', $linuxAssetName)
+$remoteScript = $remoteScript.Replace('__CURRENT_COMMIT__', $currentCommit)
 
 Write-Step "Deploying to $DeviceHost"
 $remoteScript | & ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=4 -o StrictHostKeyChecking=no $DeviceHost 'bash -s'
