@@ -365,10 +365,15 @@ type SystemSection =
 
 type SystemMobileView = 'menu' | 'detail';
 
+const narrowSystemLayoutMaxWidth = 1120;
 const narrowSystemLayoutQuery = '(max-width: 1023px)';
 
 function isNarrowSystemLayoutViewport() {
   return typeof window !== 'undefined' && window.matchMedia(narrowSystemLayoutQuery).matches;
+}
+
+function isNarrowSystemLayoutWidth(width: number) {
+  return width <= narrowSystemLayoutMaxWidth;
 }
 
 export function SystemPage() {
@@ -425,9 +430,11 @@ export function SystemPage() {
   const [pendingConnectivityAction, setPendingConnectivityAction] = useState<PendingConnectivityAction | null>(null);
   const [expandedConnectivitySection, setExpandedConnectivitySection] = useState<'wifi' | 'bluetooth' | 'ethernet' | null>(null);
   const previousUpdateStatusRef = useRef<UpdateProgress['status'] | null>(null);
+  const previousSystemLayoutRef = useRef(isNarrowSystemLayoutViewport());
   const wifiCredentialRequestRef = useRef(0);
   const cloudflareTunnelDirtyRef = useRef(false);
   const mobileSwipeStartRef = useRef<{ x: number; y: number } | null>(null);
+  const systemPageRef = useRef<HTMLDivElement>(null);
 
   const loadInternetSpeedTest = useCallback(async () => {
     try {
@@ -525,11 +532,34 @@ export function SystemPage() {
       return;
     }
 
-    const mediaQueryList = window.matchMedia(narrowSystemLayoutQuery);
     const syncLayout = (matches: boolean) => {
       setIsNarrowSystemLayout(matches);
-      setMobileSystemView(matches ? 'menu' : 'detail');
+      if (previousSystemLayoutRef.current !== matches) {
+        previousSystemLayoutRef.current = matches;
+        setMobileSystemView(matches ? 'menu' : 'detail');
+      }
     };
+
+    const container = systemPageRef.current;
+    if (container && typeof ResizeObserver !== 'undefined') {
+      const resizeObserver = new ResizeObserver((entries) => {
+        const entry = entries[0];
+        if (!entry) {
+          return;
+        }
+
+        syncLayout(isNarrowSystemLayoutWidth(entry.contentRect.width));
+      });
+
+      resizeObserver.observe(container);
+      syncLayout(isNarrowSystemLayoutWidth(container.getBoundingClientRect().width));
+
+      return () => {
+        resizeObserver.disconnect();
+      };
+    }
+
+    const mediaQueryList = window.matchMedia(narrowSystemLayoutQuery);
     const handleChange = (event: MediaQueryListEvent) => {
       syncLayout(event.matches);
     };
@@ -1402,7 +1432,7 @@ export function SystemPage() {
   );
 
   return (
-    <div className='min-w-0 space-y-6 pb-8'>
+    <div ref={systemPageRef} className='min-w-0 space-y-6 pb-8'>
       {loadError ? (
         <div className='flex items-start gap-3 rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-4 text-sm text-destructive'>
           <CircleAlert className='mt-0.5 h-5 w-5 shrink-0' />

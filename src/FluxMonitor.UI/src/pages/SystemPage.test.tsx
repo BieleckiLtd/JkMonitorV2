@@ -44,6 +44,7 @@ describe('SystemPage', () => {
   let matchMediaMock: MatchMediaMock;
 
   beforeEach(() => {
+    vi.stubGlobal('ResizeObserver', undefined);
     matchMediaMock = createMatchMediaMock(true);
     window.matchMedia = vi.fn().mockImplementation(() => matchMediaMock);
 
@@ -178,6 +179,7 @@ describe('SystemPage', () => {
 
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
