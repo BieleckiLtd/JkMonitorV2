@@ -387,9 +387,6 @@ export function SystemPage() {
   const [cloudflareTunnelError, setCloudflareTunnelError] = useState<string | null>(null);
   const [cloudflareTunnelFeedback, setCloudflareTunnelFeedback] = useState<InlineFeedback | null>(null);
   const [activeSystemSection, setActiveSystemSection] = useState<SystemSection>('resource-usage');
-  const [softwareUpdateSectionOpen, setSoftwareUpdateSectionOpen] = useState(true);
-  const [tunnelSectionOpen, setTunnelSectionOpen] = useState(true);
-  const [internetSpeedSectionOpen, setInternetSpeedSectionOpen] = useState(true);
   const [cloudflareTunnelSaving, setCloudflareTunnelSaving] = useState(false);
   const [cloudflareTunnelEnabled, setCloudflareTunnelEnabled] = useState(false);
   const [cloudflareTunnelTokenOrCommand, setCloudflareTunnelTokenOrCommand] = useState('');
@@ -598,18 +595,6 @@ export function SystemPage() {
 
     void checkForUpdate();
   }, [activeSystemSection, checkForUpdate]);
-
-  useEffect(() => {
-    if (activeSystemSection === 'software-update') {
-      setSoftwareUpdateSectionOpen(true);
-    }
-    if (activeSystemSection === 'internet-speed') {
-      setInternetSpeedSectionOpen(true);
-    }
-    if (activeSystemSection === 'tunnel') {
-      setTunnelSectionOpen(true);
-    }
-  }, [activeSystemSection]);
 
   const loadConnectivity = useCallback(async () => {
     try {
@@ -1389,11 +1374,7 @@ export function SystemPage() {
 
             <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'software-update' && 'hidden')}>
               <CardHeader className='pb-4'>
-                <button
-                  type='button'
-                  onClick={() => setSoftwareUpdateSectionOpen((current) => !current)}
-                  className='flex w-full items-start gap-3 text-left'
-                >
+                <div className='flex w-full items-start gap-3 text-left'>
                   <div className='flex items-start gap-3'>
                     <RefreshCcw className='mt-1 h-5 w-5 shrink-0 text-muted-foreground' />
                     <div>
@@ -1406,12 +1387,10 @@ export function SystemPage() {
                       <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>Published</div>
                       <div className='text-sm font-semibold text-foreground'>{installedReleasePublishedLabel}</div>
                     </div>
-                    {softwareUpdateSectionOpen ? <ChevronDown className='mt-0.5 h-4 w-4 shrink-0 text-muted-foreground' /> : <ChevronRight className='mt-0.5 h-4 w-4 shrink-0 text-muted-foreground' />}
                   </div>
-                </button>
+                </div>
               </CardHeader>
-              {softwareUpdateSectionOpen ? (
-                <CardContent className='space-y-4 border-t border-border/60 pt-5'>
+              <CardContent className='space-y-4 border-t border-border/60 pt-5'>
                   <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
                     <DetailTile label='Channel' value={formatReleaseChannel(updateChannel)} />
                     <DetailTile label='Commit' value={formatCommit(installedCommit)} />
@@ -1539,16 +1518,11 @@ export function SystemPage() {
                       </button>
                     ) : null}
                   </div>
-                </CardContent>
-              ) : null}
+              </CardContent>
             </Card>
             <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'internet-speed' && 'hidden')}>
               <CardHeader className='pb-4'>
-                <button
-                  type='button'
-                  onClick={() => setInternetSpeedSectionOpen((current) => !current)}
-                  className='flex w-full items-center gap-3 text-left'
-                >
+                <div className='flex w-full items-center gap-3 text-left'>
                   <div className='flex items-start gap-3'>
                     <Globe2 className='mt-1 h-5 w-5 shrink-0 text-muted-foreground' />
                     <div>
@@ -1559,12 +1533,10 @@ export function SystemPage() {
                   <div className='ml-auto flex min-w-0 items-center gap-3 pl-3 text-sm text-muted-foreground'>
                     {internetSpeedTest?.isRunning ? <LoaderCircle className='h-4 w-4 shrink-0 animate-spin text-primary' /> : null}
                     <span className='inline-flex min-w-0 items-center gap-2 truncate'>{internetSpeedSummary}</span>
-                    {internetSpeedSectionOpen ? <ChevronDown className='h-4 w-4 shrink-0' /> : <ChevronRight className='h-4 w-4 shrink-0' />}
                   </div>
-                </button>
+                </div>
               </CardHeader>
-              {internetSpeedSectionOpen ? (
-                <CardContent className='space-y-4 border-t border-border/60 pt-5'>
+              <CardContent className='space-y-4 border-t border-border/60 pt-5'>
                   {internetSpeedTestLoading && !internetSpeedTest ? (
                     <div className='flex items-center justify-center py-8'>
                       <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
@@ -1694,17 +1666,12 @@ export function SystemPage() {
                       </div>
                     </>
                   )}
-                </CardContent>
-              ) : null}
+              </CardContent>
             </Card>
 
             <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'tunnel' && 'hidden')}>
               <CardHeader className='pb-4'>
-                <button
-                  type='button'
-                  onClick={() => setTunnelSectionOpen((current) => !current)}
-                  className='flex w-full items-center gap-3 text-left'
-                >
+                <div className='flex w-full items-center gap-3 text-left'>
                   <div className='flex items-center gap-2'>
                     <Cloud className='h-4 w-4 text-muted-foreground' />
                     <div>
@@ -1717,12 +1684,10 @@ export function SystemPage() {
                     <span className='rounded-full border border-border/70 bg-background/70 px-3 py-1 font-medium uppercase tracking-[0.16em]'>
                       {cloudflareTunnelStateLabel}
                     </span>
-                    {tunnelSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
                   </div>
-                </button>
+                </div>
               </CardHeader>
-              {tunnelSectionOpen ? (
-                <CardContent className='space-y-4 border-t border-border/60 pt-5'>
+              <CardContent className='space-y-4 border-t border-border/60 pt-5'>
                   {cloudflareTunnelLoading && !cloudflareTunnelStatus ? (
                     <div className='flex items-center justify-center py-6'>
                       <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
@@ -1913,8 +1878,7 @@ export function SystemPage() {
                       </div>
                     </>
                   )}
-                </CardContent>
-              ) : null}
+              </CardContent>
             </Card>
 
             <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'connectivity' && 'hidden')}>
