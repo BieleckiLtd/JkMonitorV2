@@ -5,6 +5,11 @@ import type { UpdateProgress } from '../lib/systemUpdate';
 
 const initialState = useAppStore.getState();
 
+async function flushPromises() {
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
 describe('useAppStore update restart recovery', () => {
   const originalLocation = window.location;
   const originalEventSource = globalThis.EventSource;
@@ -46,6 +51,8 @@ describe('useAppStore update restart recovery', () => {
   });
 
   it('keeps the update locked during restart until heartbeat recovery triggers a hard reload', async () => {
+    vi.useFakeTimers();
+
     const locationReplace = vi.fn();
 
     Object.defineProperty(window, 'location', {
@@ -59,7 +66,19 @@ describe('useAppStore update restart recovery', () => {
 
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
-      .mockResolvedValueOnce(new Response('{}', { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ startedAt: '2026-03-29T11:59:00.000Z' }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }))
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ startedAt: '2026-03-29T12:01:30.000Z' }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }));
 
     globalThis.fetch = fetchMock as typeof fetch;
 
@@ -82,6 +101,7 @@ describe('useAppStore update restart recovery', () => {
     useAppStore.setState({ updateProgress: restartingProgress });
 
     await useAppStore.getState().fetchUpdateProgress();
+    await flushPromises();
 
     expect(useAppStore.getState().updateProgress).toMatchObject({
       status: 'restarting',
@@ -90,16 +110,29 @@ describe('useAppStore update restart recovery', () => {
     expect(useAppStore.getState().updateProgress?.stage).not.toBe('Update complete.');
     expect(useAppStore.getState().updateProgress?.detail).toMatch(/heartbeat|Reloading the frontend/i);
 
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(locationReplace).toHaveBeenCalledTimes(1);
-    });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(locationReplace).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(locationReplace).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushPromises();
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(locationReplace).toHaveBeenCalledTimes(1);
 
     expect(String(fetchMock.mock.calls[1]?.[0])).toContain('/api/health?nocache=');
+    expect(String(fetchMock.mock.calls[2]?.[0])).toContain('/api/health?nocache=');
+    expect(String(fetchMock.mock.calls[3]?.[0])).toContain('/api/health?nocache=');
     expect(String(locationReplace.mock.calls[0]?.[0])).toContain('_reload=');
   });
 
   it('treats a missing final progress snapshot as restart recovery instead of clearing the overlay', async () => {
+    vi.useFakeTimers();
+
     const locationReplace = vi.fn();
 
     Object.defineProperty(window, 'location', {
@@ -113,7 +146,19 @@ describe('useAppStore update restart recovery', () => {
 
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(null, { status: 204 }))
-      .mockResolvedValueOnce(new Response('{}', { status: 200 }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ startedAt: '2026-03-29T11:59:00.000Z' }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }))
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ startedAt: '2026-03-29T12:01:30.000Z' }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }));
 
     globalThis.fetch = fetchMock as typeof fetch;
 
@@ -136,6 +181,7 @@ describe('useAppStore update restart recovery', () => {
     useAppStore.setState({ updateProgress: finalizingProgress });
 
     await useAppStore.getState().fetchUpdateProgress();
+    await flushPromises();
 
     expect(useAppStore.getState().updateProgress).toMatchObject({
       sessionId: 'final123',
@@ -144,10 +190,92 @@ describe('useAppStore update restart recovery', () => {
     });
     expect(useAppStore.getState().updateProgress?.detail).toMatch(/heartbeat|Reloading the frontend/i);
 
-    await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-      expect(locationReplace).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(locationReplace).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(locationReplace).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushPromises();
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(locationReplace).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not hard reload until the backend actually goes away or reports a new start time', async () => {
+    vi.useFakeTimers();
+
+    const locationReplace = vi.fn();
+
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        ...originalLocation,
+        href: 'http://localhost/system',
+        replace: locationReplace,
+      },
     });
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 204 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ startedAt: '2026-03-29T11:59:00.000Z' }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ startedAt: '2026-03-29T11:59:00.000Z' }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ startedAt: '2026-03-29T12:01:30.000Z' }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }));
+
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    useAppStore.setState({
+      updateProgress: {
+        sessionId: 'restart123',
+        status: 'restarting',
+        isRunning: true,
+        stage: 'Restarting Flux Monitor…',
+        detail: 'The new version is installed. The service is restarting now.',
+        success: null,
+        canCancel: false,
+        cancelUnavailableReason: 'The update has already been installed and the service is restarting.',
+        stepIndex: 11,
+        stepCount: 11,
+        percentComplete: 100,
+        startedAt: '2026-03-29T12:00:00.000Z',
+        updatedAt: '2026-03-29T12:00:01.000Z',
+      },
+    });
+
+    await useAppStore.getState().fetchUpdateProgress();
+    await flushPromises();
+
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(locationReplace).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(locationReplace).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushPromises();
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(locationReplace).toHaveBeenCalledTimes(1);
   });
 
   it('applies pushed update progress from the event stream immediately', async () => {

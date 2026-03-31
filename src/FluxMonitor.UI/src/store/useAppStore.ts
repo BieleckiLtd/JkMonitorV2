@@ -15,6 +15,10 @@ type UpdateProgressStreamEnvelope = {
   progress: UpdateProgress | null;
 };
 
+type HealthSnapshot = {
+  startedAt?: string | null;
+};
+
 function isUpdateProgress(value: unknown): value is UpdateProgress {
   return typeof value === 'object'
     && value !== null
@@ -215,6 +219,9 @@ function beginRestartRecovery(
   }
 
   restartRecoveryPromise = (async () => {
+    let observedUnavailability = false;
+    let baselineStartedAt: string | null = null;
+
     while (true) {
       try {
         const response = await fetch(`/api/health?nocache=${Date.now()}`, {
@@ -226,16 +233,29 @@ function beginRestartRecovery(
         });
 
         if (response.ok) {
-          const current = get().updateProgress;
-          if (current?.status === 'restarting') {
-            set({ updateProgress: createFrontendReloadProgress(current) });
+          const snapshot = await response.json().catch(() => null) as HealthSnapshot | null;
+          const startedAt = typeof snapshot?.startedAt === 'string' && snapshot.startedAt.length > 0
+            ? snapshot.startedAt
+            : null;
+          const hasRestarted = observedUnavailability
+            || (baselineStartedAt !== null && startedAt !== null && startedAt !== baselineStartedAt);
+
+          if (hasRestarted) {
+            const current = get().updateProgress;
+            if (current?.status === 'restarting') {
+              set({ updateProgress: createFrontendReloadProgress(current) });
+            }
+
+            await hardReloadFrontend();
+            return;
           }
 
-          await hardReloadFrontend();
-          return;
+          baselineStartedAt ??= startedAt;
+        } else {
+          observedUnavailability = true;
         }
       } catch {
-        // The service is still restarting; keep polling.
+        observedUnavailability = true;
       }
 
       await new Promise<void>((resolve) => {
