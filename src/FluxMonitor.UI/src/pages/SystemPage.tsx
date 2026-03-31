@@ -1310,16 +1310,7 @@ export function SystemPage() {
 
       {status ? (
         <div className='grid gap-6 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[19rem_minmax(0,1fr)]'>
-          <Card className='border border-border/80 bg-card/85 shadow-sm'>
-            <CardHeader className='border-b border-border/60 pb-4'>
-              <div className='flex items-center gap-2'>
-                <List className='h-4 w-4 text-muted-foreground' />
-                <div>
-                  <CardTitle>System sections</CardTitle>
-                  <CardDescription>Select a panel to show its details.</CardDescription>
-                </div>
-              </div>
-            </CardHeader>
+          <Card className='gap-0 bg-card/85 py-0 shadow-none ring-0'>
             <CardContent className='space-y-2 p-3'>
               {systemSectionItems.map((item) => {
                 const Icon = item.icon;
@@ -1553,7 +1544,7 @@ export function SystemPage() {
             </Card>
           </div>
 
-          <div className='min-w-0 space-y-6'>
+          <div className='min-w-0 space-y-6 lg:col-start-2'>
             <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'internet-speed' && 'hidden')}>
               <CardHeader className='pb-4'>
                 <button
