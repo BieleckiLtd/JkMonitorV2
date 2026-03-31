@@ -112,6 +112,7 @@ public sealed class DeviceDefinitionLoader
         try
         {
             using var client = _httpClientFactory.CreateClient();
+            client.Timeout = TimeSpan.FromSeconds(10);
             client.DefaultRequestHeaders.Add("User-Agent", "FluxMonitor-DeviceDefinitionLoader");
 
             var manifest = await client.GetFromJsonAsync<DeviceDefinitionManifest>(manifestUrl, JsonOptions, cancellationToken);

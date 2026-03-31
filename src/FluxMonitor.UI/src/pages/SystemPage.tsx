@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSignal, type IconDefinition } from '@fortawesome/free-solid-svg-icons';
-import { Bluetooth, Cable, ChevronDown, ChevronRight, CircleAlert, Cloud, Cpu, Database, Download, ExternalLink, Gauge, Globe2, HardDrive, Leaf, LoaderCircle, Lock, MemoryStick, RefreshCcw, CheckCircle2, Thermometer, Upload, Usb, Wifi, XCircle } from 'lucide-react';
+import { Bluetooth, Cable, ChevronDown, ChevronRight, CircleAlert, Cloud, Cpu, Database, Download, ExternalLink, Gauge, Globe2, HardDrive, Leaf, List, LoaderCircle, Lock, MemoryStick, RefreshCcw, CheckCircle2, Thermometer, Upload, Usb, Wifi, XCircle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { Switch } from '../components/ui/switch';
@@ -353,6 +353,16 @@ type WifiConnectDialogState = {
   title: string;
 };
 
+type SystemSection =
+  | 'resource-usage'
+  | 'software-update'
+  | 'internet-speed'
+  | 'tunnel'
+  | 'connectivity'
+  | 'hardware-interfaces'
+  | 'database'
+  | 'logs';
+
 export function SystemPage() {
   const updateProgress = useAppStore((state) => state.updateProgress);
   const updateActionPending = useAppStore((state) => state.updateActionPending);
@@ -368,8 +378,6 @@ export function SystemPage() {
   const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult | null>(null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateActionError, setUpdateActionError] = useState<string | null>(null);
-  const [softwareUpdateSectionOpen, setSoftwareUpdateSectionOpen] = useState(false);
-  const [tunnelSectionOpen, setTunnelSectionOpen] = useState(false);
   const [interfaces, setInterfaces] = useState<SystemInterfacesResponse | null>(null);
   const [connectivity, setConnectivity] = useState<SystemConnectivitySnapshot | null>(null);
   const [connectivityLoading, setConnectivityLoading] = useState(true);
@@ -378,10 +386,13 @@ export function SystemPage() {
   const [cloudflareTunnelLoading, setCloudflareTunnelLoading] = useState(true);
   const [cloudflareTunnelError, setCloudflareTunnelError] = useState<string | null>(null);
   const [cloudflareTunnelFeedback, setCloudflareTunnelFeedback] = useState<InlineFeedback | null>(null);
+  const [activeSystemSection, setActiveSystemSection] = useState<SystemSection>('resource-usage');
+  const [softwareUpdateSectionOpen, setSoftwareUpdateSectionOpen] = useState(true);
+  const [tunnelSectionOpen, setTunnelSectionOpen] = useState(true);
+  const [internetSpeedSectionOpen, setInternetSpeedSectionOpen] = useState(true);
   const [cloudflareTunnelSaving, setCloudflareTunnelSaving] = useState(false);
   const [cloudflareTunnelEnabled, setCloudflareTunnelEnabled] = useState(false);
   const [cloudflareTunnelTokenOrCommand, setCloudflareTunnelTokenOrCommand] = useState('');
-  const [internetSpeedSectionOpen, setInternetSpeedSectionOpen] = useState(false);
   const [internetSpeedTest, setInternetSpeedTest] = useState<InternetSpeedTestSnapshot | null>(null);
   const [internetSpeedTestLoading, setInternetSpeedTestLoading] = useState(true);
   const [internetSpeedTestStarting, setInternetSpeedTestStarting] = useState(false);
@@ -581,12 +592,24 @@ export function SystemPage() {
   }, [wifiConnectDialog, wifiPasswordDirty, wifiTargetSsid]);
 
   useEffect(() => {
-    if (!softwareUpdateSectionOpen) {
+    if (activeSystemSection !== 'software-update') {
       return;
     }
 
     void checkForUpdate();
-  }, [checkForUpdate, softwareUpdateSectionOpen]);
+  }, [activeSystemSection, checkForUpdate]);
+
+  useEffect(() => {
+    if (activeSystemSection === 'software-update') {
+      setSoftwareUpdateSectionOpen(true);
+    }
+    if (activeSystemSection === 'internet-speed') {
+      setInternetSpeedSectionOpen(true);
+    }
+    if (activeSystemSection === 'tunnel') {
+      setTunnelSectionOpen(true);
+    }
+  }, [activeSystemSection]);
 
   const loadConnectivity = useCallback(async () => {
     try {
@@ -648,7 +671,7 @@ export function SystemPage() {
   const startInternetSpeedTest = async () => {
     setInternetSpeedTestStarting(true);
     setInternetSpeedTestError(null);
-    setInternetSpeedSectionOpen(true);
+    setActiveSystemSection('internet-speed');
 
     try {
       const response = await fetch('/api/system/internet-speed/run', {
@@ -675,12 +698,12 @@ export function SystemPage() {
       setUpdateActionError(null);
     }
 
-    if (softwareUpdateSectionOpen && previousUpdateStatusRef.current !== 'succeeded' && updateProgress?.status === 'succeeded') {
+    if (activeSystemSection === 'software-update' && previousUpdateStatusRef.current !== 'succeeded' && updateProgress?.status === 'succeeded') {
       void checkForUpdate();
     }
 
     previousUpdateStatusRef.current = updateProgress?.status ?? null;
-  }, [checkForUpdate, softwareUpdateSectionOpen, updateProgress]);
+  }, [activeSystemSection, checkForUpdate, updateProgress]);
 
   useEffect(() => {
     const loadInterfaces = async () => {
@@ -1251,6 +1274,21 @@ export function SystemPage() {
     : pendingConnectivityAction?.kind === 'disconnect-ethernet'
       ? 'Disconnect Ethernet'
       : null;
+  const systemSectionItems: Array<{
+    id: SystemSection;
+    label: string;
+    description: string;
+    icon: typeof Cpu;
+  }> = [
+    { id: 'resource-usage', label: 'Resource usage', description: 'CPU, memory, and storage', icon: Cpu },
+    { id: 'software-update', label: 'Software update', description: 'Check and install releases', icon: RefreshCcw },
+    { id: 'internet-speed', label: 'Internet speed', description: 'Run a live bandwidth check', icon: Globe2 },
+    { id: 'tunnel', label: 'Tunnel', description: 'Cloudflare Tunnel settings', icon: Cloud },
+    { id: 'connectivity', label: 'Connectivity', description: 'Wi-Fi, Bluetooth, and Ethernet', icon: Wifi },
+    { id: 'hardware-interfaces', label: 'Hardware interfaces', description: 'Serial ports and block devices', icon: Usb },
+    { id: 'database', label: 'Database', description: 'Storage size, backup, and restore', icon: Database },
+    { id: 'logs', label: 'Logs', description: 'Application log output', icon: List },
+  ];
 
   return (
     <div className='min-w-0 space-y-6 pb-8'>
@@ -1271,54 +1309,94 @@ export function SystemPage() {
       ) : null}
 
       {status ? (
-        <div className='grid gap-6 2xl:grid-cols-[minmax(0,1.35fr)_minmax(0,1fr)]'>
-          <div className='min-w-0 space-y-6'>
-            <Card className='border border-border/80 bg-card/85 shadow-sm'>
-              <CardHeader className='border-b border-border/60 pb-4'>
-                <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
-                  <div>
-                    <CardTitle>Resource usage</CardTitle>
-                    <CardDescription>CPU, memory, and storage capacity on the host running the monitor service.</CardDescription>
-                  </div>
-                  <div className='space-y-1 text-right text-xs text-muted-foreground'>
-                    <div>Host uptime {formatElapsedDuration(metrics?.systemUptimeSeconds)}</div>
-                    <div>App uptime {applicationUptime}</div>
-                  </div>
+        <div className='grid gap-6 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[19rem_minmax(0,1fr)]'>
+          <Card className='border border-border/80 bg-card/85 shadow-sm'>
+            <CardHeader className='border-b border-border/60 pb-4'>
+              <div className='flex items-center gap-2'>
+                <List className='h-4 w-4 text-muted-foreground' />
+                <div>
+                  <CardTitle>System sections</CardTitle>
+                  <CardDescription>Select a panel to show its details.</CardDescription>
                 </div>
-              </CardHeader>
-              <CardContent className='grid gap-5 pt-5'>
-                <UsagePanel
-                  icon={Cpu}
-                  label='CPU'
-                  percent={cpuUsage}
-                  summary={`Current ${formatFrequency(metrics?.cpuCurrentClockSpeedMegahertz)}`}
-                  secondary={`Base ${formatFrequency(metrics?.cpuMaxClockSpeedMegahertz)} • ${formatWholeNumber(metrics?.cpuCoreCount)} cores`}
-                  details={[
-                    `${formatWholeNumber(metrics?.processCount)} processes`,
-                    `System temperature ${formatDecimalValue(metrics?.systemTemperatureCelsius, '°C')}`,
-                    `Fan speed ${formatRpm(metrics?.mainFanSpeedRpm)}`,
-                  ]}
-                  labelIcon={cpuStatusIcon}
-                  labelIconClassName={cpuStatusIconClassName}
-                />
-                <UsagePanel
-                  icon={MemoryStick}
-                  label='Memory'
-                  percent={memoryUsagePercent}
-                  summary={formatUsage(memoryUsed, memoryTotal)}
-                  secondary={metrics?.memoryAvailableBytes != null ? `${formatBytes(metrics.memoryAvailableBytes)} free` : noDataLabel}
-                />
-                <UsagePanel
-                  icon={HardDrive}
-                  label='Storage'
-                  percent={storageUsagePercent}
-                  summary={formatUsage(storageUsed, storageTotal)}
-                  secondary={storageTotal != null && storageUsed != null ? `${formatBytes(Math.max(storageTotal - storageUsed, 0))} free` : noDataLabel}
-                />
-              </CardContent>
-            </Card>
+              </div>
+            </CardHeader>
+            <CardContent className='space-y-2 p-3'>
+              {systemSectionItems.map((item) => {
+                const Icon = item.icon;
+                const active = activeSystemSection === item.id;
 
-            <Card className='border border-border/80 bg-card/85 shadow-sm'>
+                return (
+                  <button
+                    key={item.id}
+                    type='button'
+                    onClick={() => setActiveSystemSection(item.id)}
+                    className={cn(
+                      'flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition-colors',
+                      active
+                        ? 'border-primary/30 bg-primary/10 text-foreground shadow-sm'
+                        : 'border-border/60 bg-background/30 text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                    )}
+                  >
+                    <Icon className='h-4 w-4 shrink-0' />
+                    <div className='min-w-0'>
+                      <div className='text-sm font-medium'>{item.label}</div>
+                      <div className='mt-0.5 text-xs opacity-80'>{item.description}</div>
+                    </div>
+                  </button>
+                );
+              })}
+            </CardContent>
+          </Card>
+
+          <div className='min-w-0 space-y-6'>
+            {activeSystemSection === 'resource-usage' ? (
+              <Card className='border border-border/80 bg-card/85 shadow-sm'>
+                <CardHeader className='border-b border-border/60 pb-4'>
+                  <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
+                    <div>
+                      <CardTitle>Resource usage</CardTitle>
+                      <CardDescription>CPU, memory, and storage capacity on the host running the monitor service.</CardDescription>
+                    </div>
+                    <div className='space-y-1 text-right text-xs text-muted-foreground'>
+                      <div>Host uptime {formatElapsedDuration(metrics?.systemUptimeSeconds)}</div>
+                      <div>App uptime {applicationUptime}</div>
+                    </div>
+                  </div>
+                </CardHeader>
+                <CardContent className='grid gap-5 pt-5'>
+                  <UsagePanel
+                    icon={Cpu}
+                    label='CPU'
+                    percent={cpuUsage}
+                    summary={`Current ${formatFrequency(metrics?.cpuCurrentClockSpeedMegahertz)}`}
+                    secondary={`Base ${formatFrequency(metrics?.cpuMaxClockSpeedMegahertz)} • ${formatWholeNumber(metrics?.cpuCoreCount)} cores`}
+                    details={[
+                      `${formatWholeNumber(metrics?.processCount)} processes`,
+                      `System temperature ${formatDecimalValue(metrics?.systemTemperatureCelsius, '°C')}`,
+                      `Fan speed ${formatRpm(metrics?.mainFanSpeedRpm)}`,
+                    ]}
+                    labelIcon={cpuStatusIcon}
+                    labelIconClassName={cpuStatusIconClassName}
+                  />
+                  <UsagePanel
+                    icon={MemoryStick}
+                    label='Memory'
+                    percent={memoryUsagePercent}
+                    summary={formatUsage(memoryUsed, memoryTotal)}
+                    secondary={metrics?.memoryAvailableBytes != null ? `${formatBytes(metrics.memoryAvailableBytes)} free` : noDataLabel}
+                  />
+                  <UsagePanel
+                    icon={HardDrive}
+                    label='Storage'
+                    percent={storageUsagePercent}
+                    summary={formatUsage(storageUsed, storageTotal)}
+                    secondary={storageTotal != null && storageUsed != null ? `${formatBytes(Math.max(storageTotal - storageUsed, 0))} free` : noDataLabel}
+                  />
+                </CardContent>
+              </Card>
+            ) : null}
+
+            <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'software-update' && 'hidden')}>
               <CardHeader className='pb-4'>
                 <button
                   type='button'
@@ -1476,7 +1554,7 @@ export function SystemPage() {
           </div>
 
           <div className='min-w-0 space-y-6'>
-            <Card className='border border-border/80 bg-card/85 shadow-sm'>
+            <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'internet-speed' && 'hidden')}>
               <CardHeader className='pb-4'>
                 <button
                   type='button'
@@ -1632,7 +1710,7 @@ export function SystemPage() {
               ) : null}
             </Card>
 
-            <Card className='border border-border/80 bg-card/85 shadow-sm'>
+            <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'tunnel' && 'hidden')}>
               <CardHeader className='pb-4'>
                 <button
                   type='button'
@@ -1851,7 +1929,7 @@ export function SystemPage() {
               ) : null}
             </Card>
 
-            <Card className='border border-border/80 bg-card/85 shadow-sm'>
+            <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'connectivity' && 'hidden')}>
               <CardHeader className='border-b border-border/60 pb-4'>
                 <div className='flex items-center gap-2'>
                   <Wifi className='h-4 w-4 text-muted-foreground' />
@@ -2241,7 +2319,7 @@ export function SystemPage() {
               </CardContent>
             </Card>
 
-            <Card className='border border-border/80 bg-card/85 shadow-sm'>
+            <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'hardware-interfaces' && 'hidden')}>
               <CardHeader className='border-b border-border/60 pb-4'>
                 <div className='flex items-center gap-2'>
                   <Usb className='h-4 w-4 text-muted-foreground' />
@@ -2295,7 +2373,7 @@ export function SystemPage() {
               </CardContent>
             </Card>
 
-            <Card className='border border-border/80 bg-card/85 shadow-sm'>
+            <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'database' && 'hidden')}>
               <CardHeader className='border-b border-border/60 pb-4'>
                 <div className='flex items-center gap-2'>
                   <Database className='h-4 w-4 text-muted-foreground' />
@@ -2483,7 +2561,7 @@ export function SystemPage() {
       ) : null}
 
       {/* Application Logs */}
-      <LogsPanel />
+      {activeSystemSection === 'logs' ? <LogsPanel /> : null}
     </div>
   );
 }

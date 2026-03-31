@@ -146,6 +146,11 @@ export function DevicesPage() {
   const [bleScanResults, setBleScanResults] = useState<Record<string, BleScanDevice[]>>({});
   const [bleScanLoading, setBleScanLoading] = useState<Record<string, boolean>>({});
   const [bleScanErrors, setBleScanErrors] = useState<Record<string, string | null>>({});
+  const definitionsRef = useRef<DeviceDefinitionSummary[]>([]);
+
+  useEffect(() => {
+    definitionsRef.current = availableDefinitions;
+  }, [availableDefinitions]);
   const [deviceActions, setDeviceActions] = useState<Record<string, { loading: boolean; result?: StartStopResult }>>({});
   const devicesRef = useRef<DeviceConfiguration[]>([]);
   const initialLoadDone = useRef(false);
@@ -258,15 +263,15 @@ export function DevicesPage() {
     }
   }, []);
 
-  const addDeviceFromDefinition = useCallback((definitionId: string) => {
-    const definition = availableDefinitions.find((entry) => entry.id === definitionId);
+  const addDeviceFromDefinition = useCallback((definitionId: string, explicitDefinition?: DeviceDefinitionSummary) => {
+    const definition = explicitDefinition ?? definitionsRef.current.find((entry) => entry.id === definitionId);
     if (!definition || !definition.isTransportSupported) return;
 
     setDevices((current) => [...current, defaultDevice(current.length + 1, definition)]);
     setShowAddPicker(false);
     setUploadError(null);
     markDirty();
-  }, [availableDefinitions, markDirty]);
+  }, [markDirty]);
 
   const handleUploadDefinition = useCallback(async (file: File) => {
     setUploadError(null);
@@ -275,10 +280,36 @@ export function DevicesPage() {
       const formData = new FormData();
       formData.append('file', file);
       const response = await fetch('/api/definitions/upload', { method: 'POST', body: formData });
-      const data = (await response.json()) as { id?: string; message?: string };
+      type DefinitionUploadResult = {
+      id?: string;
+      name?: string;
+      manufacturer?: string;
+      model?: string;
+      category?: string;
+      description?: string;
+      transportType?: string;
+      isTransportSupported?: boolean;
+      unsupportedTransportMessage?: string | null;
+      message?: string;
+    };
+
+    const data = (await response.json()) as DefinitionUploadResult;
       if (!response.ok) throw new Error(data.message ?? 'Upload failed.');
       await refreshDefinitions();
-      if (data.id) addDeviceFromDefinition(data.id);
+      if (data.id) {
+        const summary: DeviceDefinitionSummary = {
+          id: data.id,
+          name: data.name ?? '',
+          manufacturer: data.manufacturer ?? '',
+          model: data.model ?? '',
+          category: data.category,
+          description: data.description,
+          transportType: data.transportType ?? 'serial',
+          isTransportSupported: data.isTransportSupported ?? true,
+          unsupportedTransportMessage: data.unsupportedTransportMessage ?? null,
+        };
+        addDeviceFromDefinition(data.id, summary);
+      }
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : 'Upload failed.');
     }
@@ -498,7 +529,9 @@ export function DevicesPage() {
                       onChange={(event) => updateDevice(index, 'definitionId', event.target.value)}
                     >
                       {availableDefinitions.map((definitionOption) => (
-                        <option key={definitionOption.id} value={definitionOption.id}>{definitionOption.name}</option>
+                        <option key={definitionOption.id} value={definitionOption.id}>
+                          {definitionOption.name} ({definitionOption.transportType})
+                        </option>
                       ))}
                     </select>
                   </label>
