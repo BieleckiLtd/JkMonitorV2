@@ -1,7 +1,7 @@
-import { useEffect, useState, useRef, useCallback } from 'react';
+import { useEffect, useState, useRef, useCallback, type TouchEvent } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSignal, type IconDefinition } from '@fortawesome/free-solid-svg-icons';
-import { Bluetooth, Cable, ChevronDown, ChevronRight, CircleAlert, Cloud, Cpu, Database, Download, ExternalLink, Gauge, Globe2, HardDrive, Leaf, List, LoaderCircle, Lock, MemoryStick, RefreshCcw, CheckCircle2, Thermometer, Upload, Usb, Wifi, XCircle } from 'lucide-react';
+import { Bluetooth, Cable, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Cloud, Cpu, Database, Download, ExternalLink, Gauge, Globe2, HardDrive, Leaf, List, LoaderCircle, Lock, MemoryStick, RefreshCcw, CheckCircle2, Thermometer, Upload, Usb, Wifi, XCircle } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { Switch } from '../components/ui/switch';
@@ -363,6 +363,14 @@ type SystemSection =
   | 'database'
   | 'logs';
 
+type SystemMobileView = 'menu' | 'detail';
+
+const narrowSystemLayoutQuery = '(max-width: 1023px)';
+
+function isNarrowSystemLayoutViewport() {
+  return typeof window !== 'undefined' && window.matchMedia(narrowSystemLayoutQuery).matches;
+}
+
 export function SystemPage() {
   const updateProgress = useAppStore((state) => state.updateProgress);
   const updateActionPending = useAppStore((state) => state.updateActionPending);
@@ -387,6 +395,8 @@ export function SystemPage() {
   const [cloudflareTunnelError, setCloudflareTunnelError] = useState<string | null>(null);
   const [cloudflareTunnelFeedback, setCloudflareTunnelFeedback] = useState<InlineFeedback | null>(null);
   const [activeSystemSection, setActiveSystemSection] = useState<SystemSection>('resource-usage');
+  const [isNarrowSystemLayout, setIsNarrowSystemLayout] = useState(isNarrowSystemLayoutViewport);
+  const [mobileSystemView, setMobileSystemView] = useState<SystemMobileView>(() => isNarrowSystemLayoutViewport() ? 'menu' : 'detail');
   const [cloudflareTunnelSaving, setCloudflareTunnelSaving] = useState(false);
   const [cloudflareTunnelEnabled, setCloudflareTunnelEnabled] = useState(false);
   const [cloudflareTunnelTokenOrCommand, setCloudflareTunnelTokenOrCommand] = useState('');
@@ -417,6 +427,7 @@ export function SystemPage() {
   const previousUpdateStatusRef = useRef<UpdateProgress['status'] | null>(null);
   const wifiCredentialRequestRef = useRef(0);
   const cloudflareTunnelDirtyRef = useRef(false);
+  const mobileSwipeStartRef = useRef<{ x: number; y: number } | null>(null);
 
   const loadInternetSpeedTest = useCallback(async () => {
     try {
@@ -506,6 +517,37 @@ export function SystemPage() {
     return () => {
       isMounted = false;
       window.clearInterval(intervalId);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    const mediaQueryList = window.matchMedia(narrowSystemLayoutQuery);
+    const syncLayout = (matches: boolean) => {
+      setIsNarrowSystemLayout(matches);
+      setMobileSystemView(matches ? 'menu' : 'detail');
+    };
+    const handleChange = (event: MediaQueryListEvent) => {
+      syncLayout(event.matches);
+    };
+
+    syncLayout(mediaQueryList.matches);
+
+    if (typeof mediaQueryList.addEventListener === 'function') {
+      mediaQueryList.addEventListener('change', handleChange);
+
+      return () => {
+        mediaQueryList.removeEventListener('change', handleChange);
+      };
+    }
+
+    mediaQueryList.addListener(handleChange);
+
+    return () => {
+      mediaQueryList.removeListener(handleChange);
     };
   }, []);
 
@@ -653,10 +695,60 @@ export function SystemPage() {
     }
   };
 
+  const openSystemSection = useCallback((section: SystemSection) => {
+    setActiveSystemSection(section);
+
+    if (isNarrowSystemLayout) {
+      setMobileSystemView('detail');
+    }
+  }, [isNarrowSystemLayout]);
+
+  const handleMobileSystemBack = useCallback(() => {
+    setMobileSystemView('menu');
+  }, []);
+
+  const handleSystemViewTouchStart = useCallback((event: TouchEvent<HTMLDivElement>) => {
+    const touch = event.changedTouches[0];
+    if (!touch) {
+      return;
+    }
+
+    mobileSwipeStartRef.current = { x: touch.clientX, y: touch.clientY };
+  }, []);
+
+  const handleSystemViewTouchEnd = useCallback((event: TouchEvent<HTMLDivElement>) => {
+    if (!isNarrowSystemLayout) {
+      return;
+    }
+
+    const touch = event.changedTouches[0];
+    const start = mobileSwipeStartRef.current;
+    mobileSwipeStartRef.current = null;
+
+    if (!touch || !start) {
+      return;
+    }
+
+    const deltaX = touch.clientX - start.x;
+    const deltaY = touch.clientY - start.y;
+
+    if (Math.abs(deltaX) < 60 || Math.abs(deltaY) > 80 || Math.abs(deltaY) > Math.abs(deltaX)) {
+      return;
+    }
+
+    if (deltaX < 0 && mobileSystemView === 'menu') {
+      setMobileSystemView('detail');
+    }
+
+    if (deltaX > 0 && mobileSystemView === 'detail') {
+      setMobileSystemView('menu');
+    }
+  }, [isNarrowSystemLayout, mobileSystemView]);
+
   const startInternetSpeedTest = async () => {
     setInternetSpeedTestStarting(true);
     setInternetSpeedTestError(null);
-    setActiveSystemSection('internet-speed');
+    openSystemSection('internet-speed');
 
     try {
       const response = await fetch('/api/system/internet-speed/run', {
@@ -1275,6 +1367,40 @@ export function SystemPage() {
     { id: 'logs', label: 'Logs', description: 'Application log output', icon: List },
   ];
 
+  const activeSystemSectionItem = systemSectionItems.find((item) => item.id === activeSystemSection) ?? systemSectionItems[0];
+
+  const renderSystemSectionMenu = () => (
+    <Card className='gap-0 bg-card/85 py-0 shadow-none ring-0'>
+      <CardContent className='space-y-2 p-3'>
+        {systemSectionItems.map((item) => {
+          const Icon = item.icon;
+          const active = activeSystemSection === item.id;
+
+          return (
+            <button
+              key={item.id}
+              type='button'
+              onClick={() => openSystemSection(item.id)}
+              className={cn(
+                'flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition-colors',
+                active
+                  ? 'border-primary/30 bg-primary/10 text-foreground shadow-sm'
+                  : 'border-border/60 bg-background/30 text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+              )}
+            >
+              <Icon className='h-4 w-4 shrink-0' />
+              <div className='min-w-0 flex-1'>
+                <div className='text-sm font-medium'>{item.label}</div>
+                <div className='mt-0.5 text-xs opacity-80'>{item.description}</div>
+              </div>
+              {isNarrowSystemLayout ? <ChevronRight className='h-4 w-4 shrink-0 opacity-60' /> : null}
+            </button>
+          );
+        })}
+      </CardContent>
+    </Card>
+  );
+
   return (
     <div className='min-w-0 space-y-6 pb-8'>
       {loadError ? (
@@ -1294,37 +1420,59 @@ export function SystemPage() {
       ) : null}
 
       {status ? (
-        <div className='grid gap-6 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[19rem_minmax(0,1fr)]'>
-          <Card className='gap-0 bg-card/85 py-0 shadow-none ring-0'>
-            <CardContent className='space-y-2 p-3'>
-              {systemSectionItems.map((item) => {
-                const Icon = item.icon;
-                const active = activeSystemSection === item.id;
+        <div
+          className={cn('min-w-0', isNarrowSystemLayout && 'overflow-hidden')}
+          onTouchStart={isNarrowSystemLayout ? handleSystemViewTouchStart : undefined}
+          onTouchEnd={isNarrowSystemLayout ? handleSystemViewTouchEnd : undefined}
+          onTouchCancel={isNarrowSystemLayout ? () => {
+            mobileSwipeStartRef.current = null;
+          } : undefined}
+        >
+          <div
+            className={cn(
+              isNarrowSystemLayout
+                ? 'flex w-[200%] touch-pan-y transition-transform duration-300 ease-out'
+                : 'grid gap-6 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[19rem_minmax(0,1fr)]'
+            )}
+            style={isNarrowSystemLayout ? { transform: mobileSystemView === 'menu' ? 'translateX(0%)' : 'translateX(-50%)' } : undefined}
+          >
+            <div
+              className={cn(
+                isNarrowSystemLayout && 'w-1/2 shrink-0 pr-1',
+                isNarrowSystemLayout && mobileSystemView !== 'menu' && 'pointer-events-none'
+              )}
+              aria-hidden={isNarrowSystemLayout ? mobileSystemView !== 'menu' : undefined}
+            >
+              {renderSystemSectionMenu()}
+            </div>
 
-                return (
-                  <button
-                    key={item.id}
-                    type='button'
-                    onClick={() => setActiveSystemSection(item.id)}
-                    className={cn(
-                      'flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition-colors',
-                      active
-                        ? 'border-primary/30 bg-primary/10 text-foreground shadow-sm'
-                        : 'border-border/60 bg-background/30 text-muted-foreground hover:bg-accent hover:text-accent-foreground',
-                    )}
-                  >
-                    <Icon className='h-4 w-4 shrink-0' />
+            <div
+              className={cn(
+                'min-w-0',
+                isNarrowSystemLayout && 'w-1/2 shrink-0 pl-1',
+                isNarrowSystemLayout && mobileSystemView !== 'detail' && 'pointer-events-none'
+              )}
+              aria-hidden={isNarrowSystemLayout ? mobileSystemView !== 'detail' : undefined}
+            >
+              <div className={cn('min-w-0 space-y-6', isNarrowSystemLayout && 'space-y-4')}>
+                {isNarrowSystemLayout ? (
+                  <div className='flex items-center gap-3 rounded-2xl border border-border/70 bg-background/40 px-3 py-2.5'>
+                    <button
+                      type='button'
+                      onClick={handleMobileSystemBack}
+                      className='inline-flex items-center gap-1 rounded-xl px-2 py-1 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
+                    >
+                      <ChevronLeft className='h-4 w-4' />
+                      Back
+                    </button>
                     <div className='min-w-0'>
-                      <div className='text-sm font-medium'>{item.label}</div>
-                      <div className='mt-0.5 text-xs opacity-80'>{item.description}</div>
+                      <div className='truncate text-sm font-semibold text-foreground'>{activeSystemSectionItem.label}</div>
+                      <div className='truncate text-xs text-muted-foreground'>{activeSystemSectionItem.description}</div>
                     </div>
-                  </button>
-                );
-              })}
-            </CardContent>
-          </Card>
+                  </div>
+                ) : null}
 
-          <div className='min-w-0 space-y-6'>
+                <div className='min-w-0 space-y-6'>
             {activeSystemSection === 'resource-usage' ? (
               <Card className='border border-border/80 bg-card/85 shadow-sm'>
                 <CardHeader className='border-b border-border/60 pb-4'>
@@ -2399,6 +2547,11 @@ export function SystemPage() {
               </CardContent>
             </Card>
 
+                </div>
+
+                {isNarrowSystemLayout && activeSystemSection === 'logs' ? <LogsPanel /> : null}
+              </div>
+            </div>
           </div>
         </div>
       ) : null}
@@ -2513,7 +2666,7 @@ export function SystemPage() {
       ) : null}
 
       {/* Application Logs */}
-      {activeSystemSection === 'logs' ? <LogsPanel /> : null}
+      {!isNarrowSystemLayout && activeSystemSection === 'logs' ? <LogsPanel /> : null}
     </div>
   );
 }
