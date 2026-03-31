@@ -1542,9 +1542,6 @@ export function SystemPage() {
                 </CardContent>
               ) : null}
             </Card>
-          </div>
-
-          <div className='min-w-0 space-y-6 lg:col-start-2'>
             <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'internet-speed' && 'hidden')}>
               <CardHeader className='pb-4'>
                 <button
