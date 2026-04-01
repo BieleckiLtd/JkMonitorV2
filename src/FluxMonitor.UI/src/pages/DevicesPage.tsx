@@ -191,6 +191,14 @@ export function DevicesPage() {
     void loadPorts();
   }, [loadDevices, loadPorts]);
 
+  useEffect(() => {
+    if (!showAddPicker) {
+      return;
+    }
+
+    void refreshDefinitions({ includeRemote: true });
+  }, [refreshDefinitions, showAddPicker]);
+
   const saveDevicesNow = useCallback(async (devicesToSave?: DeviceConfiguration[]) => {
     try {
       setAutoSaveStatus('saving');

@@ -75,6 +75,14 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Content Include="..\..\devices\**\*">
+      <Link>devices\%(RecursiveDir)%(Filename)%(Extension)</Link>
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
+  </ItemGroup>
+
+  <ItemGroup>
     <FrontendRestoreInputs Include="$(FluxMonitorFrontendRoot)\package.json" />
     <FrontendRestoreInputs Include="$(FluxMonitorFrontendRoot)\package-lock.json" />
     <FrontendBuildInputs Include="$(FluxMonitorFrontendRoot)\components.json" />

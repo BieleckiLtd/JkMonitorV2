@@ -28,6 +28,8 @@ public sealed class DeviceDefinitionLoader
     private readonly string _definitionsPath;
     private readonly IHttpClientFactory _httpClientFactory;
     private readonly ILogger<DeviceDefinitionLoader> _logger;
+    private readonly SemaphoreSlim _remoteLoadLock = new(1, 1);
+    private volatile bool _remoteDefinitionsLoaded;
 
     public DeviceDefinitionLoader(
         string definitionsPath,
@@ -99,12 +101,39 @@ public sealed class DeviceDefinitionLoader
     }
 
     /// <summary>
+    /// Ensure catalog device definitions are loaded from the canonical GitHub repository once per process.
+    /// Subsequent calls are a no-op after the first successful load.
+    /// </summary>
+    public async Task EnsureRemoteDefinitionsLoadedAsync(CancellationToken cancellationToken = default)
+    {
+        if (_remoteDefinitionsLoaded)
+        {
+            return;
+        }
+
+        await _remoteLoadLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_remoteDefinitionsLoaded)
+            {
+                return;
+            }
+
+            _remoteDefinitionsLoaded = await LoadFromGitHubAsync(cancellationToken);
+        }
+        finally
+        {
+            _remoteLoadLock.Release();
+        }
+    }
+
+    /// <summary>
     /// Fetch catalog device definitions from the canonical GitHub repository.
     /// Uses a manifest stored on raw.githubusercontent.com so startup does not
     /// depend on the GitHub REST API rate limit.
     /// Already-loaded definitions (e.g. user-provided local files or in-memory uploads) are not overwritten.
     /// </summary>
-    public async Task LoadFromGitHubAsync(CancellationToken cancellationToken = default)
+    public async Task<bool> LoadFromGitHubAsync(CancellationToken cancellationToken = default)
     {
         var manifestUrl = $"https://raw.githubusercontent.com/{GitHubRepository}/{GitHubBranch}/{GitHubDevicesFolder}/{GitHubDevicesManifest}";
         _logger.LogInformation("Fetching device definitions catalog from GitHub.");
@@ -119,7 +148,7 @@ public sealed class DeviceDefinitionLoader
             if (manifest?.Files is null || manifest.Files.Count == 0)
             {
                 _logger.LogWarning("GitHub device definition manifest returned no files.");
-                return;
+                return false;
             }
 
             foreach (var fileName in manifest.Files
@@ -154,10 +183,13 @@ public sealed class DeviceDefinitionLoader
                     _logger.LogError(ex, "Failed to load GitHub definition {File}.", fileName);
                 }
             }
+
+            return true;
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Failed to fetch device definitions from GitHub.");
+            return false;
         }
     }
 

@@ -1,5 +1,7 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using FluxMonitor.Backend.Services;
+using FluxMonitor.Contracts.Configuration;
+using FluxMonitor.Contracts.DeviceDefinition;
 using Microsoft.AspNetCore.Mvc;
 
 namespace FluxMonitor.Backend.Controllers;
@@ -8,36 +10,44 @@ namespace FluxMonitor.Backend.Controllers;
 [Route("api/definitions")]
 public sealed class DefinitionsController(
     DeviceDefinitionLoader definitionLoader,
-    PollingClientDispatcher pollingClientDispatcher) : ControllerBase
+    DeviceConfigStore deviceConfigStore,
+    PollingClientDispatcher pollingClientDispatcher,
+    IConfiguration configuration) : ControllerBase
 {
     [HttpGet]
-    public IActionResult GetAll()
+    public async Task<IActionResult> GetAll(
+        [FromQuery] bool includeRemote = false,
+        CancellationToken cancellationToken = default)
     {
-        var definitions = definitionLoader.GetAll();
-        var summaries = definitions.Values.Select(d => new
+        if (includeRemote && configuration.GetValue("Monitor:EnableRemoteDeviceDefinitions", true))
         {
-            d.Device.Id,
-            d.Device.Name,
-            d.Device.Manufacturer,
-            d.Device.Model,
-            d.Device.Category,
-            d.Device.Description,
-            d.Device.Icon,
-            ProtocolType = d.Connection.Protocol.Type,
-            TransportType = d.Connection.Transport.Type,
-            IsTransportSupported = pollingClientDispatcher.IsDefinitionSupported(d),
-            UnsupportedTransportMessage = pollingClientDispatcher.GetUnsupportedDefinitionMessage(d),
-            EntityCount = d.Entities.Count,
-            DataSourceCount = d.DataSources.Count
-        });
+            await definitionLoader.EnsureRemoteDefinitionsLoadedAsync(cancellationToken);
+        }
+
+        var definitions = new Dictionary<string, DeviceDefinition>(definitionLoader.GetAll(), StringComparer.OrdinalIgnoreCase);
+        foreach (var device in deviceConfigStore.GetDevices())
+        {
+            if (device.TryResolveDefinition(definitionLoader, out var definition) && definition is not null)
+            {
+                definitions.TryAdd(definition.Device.Id, definition);
+            }
+        }
+
+        var summaries = definitions.Values
+            .Select(ToSummary)
+            .OrderBy(summary => summary.Name, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(summary => summary.Id, StringComparer.OrdinalIgnoreCase);
+
         return Ok(summaries);
     }
 
     [HttpGet("{id}")]
     public IActionResult GetById(string id)
     {
-        if (!definitionLoader.TryGet(id, out var definition) || definition is null)
+        if (!TryResolveDefinition(id, out var definition) || definition is null)
+        {
             return NotFound(new { message = $"Device definition '{id}' not found." });
+        }
 
         return Ok(definition);
     }
@@ -45,8 +55,10 @@ public sealed class DefinitionsController(
     [HttpGet("{id}/ui/{page}")]
     public IActionResult GetUiPage(string id, string page)
     {
-        if (!definitionLoader.TryGet(id, out var definition) || definition is null)
+        if (!TryResolveDefinition(id, out var definition) || definition is null)
+        {
             return NotFound(new { message = $"Device definition '{id}' not found." });
+        }
 
         if (definition.Ui?.Pages is null ||
             !definition.Ui.Pages.TryGetValue(page, out var pageDefinition))
@@ -61,7 +73,9 @@ public sealed class DefinitionsController(
     public IActionResult Upload(IFormFile file)
     {
         if (file is null || file.Length == 0)
+        {
             return BadRequest(new { message = "No file provided." });
+        }
 
         using var reader = new StreamReader(file.OpenReadStream());
         var json = reader.ReadToEnd();
@@ -69,22 +83,7 @@ public sealed class DefinitionsController(
         try
         {
             var definition = definitionLoader.LoadFromJson(json);
-            return Ok(new
-            {
-                definition.Device.Id,
-                definition.Device.Name,
-                definition.Device.Manufacturer,
-                definition.Device.Model,
-                definition.Device.Category,
-                definition.Device.Description,
-                definition.Device.Icon,
-                ProtocolType = definition.Connection.Protocol.Type,
-                TransportType = definition.Connection.Transport.Type,
-                IsTransportSupported = pollingClientDispatcher.IsDefinitionSupported(definition),
-                UnsupportedTransportMessage = pollingClientDispatcher.GetUnsupportedDefinitionMessage(definition),
-                EntityCount = definition.Entities.Count,
-                DataSourceCount = definition.DataSources.Count
-            });
+            return Ok(ToSummary(definition));
         }
         catch (JsonException ex)
         {
@@ -95,4 +94,55 @@ public sealed class DefinitionsController(
             return BadRequest(new { message = ex.Message });
         }
     }
+
+    private bool TryResolveDefinition(string definitionId, out DeviceDefinition? definition)
+    {
+        foreach (var device in deviceConfigStore.GetDevices())
+        {
+            if (!string.Equals(device.DefinitionId, definitionId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            if (device.TryResolveDefinition(definitionLoader, out definition) && definition is not null)
+            {
+                return true;
+            }
+        }
+
+        return definitionLoader.TryGet(definitionId, out definition);
+    }
+
+    private DefinitionSummaryResponse ToSummary(DeviceDefinition definition)
+    {
+        return new DefinitionSummaryResponse(
+            definition.Device.Id,
+            definition.Device.Name,
+            definition.Device.Manufacturer ?? string.Empty,
+            definition.Device.Model ?? string.Empty,
+            definition.Device.Category,
+            definition.Device.Description,
+            definition.Device.Icon,
+            definition.Connection.Protocol.Type,
+            definition.Connection.Transport.Type,
+            pollingClientDispatcher.IsDefinitionSupported(definition),
+            pollingClientDispatcher.GetUnsupportedDefinitionMessage(definition),
+            definition.Entities.Count,
+            definition.DataSources.Count);
+    }
+
+    private sealed record DefinitionSummaryResponse(
+        string Id,
+        string Name,
+        string Manufacturer,
+        string Model,
+        string? Category,
+        string? Description,
+        string? Icon,
+        string ProtocolType,
+        string TransportType,
+        bool IsTransportSupported,
+        string? UnsupportedTransportMessage,
+        int EntityCount,
+        int DataSourceCount);
 }

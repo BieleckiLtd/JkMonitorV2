@@ -149,11 +149,6 @@ using (var scope = app.Services.CreateScope())
     var definitionLoader = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.DeviceDefinitionLoader>();
     definitionLoader.LoadAll();
 
-    if (builder.Configuration.GetValue<bool>("Monitor:EnableRemoteDeviceDefinitions", true))
-    {
-        await definitionLoader.LoadFromGitHubAsync(CancellationToken.None);
-    }
-
     var deviceConfigStore = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.DeviceConfigStore>();
     await deviceConfigStore.InitializeAsync(CancellationToken.None);
 

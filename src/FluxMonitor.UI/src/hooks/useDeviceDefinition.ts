@@ -54,9 +54,15 @@ export function useDeviceDefinitions() {
   const [definitions, setDefinitions] = useState<DeviceDefinitionSummary[]>([]);
   const loaded = useRef(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (options?: { includeRemote?: boolean }) => {
     try {
-      const resp = await fetch('/api/definitions');
+      const params = new URLSearchParams();
+      if (options?.includeRemote) {
+        params.set('includeRemote', 'true');
+      }
+
+      const suffix = params.size > 0 ? `?${params.toString()}` : '';
+      const resp = await fetch(`/api/definitions${suffix}`);
       if (!resp.ok) return;
       const data = (await resp.json()) as DeviceDefinitionSummary[];
       setDefinitions(data);
