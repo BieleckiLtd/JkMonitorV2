@@ -408,4 +408,125 @@ describe('useAppStore update restart recovery', () => {
 
     expect(useAppStore.getState().updateProgress).toMatchObject(currentProgress);
   });
+
+  it('does not clear a running update when a poll temporarily returns no snapshot', async () => {
+    const currentProgress: UpdateProgress = {
+      sessionId: 'keep1234',
+      status: 'running',
+      isRunning: true,
+      stage: 'Verifying package…',
+      detail: 'Checking that the downloaded package matches the published checksum before anything is replaced.',
+      success: null,
+      canCancel: true,
+      cancelUnavailableReason: null,
+      stepIndex: 3,
+      stepCount: 11,
+      percentComplete: 30,
+      startedAt: '2026-03-29T12:00:00.000Z',
+      updatedAt: '2026-03-29T12:00:05.000Z',
+    };
+
+    globalThis.fetch = vi.fn()
+      .mockResolvedValueOnce(new Response(null, { status: 204 })) as typeof fetch;
+
+    useAppStore.setState({ updateProgress: currentProgress });
+
+    await useAppStore.getState().fetchUpdateProgress();
+
+    expect(useAppStore.getState().updateProgress).toMatchObject(currentProgress);
+  });
+
+  it('treats a terminal success snapshot as restart recovery until heartbeat reload completes', async () => {
+    vi.useFakeTimers();
+
+    const locationReplace = vi.fn();
+
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        ...originalLocation,
+        href: 'http://localhost/system',
+        replace: locationReplace,
+      },
+    });
+
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        sessionId: 'success123',
+        status: 'succeeded',
+        isRunning: false,
+        stage: 'Update complete.',
+        detail: 'Flux Monitor finished installing the update.',
+        success: true,
+        canCancel: false,
+        cancelUnavailableReason: null,
+        stepIndex: 11,
+        stepCount: 11,
+        percentComplete: 100,
+        startedAt: '2026-03-29T12:00:00.000Z',
+        updatedAt: '2026-03-29T12:00:40.000Z',
+      } satisfies UpdateProgress), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ startedAt: '2026-03-29T11:59:00.000Z' }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }))
+      .mockResolvedValueOnce(new Response(null, { status: 503 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ startedAt: '2026-03-29T12:01:30.000Z' }), {
+        status: 200,
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      }));
+
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    useAppStore.setState({
+      updateProgress: {
+        sessionId: 'success123',
+        status: 'running',
+        isRunning: true,
+        stage: 'Starting Flux Monitor…',
+        detail: 'Starting the updated service and checking that it comes back online.',
+        success: null,
+        canCancel: false,
+        cancelUnavailableReason: 'Cancellation is no longer available because Flux Monitor is already switching to the new version.',
+        stepIndex: 11,
+        stepCount: 11,
+        percentComplete: 99,
+        startedAt: '2026-03-29T12:00:00.000Z',
+        updatedAt: '2026-03-29T12:00:35.000Z',
+      },
+    });
+
+    await useAppStore.getState().fetchUpdateProgress();
+    await flushPromises();
+
+    expect(useAppStore.getState().updateProgress).toMatchObject({
+      sessionId: 'success123',
+      status: 'restarting',
+      isRunning: true,
+    });
+    expect(useAppStore.getState().updateProgress?.detail).toMatch(/heartbeat|Reloading the frontend/i);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(locationReplace).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushPromises();
+    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(locationReplace).not.toHaveBeenCalled();
+
+    await vi.advanceTimersByTimeAsync(1500);
+    await flushPromises();
+
+    expect(fetchMock).toHaveBeenCalledTimes(4);
+    expect(locationReplace).toHaveBeenCalledTimes(1);
+    expect(String(locationReplace.mock.calls[0]?.[0])).toContain('_reload=');
+  });
 });

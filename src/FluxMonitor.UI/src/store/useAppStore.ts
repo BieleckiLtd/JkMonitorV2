@@ -69,6 +69,21 @@ function shouldRecoverRestartFromProgressLoss(progress: UpdateProgress | null | 
   return (progress.percentComplete ?? 0) >= 96;
 }
 
+function shouldTreatSuccessAsRestartRecovery(
+  current: UpdateProgress | null | undefined,
+  incoming: UpdateProgress,
+): boolean {
+  if (!current) {
+    return false;
+  }
+
+  if (current.sessionId !== incoming.sessionId || !current.isRunning) {
+    return false;
+  }
+
+  return incoming.status === 'succeeded' || incoming.success === true;
+}
+
 function getUpdateStatusRank(status: UpdateProgress['status']): number {
   switch (status) {
     case 'running':
@@ -126,26 +141,32 @@ function applyUpdateProgressSnapshot(
   get: () => AppState,
 ): void {
   if (!progress) {
-    set((state) => {
-      if (shouldRecoverRestartFromProgressLoss(state.updateProgress)) {
-        return {
-          updateProgress: createRestartHeartbeatProgress(state.updateProgress),
-        };
-      }
-
-      return { updateProgress: null };
-    });
-
-    if (shouldRecoverRestartFromProgressLoss(get().updateProgress)) {
+    const current = get().updateProgress;
+    if (shouldRecoverRestartFromProgressLoss(current)) {
+      set({
+        updateProgress: createRestartHeartbeatProgress(current),
+      });
       beginRestartRecovery(set, get);
+      return;
     }
 
+    if (current?.isRunning) {
+      return;
+    }
+
+    set({ updateProgress: null });
     return;
   }
 
   set((state) => {
     if (isStaleProgressSnapshot(state.updateProgress, progress)) {
       return state;
+    }
+
+    if (shouldTreatSuccessAsRestartRecovery(state.updateProgress, progress)) {
+      return {
+        updateProgress: createRestartHeartbeatProgress(progress),
+      };
     }
 
     if (!progress.isRunning && state.dismissedUpdateSessionId === progress.sessionId) {
@@ -157,6 +178,10 @@ function applyUpdateProgressSnapshot(
       dismissedUpdateSessionId: progress.isRunning ? null : state.dismissedUpdateSessionId,
     };
   });
+
+  if (shouldTreatSuccessAsRestartRecovery(get().updateProgress, progress)) {
+    beginRestartRecovery(set, get);
+  }
 }
 
 async function clearFrontendRuntimeCaches(): Promise<void> {
