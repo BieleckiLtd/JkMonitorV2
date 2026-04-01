@@ -14,7 +14,7 @@ public sealed class TelemetryRepositoryRetentionTests
         var window = TimescaleTelemetryRepository.TryGetAlignedRollupWindow(from, to, "1m");
 
         Assert.NotNull(window);
-        Assert.Equal(new DateTimeOffset(2026, 4, 1, 12, 44, 0, TimeSpan.Zero), window!.Value.FromInclusive);
+        Assert.Equal(new DateTimeOffset(2026, 4, 1, 12, 43, 0, TimeSpan.Zero), window!.Value.FromInclusive);
         Assert.Equal(new DateTimeOffset(2026, 4, 1, 13, 33, 0, TimeSpan.Zero), window.Value.ToExclusive);
     }
 
@@ -27,7 +27,7 @@ public sealed class TelemetryRepositoryRetentionTests
         var window = TimescaleTelemetryRepository.TryGetAlignedRollupWindow(from, to, "5m");
 
         Assert.NotNull(window);
-        Assert.Equal(new DateTimeOffset(2026, 4, 1, 12, 45, 0, TimeSpan.Zero), window!.Value.FromInclusive);
+        Assert.Equal(new DateTimeOffset(2026, 4, 1, 12, 40, 0, TimeSpan.Zero), window!.Value.FromInclusive);
         Assert.Equal(new DateTimeOffset(2026, 4, 1, 13, 30, 0, TimeSpan.Zero), window.Value.ToExclusive);
     }
 

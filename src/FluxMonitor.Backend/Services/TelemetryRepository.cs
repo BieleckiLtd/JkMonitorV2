@@ -94,6 +94,8 @@ public sealed class TimescaleTelemetryRepository(
     private static readonly string[] ExportTables = ["Devices", "DeviceSensors", "Measurements"];
     private const int RetentionDeleteBatchSize = 5_000;
     private const int RetentionDeleteCommandTimeoutSeconds = 120;
+    private const int OneMinuteRollupBatchCountPerSweep = 12;
+    private const int FiveMinuteRollupBatchCountPerSweep = 24;
 
     public async Task InitializeAsync(CancellationToken cancellationToken)
     {
@@ -958,7 +960,7 @@ public sealed class TimescaleTelemetryRepository(
         DateTimeOffset toExclusive,
         string resolution)
     {
-        var alignedFrom = AlignToBucketBoundaryCeiling(fromInclusive, resolution);
+        var alignedFrom = AlignToBucketBoundaryFloor(fromInclusive, resolution);
         var alignedTo = AlignToBucketBoundaryFloor(toExclusive, resolution);
 
         return alignedFrom < alignedTo
@@ -1016,6 +1018,22 @@ public sealed class TimescaleTelemetryRepository(
         "5m" => TimeSpan.FromMinutes(5),
         "1h" => TimeSpan.FromHours(1),
         _ => TimeSpan.FromMinutes(5)
+    };
+
+    private static TimeSpan GetRollupBatchWindow(string resolution) => resolution switch
+    {
+        "1m" => TimeSpan.FromMinutes(5),
+        "5m" => TimeSpan.FromMinutes(15),
+        "1h" => TimeSpan.FromHours(1),
+        _ => TimeSpan.FromMinutes(15)
+    };
+
+    private static int GetRollupBatchCountPerSweep(string resolution) => resolution switch
+    {
+        "1m" => OneMinuteRollupBatchCountPerSweep,
+        "5m" => FiveMinuteRollupBatchCountPerSweep,
+        "1h" => FiveMinuteRollupBatchCountPerSweep,
+        _ => FiveMinuteRollupBatchCountPerSweep
     };
 
     private async Task DeleteOlderThanAsync(
@@ -1087,14 +1105,78 @@ public sealed class TimescaleTelemetryRepository(
             return;
         }
 
-        await using var command = connection.CreateCommand();
-        command.CommandTimeout = RetentionDeleteCommandTimeoutSeconds;
-        command.CommandText = $"""
-            WITH deleted AS (
-                DELETE FROM "Measurements"
-                WHERE "Time" >= @From
-                  AND "Time" < @To
-                RETURNING
+        var batchWindow = GetRollupBatchWindow(resolution);
+        var maxBatches = GetRollupBatchCountPerSweep(resolution);
+        var processedBatches = 0;
+        var searchFrom = fromInclusive;
+
+        while (processedBatches < maxBatches)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var earliestMeasurementTime = await GetEarliestMeasurementTimeAsync(
+                connection,
+                searchFrom,
+                toExclusive,
+                cancellationToken);
+
+            if (earliestMeasurementTime is null)
+            {
+                break;
+            }
+
+            var batchStart = AlignToBucketBoundaryFloor(earliestMeasurementTime.Value, resolution);
+            if (batchStart < fromInclusive)
+            {
+                batchStart = fromInclusive;
+            }
+
+            if (batchStart >= toExclusive)
+            {
+                break;
+            }
+
+            var batchEnd = batchStart.Add(batchWindow);
+            if (batchEnd > toExclusive)
+            {
+                batchEnd = toExclusive;
+            }
+
+            await using var command = connection.CreateCommand();
+            command.CommandTimeout = RetentionDeleteCommandTimeoutSeconds;
+            command.CommandText = $"""
+                WITH deleted AS (
+                    DELETE FROM "Measurements"
+                    WHERE "Time" >= @From
+                      AND "Time" < @To
+                    RETURNING
+                        "Time",
+                        "DeviceId",
+                        "SensorId",
+                        "ValueDouble",
+                        "ValueBigInt",
+                        "ValueBool",
+                        "ValueText"
+                ),
+                bucketed AS (
+                    SELECT
+                        {GetBucketExpression(resolution)} AS bucket,
+                        deleted.*
+                    FROM deleted
+                ),
+                rolled AS (
+                    SELECT DISTINCT ON (bucket, "SensorId")
+                        bucket AS "Time",
+                        "DeviceId",
+                        "SensorId",
+                        "ValueDouble",
+                        "ValueBigInt",
+                        "ValueBool",
+                        "ValueText"
+                    FROM bucketed
+                    ORDER BY bucket, "SensorId", "Time" DESC
+                )
+                INSERT INTO "Measurements" (
                     "Time",
                     "DeviceId",
                     "SensorId",
@@ -1102,48 +1184,35 @@ public sealed class TimescaleTelemetryRepository(
                     "ValueBigInt",
                     "ValueBool",
                     "ValueText"
-            ),
-            bucketed AS (
+                )
                 SELECT
-                    {GetBucketExpression(resolution)} AS bucket,
-                    deleted.*
-                FROM deleted
-            ),
-            rolled AS (
-                SELECT DISTINCT ON (bucket, "SensorId")
-                    bucket AS "Time",
+                    "Time",
                     "DeviceId",
                     "SensorId",
                     "ValueDouble",
                     "ValueBigInt",
                     "ValueBool",
                     "ValueText"
-                FROM bucketed
-                ORDER BY bucket, "SensorId", "Time" DESC
-            )
-            INSERT INTO "Measurements" (
-                "Time",
-                "DeviceId",
-                "SensorId",
-                "ValueDouble",
-                "ValueBigInt",
-                "ValueBool",
-                "ValueText"
-            )
-            SELECT
-                "Time",
-                "DeviceId",
-                "SensorId",
-                "ValueDouble",
-                "ValueBigInt",
-                "ValueBool",
-                "ValueText"
-            FROM rolled;
-            """;
-        command.Parameters.AddWithValue("From", fromInclusive);
-        command.Parameters.AddWithValue("To", toExclusive);
+                FROM rolled;
+                """;
+            command.Parameters.AddWithValue("From", batchStart);
+            command.Parameters.AddWithValue("To", batchEnd);
 
-        await command.ExecuteNonQueryAsync(cancellationToken);
+            await command.ExecuteNonQueryAsync(cancellationToken);
+
+            processedBatches++;
+            searchFrom = batchEnd;
+        }
+
+        if (processedBatches == maxBatches)
+        {
+            logger.LogInformation(
+                "Retention rollup for {Resolution} processed {BatchCount} batches between {FromInclusive} and {ToExclusive}. Remaining data will be handled in later sweeps.",
+                resolution,
+                processedBatches,
+                fromInclusive,
+                toExclusive);
+        }
     }
 
     private async Task<long> GetTableSizeBytesAsync(
@@ -1170,6 +1239,29 @@ public sealed class TimescaleTelemetryRepository(
 
         var result = await command.ExecuteScalarAsync(cancellationToken);
         return ConvertDatabaseScalarToInt64(result);
+    }
+
+    private async Task<DateTimeOffset?> GetEarliestMeasurementTimeAsync(
+        NpgsqlConnection connection,
+        DateTimeOffset fromInclusive,
+        DateTimeOffset toExclusive,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandTimeout = RetentionDeleteCommandTimeoutSeconds;
+        command.CommandText = """
+            SELECT "Time"
+            FROM "Measurements"
+            WHERE "Time" >= @From
+              AND "Time" < @To
+            ORDER BY "Time"
+            LIMIT 1;
+            """;
+        command.Parameters.AddWithValue("From", fromInclusive);
+        command.Parameters.AddWithValue("To", toExclusive);
+
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is DateTimeOffset value ? value : null;
     }
 
     private static async Task ExecuteNonQueryAsync(
