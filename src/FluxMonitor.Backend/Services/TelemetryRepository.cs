@@ -442,21 +442,31 @@ public sealed class TimescaleTelemetryRepository(
 
     public async Task ApplyRetentionAsync(CancellationToken cancellationToken)
     {
-        var retentionWindow = GetMeasurementRetentionWindow();
-        if (retentionWindow is null)
-        {
-            return;
-        }
+        var now = DateTimeOffset.UtcNow;
+        var rawCutoff = now.Subtract(TimeSpan.FromMinutes(Math.Max(_retention.RawSecondsWindowMinutes, 0)));
+        var oneMinuteCutoff = now.Subtract(TimeSpan.FromHours(Math.Max(_retention.OneMinuteWindowHours, 0)));
+        DateTimeOffset? fiveMinuteCutoff = _retention.FiveMinuteWindowDays > 0
+            ? now.Subtract(TimeSpan.FromDays(_retention.FiveMinuteWindowDays))
+            : null;
 
         await using var connection = new NpgsqlConnection(_storage.ConnectionString);
         await connection.OpenAsync(cancellationToken);
 
-        await DeleteOlderThanAsync(
-            connection,
-            "Measurements",
-            "Time",
-            DateTimeOffset.UtcNow.Subtract(retentionWindow.Value),
-            cancellationToken);
+        if (_retention.OneMinuteWindowHours > 0 && rawCutoff > oneMinuteCutoff)
+        {
+            await RollupMeasurementsAsync(connection, oneMinuteCutoff, rawCutoff, "1m", cancellationToken);
+        }
+
+        if (fiveMinuteCutoff is not null && oneMinuteCutoff > fiveMinuteCutoff.Value)
+        {
+            await RollupMeasurementsAsync(connection, fiveMinuteCutoff.Value, oneMinuteCutoff, "5m", cancellationToken);
+            await DeleteOlderThanAsync(
+                connection,
+                "Measurements",
+                "Time",
+                fiveMinuteCutoff.Value,
+                cancellationToken);
+        }
 
         logger.LogDebug("Retention sweep completed.");
     }
@@ -479,15 +489,8 @@ public sealed class TimescaleTelemetryRepository(
         var tables = new List<TableSizeInfo>();
         foreach (var tableName in ExportTables)
         {
-            long tableBytes = 0;
+            long tableBytes = await GetTableSizeBytesAsync(connection, tableName, cancellationToken);
             long rowCount = 0;
-
-            await using (var sizeCommand = connection.CreateCommand())
-            {
-                sizeCommand.CommandText = $"""SELECT pg_total_relation_size('"{tableName}"');""";
-                var result = await sizeCommand.ExecuteScalarAsync(cancellationToken);
-                tableBytes = result is long value ? value : 0;
-            }
 
             await using (var countCommand = connection.CreateCommand())
             {
@@ -940,22 +943,6 @@ public sealed class TimescaleTelemetryRepository(
         _ => "to_timestamp(floor(extract(epoch from \"Time\") / 300) * 300)"
     };
 
-    private TimeSpan? GetMeasurementRetentionWindow()
-    {
-        if (_retention.OneHourWindowDays == 0)
-        {
-            return null;
-        }
-
-        var windows = new List<TimeSpan>();
-        if (_retention.RawSecondsWindowMinutes > 0) windows.Add(TimeSpan.FromMinutes(_retention.RawSecondsWindowMinutes));
-        if (_retention.OneMinuteWindowHours > 0) windows.Add(TimeSpan.FromHours(_retention.OneMinuteWindowHours));
-        if (_retention.FiveMinuteWindowDays > 0) windows.Add(TimeSpan.FromDays(_retention.FiveMinuteWindowDays));
-        if (_retention.OneHourWindowDays > 0) windows.Add(TimeSpan.FromDays(_retention.OneHourWindowDays));
-
-        return windows.Count == 0 ? null : windows.Max();
-    }
-
     private async Task DeleteOlderThanAsync(
         NpgsqlConnection connection,
         string table,
@@ -1011,6 +998,103 @@ public sealed class TimescaleTelemetryRepository(
                 cutoff,
                 batches);
         }
+    }
+
+    private async Task RollupMeasurementsAsync(
+        NpgsqlConnection connection,
+        DateTimeOffset fromInclusive,
+        DateTimeOffset toExclusive,
+        string resolution,
+        CancellationToken cancellationToken)
+    {
+        if (fromInclusive >= toExclusive)
+        {
+            return;
+        }
+
+        await using var command = connection.CreateCommand();
+        command.CommandTimeout = RetentionDeleteCommandTimeoutSeconds;
+        command.CommandText = $"""
+            WITH deleted AS (
+                DELETE FROM "Measurements"
+                WHERE "Time" >= @From
+                  AND "Time" < @To
+                RETURNING
+                    "Time",
+                    "DeviceId",
+                    "SensorId",
+                    "ValueDouble",
+                    "ValueBigInt",
+                    "ValueBool",
+                    "ValueText"
+            ),
+            bucketed AS (
+                SELECT
+                    {GetBucketExpression(resolution)} AS bucket,
+                    deleted.*
+                FROM deleted
+            ),
+            rolled AS (
+                SELECT DISTINCT ON (bucket, "SensorId")
+                    bucket AS "Time",
+                    "DeviceId",
+                    "SensorId",
+                    "ValueDouble",
+                    "ValueBigInt",
+                    "ValueBool",
+                    "ValueText"
+                FROM bucketed
+                ORDER BY bucket, "SensorId", "Time" DESC
+            )
+            INSERT INTO "Measurements" (
+                "Time",
+                "DeviceId",
+                "SensorId",
+                "ValueDouble",
+                "ValueBigInt",
+                "ValueBool",
+                "ValueText"
+            )
+            SELECT
+                "Time",
+                "DeviceId",
+                "SensorId",
+                "ValueDouble",
+                "ValueBigInt",
+                "ValueBool",
+                "ValueText"
+            FROM rolled;
+            """;
+        command.Parameters.AddWithValue("From", fromInclusive);
+        command.Parameters.AddWithValue("To", toExclusive);
+
+        await command.ExecuteNonQueryAsync(cancellationToken);
+    }
+
+    private async Task<long> GetTableSizeBytesAsync(
+        NpgsqlConnection connection,
+        string tableName,
+        CancellationToken cancellationToken)
+    {
+        await using var command = connection.CreateCommand();
+        command.CommandText = """
+            SELECT CASE
+                WHEN to_regclass('timescaledb_information.chunks') IS NULL THEN pg_total_relation_size(format('%I.%I', current_schema(), @TableName)::regclass)
+                ELSE pg_total_relation_size(format('%I.%I', current_schema(), @TableName)::regclass) + COALESCE(
+                    (
+                        SELECT SUM(pg_total_relation_size(format('%I.%I', chunk_schema, chunk_name)::regclass))
+                        FROM timescaledb_information.chunks
+                        WHERE hypertable_schema = current_schema()
+                          AND hypertable_name = @TableName
+                    ),
+                    0
+                )
+            END;
+            """;
+        command.Parameters.AddWithValue("TableName", tableName);
+
+        var result = await command.ExecuteScalarAsync(cancellationToken);
+        return result is long value ? value : 0;
     }
 
     private static async Task ExecuteNonQueryAsync(
