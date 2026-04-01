@@ -1036,6 +1036,15 @@ public sealed class TimescaleTelemetryRepository(
         _ => FiveMinuteRollupBatchCountPerSweep
     };
 
+    private static string GetUnalignedTimestampPredicate(string resolution, string columnExpression) => resolution switch
+    {
+        "1s" => "FALSE",
+        "1m" => $"mod(extract(epoch from {columnExpression})::bigint, 60) <> 0",
+        "5m" => $"mod(extract(epoch from {columnExpression})::bigint, 300) <> 0",
+        "1h" => $"mod(extract(epoch from {columnExpression})::bigint, 3600) <> 0",
+        _ => $"mod(extract(epoch from {columnExpression})::bigint, 300) <> 0"
+    };
+
     private async Task DeleteOlderThanAsync(
         NpgsqlConnection connection,
         string table,
@@ -1118,6 +1127,7 @@ public sealed class TimescaleTelemetryRepository(
                 connection,
                 searchFrom,
                 toExclusive,
+                resolution,
                 cancellationToken);
 
             if (earliestMeasurementTime is null)
@@ -1245,15 +1255,17 @@ public sealed class TimescaleTelemetryRepository(
         NpgsqlConnection connection,
         DateTimeOffset fromInclusive,
         DateTimeOffset toExclusive,
+        string resolution,
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
         command.CommandTimeout = RetentionDeleteCommandTimeoutSeconds;
-        command.CommandText = """
+        command.CommandText = $"""
             SELECT "Time"
             FROM "Measurements"
             WHERE "Time" >= @From
               AND "Time" < @To
+              AND {GetUnalignedTimestampPredicate(resolution, "\"Time\"")}
             ORDER BY "Time"
             LIMIT 1;
             """;
