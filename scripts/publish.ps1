@@ -307,6 +307,7 @@ else {
 
         Write-Step 'Creating commit'
         Invoke-GitChecked @('commit', '-m', $CommitMessage)
+        $currentCommit = (Invoke-GitCapture @('rev-parse', 'HEAD') | Select-Object -First 1).Trim()
 
         Write-Step "Pushing to $RemoteName/$Branch"
         $pushStartedAt = [DateTimeOffset]::UtcNow

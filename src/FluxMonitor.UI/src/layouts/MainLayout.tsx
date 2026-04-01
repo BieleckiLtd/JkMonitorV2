@@ -20,6 +20,7 @@ export function Sidebar() {
   const isDesktopSidebarOpen = useAppStore((state) => state.isDesktopSidebarOpen);
   const isMobileSidebarOpen = useAppStore((state) => state.isMobileSidebarOpen);
   const closeMobileSidebar = useAppStore((state) => state.closeMobileSidebar);
+  const toggleSidebar = useAppStore((state) => state.toggleSidebar);
 
   const navItems = [
     { name: 'System', path: '/', icon: Monitor },
@@ -38,6 +39,29 @@ export function Sidebar() {
           isDesktopSidebarOpen ? 'w-64' : 'w-16'
         )}
       >
+        <div
+          className={cn(
+            'flex h-14 items-center border-b border-border px-3',
+            isDesktopSidebarOpen ? 'justify-between gap-3' : 'justify-center gap-2 px-2'
+          )}
+        >
+          <div className='flex min-w-0 items-center gap-3 overflow-hidden'>
+            <Activity className='h-6 w-6 shrink-0 text-primary' />
+            {!isDesktopSidebarOpen && null}
+            {isDesktopSidebarOpen && (
+              <span className='overflow-hidden text-ellipsis whitespace-nowrap font-semibold tracking-tight text-foreground'>
+                Flux Monitor
+              </span>
+            )}
+          </div>
+          <button
+            onClick={toggleSidebar}
+            className='rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground'
+            aria-label={isDesktopSidebarOpen ? 'Collapse navigation' : 'Expand navigation'}
+          >
+            <Menu className='h-5 w-5' />
+          </button>
+        </div>
         <SidebarContent navItems={navItems} isCollapsed={!isDesktopSidebarOpen} />
       </aside>
 
@@ -71,35 +95,26 @@ export function Sidebar() {
               <X className='h-5 w-5' />
             </button>
           </div>
-          <SidebarContent navItems={navItems} isCollapsed={false} onNavigate={closeMobileSidebar} hideHeader />
+          <SidebarContent navItems={navItems} isCollapsed={false} onNavigate={closeMobileSidebar} />
         </aside>
       </div>
     </>
   );
 }
 
-export function Header() {
+function MobileSidebarToggle() {
   const toggleSidebar = useAppStore((state) => state.toggleSidebar);
 
   return (
-    <header className="h-14 bg-background/50 backdrop-blur-md border-b border-border flex items-center justify-between px-4 sticky top-0 z-10 shrink-0">
-      <div className="flex items-center gap-4">
-        <button
-          onClick={toggleSidebar}
-          className="p-1.5 rounded-md text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-        >
-          <Menu className="h-5 w-5" />
-        </button>
-        <h1 className="text-sm font-medium text-foreground/90 hidden sm:block">Command Center</h1>
-      </div>
-
-      <div className="flex items-center gap-3">
-        <div className="flex items-center gap-1.5 px-3 py-1 rounded-full bg-primary/10 border border-primary/20">
-          <div className="h-2 w-2 rounded-full bg-primary animate-pulse" />
-          <span className="text-xs font-medium text-primary">System Healthy</span>
-        </div>
-      </div>
-    </header>
+    <button
+      type='button'
+      onClick={toggleSidebar}
+      className='safe-area-fab fixed z-30 inline-flex h-12 items-center gap-2 rounded-full border border-border/70 bg-background/72 px-4 text-sm font-medium text-foreground shadow-lg shadow-black/10 backdrop-blur-xl transition-colors hover:bg-background/88 md:hidden'
+      aria-label='Open navigation'
+    >
+      <Menu className='h-5 w-5' />
+      <span>Menu</span>
+    </button>
   );
 }
 
@@ -120,13 +135,13 @@ export function MainLayout({ children }: { children: ReactNode }) {
   }, [hasUpdateOverlay, isMobileSidebarOpen]);
 
   return (
-    <div className="flex h-dvh w-full overflow-hidden bg-background font-sans text-foreground">
+    <div className="app-shell flex h-full w-full overflow-hidden bg-background font-sans text-foreground">
       {!hasBlockingUpdateOverlay ? (
         <>
           <Sidebar />
+          <MobileSidebarToggle />
           <div className="flex h-full min-w-0 flex-1 flex-col">
-            <Header />
-            <main className="safe-area-bottom flex min-h-0 flex-1 w-full overflow-y-auto px-1 py-2 sm:p-4 md:p-6">
+            <main className="safe-area-main flex min-h-0 flex-1 w-full overflow-y-auto">
               <div className={cn('flex min-h-full w-full flex-col', isFullWidthRoute ? 'max-w-none' : 'mx-auto max-w-7xl')}>
                 {children}
               </div>
@@ -145,20 +160,9 @@ type NavItem = {
   icon: typeof Monitor;
 };
 
-function SidebarContent({ navItems, isCollapsed, onNavigate, hideHeader }: { navItems: NavItem[]; isCollapsed: boolean; onNavigate?: () => void; hideHeader?: boolean }) {
+function SidebarContent({ navItems, isCollapsed, onNavigate }: { navItems: NavItem[]; isCollapsed: boolean; onNavigate?: () => void }) {
   return (
     <>
-      {!hideHeader && (
-        <div className='flex h-14 items-center justify-center border-b border-border'>
-          <Activity className='h-6 w-6 shrink-0 text-primary' />
-          {!isCollapsed && (
-            <span className='ml-3 overflow-hidden text-ellipsis whitespace-nowrap font-semibold tracking-tight text-foreground'>
-              Flux Monitor
-            </span>
-          )}
-        </div>
-      )}
-
       <nav className='flex-1 space-y-1 overflow-y-auto px-2 py-4'>
         {navItems.map((item) => (
           <NavLink

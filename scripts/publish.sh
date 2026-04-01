@@ -372,6 +372,7 @@ else
 
     log 'Creating commit'
     git commit -m "$COMMIT_MSG"
+    CURRENT_COMMIT="$(git rev-parse HEAD)"
 
     log "Pushing to $REMOTE_NAME/$BRANCH"
     PUSH_STARTED_AT="$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
