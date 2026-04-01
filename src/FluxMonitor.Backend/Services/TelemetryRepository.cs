@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Globalization;
 using System.Text.Json;
 using FluxMonitor.Backend.Models;
 using FluxMonitor.Contracts.Configuration;
@@ -442,6 +443,8 @@ public sealed class TimescaleTelemetryRepository(
 
     public async Task ApplyRetentionAsync(CancellationToken cancellationToken)
     {
+        await InitializeAsync(cancellationToken);
+
         var now = DateTimeOffset.UtcNow;
         var rawCutoff = now.Subtract(TimeSpan.FromMinutes(Math.Max(_retention.RawSecondsWindowMinutes, 0)));
         var oneMinuteCutoff = now.Subtract(TimeSpan.FromHours(Math.Max(_retention.OneMinuteWindowHours, 0)));
@@ -452,14 +455,30 @@ public sealed class TimescaleTelemetryRepository(
         await using var connection = new NpgsqlConnection(_storage.ConnectionString);
         await connection.OpenAsync(cancellationToken);
 
-        if (_retention.OneMinuteWindowHours > 0 && rawCutoff > oneMinuteCutoff)
+        if (_retention.OneMinuteWindowHours > 0 &&
+            TryGetAlignedRollupWindow(oneMinuteCutoff, rawCutoff, "1m") is { } oneMinuteWindow)
         {
-            await RollupMeasurementsAsync(connection, oneMinuteCutoff, rawCutoff, "1m", cancellationToken);
+            await RollupMeasurementsAsync(
+                connection,
+                oneMinuteWindow.FromInclusive,
+                oneMinuteWindow.ToExclusive,
+                "1m",
+                cancellationToken);
         }
 
-        if (fiveMinuteCutoff is not null && oneMinuteCutoff > fiveMinuteCutoff.Value)
+        if (fiveMinuteCutoff is not null &&
+            TryGetAlignedRollupWindow(fiveMinuteCutoff.Value, oneMinuteCutoff, "5m") is { } fiveMinuteWindow)
         {
-            await RollupMeasurementsAsync(connection, fiveMinuteCutoff.Value, oneMinuteCutoff, "5m", cancellationToken);
+            await RollupMeasurementsAsync(
+                connection,
+                fiveMinuteWindow.FromInclusive,
+                fiveMinuteWindow.ToExclusive,
+                "5m",
+                cancellationToken);
+        }
+
+        if (fiveMinuteCutoff is not null)
+        {
             await DeleteOlderThanAsync(
                 connection,
                 "Measurements",
@@ -483,7 +502,7 @@ public sealed class TimescaleTelemetryRepository(
         {
             command.CommandText = "SELECT pg_database_size(current_database());";
             var result = await command.ExecuteScalarAsync(cancellationToken);
-            totalBytes = result is long value ? value : 0;
+            totalBytes = ConvertDatabaseScalarToInt64(result);
         }
 
         var tables = new List<TableSizeInfo>();
@@ -496,7 +515,7 @@ public sealed class TimescaleTelemetryRepository(
             {
                 countCommand.CommandText = $"""SELECT COUNT(*) FROM "{tableName}";""";
                 var result = await countCommand.ExecuteScalarAsync(cancellationToken);
-                rowCount = result is long value ? value : 0;
+                rowCount = ConvertDatabaseScalarToInt64(result);
             }
 
             tables.Add(new TableSizeInfo(tableName, tableBytes, FormatBytes(tableBytes), rowCount));
@@ -934,6 +953,53 @@ public sealed class TimescaleTelemetryRepository(
         return rows.Values.ToList();
     }
 
+    internal static (DateTimeOffset FromInclusive, DateTimeOffset ToExclusive)? TryGetAlignedRollupWindow(
+        DateTimeOffset fromInclusive,
+        DateTimeOffset toExclusive,
+        string resolution)
+    {
+        var alignedFrom = AlignToBucketBoundaryCeiling(fromInclusive, resolution);
+        var alignedTo = AlignToBucketBoundaryFloor(toExclusive, resolution);
+
+        return alignedFrom < alignedTo
+            ? (alignedFrom, alignedTo)
+            : null;
+    }
+
+    internal static DateTimeOffset AlignToBucketBoundaryFloor(DateTimeOffset value, string resolution)
+    {
+        var bucketSize = GetBucketSize(resolution);
+        var utcValue = value.ToUniversalTime();
+        var alignedTicks = utcValue.UtcDateTime.Ticks - (utcValue.UtcDateTime.Ticks % bucketSize.Ticks);
+        return new DateTimeOffset(alignedTicks, TimeSpan.Zero);
+    }
+
+    internal static DateTimeOffset AlignToBucketBoundaryCeiling(DateTimeOffset value, string resolution)
+    {
+        var alignedFloor = AlignToBucketBoundaryFloor(value, resolution);
+        var utcValue = value.ToUniversalTime();
+
+        return alignedFloor == utcValue
+            ? alignedFloor
+            : alignedFloor.Add(GetBucketSize(resolution));
+    }
+
+    internal static long ConvertDatabaseScalarToInt64(object? result) => result switch
+    {
+        null => 0,
+        DBNull => 0,
+        long value => value,
+        int value => value,
+        short value => value,
+        byte value => value,
+        decimal value => decimal.ToInt64(value),
+        double value => Convert.ToInt64(value, CultureInfo.InvariantCulture),
+        float value => Convert.ToInt64(value, CultureInfo.InvariantCulture),
+        ulong value => checked((long)value),
+        IConvertible value => value.ToInt64(CultureInfo.InvariantCulture),
+        _ => 0
+    };
+
     private static string GetBucketExpression(string resolution) => resolution switch
     {
         "1s" => "\"Time\"",
@@ -941,6 +1007,15 @@ public sealed class TimescaleTelemetryRepository(
         "5m" => "to_timestamp(floor(extract(epoch from \"Time\") / 300) * 300)",
         "1h" => "date_trunc('hour', \"Time\")",
         _ => "to_timestamp(floor(extract(epoch from \"Time\") / 300) * 300)"
+    };
+
+    private static TimeSpan GetBucketSize(string resolution) => resolution switch
+    {
+        "1s" => TimeSpan.FromSeconds(1),
+        "1m" => TimeSpan.FromMinutes(1),
+        "5m" => TimeSpan.FromMinutes(5),
+        "1h" => TimeSpan.FromHours(1),
+        _ => TimeSpan.FromMinutes(5)
     };
 
     private async Task DeleteOlderThanAsync(
@@ -1094,7 +1169,7 @@ public sealed class TimescaleTelemetryRepository(
         command.Parameters.AddWithValue("TableName", tableName);
 
         var result = await command.ExecuteScalarAsync(cancellationToken);
-        return result is long value ? value : 0;
+        return ConvertDatabaseScalarToInt64(result);
     }
 
     private static async Task ExecuteNonQueryAsync(

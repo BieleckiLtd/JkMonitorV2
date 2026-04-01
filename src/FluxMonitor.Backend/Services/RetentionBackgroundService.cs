@@ -10,24 +10,41 @@ public sealed class RetentionBackgroundService(
     {
         logger.LogInformation("Retention cleanup service started (interval: {Interval}).", Interval);
 
-        using var timer = new PeriodicTimer(Interval);
-
-        while (!stoppingToken.IsCancellationRequested)
+        async Task SweepAsync()
         {
-            if (!await timer.WaitForNextTickAsync(stoppingToken)) break;
-
             try
             {
                 await repository.ApplyRetentionAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
-                break;
+                throw;
             }
             catch (Exception ex)
             {
                 logger.LogError(ex, "Retention sweep failed.");
             }
+        }
+
+        await SweepAsync();
+
+        using var timer = new PeriodicTimer(Interval);
+
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                if (!await timer.WaitForNextTickAsync(stoppingToken))
+                {
+                    break;
+                }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+
+            await SweepAsync();
         }
     }
 }
