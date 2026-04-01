@@ -142,15 +142,14 @@ function applyUpdateProgressSnapshot(
 ): void {
   if (!progress) {
     const current = get().updateProgress;
-    if (shouldRecoverRestartFromProgressLoss(current)) {
-      set({
-        updateProgress: createRestartHeartbeatProgress(current),
-      });
-      beginRestartRecovery(set, get);
-      return;
-    }
-
     if (current?.isRunning) {
+      if (shouldRecoverRestartFromProgressLoss(current)) {
+        set({
+          updateProgress: createRestartHeartbeatProgress(current),
+        });
+        beginRestartRecovery(set, get);
+      }
+
       return;
     }
 
