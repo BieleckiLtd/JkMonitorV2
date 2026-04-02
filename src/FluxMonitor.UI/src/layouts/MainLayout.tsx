@@ -110,7 +110,7 @@ function MobileSidebarToggle() {
       type='button'
       onClick={toggleSidebar}
       className='safe-area-fab fixed z-30 inline-flex h-12 items-center gap-2 rounded-full border border-border/70 bg-background/72 px-4 text-sm font-medium text-foreground shadow-lg shadow-black/10 backdrop-blur-xl transition-colors hover:bg-background/88 md:hidden'
-      aria-label='Open navigation'
+      aria-label='Open navigation sidebar'
     >
       <Menu className='h-5 w-5' />
       <span>Menu</span>
