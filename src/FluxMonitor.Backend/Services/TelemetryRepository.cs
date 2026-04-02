@@ -23,6 +23,8 @@ public interface ITelemetryRepository
 
     Task ApplyRetentionAsync(CancellationToken cancellationToken);
 
+    Task<CompressionStats?> GetCompressionStatsAsync(CancellationToken cancellationToken);
+
     Task<DatabaseSizeInfo> GetDatabaseSizeAsync(CancellationToken cancellationToken);
 
     Task ExportAsync(Stream destination, CancellationToken cancellationToken);
@@ -33,6 +35,16 @@ public interface ITelemetryRepository
 public sealed record TableSizeInfo(string TableName, long SizeBytes, string SizeFormatted, long RowCount);
 
 public sealed record DatabaseSizeInfo(long TotalSizeBytes, string TotalSizeFormatted, IReadOnlyList<TableSizeInfo> Tables);
+
+public sealed record CompressionStats(
+    int TotalChunks,
+    int CompressedChunks,
+    int UncompressedChunks,
+    long UncompressedSizeBytes,
+    string UncompressedSizeFormatted,
+    long CompressedSizeBytes,
+    string CompressedSizeFormatted,
+    double CompressionRatio);
 
 public sealed record HistoryDataPoint(
     DateTimeOffset Timestamp,
@@ -64,6 +76,9 @@ public sealed class NoOpTelemetryRepository : ITelemetryRepository
 
     public Task ApplyRetentionAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
+    public Task<CompressionStats?> GetCompressionStatsAsync(CancellationToken cancellationToken)
+        => Task.FromResult<CompressionStats?>(null);
+
     public Task<DatabaseSizeInfo> GetDatabaseSizeAsync(CancellationToken cancellationToken)
         => Task.FromResult(new DatabaseSizeInfo(0, "0 B", []));
 
@@ -80,6 +95,7 @@ public sealed class TimescaleTelemetryRepository(
 {
     private readonly StorageConfiguration _storage = configuration.Value.Storage;
     private readonly RetentionConfiguration _retention = configuration.Value.Storage.Retention;
+    private readonly CompressionConfiguration _compression = configuration.Value.Storage.Compression;
     private readonly SemaphoreSlim _initializationLock = new(1, 1);
     private readonly ConcurrentDictionary<string, string> _sensorCatalogHashes = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, IReadOnlyDictionary<SensorKey, PersistedSensor>> _sensorCatalogCache = new(StringComparer.OrdinalIgnoreCase);
@@ -154,6 +170,11 @@ public sealed class TimescaleTelemetryRepository(
             if (useTimescale)
             {
                 useTimescale = await TryConvertMeasurementsToHypertableAsync(connection, cancellationToken);
+            }
+
+            if (useTimescale)
+            {
+                await TryEnableCompressionAsync(connection, cancellationToken);
             }
 
             await ExecuteNonQueryAsync(connection, """
@@ -524,6 +545,55 @@ public sealed class TimescaleTelemetryRepository(
         }
 
         return new DatabaseSizeInfo(totalBytes, FormatBytes(totalBytes), tables);
+    }
+
+    public async Task<CompressionStats?> GetCompressionStatsAsync(CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken);
+
+        await using var connection = new NpgsqlConnection(_storage.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        try
+        {
+            await using var command = connection.CreateCommand();
+            command.CommandText = """
+                SELECT
+                    COUNT(*)::int AS total_chunks,
+                    COUNT(*) FILTER (WHERE is_compressed)::int AS compressed_chunks,
+                    COUNT(*) FILTER (WHERE NOT is_compressed)::int AS uncompressed_chunks,
+                    COALESCE(SUM(before_compression_total_bytes), 0)::bigint AS before_bytes,
+                    COALESCE(SUM(after_compression_total_bytes), 0)::bigint AS after_bytes
+                FROM hypertable_compression_stats('"Measurements"');
+                """;
+
+            await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+            if (await reader.ReadAsync(cancellationToken))
+            {
+                var totalChunks = reader.GetInt32(0);
+                var compressedChunks = reader.GetInt32(1);
+                var uncompressedChunks = reader.GetInt32(2);
+                var beforeBytes = reader.GetInt64(3);
+                var afterBytes = reader.GetInt64(4);
+                var ratio = afterBytes > 0 ? (double)beforeBytes / afterBytes : 0;
+
+                return new CompressionStats(
+                    totalChunks,
+                    compressedChunks,
+                    uncompressedChunks,
+                    beforeBytes,
+                    FormatBytes(beforeBytes),
+                    afterBytes,
+                    FormatBytes(afterBytes),
+                    Math.Round(ratio, 2));
+            }
+
+            return null;
+        }
+        catch (PostgresException)
+        {
+            return null;
+        }
     }
 
     public async Task ExportAsync(Stream destination, CancellationToken cancellationToken)
@@ -1313,6 +1383,45 @@ public sealed class TimescaleTelemetryRepository(
             return false;
         }
     }
+
+    private async Task TryEnableCompressionAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
+    {
+        if (_compression.CompressAfterMinutes <= 0)
+        {
+            logger.LogInformation("TimescaleDB compression is disabled (CompressAfterMinutes = {Value}).", _compression.CompressAfterMinutes);
+            return;
+        }
+
+        try
+        {
+            await ExecuteNonQueryAsync(connection, BuildEnableCompressionSql(), cancellationToken);
+            await ExecuteNonQueryAsync(connection, BuildCompressionPolicySql(_compression.CompressAfterMinutes), cancellationToken);
+
+            logger.LogInformation(
+                "TimescaleDB compression policy active: chunks older than {Minutes} minutes will be compressed.",
+                _compression.CompressAfterMinutes);
+        }
+        catch (PostgresException exception)
+        {
+            logger.LogWarning(
+                exception,
+                "TimescaleDB compression could not be enabled for database '{Database}'. Storage will continue without compression.",
+                connection.Database);
+        }
+    }
+
+    internal static string BuildEnableCompressionSql() => """
+        ALTER TABLE "Measurements" SET (
+            timescaledb.compress,
+            timescaledb.compress_segmentby = '"DeviceId", "SensorId"',
+            timescaledb.compress_orderby = '"Time" DESC'
+        );
+        """;
+
+    internal static string BuildCompressionPolicySql(int intervalMinutes) => $"""
+        SELECT remove_compression_policy('"Measurements"', if_exists => true);
+        SELECT add_compression_policy('"Measurements"', INTERVAL '{intervalMinutes} minutes');
+        """;
 
     private async Task<bool> TryEnableTimescaleAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
     {

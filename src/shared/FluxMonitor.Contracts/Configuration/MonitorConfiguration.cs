@@ -18,6 +18,17 @@ public sealed class StorageConfiguration
     public required string ConnectionString { get; init; }
 
     public required RetentionConfiguration Retention { get; init; }
+
+    public CompressionConfiguration Compression { get; init; } = new();
+}
+
+public sealed class CompressionConfiguration
+{
+    /// <summary>
+    /// Compress hypertable chunks older than this many minutes.
+    /// Set to 0 to disable compression. Default: 60 minutes.
+    /// </summary>
+    public int CompressAfterMinutes { get; init; } = 60;
 }
 
 public sealed class RetentionConfiguration
