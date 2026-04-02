@@ -49,6 +49,8 @@ public sealed record class InternetSpeedTestResult
 
     public string? ShareUrl { get; init; }
 
+    public string? ConnectionMode { get; init; }
+
     public InternetSpeedTestServerSnapshot? Server { get; init; }
 
     public InternetSpeedTestClientSnapshot? Client { get; init; }

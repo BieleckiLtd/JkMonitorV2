@@ -299,6 +299,7 @@ type InternetSpeedTestResult = {
   bytesSent?: number | null;
   testedAt?: string | null;
   shareUrl?: string | null;
+  connectionMode?: string | null;
   server?: InternetSpeedTestServerSnapshot | null;
   client?: InternetSpeedTestClientSnapshot | null;
 };
@@ -1424,17 +1425,17 @@ export function SystemPage() {
     ? 'Measuring ping'
     : formatLatency(internetSpeedResult?.pingMilliseconds);
   const internetSpeedDownloadCaption = internetSpeedDownloadIsActive
-    ? internetSpeedRunningMessage ?? 'Download measurement in progress.'
+    ? getInternetSpeedActiveCaption('download', internetSpeedRunningMessage)
     : internetSpeedDownloadPending
       ? 'Queued for this run.'
       : formatTransferSize(internetSpeedResult?.bytesReceived, 'received');
   const internetSpeedUploadCaption = internetSpeedUploadIsActive
-    ? internetSpeedRunningMessage ?? 'Upload measurement in progress.'
+    ? getInternetSpeedActiveCaption('upload', internetSpeedRunningMessage)
     : internetSpeedUploadPending
       ? 'Queued for this run.'
       : formatTransferSize(internetSpeedResult?.bytesSent, 'sent');
   const internetSpeedPingCaption = internetSpeedPingIsActive
-    ? internetSpeedRunningMessage ?? 'Ping measurement in progress.'
+    ? getInternetSpeedActiveCaption('ping', internetSpeedRunningMessage)
     : undefined;
   const internetSpeedDownloadDialGauge = internetSpeedDownloadIsActive
     ? Math.max(internetSpeedStagePercent, 6)
@@ -1446,25 +1447,16 @@ export function SystemPage() {
     ? Math.max(internetSpeedStagePercent, 6)
     : internetSpeedPingGauge;
   const internetSpeedPingTone = internetSpeedPingIsActive ? 'amber' : getLatencyTone(internetSpeedPing);
+  const internetSpeedConnectionMode = formatInternetSpeedConnectionMode(internetSpeedResult?.connectionMode);
   const internetSpeedSummary = !internetSpeedTest?.supported
     ? internetSpeedTest?.statusMessage ?? 'Unavailable'
     : internetSpeedTest.isRunning
       ? getInternetSpeedRunningSummary(internetSpeedStage, internetSpeedStagePercent)
-      : internetSpeedResult
-        ? (
-            <>
-              <span className='inline-flex items-center gap-1'>
-                <Download className='h-3.5 w-3.5' />
-                {formatSpeedMbps(internetSpeedResult.downloadBitsPerSecond)}
-              </span>
-              <span aria-hidden='true' className='text-muted-foreground/70'>•</span>
-              <span className='inline-flex items-center gap-1'>
-                <Upload className='h-3.5 w-3.5' />
-                {formatSpeedMbps(internetSpeedResult.uploadBitsPerSecond)}
-              </span>
-            </>
-          )
-        : 'No stored result';
+      : internetSpeedTest.status === 'failed'
+        ? 'Last test failed'
+        : internetSpeedResult
+          ? 'Latest saved result'
+          : 'No stored result';
   const cloudflareTunnelRunning = cloudflareTunnelStatus?.serviceRunning ?? false;
   const cloudflareTunnelSupported = cloudflareTunnelStatus?.supported ?? false;
   const cloudflareTunnelMaskedToken = cloudflareTunnelStatus?.maskedToken ?? null;
@@ -1955,23 +1947,11 @@ export function SystemPage() {
                         <DetailTile label='Distance' value={formatDistance(internetSpeedResult?.server?.distanceKilometers)} />
                         <DetailTile label='Provider' value={internetSpeedResult?.client?.internetServiceProvider ?? noDataLabel} />
                         <DetailTile label='IP address' value={internetSpeedResult?.client?.ipAddress ?? noDataLabel} />
+                        <DetailTile label='Connections' value={internetSpeedConnectionMode} />
                         <DetailTile label='Measured at' value={formatTimestamp(internetSpeedResult?.testedAt ?? internetSpeedTest?.completedAt)} />
                       </div>
 
-                      <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-4 text-xs text-muted-foreground'>
-                        This test downloads and uploads real traffic from the device. While it runs, keep this panel open and wait for the full result before starting another test.
-                      </div>
-
-                      <div className='grid gap-2 sm:grid-cols-2'>
-                        <button
-                          type='button'
-                          disabled={internetSpeedTestStarting}
-                          onClick={() => void loadInternetSpeedTest()}
-                          className='inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
-                        >
-                          <RefreshCcw className='h-4 w-4' />
-                          Refresh status
-                        </button>
+                      <div>
                         <button
                           type='button'
                           disabled={internetSpeedTestStarting || internetSpeedTest?.isRunning || !internetSpeedTest?.canStart}
@@ -2937,14 +2917,9 @@ function SpeedMetricCard({
       'rounded-[28px] border border-border/70 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.07),transparent_55%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent)] px-4 py-4 transition-colors duration-300',
       isActive && 'border-primary/35 bg-primary/5'
     )}>
-      <div className='flex items-center justify-between gap-3'>
-        <div className='flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
-          <Icon className='h-3.5 w-3.5' />
-          {label}
-        </div>
-        <div className={cn('text-[10px] font-semibold uppercase tracking-[0.18em]', toneClassName)}>
-          {Math.round(gaugePercent)}%
-        </div>
+      <div className='flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
+        <Icon className='h-3.5 w-3.5' />
+        {label}
       </div>
       <div className='mt-4 flex items-center gap-4'>
         <div className='relative flex size-24 shrink-0 items-center justify-center'>
@@ -3465,6 +3440,33 @@ function getInternetSpeedStageLabel(stage: string | null | undefined) {
 
 function getInternetSpeedRunningSummary(stage: string | null | undefined, stagePercentComplete: number | null | undefined) {
   return `${getInternetSpeedStageLabel(stage)} ${clampPercent(stagePercentComplete)}%`;
+}
+
+function getInternetSpeedActiveCaption(stage: 'download' | 'upload' | 'ping', statusMessage: string | null | undefined) {
+  if (!statusMessage) {
+    return undefined;
+  }
+
+  const normalizedMessage = statusMessage.trim().toLowerCase();
+  if ((stage === 'download' && normalizedMessage === 'measuring download speed.')
+    || (stage === 'upload' && normalizedMessage === 'measuring upload speed.')
+    || (stage === 'ping' && normalizedMessage === 'measuring ping speed.')) {
+    return undefined;
+  }
+
+  return statusMessage;
+}
+
+function formatInternetSpeedConnectionMode(connectionMode: string | null | undefined) {
+  if (!connectionMode) {
+    return noDataLabel;
+  }
+
+  return stringEqualsIgnoreCase(connectionMode, 'single')
+    ? 'Single'
+    : stringEqualsIgnoreCase(connectionMode, 'multi')
+      ? 'Multi'
+      : connectionMode;
 }
 
 function formatRpm(value: number | null | undefined) {

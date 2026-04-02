@@ -337,6 +337,7 @@ public sealed class InternetSpeedTestService(
             BytesSent = ReadLong(root, "bytes_sent"),
             TestedAt = ReadDateTimeOffset(root, "timestamp"),
             ShareUrl = ReadString(root, "share"),
+            ConnectionMode = ReadString(root, "connection_mode") ?? ReadString(root, "connectionMode"),
             Server = server,
             Client = client
         };

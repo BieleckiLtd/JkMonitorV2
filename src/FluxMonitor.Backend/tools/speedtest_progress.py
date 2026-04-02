@@ -59,13 +59,15 @@ def load_speedtest_module():
     return resolve_speedtest_api_module(module, f"Executable '{executable}'")
 
 
-def build_result_payload(speedtest, *, final=False):
+def build_result_payload(speedtest, *, final=False, connection_mode="multi"):
     results = getattr(speedtest, "results", None)
     if results is None:
         return None
 
     if final and hasattr(results, "dict"):
-        return results.dict()
+        payload = results.dict()
+        payload["connection_mode"] = connection_mode
+        return payload
 
     share_value = getattr(results, "share", None)
     if callable(share_value):
@@ -83,11 +85,12 @@ def build_result_payload(speedtest, *, final=False):
         "bytes_sent": getattr(results, "bytes_sent", None),
         "bytes_received": getattr(results, "bytes_received", None),
         "share": share_value,
+        "connection_mode": connection_mode,
         "client": client,
     }
 
 
-def emit_progress(stage, stage_percent, status_message, speedtest, *, final_result=False):
+def emit_progress(stage, stage_percent, status_message, speedtest, *, final_result=False, connection_mode="multi"):
     step_index = STAGE_INDEX[stage]
     clamped_stage_percent = clamp_percent(stage_percent)
     percent_complete = clamp_percent((((step_index - 1) + (clamped_stage_percent / 100.0)) / STEP_COUNT) * 100)
@@ -100,12 +103,12 @@ def emit_progress(stage, stage_percent, status_message, speedtest, *, final_resu
             "stepCount": STEP_COUNT,
             "stagePercentComplete": clamped_stage_percent,
             "percentComplete": percent_complete,
-            "result": build_result_payload(speedtest, final=final_result),
+            "result": build_result_payload(speedtest, final=final_result, connection_mode=connection_mode),
         }
     )
 
 
-def create_transfer_callback(stage, speedtest):
+def create_transfer_callback(stage, speedtest, connection_mode):
     state = {
         "completed": 0,
         "lastPercent": -1,
@@ -114,7 +117,7 @@ def create_transfer_callback(stage, speedtest):
     def callback(_current, total, start=False, end=False):
         if start and state["lastPercent"] < 0:
             state["lastPercent"] = 0
-            emit_progress(stage, 0, f"Measuring {stage} speed.", speedtest)
+            emit_progress(stage, 0, f"Measuring {stage} speed.", speedtest, connection_mode=connection_mode)
 
         if not end or total <= 0:
             return
@@ -125,7 +128,7 @@ def create_transfer_callback(stage, speedtest):
             return
 
         state["lastPercent"] = percent
-        emit_progress(stage, percent, f"Measuring {stage} speed.", speedtest)
+        emit_progress(stage, percent, f"Measuring {stage} speed.", speedtest, connection_mode=connection_mode)
 
     return callback
 
@@ -134,37 +137,43 @@ def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument("--timeout", type=float, default=15.0)
     parser.add_argument("--secure", action="store_true")
+    parser.add_argument("--single", action="store_true")
     parser.add_argument("--no-pre-allocate", dest="pre_allocate", action="store_false", default=True)
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
+    connection_mode = "single" if args.single else "multi"
 
     try:
         speedtest_module = load_speedtest_module()
 
-        emit_progress("ping", 0, "Loading speed test configuration.", None)
+        emit_progress("ping", 0, "Loading speed test configuration.", None, connection_mode=connection_mode)
         speedtest = speedtest_module.Speedtest(timeout=args.timeout, secure=args.secure)
 
-        emit_progress("ping", 25, "Retrieving speed test server list.", speedtest)
+        emit_progress("ping", 25, "Retrieving speed test server list.", speedtest, connection_mode=connection_mode)
         speedtest.get_servers()
 
-        emit_progress("ping", 70, "Selecting best server based on ping.", speedtest)
+        emit_progress("ping", 70, "Selecting best server based on ping.", speedtest, connection_mode=connection_mode)
         speedtest.get_best_server()
 
-        emit_progress("ping", 100, "Ping measured. Starting download test.", speedtest)
+        emit_progress("ping", 100, "Ping measured. Starting download test.", speedtest, connection_mode=connection_mode)
 
-        emit_progress("download", 0, "Measuring download speed.", speedtest)
-        speedtest.download(callback=create_transfer_callback("download", speedtest))
-        emit_progress("download", 100, "Download measured. Starting upload test.", speedtest)
-
-        emit_progress("upload", 0, "Measuring upload speed.", speedtest)
-        speedtest.upload(
-            callback=create_transfer_callback("upload", speedtest),
-            pre_allocate=args.pre_allocate,
+        emit_progress("download", 0, "Measuring download speed.", speedtest, connection_mode=connection_mode)
+        speedtest.download(
+            callback=create_transfer_callback("download", speedtest, connection_mode),
+            threads=(1 if args.single else None),
         )
-        emit_progress("upload", 100, "Upload measured. Finalizing result.", speedtest, final_result=True)
+        emit_progress("download", 100, "Download measured. Starting upload test.", speedtest, connection_mode=connection_mode)
+
+        emit_progress("upload", 0, "Measuring upload speed.", speedtest, connection_mode=connection_mode)
+        speedtest.upload(
+            callback=create_transfer_callback("upload", speedtest, connection_mode),
+            pre_allocate=args.pre_allocate,
+            threads=(1 if args.single else None),
+        )
+        emit_progress("upload", 100, "Upload measured. Finalizing result.", speedtest, final_result=True, connection_mode=connection_mode)
         return 0
     except Exception as exception:
         message = str(exception).strip() or exception.__class__.__name__
