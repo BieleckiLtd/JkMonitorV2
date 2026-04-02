@@ -19,6 +19,8 @@ public sealed class SystemController(
     HostServicesCatalogService hostServicesCatalogService,
     ILogger<SystemController> logger) : ControllerBase
 {
+    private static readonly JsonSerializerOptions UpdateProgressStreamJsonOptions = new(JsonSerializerDefaults.Web);
+
     [HttpGet("services")]
     public async Task<ActionResult<SystemServicesSnapshot>> GetServices(CancellationToken cancellationToken)
     {
@@ -261,10 +263,7 @@ public sealed class SystemController(
         {
             await foreach (var progress in subscription.Reader.ReadAllAsync(cancellationToken))
             {
-                var payload = JsonSerializer.Serialize(new UpdateProgressStreamEnvelope
-                {
-                    Progress = progress
-                });
+                var payload = SerializeUpdateProgressStream(progress);
 
                 await Response.WriteAsync($"data: {payload}\n\n", cancellationToken);
                 await Response.Body.FlushAsync(cancellationToken);
@@ -274,6 +273,14 @@ public sealed class SystemController(
         {
             // The client disconnected.
         }
+    }
+
+    internal static string SerializeUpdateProgressStream(UpdateProgress? progress)
+    {
+        return JsonSerializer.Serialize(new UpdateProgressStreamEnvelope
+        {
+            Progress = progress
+        }, UpdateProgressStreamJsonOptions);
     }
 
     [HttpGet("interfaces")]
