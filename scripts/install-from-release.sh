@@ -716,6 +716,29 @@ timescaledb_is_enabled_for_database() {
   [ "$(run_as_postgres "psql -Atq -d \"$database_name\" -c \"SELECT 1 FROM pg_extension WHERE extname = 'timescaledb';\"" | tr -d '[:space:]')" = '1' ]
 }
 
+dpkg_package_is_installed() {
+  local package_name="$1"
+  dpkg -l "$package_name" 2>/dev/null \
+    | awk -v package_name="$package_name" '$1 == "ii" && $2 == package_name { found = 1 } END { exit(found ? 0 : 1) }'
+}
+
+find_installed_timescaledb_apache_package() {
+  local postgres_major="$1"
+  local package_name
+
+  for package_name in \
+    "timescaledb-2-oss-postgresql-$postgres_major" \
+    "postgresql-$postgres_major-timescaledb"
+  do
+    if dpkg_package_is_installed "$package_name"; then
+      printf '%s\n' "$package_name"
+      return 0
+    fi
+  done
+
+  return 1
+}
+
 select_timescaledb_package_name() {
   local postgres_major="$1"
   local packages
@@ -745,23 +768,24 @@ select_timescaledb_package_name() {
 install_timescaledb_package_for_local_postgres() {
   local postgres_major="$1"
   local repo_setup_script="$TEMP_ROOT/install-timescaledb-repository.sh"
+  local apache_package=''
+  local community_package="timescaledb-2-postgresql-$postgres_major"
   local package_name
 
-  if timescaledb_is_available_on_server; then
-    local oss_package="timescaledb-2-oss-postgresql-$postgres_major"
-    local community_package="timescaledb-2-postgresql-$postgres_major"
+  apache_package="$(find_installed_timescaledb_apache_package "$postgres_major" || true)"
 
-    if dpkg -l "$oss_package" 2>/dev/null | grep -q "^ii" \
-       && ! dpkg -l "$community_package" 2>/dev/null | grep -q "^ii"; then
+  if timescaledb_is_available_on_server; then
+    if [ -n "$apache_package" ] && ! dpkg_package_is_installed "$community_package"; then
       section 'Upgrading TimescaleDB from Apache (OSS) to Community Edition' >&2
+      info "Detected Apache-only TimescaleDB package '$apache_package'." >&2
       info "Community Edition enables native compression for reduced storage." >&2
 
       download_file "$TIMESCALE_REPOSITORY_SETUP_URL" "$repo_setup_script"
       run_elevated bash "$repo_setup_script" >&2
       run_elevated apt-get update >&2
 
-      info "Removing $oss_package" >&2
-      run_elevated apt-get remove -y "$oss_package" >&2
+      info "Removing $apache_package" >&2
+      run_elevated apt-get remove -y "$apache_package" >&2
 
       info "Installing $community_package" >&2
       run_elevated apt-get install -y "$community_package" >&2
@@ -770,10 +794,10 @@ install_timescaledb_package_for_local_postgres() {
         run_elevated systemctl restart postgresql >/dev/null 2>&1 || true
       fi
 
-      if dpkg -l "$community_package" 2>/dev/null | grep -q "^ii"; then
+      if dpkg_package_is_installed "$community_package"; then
         success "Upgraded to TimescaleDB Community Edition ($community_package)." >&2
       else
-        warn "TimescaleDB Community package '$community_package' could not be installed. Continuing with OSS edition." >&2
+        warn "TimescaleDB Community package '$community_package' could not be installed. Continuing with Apache-only edition." >&2
       fi
     fi
 
