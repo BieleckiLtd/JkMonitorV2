@@ -1224,11 +1224,13 @@ public sealed class TimescaleTelemetryRepository(
 
             await using var command = connection.CreateCommand();
             command.CommandTimeout = RetentionDeleteCommandTimeoutSeconds;
+            var unalignedPredicate = GetUnalignedTimestampPredicate(resolution, @"""Time""");
             command.CommandText = $"""
                 WITH deleted AS (
                     DELETE FROM "Measurements"
                     WHERE "Time" >= @From
                       AND "Time" < @To
+                      AND {unalignedPredicate}
                     RETURNING
                         "Time",
                         "DeviceId",
@@ -1238,23 +1240,21 @@ public sealed class TimescaleTelemetryRepository(
                         "ValueBool",
                         "ValueText"
                 ),
-                bucketed AS (
-                    SELECT
-                        {GetBucketExpression(resolution)} AS bucket,
-                        deleted.*
-                    FROM deleted
-                ),
                 rolled AS (
-                    SELECT DISTINCT ON (bucket, "SensorId")
-                        bucket AS "Time",
-                        "DeviceId",
+                    SELECT
+                        {GetBucketExpression(resolution)} AS "Time",
+                        MAX("DeviceId") AS "DeviceId",
                         "SensorId",
-                        "ValueDouble",
-                        "ValueBigInt",
-                        "ValueBool",
-                        "ValueText"
-                    FROM bucketed
-                    ORDER BY bucket, "SensorId", "Time" DESC
+                        AVG("ValueDouble") AS "ValueDouble",
+                        CASE WHEN COUNT("ValueBigInt") > 0
+                             THEN ROUND(AVG("ValueBigInt"::double precision))::bigint
+                             ELSE NULL END AS "ValueBigInt",
+                        CASE WHEN COUNT("ValueBool") > 0
+                             THEN (SUM(CASE WHEN "ValueBool" THEN 1 ELSE 0 END) * 2 >= COUNT("ValueBool"))
+                             ELSE NULL END AS "ValueBool",
+                        (array_agg("ValueText" ORDER BY "Time" DESC) FILTER (WHERE "ValueText" IS NOT NULL))[1] AS "ValueText"
+                    FROM deleted
+                    GROUP BY {GetBucketExpression(resolution)}, "SensorId"
                 )
                 INSERT INTO "Measurements" (
                     "Time",
@@ -1273,7 +1273,13 @@ public sealed class TimescaleTelemetryRepository(
                     "ValueBigInt",
                     "ValueBool",
                     "ValueText"
-                FROM rolled;
+                FROM rolled
+                ON CONFLICT ("Time", "SensorId") DO UPDATE SET
+                    "DeviceId" = EXCLUDED."DeviceId",
+                    "ValueDouble" = EXCLUDED."ValueDouble",
+                    "ValueBigInt" = EXCLUDED."ValueBigInt",
+                    "ValueBool" = EXCLUDED."ValueBool",
+                    "ValueText" = EXCLUDED."ValueText";
                 """;
             command.Parameters.AddWithValue("From", batchStart);
             command.Parameters.AddWithValue("To", batchEnd);
