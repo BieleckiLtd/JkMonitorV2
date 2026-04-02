@@ -17,6 +17,13 @@ public sealed class DatabaseController(
         return Ok(info);
     }
 
+    [HttpGet("compression")]
+    public async Task<IActionResult> GetCompressionStats(CancellationToken cancellationToken)
+    {
+        var stats = await repository.GetCompressionStatsAsync(cancellationToken);
+        return stats is not null ? Ok(stats) : Ok(new { message = "Compression not available." });
+    }
+
     [HttpGet("export")]
     public async Task Export(CancellationToken cancellationToken)
     {
