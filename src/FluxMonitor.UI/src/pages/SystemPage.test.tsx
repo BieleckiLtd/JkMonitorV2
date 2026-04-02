@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SystemPage } from './SystemPage';
 
@@ -38,6 +39,23 @@ function createMatchMediaMock(initialMatches: boolean): MatchMediaMock {
       }
     },
   };
+}
+
+function LocationDisplay() {
+  const location = useLocation();
+  return <div data-testid='location-display'>{location.pathname}</div>;
+}
+
+function renderSystemPage(initialEntry = '/system') {
+  return render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <Routes>
+        <Route path='/system' element={<SystemPage />} />
+        <Route path='/system/:sectionId' element={<SystemPage />} />
+      </Routes>
+      <LocationDisplay />
+    </MemoryRouter>
+  );
 }
 
 describe('SystemPage', () => {
@@ -173,6 +191,16 @@ describe('SystemPage', () => {
         } as Response;
       }
 
+      if (url.startsWith('/api/logs?')) {
+        return {
+          ok: true,
+          json: async () => ({
+            entries: [],
+            totalCount: 0,
+          }),
+        } as Response;
+      }
+
       throw new Error(`Unhandled fetch: ${url}`);
     }) as typeof fetch;
   });
@@ -184,7 +212,7 @@ describe('SystemPage', () => {
   });
 
   it('opens a system section in a narrow-screen detail view and returns to the menu', async () => {
-    render(<SystemPage />);
+    renderSystemPage();
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /resource usage/i })).toBeInTheDocument();
@@ -196,6 +224,7 @@ describe('SystemPage', () => {
 
     expect(await screen.findByRole('button', { name: /^back$/i })).toBeInTheDocument();
     expect(screen.getByText(/serial ports and block devices detected on this host/i)).toBeInTheDocument();
+    expect(screen.getByTestId('location-display')).toHaveTextContent('/system/hardware-interfaces');
 
     fireEvent.click(screen.getByRole('button', { name: /^back$/i }));
 
@@ -203,5 +232,14 @@ describe('SystemPage', () => {
       expect(screen.queryByRole('button', { name: /^back$/i })).not.toBeInTheDocument();
     });
     expect(screen.getByRole('button', { name: /hardware interfaces/i })).toBeInTheDocument();
+    expect(screen.getByTestId('location-display')).toHaveTextContent('/system');
+  });
+
+  it('loads the matching section from a direct system child route', async () => {
+    renderSystemPage('/system/logs');
+
+    expect(await screen.findByRole('button', { name: /^back$/i })).toBeInTheDocument();
+    expect(await screen.findByText(/browse captured log entries filtered by severity and time range/i)).toBeInTheDocument();
+    expect(screen.getByTestId('location-display')).toHaveTextContent('/system/logs');
   });
 });

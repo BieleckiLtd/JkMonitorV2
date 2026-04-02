@@ -2,6 +2,7 @@ import { useEffect, useState, useRef, useCallback, type TouchEvent } from 'react
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSignal, type IconDefinition } from '@fortawesome/free-solid-svg-icons';
 import { Bluetooth, Cable, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Cloud, Cpu, Database, Download, ExternalLink, Gauge, Globe2, HardDrive, Leaf, List, LoaderCircle, Lock, MemoryStick, RefreshCcw, CheckCircle2, Thermometer, Upload, Usb, Wifi, XCircle } from 'lucide-react';
+import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { Switch } from '../components/ui/switch';
@@ -364,9 +365,36 @@ type SystemSection =
   | 'logs';
 
 type SystemMobileView = 'menu' | 'detail';
+type SystemSectionRouteSegment = Exclude<SystemSection, 'resource-usage'>;
 
 const narrowSystemLayoutMaxWidth = 1120;
 const narrowSystemLayoutQuery = '(max-width: 1023px)';
+
+const systemSectionRouteSegments: SystemSectionRouteSegment[] = [
+  'software-update',
+  'internet-speed',
+  'tunnel',
+  'connectivity',
+  'hardware-interfaces',
+  'database',
+  'logs',
+];
+
+const systemSectionItems: Array<{
+  id: SystemSection;
+  label: string;
+  description: string;
+  icon: typeof Cpu;
+}> = [
+  { id: 'resource-usage', label: 'Resource usage', description: 'CPU, memory, and storage', icon: Cpu },
+  { id: 'software-update', label: 'Software update', description: 'Check and install releases', icon: RefreshCcw },
+  { id: 'internet-speed', label: 'Internet speed', description: 'Run a live bandwidth check', icon: Globe2 },
+  { id: 'tunnel', label: 'Tunnel', description: 'Cloudflare Tunnel settings', icon: Cloud },
+  { id: 'connectivity', label: 'Connectivity', description: 'Wi-Fi, Bluetooth, and Ethernet', icon: Wifi },
+  { id: 'hardware-interfaces', label: 'Hardware interfaces', description: 'Serial ports and block devices', icon: Usb },
+  { id: 'database', label: 'Database', description: 'Storage size, backup, and restore', icon: Database },
+  { id: 'logs', label: 'Logs', description: 'Application log output', icon: List },
+];
 
 function isNarrowSystemLayoutViewport() {
   return typeof window !== 'undefined' && window.matchMedia(narrowSystemLayoutQuery).matches;
@@ -376,7 +404,27 @@ function isNarrowSystemLayoutWidth(width: number) {
   return width <= narrowSystemLayoutMaxWidth;
 }
 
+function getSystemSectionFromRouteSegment(sectionId?: string): SystemSection | null {
+  if (!sectionId) {
+    return 'resource-usage';
+  }
+
+  if (systemSectionRouteSegments.includes(sectionId as SystemSectionRouteSegment)) {
+    return sectionId as SystemSectionRouteSegment;
+  }
+
+  return null;
+}
+
+function getSystemSectionPath(section: SystemSection) {
+  return section === 'resource-usage' ? '/system' : `/system/${section}`;
+}
+
 export function SystemPage() {
+  const navigate = useNavigate();
+  const { sectionId } = useParams<{ sectionId?: string }>();
+  const routedSystemSection = getSystemSectionFromRouteSegment(sectionId);
+  const activeSystemSection = routedSystemSection ?? 'resource-usage';
   const updateProgress = useAppStore((state) => state.updateProgress);
   const updateActionPending = useAppStore((state) => state.updateActionPending);
   const startSystemUpdate = useAppStore((state) => state.startSystemUpdate);
@@ -399,9 +447,14 @@ export function SystemPage() {
   const [cloudflareTunnelLoading, setCloudflareTunnelLoading] = useState(true);
   const [cloudflareTunnelError, setCloudflareTunnelError] = useState<string | null>(null);
   const [cloudflareTunnelFeedback, setCloudflareTunnelFeedback] = useState<InlineFeedback | null>(null);
-  const [activeSystemSection, setActiveSystemSection] = useState<SystemSection>('resource-usage');
   const [isNarrowSystemLayout, setIsNarrowSystemLayout] = useState(isNarrowSystemLayoutViewport);
-  const [mobileSystemView, setMobileSystemView] = useState<SystemMobileView>(() => isNarrowSystemLayoutViewport() ? 'menu' : 'detail');
+  const [mobileSystemView, setMobileSystemView] = useState<SystemMobileView>(() => {
+    if (!isNarrowSystemLayoutViewport()) {
+      return 'detail';
+    }
+
+    return sectionId ? 'detail' : 'menu';
+  });
   const [cloudflareTunnelSaving, setCloudflareTunnelSaving] = useState(false);
   const [cloudflareTunnelEnabled, setCloudflareTunnelEnabled] = useState(false);
   const [cloudflareTunnelTokenOrCommand, setCloudflareTunnelTokenOrCommand] = useState('');
@@ -431,6 +484,7 @@ export function SystemPage() {
   const [expandedConnectivitySection, setExpandedConnectivitySection] = useState<'wifi' | 'bluetooth' | 'ethernet' | null>(null);
   const previousUpdateStatusRef = useRef<UpdateProgress['status'] | null>(null);
   const previousSystemLayoutRef = useRef(isNarrowSystemLayoutViewport());
+  const previousSystemRouteSectionRef = useRef(sectionId);
   const wifiCredentialRequestRef = useRef(0);
   const cloudflareTunnelDirtyRef = useRef(false);
   const mobileSwipeStartRef = useRef<{ x: number; y: number } | null>(null);
@@ -536,7 +590,7 @@ export function SystemPage() {
       setIsNarrowSystemLayout(matches);
       if (previousSystemLayoutRef.current !== matches) {
         previousSystemLayoutRef.current = matches;
-        setMobileSystemView(matches ? 'menu' : 'detail');
+        setMobileSystemView(matches ? (sectionId ? 'detail' : 'menu') : 'detail');
       }
     };
 
@@ -579,7 +633,25 @@ export function SystemPage() {
     return () => {
       mediaQueryList.removeListener(handleChange);
     };
-  }, []);
+  }, [sectionId]);
+
+  useEffect(() => {
+    if (!isNarrowSystemLayout) {
+      previousSystemRouteSectionRef.current = sectionId;
+      return;
+    }
+
+    const hadChildSectionRoute = Boolean(previousSystemRouteSectionRef.current);
+    const hasChildSectionRoute = Boolean(sectionId);
+
+    if (hasChildSectionRoute) {
+      setMobileSystemView('detail');
+    } else if (hadChildSectionRoute) {
+      setMobileSystemView('menu');
+    }
+
+    previousSystemRouteSectionRef.current = sectionId;
+  }, [isNarrowSystemLayout, sectionId]);
 
   const loadDbSize = async () => {
     setDbLoading(true);
@@ -726,16 +798,17 @@ export function SystemPage() {
   };
 
   const openSystemSection = useCallback((section: SystemSection) => {
-    setActiveSystemSection(section);
+    navigate(getSystemSectionPath(section));
 
     if (isNarrowSystemLayout) {
       setMobileSystemView('detail');
     }
-  }, [isNarrowSystemLayout]);
+  }, [isNarrowSystemLayout, navigate]);
 
   const handleMobileSystemBack = useCallback(() => {
     setMobileSystemView('menu');
-  }, []);
+    navigate('/system', { replace: true });
+  }, [navigate]);
 
   const handleSystemViewTouchStart = useCallback((event: TouchEvent<HTMLDivElement>) => {
     const touch = event.changedTouches[0];
@@ -771,9 +844,13 @@ export function SystemPage() {
     }
 
     if (deltaX > 0 && mobileSystemView === 'detail') {
-      setMobileSystemView('menu');
+      if (sectionId) {
+        navigate('/system', { replace: true });
+      } else {
+        setMobileSystemView('menu');
+      }
     }
-  }, [isNarrowSystemLayout, mobileSystemView]);
+  }, [isNarrowSystemLayout, mobileSystemView, navigate, sectionId]);
 
   const startInternetSpeedTest = async () => {
     setInternetSpeedTestStarting(true);
@@ -1381,22 +1458,6 @@ export function SystemPage() {
     : pendingConnectivityAction?.kind === 'disconnect-ethernet'
       ? 'Disconnect Ethernet'
       : null;
-  const systemSectionItems: Array<{
-    id: SystemSection;
-    label: string;
-    description: string;
-    icon: typeof Cpu;
-  }> = [
-    { id: 'resource-usage', label: 'Resource usage', description: 'CPU, memory, and storage', icon: Cpu },
-    { id: 'software-update', label: 'Software update', description: 'Check and install releases', icon: RefreshCcw },
-    { id: 'internet-speed', label: 'Internet speed', description: 'Run a live bandwidth check', icon: Globe2 },
-    { id: 'tunnel', label: 'Tunnel', description: 'Cloudflare Tunnel settings', icon: Cloud },
-    { id: 'connectivity', label: 'Connectivity', description: 'Wi-Fi, Bluetooth, and Ethernet', icon: Wifi },
-    { id: 'hardware-interfaces', label: 'Hardware interfaces', description: 'Serial ports and block devices', icon: Usb },
-    { id: 'database', label: 'Database', description: 'Storage size, backup, and restore', icon: Database },
-    { id: 'logs', label: 'Logs', description: 'Application log output', icon: List },
-  ];
-
   const activeSystemSectionItem = systemSectionItems.find((item) => item.id === activeSystemSection) ?? systemSectionItems[0];
 
   const renderSystemSectionMenu = () => (
@@ -1430,6 +1491,10 @@ export function SystemPage() {
       </CardContent>
     </Card>
   );
+
+  if (sectionId === 'resource-usage' || routedSystemSection === null) {
+    return <Navigate to='/system' replace />;
+  }
 
   return (
     <div ref={systemPageRef} className='min-w-0 space-y-6 pb-8'>

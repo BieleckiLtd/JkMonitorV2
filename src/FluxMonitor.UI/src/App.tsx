@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { useEffect } from 'react';
 import { useAppStore } from './store/useAppStore';
 import { MainLayout } from './layouts/MainLayout';
@@ -34,7 +34,9 @@ function App() {
     <Router>
       <MainLayout>
         <Routes>
-          <Route path='/' element={<SystemPage />} />
+          <Route path='/' element={<Navigate to='/system' replace />} />
+          <Route path='/system' element={<SystemPage />} />
+          <Route path='/system/:sectionId' element={<SystemPage />} />
           <Route path='/monitor' element={<MonitorPage />} />
           <Route path='/devices' element={<DevicesPage />} />
           <Route path='/services' element={<ServicesPage />} />

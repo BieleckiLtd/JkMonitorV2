@@ -23,7 +23,7 @@ export function Sidebar() {
   const toggleSidebar = useAppStore((state) => state.toggleSidebar);
 
   const navItems = [
-    { name: 'System', path: '/', icon: Monitor },
+    { name: 'System', path: '/system', icon: Monitor },
     { name: 'Monitor', path: '/monitor', icon: Gauge },
     { name: 'Devices', path: '/devices', icon: Cable },
     { name: 'Services', path: '/services', icon: Sparkles },
@@ -124,7 +124,7 @@ export function MainLayout({ children }: { children: ReactNode }) {
   const updateProgress = useAppStore((state) => state.updateProgress);
   const hasUpdateOverlay = updateProgress !== null;
   const hasBlockingUpdateOverlay = updateProgress?.isRunning ?? false;
-  const isFullWidthRoute = location.pathname === '/' || location.pathname === '/services';
+  const isFullWidthRoute = location.pathname.startsWith('/system') || location.pathname === '/services';
 
   useEffect(() => {
     document.body.style.overflow = isMobileSidebarOpen || hasUpdateOverlay ? 'hidden' : '';
