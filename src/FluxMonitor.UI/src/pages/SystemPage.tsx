@@ -1382,7 +1382,6 @@ export function SystemPage() {
   const internetSpeedResult = internetSpeedTest?.result ?? null;
   const internetSpeedStage = internetSpeedTest?.stage ?? null;
   const internetSpeedStagePercent = clampPercent(internetSpeedTest?.stagePercentComplete);
-  const internetSpeedPercentComplete = clampPercent(internetSpeedTest?.percentComplete);
   const internetSpeedActiveMetric = internetSpeedTest?.isRunning ? getInternetSpeedActiveMetric(internetSpeedStage) : null;
   const internetSpeedDownloadMbps = getMegabitsPerSecond(internetSpeedResult?.downloadBitsPerSecond);
   const internetSpeedUploadMbps = getMegabitsPerSecond(internetSpeedResult?.uploadBitsPerSecond);
@@ -1880,18 +1879,6 @@ export function SystemPage() {
                         </div>
                       ) : null}
 
-                      {internetSpeedTest?.isRunning ? (
-                        <div className='flex items-center justify-between gap-3 text-xs text-muted-foreground'>
-                          <span className='inline-flex min-w-0 items-center gap-2'>
-                            <LoaderCircle className='h-3.5 w-3.5 shrink-0 animate-spin text-primary' />
-                            <span className='truncate'>{internetSpeedRunningMessage}</span>
-                          </span>
-                          <span className='shrink-0 font-medium uppercase tracking-[0.18em] text-foreground/80'>
-                            {internetSpeedPercentComplete}%
-                          </span>
-                        </div>
-                      ) : null}
-
                       {internetSpeedTest?.statusMessage && !internetSpeedTest.isRunning && (!internetSpeedTest.supported || internetSpeedTest.status === 'failed' || (!internetSpeedResult && internetSpeedTest.status !== 'succeeded')) ? (
                         <div className={cn(
                           'rounded-2xl border px-4 py-4',
@@ -1925,6 +1912,16 @@ export function SystemPage() {
 
                       <div className='grid gap-3 sm:grid-cols-3'>
                         <SpeedMetricCard
+                          icon={Gauge}
+                          label='Ping'
+                          value={internetSpeedPingValue}
+                          dialValue={internetSpeedPingDialDisplay}
+                          caption={internetSpeedPingCaption}
+                          gaugePercent={internetSpeedPingDialGauge}
+                          tone={internetSpeedPingTone}
+                          isActive={internetSpeedPingIsActive}
+                        />
+                        <SpeedMetricCard
                           icon={Download}
                           label='Download'
                           value={internetSpeedDownloadValue}
@@ -1943,16 +1940,6 @@ export function SystemPage() {
                           gaugePercent={internetSpeedUploadDialGauge}
                           tone='sky'
                           isActive={internetSpeedUploadIsActive}
-                        />
-                        <SpeedMetricCard
-                          icon={Gauge}
-                          label='Ping'
-                          value={internetSpeedPingValue}
-                          dialValue={internetSpeedPingDialDisplay}
-                          caption={internetSpeedPingCaption}
-                          gaugePercent={internetSpeedPingDialGauge}
-                          tone={internetSpeedPingTone}
-                          isActive={internetSpeedPingIsActive}
                         />
                       </div>
 
