@@ -101,6 +101,7 @@ public sealed class TimescaleTelemetryRepository(
     private readonly ConcurrentDictionary<string, IReadOnlyDictionary<SensorKey, PersistedSensor>> _sensorCatalogCache = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _sensorCatalogLocks = new(StringComparer.OrdinalIgnoreCase);
     private volatile bool _initialized;
+    private volatile bool _timescaleMetadataAvailable;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -125,6 +126,7 @@ public sealed class TimescaleTelemetryRepository(
             await using var connection = new NpgsqlConnection(_storage.ConnectionString);
             await connection.OpenAsync(cancellationToken);
             var useTimescale = await TryEnableTimescaleAsync(connection, cancellationToken);
+            _timescaleMetadataAvailable = useTimescale;
 
             await ExecuteNonQueryAsync(connection, """
                 CREATE TABLE IF NOT EXISTS "DeviceSensors" (
@@ -550,6 +552,11 @@ public sealed class TimescaleTelemetryRepository(
     public async Task<CompressionStats?> GetCompressionStatsAsync(CancellationToken cancellationToken)
     {
         await InitializeAsync(cancellationToken);
+
+        if (!_timescaleMetadataAvailable)
+        {
+            return null;
+        }
 
         await using var connection = new NpgsqlConnection(_storage.ConnectionString);
         await connection.OpenAsync(cancellationToken);
@@ -1195,6 +1202,22 @@ public sealed class TimescaleTelemetryRepository(
             """;
     }
 
+    internal static string BuildTableSizeSql(bool includeTimescaleChunks) => includeTimescaleChunks
+        ? """
+            SELECT pg_total_relation_size(format('%I.%I', current_schema(), @TableName)::regclass) + COALESCE(
+                (
+                    SELECT SUM(pg_total_relation_size(format('%I.%I', chunk_schema, chunk_name)::regclass))
+                    FROM timescaledb_information.chunks
+                    WHERE hypertable_schema = current_schema()
+                      AND hypertable_name = @TableName
+                ),
+                0
+            );
+            """
+        : """
+            SELECT pg_total_relation_size(format('%I.%I', current_schema(), @TableName)::regclass);
+            """;
+
     private async Task RollupMeasurementsAsync(
         NpgsqlConnection connection,
         DateTimeOffset fromInclusive,
@@ -1330,20 +1353,7 @@ public sealed class TimescaleTelemetryRepository(
         CancellationToken cancellationToken)
     {
         await using var command = connection.CreateCommand();
-        command.CommandText = """
-            SELECT CASE
-                WHEN to_regclass('timescaledb_information.chunks') IS NULL THEN pg_total_relation_size(format('%I.%I', current_schema(), @TableName)::regclass)
-                ELSE pg_total_relation_size(format('%I.%I', current_schema(), @TableName)::regclass) + COALESCE(
-                    (
-                        SELECT SUM(pg_total_relation_size(format('%I.%I', chunk_schema, chunk_name)::regclass))
-                        FROM timescaledb_information.chunks
-                        WHERE hypertable_schema = current_schema()
-                          AND hypertable_name = @TableName
-                    ),
-                    0
-                )
-            END;
-            """;
+        command.CommandText = BuildTableSizeSql(_timescaleMetadataAvailable);
         command.Parameters.AddWithValue("TableName", tableName);
 
         var result = await command.ExecuteScalarAsync(cancellationToken);

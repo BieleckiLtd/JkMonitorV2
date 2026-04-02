@@ -17,6 +17,9 @@ build/
 .env
 .env.*
 artifacts/
+.tools/postgresql/
+.tools/postgresql-*.zip
+.tools/postgresql-*.exe
 appsettings.Local.json
 appsettings.*.Local.json
 Docs/

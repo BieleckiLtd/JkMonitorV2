@@ -67,4 +67,21 @@ public sealed class TelemetryRepositoryRetentionTests
 
         Assert.Contains("ctid", sql, StringComparison.OrdinalIgnoreCase);
     }
+
+    [Fact]
+    public void BuildTableSizeSql_WithoutTimescaleMetadata_DoesNotReferenceTimescaleCatalog()
+    {
+        var sql = TimescaleTelemetryRepository.BuildTableSizeSql(includeTimescaleChunks: false);
+
+        Assert.DoesNotContain("timescaledb_information", sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("pg_total_relation_size", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void BuildTableSizeSql_WithTimescaleMetadata_ReferencesChunkCatalog()
+    {
+        var sql = TimescaleTelemetryRepository.BuildTableSizeSql(includeTimescaleChunks: true);
+
+        Assert.Contains("timescaledb_information.chunks", sql, StringComparison.OrdinalIgnoreCase);
+    }
 }
