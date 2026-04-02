@@ -32,6 +32,8 @@ NONINTERACTIVE_REFRESH_CLOUDFLARED="${FLUXMONITOR_REFRESH_CLOUDFLARED:-}"
 EXPECTED_RELEASE_SHA256="${FLUXMONITOR_EXPECTED_RELEASE_SHA256:-}"
 CONFIGURE_SCRIPT_PATH="$DESTINATION/configure.sh"
 TIMESCALE_REPOSITORY_SETUP_URL='https://packagecloud.io/install/repositories/timescale/timescaledb/script.deb.sh'
+CLOUDFLARED_PACKAGE_CHANGED='false'
+CLOUDFLARED_START_SCRIPT_CHANGED='false'
 
 if [ -t 1 ]; then
   COLOR_RESET='\033[0m'
@@ -1020,6 +1022,7 @@ install_or_update_cloudflared_package() {
     fi
 
     muted 'Set FLUXMONITOR_REFRESH_CLOUDFLARED=yes to force a package refresh.'
+    CLOUDFLARED_PACKAGE_CHANGED='false'
     return 0
   fi
 
@@ -1047,6 +1050,8 @@ install_or_update_cloudflared_package() {
       exit 1
     fi
   fi
+
+  CLOUDFLARED_PACKAGE_CHANGED='true'
 }
 
 install_or_update_speedtest_cli() {
@@ -1082,8 +1087,36 @@ install_or_update_speedtest_cli() {
   fi
 }
 
-write_cloudflared_start_script() {
-  cat > "$CLOUDFLARED_START_SCRIPT_PATH" <<'EOF'
+write_local_file_if_changed() {
+  local source_path="$1"
+  local target_path="$2"
+  local file_mode="${3:-0644}"
+
+  if [ -f "$target_path" ] && cmp -s "$source_path" "$target_path"; then
+    return 1
+  fi
+
+  mkdir -p "$(dirname "$target_path")"
+  install -m "$file_mode" "$source_path" "$target_path"
+  return 0
+}
+
+write_elevated_file_if_changed() {
+  local source_path="$1"
+  local target_path="$2"
+  local file_mode="${3:-0644}"
+
+  if [ -f "$target_path" ] && run_elevated cmp -s "$source_path" "$target_path"; then
+    return 1
+  fi
+
+  run_elevated mkdir -p "$(dirname "$target_path")"
+  run_elevated install -m "$file_mode" "$source_path" "$target_path"
+  return 0
+}
+
+build_cloudflared_start_script() {
+  cat <<'EOF'
 #!/usr/bin/env bash
 set -euo pipefail
 
@@ -1099,8 +1132,61 @@ fi
 
 exec "$(command -v cloudflared)" tunnel --no-autoupdate run --token "$CLOUDFLARED_TUNNEL_TOKEN"
 EOF
+}
 
-  chmod +x "$CLOUDFLARED_START_SCRIPT_PATH"
+write_cloudflared_start_script() {
+  local temp_path="$TEMP_ROOT/cloudflared-run.sh"
+
+  build_cloudflared_start_script > "$temp_path"
+
+  if write_local_file_if_changed "$temp_path" "$CLOUDFLARED_START_SCRIPT_PATH" 0755; then
+    CLOUDFLARED_START_SCRIPT_CHANGED='true'
+  else
+    CLOUDFLARED_START_SCRIPT_CHANGED='false'
+  fi
+}
+
+build_cloudflared_polkit_rule() {
+  local current_user="$1"
+
+  cat <<EOF
+polkit.addRule(function(action, subject) {
+  if (subject.user === '$current_user'
+      && action.id === 'org.freedesktop.systemd1.manage-units') {
+    var unit = action.lookup('unit');
+    var verb = action.lookup('verb');
+    if (unit === '$TUNNEL_SERVICE_NAME'
+        && ['start', 'stop', 'restart', 'reload-or-restart'].indexOf(verb) >= 0) {
+      return polkit.Result.YES;
+    }
+  }
+});
+EOF
+}
+
+build_cloudflared_service_unit() {
+  local current_user="$1"
+
+  cat <<EOF
+[Unit]
+Description=Cloudflare Tunnel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=$current_user
+WorkingDirectory=$DESTINATION
+EnvironmentFile=-$TUNNEL_ENV_PATH
+ExecCondition=/bin/bash -lc '[ -n "\${CLOUDFLARED_TUNNEL_TOKEN:-}" ]'
+ExecStart=$CLOUDFLARED_START_SCRIPT_PATH
+Restart=on-failure
+RestartSec=5
+TimeoutStartSec=0
+
+[Install]
+WantedBy=multi-user.target
+EOF
 }
 
 write_configure_script() {
@@ -1249,48 +1335,65 @@ EOF
 
 install_cloudflared_service() {
   local current_user
+  local polkit_changed='false'
+  local service_changed='false'
+  local service_enabled='false'
+  local service_running='false'
+  local polkit_temp_path="$TEMP_ROOT/cloudflared-systemd.rules"
+  local service_temp_path="$TEMP_ROOT/cloudflared.service"
   current_user="$(id -un)"
 
   if [ -d /etc/polkit-1/rules.d ]; then
-    run_elevated tee "$SYSTEMD_POLKIT_RULE_PATH" >/dev/null <<EOF
-polkit.addRule(function(action, subject) {
-  if (subject.user === '$current_user'
-      && action.id === 'org.freedesktop.systemd1.manage-units') {
-    var unit = action.lookup('unit');
-    var verb = action.lookup('verb');
-    if (unit === '$TUNNEL_SERVICE_NAME'
-        && ['start', 'stop', 'restart', 'reload-or-restart'].indexOf(verb) >= 0) {
-      return polkit.Result.YES;
-    }
-  }
-});
-EOF
+    build_cloudflared_polkit_rule "$current_user" > "$polkit_temp_path"
+    if write_elevated_file_if_changed "$polkit_temp_path" "$SYSTEMD_POLKIT_RULE_PATH" 0644; then
+      polkit_changed='true'
+    fi
   fi
 
-  run_elevated tee "$TUNNEL_SERVICE_PATH" >/dev/null <<EOF
-[Unit]
-Description=Cloudflare Tunnel
-After=network-online.target
-Wants=network-online.target
+  build_cloudflared_service_unit "$current_user" > "$service_temp_path"
+  if write_elevated_file_if_changed "$service_temp_path" "$TUNNEL_SERVICE_PATH" 0644; then
+    service_changed='true'
+  fi
 
-[Service]
-Type=simple
-User=$current_user
-WorkingDirectory=$DESTINATION
-EnvironmentFile=-$TUNNEL_ENV_PATH
-ExecCondition=/bin/bash -lc '[ -n "\${CLOUDFLARED_TUNNEL_TOKEN:-}" ]'
-ExecStart=$CLOUDFLARED_START_SCRIPT_PATH
-Restart=on-failure
-RestartSec=5
-TimeoutStartSec=0
+  if run_elevated systemctl is-active --quiet "$TUNNEL_SERVICE_NAME"; then
+    service_running='true'
+  fi
 
-[Install]
-WantedBy=multi-user.target
-EOF
+  if run_elevated systemctl is-enabled "$TUNNEL_SERVICE_NAME" >/dev/null 2>&1; then
+    service_enabled='true'
+  fi
 
-  run_elevated systemctl daemon-reload
-  run_elevated systemctl enable "$TUNNEL_SERVICE_NAME" >/dev/null 2>&1 || true
-  run_elevated systemctl stop "$TUNNEL_SERVICE_NAME" >/dev/null 2>&1 || true
+  if [ "$polkit_changed" = 'false' ] \
+    && [ "$service_changed" = 'false' ] \
+    && [ "$CLOUDFLARED_PACKAGE_CHANGED" = 'false' ] \
+    && [ "$CLOUDFLARED_START_SCRIPT_CHANGED" = 'false' ] \
+    && [ "$service_enabled" = 'true' ]; then
+    if [ "$service_running" = 'true' ]; then
+      info 'Managed cloudflared service is already up to date and running. Skipping reinstall.'
+    else
+      info 'Managed cloudflared service is already up to date. Skipping reinstall.'
+    fi
+
+    return 0
+  fi
+
+  if [ "$polkit_changed" = 'true' ] || [ "$service_changed" = 'true' ]; then
+    run_elevated systemctl daemon-reload
+  fi
+
+  if [ "$service_enabled" = 'false' ]; then
+    run_elevated systemctl enable "$TUNNEL_SERVICE_NAME" >/dev/null 2>&1 || true
+  fi
+
+  if [ "$service_running" = 'true' ] \
+    && { [ "$service_changed" = 'true' ] \
+      || [ "$CLOUDFLARED_PACKAGE_CHANGED" = 'true' ] \
+      || [ "$CLOUDFLARED_START_SCRIPT_CHANGED" = 'true' ]; }; then
+    info 'Restarting the managed cloudflared service to apply tunnel updates.'
+    run_elevated systemctl restart "$TUNNEL_SERVICE_NAME" >/dev/null 2>&1 || true
+  else
+    info 'Managed cloudflared service configuration was checked. No tunnel restart was needed.'
+  fi
 }
 
 install_systemd_service() {

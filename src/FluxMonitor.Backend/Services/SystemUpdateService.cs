@@ -136,8 +136,8 @@ public sealed class SystemUpdateService(
             CancelUnavailableReason: "Cancellation is no longer available because the new installation is being finalized."),
         new(
             InstallerSection: "Installing Cloudflare Tunnel service",
-            Stage: "Updating tunnel service…",
-            Detail: "Reinstalling the managed cloudflared service so the tunnel can be started from the app.",
+            Stage: "Checking tunnel service…",
+            Detail: "Checking the managed cloudflared service and refreshing it only when the installed files changed.",
             StepIndex: 10,
             StepCount: 11,
             PercentComplete: 92,
