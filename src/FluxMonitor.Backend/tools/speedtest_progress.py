@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import importlib
 import importlib.util
 import json
 import shutil
@@ -25,7 +26,25 @@ def clamp_percent(value):
     return max(0, min(100, int(round(value))))
 
 
+def resolve_speedtest_api_module(module, source_name):
+    if hasattr(module, "Speedtest"):
+        return module
+
+    raise RuntimeError(f"{source_name} does not expose the speedtest Python API.")
+
+
 def load_speedtest_module():
+    for module_name in ("speedtest", "speedtest_cli"):
+        try:
+            module = importlib.import_module(module_name)
+        except Exception:
+            continue
+
+        try:
+            return resolve_speedtest_api_module(module, f"Python module '{module_name}'")
+        except RuntimeError:
+            continue
+
     executable = shutil.which("speedtest-cli")
     if not executable:
         raise RuntimeError("speedtest-cli is not installed on this device yet. Run the installer or updater first.")
@@ -37,7 +56,7 @@ def load_speedtest_module():
 
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
-    return module
+    return resolve_speedtest_api_module(module, f"Executable '{executable}'")
 
 
 def build_result_payload(speedtest, *, final=False):
