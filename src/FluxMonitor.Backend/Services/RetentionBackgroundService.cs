@@ -1,4 +1,6 @@
-﻿namespace FluxMonitor.Backend.Services;
+using System.Diagnostics;
+
+namespace FluxMonitor.Backend.Services;
 
 public sealed class RetentionBackgroundService(
     ITelemetryRepository repository,
@@ -14,7 +16,9 @@ public sealed class RetentionBackgroundService(
         {
             try
             {
+                var stopwatch = Stopwatch.StartNew();
                 await repository.ApplyRetentionAsync(stoppingToken);
+                logger.LogInformation("Retention sweep succeeded in {ElapsedMilliseconds} ms.", stopwatch.ElapsedMilliseconds);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

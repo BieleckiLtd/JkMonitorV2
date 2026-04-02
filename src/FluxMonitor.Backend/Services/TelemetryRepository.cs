@@ -1131,18 +1131,7 @@ public sealed class TimescaleTelemetryRepository(
 
             await using var command = connection.CreateCommand();
             command.CommandTimeout = RetentionDeleteCommandTimeoutSeconds;
-            command.CommandText = $"""
-                WITH batch AS (
-                    SELECT ctid
-                    FROM "{table}"
-                    WHERE "{column}" < @Cutoff
-                    ORDER BY "{column}"
-                    LIMIT @BatchSize
-                )
-                DELETE FROM "{table}" AS target
-                USING batch
-                WHERE target.ctid = batch.ctid;
-                """;
+            command.CommandText = BuildDeleteOlderThanSql(table, column);
             command.Parameters.AddWithValue("Cutoff", cutoff);
             command.Parameters.AddWithValue("BatchSize", NpgsqlDbType.Integer, RetentionDeleteBatchSize);
 
@@ -1170,6 +1159,40 @@ public sealed class TimescaleTelemetryRepository(
                 cutoff,
                 batches);
         }
+    }
+
+    internal static string BuildDeleteOlderThanSql(string table, string column)
+    {
+        if (string.Equals(table, "Measurements", StringComparison.Ordinal) &&
+            string.Equals(column, "Time", StringComparison.Ordinal))
+        {
+            return """
+                WITH batch AS (
+                    SELECT "Time", "SensorId"
+                    FROM "Measurements"
+                    WHERE "Time" < @Cutoff
+                    ORDER BY "Time", "SensorId"
+                    LIMIT @BatchSize
+                )
+                DELETE FROM "Measurements" AS target
+                USING batch
+                WHERE target."Time" = batch."Time"
+                  AND target."SensorId" = batch."SensorId";
+                """;
+        }
+
+        return $"""
+            WITH batch AS (
+                SELECT ctid
+                FROM "{table}"
+                WHERE "{column}" < @Cutoff
+                ORDER BY "{column}"
+                LIMIT @BatchSize
+            )
+            DELETE FROM "{table}" AS target
+            USING batch
+            WHERE target.ctid = batch.ctid;
+            """;
     }
 
     private async Task RollupMeasurementsAsync(

@@ -49,4 +49,22 @@ public sealed class TelemetryRepositoryRetentionTests
 
         Assert.Equal(2048L, value);
     }
+
+    [Fact]
+    public void BuildDeleteOlderThanSql_ForMeasurements_UsesPrimaryKeyBatchDelete()
+    {
+        var sql = TimescaleTelemetryRepository.BuildDeleteOlderThanSql("Measurements", "Time");
+
+        Assert.Contains(@"""Time""", sql);
+        Assert.Contains(@"""SensorId""", sql);
+        Assert.DoesNotContain("ctid", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void BuildDeleteOlderThanSql_ForOtherTables_UsesCtidBatchDelete()
+    {
+        var sql = TimescaleTelemetryRepository.BuildDeleteOlderThanSql("Devices", "UpdatedAt");
+
+        Assert.Contains("ctid", sql, StringComparison.OrdinalIgnoreCase);
+    }
 }
