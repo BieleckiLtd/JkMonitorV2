@@ -313,6 +313,11 @@ type InternetSpeedTestSnapshot = {
   startedAt?: string | null;
   completedAt?: string | null;
   lastUpdatedAt?: string | null;
+  stage?: string | null;
+  stepIndex?: number | null;
+  stepCount?: number | null;
+  stagePercentComplete?: number | null;
+  percentComplete?: number | null;
   result?: InternetSpeedTestResult | null;
 };
 
@@ -487,10 +492,17 @@ export function SystemPage() {
   const previousSystemRouteSectionRef = useRef(sectionId);
   const wifiCredentialRequestRef = useRef(0);
   const cloudflareTunnelDirtyRef = useRef(false);
+  const internetSpeedTestRequestInFlightRef = useRef(false);
   const mobileSwipeStartRef = useRef<{ x: number; y: number } | null>(null);
   const systemPageRef = useRef<HTMLDivElement>(null);
 
   const loadInternetSpeedTest = useCallback(async () => {
+    if (internetSpeedTestRequestInFlightRef.current) {
+      return;
+    }
+
+    internetSpeedTestRequestInFlightRef.current = true;
+
     try {
       const response = await fetch('/api/system/internet-speed', { cache: 'no-store' });
       if (!response.ok) {
@@ -503,6 +515,7 @@ export function SystemPage() {
     } catch (error) {
       setInternetSpeedTestError(error instanceof Error ? error.message : 'Unable to load internet speed status.');
     } finally {
+      internetSpeedTestRequestInFlightRef.current = false;
       setInternetSpeedTestLoading(false);
     }
   }, []);
@@ -764,6 +777,20 @@ export function SystemPage() {
   useEffect(() => {
     void loadInternetSpeedTest();
   }, [loadInternetSpeedTest]);
+
+  useEffect(() => {
+    if (!internetSpeedTest?.isRunning) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void loadInternetSpeedTest();
+    }, 1000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [internetSpeedTest?.isRunning, loadInternetSpeedTest]);
 
   useEffect(() => {
     void loadCloudflareTunnelStatus();
@@ -1353,16 +1380,77 @@ export function SystemPage() {
   const activeBluetoothDevice = visibleBluetoothDevices.find((device) => device.isConnected) ?? visibleBluetoothDevices[0] ?? null;
   const activeEthernetInterface = ethernetInterfaces.find((ethernetInterface) => isEthernetInterfaceActive(ethernetInterface)) ?? ethernetInterfaces[0] ?? null;
   const internetSpeedResult = internetSpeedTest?.result ?? null;
+  const internetSpeedStage = internetSpeedTest?.stage ?? null;
+  const internetSpeedStagePercent = clampPercent(internetSpeedTest?.stagePercentComplete);
+  const internetSpeedPercentComplete = clampPercent(internetSpeedTest?.percentComplete);
+  const internetSpeedActiveMetric = internetSpeedTest?.isRunning ? getInternetSpeedActiveMetric(internetSpeedStage) : null;
   const internetSpeedDownloadMbps = getMegabitsPerSecond(internetSpeedResult?.downloadBitsPerSecond);
   const internetSpeedUploadMbps = getMegabitsPerSecond(internetSpeedResult?.uploadBitsPerSecond);
   const internetSpeedPing = internetSpeedResult?.pingMilliseconds ?? null;
   const internetSpeedDownloadGauge = getBandwidthGaugePercent(internetSpeedDownloadMbps);
   const internetSpeedUploadGauge = getBandwidthGaugePercent(internetSpeedUploadMbps);
   const internetSpeedPingGauge = getLatencyGaugePercent(internetSpeedPing);
+  const internetSpeedRunningMessage = internetSpeedTest?.isRunning
+    ? internetSpeedTest.statusMessage ?? `Measuring ${getInternetSpeedStageLabel(internetSpeedStage).toLowerCase()}.`
+    : null;
+  const internetSpeedDownloadIsActive = internetSpeedActiveMetric === 'download';
+  const internetSpeedUploadIsActive = internetSpeedActiveMetric === 'upload';
+  const internetSpeedPingIsActive = internetSpeedActiveMetric === 'ping';
+  const internetSpeedDownloadPending = Boolean(internetSpeedTest?.isRunning && !internetSpeedDownloadIsActive && internetSpeedResult?.downloadBitsPerSecond == null);
+  const internetSpeedUploadPending = Boolean(internetSpeedTest?.isRunning && !internetSpeedUploadIsActive && internetSpeedResult?.uploadBitsPerSecond == null);
+  const internetSpeedDownloadDialDisplay = internetSpeedDownloadIsActive
+    ? formatProgressDialValue(internetSpeedStagePercent)
+    : internetSpeedDownloadPending
+      ? '--'
+      : formatSpeedDialValue(internetSpeedResult?.downloadBitsPerSecond);
+  const internetSpeedUploadDialDisplay = internetSpeedUploadIsActive
+    ? formatProgressDialValue(internetSpeedStagePercent)
+    : internetSpeedUploadPending
+      ? '--'
+      : formatSpeedDialValue(internetSpeedResult?.uploadBitsPerSecond);
+  const internetSpeedPingDialDisplay = internetSpeedPingIsActive
+    ? formatProgressDialValue(internetSpeedStagePercent)
+    : formatLatencyDialValue(internetSpeedResult?.pingMilliseconds);
+  const internetSpeedDownloadValue = internetSpeedDownloadIsActive
+    ? 'Measuring download'
+    : internetSpeedDownloadPending
+      ? 'Waiting to start'
+      : formatSpeedMbps(internetSpeedResult?.downloadBitsPerSecond);
+  const internetSpeedUploadValue = internetSpeedUploadIsActive
+    ? 'Measuring upload'
+    : internetSpeedUploadPending
+      ? 'Waiting to start'
+      : formatSpeedMbps(internetSpeedResult?.uploadBitsPerSecond);
+  const internetSpeedPingValue = internetSpeedPingIsActive
+    ? 'Measuring ping'
+    : formatLatency(internetSpeedResult?.pingMilliseconds);
+  const internetSpeedDownloadCaption = internetSpeedDownloadIsActive
+    ? internetSpeedRunningMessage ?? 'Download measurement in progress.'
+    : internetSpeedDownloadPending
+      ? 'Queued for this run.'
+      : formatTransferSize(internetSpeedResult?.bytesReceived, 'received');
+  const internetSpeedUploadCaption = internetSpeedUploadIsActive
+    ? internetSpeedRunningMessage ?? 'Upload measurement in progress.'
+    : internetSpeedUploadPending
+      ? 'Queued for this run.'
+      : formatTransferSize(internetSpeedResult?.bytesSent, 'sent');
+  const internetSpeedPingCaption = internetSpeedPingIsActive
+    ? internetSpeedRunningMessage ?? 'Ping measurement in progress.'
+    : undefined;
+  const internetSpeedDownloadDialGauge = internetSpeedDownloadIsActive
+    ? Math.max(internetSpeedStagePercent, 6)
+    : internetSpeedDownloadGauge;
+  const internetSpeedUploadDialGauge = internetSpeedUploadIsActive
+    ? Math.max(internetSpeedStagePercent, 6)
+    : internetSpeedUploadGauge;
+  const internetSpeedPingDialGauge = internetSpeedPingIsActive
+    ? Math.max(internetSpeedStagePercent, 6)
+    : internetSpeedPingGauge;
+  const internetSpeedPingTone = internetSpeedPingIsActive ? 'amber' : getLatencyTone(internetSpeedPing);
   const internetSpeedSummary = !internetSpeedTest?.supported
     ? internetSpeedTest?.statusMessage ?? 'Unavailable'
     : internetSpeedTest.isRunning
-      ? 'Test running'
+      ? getInternetSpeedRunningSummary(internetSpeedStage, internetSpeedStagePercent)
       : internetSpeedResult
         ? (
             <>
@@ -1792,19 +1880,27 @@ export function SystemPage() {
                         </div>
                       ) : null}
 
-                      {internetSpeedTest?.statusMessage ? (
+                      {internetSpeedTest?.isRunning ? (
+                        <div className='flex items-center justify-between gap-3 text-xs text-muted-foreground'>
+                          <span className='inline-flex min-w-0 items-center gap-2'>
+                            <LoaderCircle className='h-3.5 w-3.5 shrink-0 animate-spin text-primary' />
+                            <span className='truncate'>{internetSpeedRunningMessage}</span>
+                          </span>
+                          <span className='shrink-0 font-medium uppercase tracking-[0.18em] text-foreground/80'>
+                            {internetSpeedPercentComplete}%
+                          </span>
+                        </div>
+                      ) : null}
+
+                      {internetSpeedTest?.statusMessage && !internetSpeedTest.isRunning && (!internetSpeedTest.supported || internetSpeedTest.status === 'failed' || (!internetSpeedResult && internetSpeedTest.status !== 'succeeded')) ? (
                         <div className={cn(
                           'rounded-2xl border px-4 py-4',
-                          internetSpeedTest.isRunning
-                            ? 'border-primary/20 bg-primary/10 text-primary'
-                            : internetSpeedTest.status === 'failed'
-                              ? 'border-rose-500/20 bg-rose-500/10 text-rose-200'
-                              : 'border-border/70 bg-background/40 text-foreground'
+                          internetSpeedTest.status === 'failed'
+                            ? 'border-rose-500/20 bg-rose-500/10 text-rose-200'
+                            : 'border-border/70 bg-background/40 text-foreground'
                         )}>
                           <div className='flex items-start gap-3'>
-                            {internetSpeedTest.isRunning ? (
-                              <LoaderCircle className='mt-0.5 h-4 w-4 shrink-0 animate-spin' />
-                            ) : !internetSpeedTest.supported ? (
+                            {!internetSpeedTest.supported ? (
                               <CircleAlert className='mt-0.5 h-4 w-4 shrink-0' />
                             ) : internetSpeedTest.status === 'failed' ? (
                               <CircleAlert className='mt-0.5 h-4 w-4 shrink-0' />
@@ -1813,27 +1909,15 @@ export function SystemPage() {
                             )}
                             <div className='min-w-0'>
                               <div className='text-sm font-semibold'>
-                                {internetSpeedTest.isRunning
-                                  ? 'Speed test running. Please wait.'
-                                  : !internetSpeedTest.supported
-                                    ? 'Speed test unavailable'
+                                {!internetSpeedTest.supported
+                                  ? 'Speed test unavailable'
                                   : internetSpeedTest.status === 'failed'
                                     ? 'Speed test did not finish'
-                                    : 'Latest saved speed test'}
+                                    : 'Internet speed ready'}
                               </div>
                               <div className='mt-1 text-xs opacity-85'>
                                 {internetSpeedTest.statusMessage}
                               </div>
-                              {internetSpeedTest.isRunning ? (
-                                <div className='mt-3'>
-                                  <div className='mb-1.5 text-[10px] font-medium uppercase tracking-[0.18em] opacity-75'>
-                                    Measuring ping, download, then upload
-                                  </div>
-                                  <div className='h-2 overflow-hidden rounded-full bg-background/35'>
-                                    <div className='h-full w-2/3 rounded-full bg-current animate-pulse' />
-                                  </div>
-                                </div>
-                              ) : null}
                             </div>
                           </div>
                         </div>
@@ -1843,28 +1927,32 @@ export function SystemPage() {
                         <SpeedMetricCard
                           icon={Download}
                           label='Download'
-                          value={formatSpeedMbps(internetSpeedResult?.downloadBitsPerSecond)}
-                          dialValue={formatSpeedDialValue(internetSpeedResult?.downloadBitsPerSecond)}
-                          caption={formatTransferSize(internetSpeedResult?.bytesReceived, 'received')}
-                          gaugePercent={internetSpeedDownloadGauge}
+                          value={internetSpeedDownloadValue}
+                          dialValue={internetSpeedDownloadDialDisplay}
+                          caption={internetSpeedDownloadCaption}
+                          gaugePercent={internetSpeedDownloadDialGauge}
                           tone='emerald'
+                          isActive={internetSpeedDownloadIsActive}
                         />
                         <SpeedMetricCard
                           icon={Upload}
                           label='Upload'
-                          value={formatSpeedMbps(internetSpeedResult?.uploadBitsPerSecond)}
-                          dialValue={formatSpeedDialValue(internetSpeedResult?.uploadBitsPerSecond)}
-                          caption={formatTransferSize(internetSpeedResult?.bytesSent, 'sent')}
-                          gaugePercent={internetSpeedUploadGauge}
+                          value={internetSpeedUploadValue}
+                          dialValue={internetSpeedUploadDialDisplay}
+                          caption={internetSpeedUploadCaption}
+                          gaugePercent={internetSpeedUploadDialGauge}
                           tone='sky'
+                          isActive={internetSpeedUploadIsActive}
                         />
                         <SpeedMetricCard
                           icon={Gauge}
                           label='Ping'
-                          value={formatLatency(internetSpeedResult?.pingMilliseconds)}
-                          dialValue={formatLatencyDialValue(internetSpeedResult?.pingMilliseconds)}
-                          gaugePercent={internetSpeedPingGauge}
-                          tone={getLatencyTone(internetSpeedPing)}
+                          value={internetSpeedPingValue}
+                          dialValue={internetSpeedPingDialDisplay}
+                          caption={internetSpeedPingCaption}
+                          gaugePercent={internetSpeedPingDialGauge}
+                          tone={internetSpeedPingTone}
+                          isActive={internetSpeedPingIsActive}
                         />
                       </div>
 
@@ -2834,6 +2922,7 @@ function SpeedMetricCard({
   caption,
   gaugePercent,
   tone,
+  isActive = false,
 }: {
   icon: typeof Cpu;
   label: string;
@@ -2842,6 +2931,7 @@ function SpeedMetricCard({
   caption?: string;
   gaugePercent: number;
   tone: 'emerald' | 'sky' | 'emerald-soft' | 'amber' | 'rose';
+  isActive?: boolean;
 }) {
   const circumference = 2 * Math.PI * 36;
   const offset = circumference - ((Math.max(0, Math.min(100, gaugePercent)) / 100) * circumference);
@@ -2856,7 +2946,10 @@ function SpeedMetricCard({
           : 'text-emerald-300';
 
   return (
-    <div className='rounded-[28px] border border-border/70 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.07),transparent_55%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent)] px-4 py-4'>
+    <div className={cn(
+      'rounded-[28px] border border-border/70 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.07),transparent_55%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent)] px-4 py-4 transition-colors duration-300',
+      isActive && 'border-primary/35 bg-primary/5'
+    )}>
       <div className='flex items-center justify-between gap-3'>
         <div className='flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
           <Icon className='h-3.5 w-3.5' />
@@ -3353,6 +3446,38 @@ function getLatencyTone(milliseconds: number | null | undefined): 'emerald-soft'
   }
 
   return 'rose';
+}
+
+function clampPercent(value: number | null | undefined) {
+  if (value == null || !Number.isFinite(value)) {
+    return 0;
+  }
+
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function formatProgressDialValue(percent: number | null | undefined) {
+  return `${clampPercent(percent)}%`;
+}
+
+function getInternetSpeedActiveMetric(stage: string | null | undefined): 'download' | 'upload' | 'ping' {
+  if (stage === 'download' || stage === 'upload') {
+    return stage;
+  }
+
+  return 'ping';
+}
+
+function getInternetSpeedStageLabel(stage: string | null | undefined) {
+  return stage === 'download'
+    ? 'Download'
+    : stage === 'upload'
+      ? 'Upload'
+      : 'Ping';
+}
+
+function getInternetSpeedRunningSummary(stage: string | null | undefined, stagePercentComplete: number | null | undefined) {
+  return `${getInternetSpeedStageLabel(stage)} ${clampPercent(stagePercentComplete)}%`;
 }
 
 function formatRpm(value: number | null | undefined) {

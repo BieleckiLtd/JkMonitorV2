@@ -1,5 +1,6 @@
-using System.Text.Json;
 using System.Globalization;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using FluxMonitor.Backend.Models;
 
 namespace FluxMonitor.Backend.Services;
@@ -11,6 +12,8 @@ public sealed class InternetSpeedTestService(
 {
     private static readonly TimeSpan CommandAvailabilityCacheDuration = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan SpeedTestTimeout = TimeSpan.FromMinutes(3);
+    private const int ProgressStepCount = 3;
+    private static readonly JsonSerializerOptions ProgressSerializerOptions = new(JsonSerializerDefaults.Web);
     private readonly Lock _stateLock = new();
     private readonly SemaphoreSlim _latestResultInitializationLock = new(1, 1);
     private InternetSpeedTestSnapshot _snapshot = BuildUnsupportedSnapshot(
@@ -84,6 +87,7 @@ public sealed class InternetSpeedTestService(
 
         InternetSpeedTestSnapshot snapshotToReturn;
         var shouldStart = false;
+        InternetSpeedTestResult? previousResult = null;
 
         lock (_stateLock)
         {
@@ -98,19 +102,15 @@ public sealed class InternetSpeedTestService(
             }
 
             var startedAt = DateTimeOffset.UtcNow;
-            _snapshot = new InternetSpeedTestSnapshot
-            {
-                Supported = true,
-                Status = "running",
-                Backend = "speedtest-cli",
-                CanStart = false,
-                IsRunning = true,
-                StatusMessage = "Internet speed test in progress. This can take up to a minute. Please wait for the full result.",
-                StartedAt = startedAt,
-                CompletedAt = null,
-                LastUpdatedAt = startedAt,
-                Result = _snapshot.Result
-            };
+            previousResult = _snapshot.Result;
+            _snapshot = BuildRunningSnapshot(
+                startedAt,
+                null,
+                "Loading speed test configuration.",
+                stage: "ping",
+                stepIndex: 1,
+                stagePercentComplete: 0,
+                percentComplete: 0);
 
             snapshotToReturn = _snapshot;
             shouldStart = true;
@@ -118,51 +118,65 @@ public sealed class InternetSpeedTestService(
 
         if (shouldStart)
         {
-            _ = RunSpeedTestAsync(snapshotToReturn.StartedAt ?? DateTimeOffset.UtcNow);
+            _ = RunSpeedTestAsync(snapshotToReturn.StartedAt ?? DateTimeOffset.UtcNow, previousResult);
         }
 
         return new InternetSpeedTestCommandResult
         {
             Success = true,
-            Message = "Internet speed test started. This can take up to a minute. Please wait for the result.",
+            Message = "Internet speed test started. The dials will update as ping, download, and upload progress.",
             Snapshot = snapshotToReturn
         };
     }
 
-    internal async Task RunSpeedTestAsync(DateTimeOffset startedAt)
+    internal async Task RunSpeedTestAsync(DateTimeOffset startedAt, InternetSpeedTestResult? fallbackResult = null)
     {
         try
         {
             logger.LogInformation("Starting internet speed test via speedtest-cli.");
 
             using var timeoutCancellation = new CancellationTokenSource(SpeedTestTimeout);
-            var result = await commandRunner.RunAsync(
-                "speedtest-cli",
-                ["--json", "--secure", "--no-pre-allocate", "--timeout", "15"],
+            InternetSpeedTestResult? latestProgressResult = null;
+            var result = await commandRunner.RunStreamingAsync(
+                "python3",
+                BuildSpeedTestHelperArguments(),
+                async outputLine =>
+                {
+                    if (TryParseProgressEvent(outputLine.Line, out var progressEvent))
+                    {
+                        if (progressEvent.Result is JsonElement { ValueKind: JsonValueKind.Object } progressResult)
+                        {
+                            latestProgressResult = ParseResult(progressResult.GetRawText());
+                        }
+
+                        UpdateProgressSnapshot(
+                            startedAt,
+                            progressEvent,
+                            latestProgressResult,
+                            fallbackResult);
+                    }
+
+                    await ValueTask.CompletedTask;
+                },
                 timeoutCancellation.Token);
 
             if (!result.Succeeded)
             {
-                CompleteWithFailure(startedAt, BuildCommandFailureMessage(result));
+                CompleteWithFailure(startedAt, BuildCommandFailureMessage(result), fallbackResult);
                 return;
             }
 
-            InternetSpeedTestResult parsedResult;
-            try
+            if (latestProgressResult is null)
             {
-                parsedResult = ParseResult(result.StandardOutput);
-            }
-            catch (Exception exception)
-            {
-                logger.LogWarning(exception, "speedtest-cli returned output that could not be parsed.");
-                CompleteWithFailure(startedAt, "The internet speed test completed, but the device could not read the result.");
+                logger.LogWarning("speedtest-cli completed without returning a structured result payload.");
+                CompleteWithFailure(startedAt, "The internet speed test completed, but the device could not read the result.", fallbackResult);
                 return;
             }
 
             var completedAt = DateTimeOffset.UtcNow;
-            var persistedResult = parsedResult with
+            var persistedResult = latestProgressResult with
             {
-                TestedAt = parsedResult.TestedAt ?? completedAt
+                TestedAt = latestProgressResult.TestedAt ?? completedAt
             };
 
             try
@@ -191,24 +205,28 @@ public sealed class InternetSpeedTestService(
                     StartedAt = startedAt,
                     CompletedAt = completedAt,
                     LastUpdatedAt = completedAt,
+                    StepIndex = ProgressStepCount,
+                    StepCount = ProgressStepCount,
+                    StagePercentComplete = 100,
+                    PercentComplete = 100,
                     Result = persistedResult
                 };
             }
 
             logger.LogInformation(
                 "Internet speed test completed. DownloadBitsPerSecond={DownloadBitsPerSecond}, UploadBitsPerSecond={UploadBitsPerSecond}, PingMilliseconds={PingMilliseconds}",
-                parsedResult.DownloadBitsPerSecond,
-                parsedResult.UploadBitsPerSecond,
-                parsedResult.PingMilliseconds);
+                latestProgressResult.DownloadBitsPerSecond,
+                latestProgressResult.UploadBitsPerSecond,
+                latestProgressResult.PingMilliseconds);
         }
         catch (OperationCanceledException)
         {
-            CompleteWithFailure(startedAt, "The internet speed test timed out before it could finish.");
+            CompleteWithFailure(startedAt, "The internet speed test timed out before it could finish.", fallbackResult);
         }
         catch (Exception exception)
         {
             logger.LogWarning(exception, "Internet speed test failed unexpectedly.");
-            CompleteWithFailure(startedAt, "The internet speed test could not be completed on this device.");
+            CompleteWithFailure(startedAt, "The internet speed test could not be completed on this device.", fallbackResult);
         }
     }
 
@@ -260,7 +278,7 @@ public sealed class InternetSpeedTestService(
         }
     }
 
-    internal void CompleteWithFailure(DateTimeOffset startedAt, string message)
+    internal void CompleteWithFailure(DateTimeOffset startedAt, string message, InternetSpeedTestResult? fallbackResult = null)
     {
         logger.LogWarning("Internet speed test failed: {Message}", message);
 
@@ -279,7 +297,7 @@ public sealed class InternetSpeedTestService(
                 StartedAt = startedAt,
                 CompletedAt = completedAt,
                 LastUpdatedAt = completedAt,
-                Result = _snapshot.Result
+                Result = fallbackResult ?? _snapshot.Result
             };
         }
     }
@@ -390,6 +408,121 @@ public sealed class InternetSpeedTestService(
         };
     }
 
+    private static InternetSpeedTestSnapshot BuildRunningSnapshot(
+        DateTimeOffset startedAt,
+        InternetSpeedTestResult? result,
+        string statusMessage,
+        string stage,
+        int stepIndex,
+        int stagePercentComplete,
+        int percentComplete)
+    {
+        return new InternetSpeedTestSnapshot
+        {
+            Supported = true,
+            Status = "running",
+            Backend = "speedtest-cli",
+            CanStart = false,
+            IsRunning = true,
+            StatusMessage = statusMessage,
+            StartedAt = startedAt,
+            CompletedAt = null,
+            LastUpdatedAt = DateTimeOffset.UtcNow,
+            Stage = stage,
+            StepIndex = stepIndex,
+            StepCount = ProgressStepCount,
+            StagePercentComplete = stagePercentComplete,
+            PercentComplete = percentComplete,
+            Result = result
+        };
+    }
+
+    private static IReadOnlyList<string> BuildSpeedTestHelperArguments()
+    {
+        return
+        [
+            "-u",
+            Path.Combine(AppContext.BaseDirectory, "tools", "speedtest_progress.py"),
+            "--timeout",
+            "15",
+            "--secure",
+            "--no-pre-allocate"
+        ];
+    }
+
+    private void UpdateProgressSnapshot(
+        DateTimeOffset startedAt,
+        InternetSpeedTestProgressEvent progressEvent,
+        InternetSpeedTestResult? progressResult,
+        InternetSpeedTestResult? fallbackResult)
+    {
+        var stage = string.IsNullOrWhiteSpace(progressEvent.Stage) ? "ping" : progressEvent.Stage;
+        var stepIndex = progressEvent.StepIndex ?? GetStepIndex(stage);
+        var stagePercentComplete = ClampPercent(progressEvent.StagePercentComplete);
+        var percentComplete = ClampPercent(progressEvent.PercentComplete);
+        var statusMessage = string.IsNullOrWhiteSpace(progressEvent.StatusMessage)
+            ? _snapshot.StatusMessage ?? "Internet speed test in progress."
+            : progressEvent.StatusMessage;
+
+        lock (_stateLock)
+        {
+            _snapshot = BuildRunningSnapshot(
+                startedAt,
+                progressResult ?? fallbackResult ?? _snapshot.Result,
+                statusMessage,
+                stage,
+                stepIndex,
+                stagePercentComplete,
+                percentComplete);
+        }
+    }
+
+    private static bool TryParseProgressEvent(string line, out InternetSpeedTestProgressEvent progressEvent)
+    {
+        progressEvent = default!;
+
+        if (string.IsNullOrWhiteSpace(line) || !line.TrimStart().StartsWith('{'))
+        {
+            return false;
+        }
+
+        try
+        {
+            var parsedEvent = JsonSerializer.Deserialize<InternetSpeedTestProgressEvent>(line, ProgressSerializerOptions);
+            if (parsedEvent is null)
+            {
+                return false;
+            }
+
+            progressEvent = parsedEvent;
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static int GetStepIndex(string? stage)
+    {
+        return stage?.ToLowerInvariant() switch
+        {
+            "download" => 2,
+            "upload" => 3,
+            _ => 1
+        };
+    }
+
+    private static int ClampPercent(int? value)
+    {
+        if (!value.HasValue)
+        {
+            return 0;
+        }
+
+        return Math.Max(0, Math.Min(100, value.Value));
+    }
+
     private static string BuildCommandFailureMessage(CommandResult result)
     {
         var output = string.IsNullOrWhiteSpace(result.StandardError)
@@ -401,7 +534,15 @@ public sealed class InternetSpeedTestService(
             return "The internet speed test could not be completed on this device.";
         }
 
-        var message = output.Trim();
+        var message = output
+            .Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .LastOrDefault()
+            ?? output.Trim();
+
+        if (message.StartsWith("ERROR: ", StringComparison.OrdinalIgnoreCase))
+        {
+            message = message["ERROR: ".Length..];
+        }
 
         if (message.Contains("Cannot retrieve speedtest configuration", StringComparison.OrdinalIgnoreCase)
             || message.Contains("HTTP Error", StringComparison.OrdinalIgnoreCase)
@@ -482,5 +623,29 @@ public sealed class InternetSpeedTestService(
         return DateTimeOffset.TryParse(value.GetString(), out var parsedValue)
             ? parsedValue
             : null;
+    }
+
+    private sealed record class InternetSpeedTestProgressEvent
+    {
+        [JsonPropertyName("stage")]
+        public string? Stage { get; init; }
+
+        [JsonPropertyName("statusMessage")]
+        public string? StatusMessage { get; init; }
+
+        [JsonPropertyName("stepIndex")]
+        public int? StepIndex { get; init; }
+
+        [JsonPropertyName("stepCount")]
+        public int? StepCount { get; init; }
+
+        [JsonPropertyName("stagePercentComplete")]
+        public int? StagePercentComplete { get; init; }
+
+        [JsonPropertyName("percentComplete")]
+        public int? PercentComplete { get; init; }
+
+        [JsonPropertyName("result")]
+        public JsonElement? Result { get; init; }
     }
 }

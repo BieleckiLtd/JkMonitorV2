@@ -1,3 +1,4 @@
+using System.Text.Json;
 using FluxMonitor.Backend.Services;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -53,13 +54,21 @@ public sealed class InternetSpeedTestServiceTests
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         var store = new StubInternetSpeedTestStore();
-        var runner = new StubCommandRunner(new CommandResult(
-            true,
-            """
+        var payload = """
             {"download":98000000.0,"upload":41000000.0,"ping":14.2,"server":{"id":"77","sponsor":"Host","name":"Manchester","country":"United Kingdom","d":"12.8","latency":14.2},"timestamp":"2026-03-29T17:45:12.123456Z","bytes_sent":4100000,"bytes_received":9800000,"share":null,"client":{"ip":"203.0.113.7","isp":"ISP","country":"GB"}}
-            """,
-            string.Empty,
-            0));
+            """;
+        var runner = new StubCommandRunner(
+            runStreamingAsync: async (_fileName, _arguments, onOutput, _cancellationToken) =>
+            {
+                if (onOutput is not null)
+                {
+                    await onOutput(new CommandOutputLine(BuildProgressLine("ping", 100, 33, "Ping measured. Starting download test.", payload), false));
+                    await onOutput(new CommandOutputLine(BuildProgressLine("download", 100, 67, "Download measured. Starting upload test.", payload), false));
+                    await onOutput(new CommandOutputLine(BuildProgressLine("upload", 100, 100, "Upload measured. Finalizing result.", payload), false));
+                }
+
+                return new CommandResult(true, string.Empty, string.Empty, 0);
+            });
         var service = new InternetSpeedTestService(runner, store, NullLogger<InternetSpeedTestService>.Instance);
 
         await service.RunSpeedTestAsync(DateTimeOffset.Parse("2026-03-29T17:44:00Z"));
@@ -70,6 +79,7 @@ public sealed class InternetSpeedTestServiceTests
         Assert.False(snapshot.IsRunning);
         Assert.True(snapshot.CanStart);
         Assert.NotNull(snapshot.CompletedAt);
+        Assert.Equal(100, snapshot.PercentComplete);
         Assert.Equal(98_000_000.0, snapshot.Result?.DownloadBitsPerSecond);
         Assert.Equal(41_000_000.0, snapshot.Result?.UploadBitsPerSecond);
         Assert.Equal("Manchester", snapshot.Result?.Server?.Name);
@@ -77,15 +87,69 @@ public sealed class InternetSpeedTestServiceTests
     }
 
     [Fact]
+    public async Task RunSpeedTestAsync_UpdatesSnapshotWhileProgressIsStreaming()
+    {
+        var cancellationToken = TestContext.Current.CancellationToken;
+        var store = new StubInternetSpeedTestStore();
+        var pauseStreaming = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var progressObserved = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var partialPayload = """
+            {"download":null,"upload":null,"ping":18.4,"server":{"id":"77","sponsor":"Host","name":"Manchester","country":"United Kingdom","d":"12.8","latency":18.4},"timestamp":null,"bytes_sent":null,"bytes_received":null,"share":null,"client":{"ip":"203.0.113.7","isp":"ISP","country":"GB"}}
+            """;
+        var finalPayload = """
+            {"download":98000000.0,"upload":41000000.0,"ping":18.4,"server":{"id":"77","sponsor":"Host","name":"Manchester","country":"United Kingdom","d":"12.8","latency":18.4},"timestamp":"2026-03-29T17:45:12.123456Z","bytes_sent":4100000,"bytes_received":9800000,"share":null,"client":{"ip":"203.0.113.7","isp":"ISP","country":"GB"}}
+            """;
+        var runner = new StubCommandRunner(
+            runStreamingAsync: async (_fileName, _arguments, onOutput, cancellationToken) =>
+            {
+                if (onOutput is not null)
+                {
+                    await onOutput(new CommandOutputLine(BuildProgressLine("ping", 100, 33, "Ping measured. Starting download test.", partialPayload), false));
+                    await onOutput(new CommandOutputLine(BuildProgressLine("download", 45, 48, "Measuring download speed.", partialPayload), false));
+                    progressObserved.TrySetResult();
+                    await pauseStreaming.Task.WaitAsync(cancellationToken);
+                    await onOutput(new CommandOutputLine(BuildProgressLine("upload", 100, 100, "Upload measured. Finalizing result.", finalPayload), false));
+                }
+
+                return new CommandResult(true, string.Empty, string.Empty, 0);
+            });
+        var service = new InternetSpeedTestService(runner, store, NullLogger<InternetSpeedTestService>.Instance);
+
+        var runTask = service.RunSpeedTestAsync(DateTimeOffset.Parse("2026-03-29T17:44:00Z"));
+
+        await progressObserved.Task.WaitAsync(cancellationToken);
+        var snapshot = await service.GetSnapshotAsync(cancellationToken);
+
+        Assert.True(snapshot.IsRunning);
+        Assert.Equal("running", snapshot.Status);
+        Assert.Equal("download", snapshot.Stage);
+        Assert.Equal(2, snapshot.StepIndex);
+        Assert.Equal(3, snapshot.StepCount);
+        Assert.Equal(45, snapshot.StagePercentComplete);
+        Assert.Equal(48, snapshot.PercentComplete);
+        Assert.Equal(18.4, snapshot.Result?.PingMilliseconds);
+        Assert.Null(snapshot.Result?.DownloadBitsPerSecond);
+
+        pauseStreaming.TrySetResult();
+        await runTask;
+
+        var completedSnapshot = await service.GetSnapshotAsync(cancellationToken);
+        Assert.Equal("succeeded", completedSnapshot.Status);
+        Assert.Equal(98_000_000.0, completedSnapshot.Result?.DownloadBitsPerSecond);
+    }
+
+    [Fact]
     public async Task RunSpeedTestAsync_StoresFailureSnapshot_WhenCommandFails()
     {
         var cancellationToken = TestContext.Current.CancellationToken;
         var store = new StubInternetSpeedTestStore();
-        var runner = new StubCommandRunner(new CommandResult(
-            false,
-            string.Empty,
-            "Cannot retrieve speedtest configuration",
-            1));
+        var runner = new StubCommandRunner(
+            runStreamingAsync: (_fileName, _arguments, _onOutput, _cancellationToken) =>
+                Task.FromResult(new CommandResult(
+                    false,
+                    string.Empty,
+                    "Cannot retrieve speedtest configuration",
+                    1)));
         var service = new InternetSpeedTestService(runner, store, NullLogger<InternetSpeedTestService>.Instance);
 
         await service.RunSpeedTestAsync(DateTimeOffset.Parse("2026-03-29T17:44:00Z"));
@@ -119,7 +183,7 @@ public sealed class InternetSpeedTestServiceTests
             }
         };
         var service = new InternetSpeedTestService(
-            new StubCommandRunner(new CommandResult(true, "speedtest-cli 2.1.3", string.Empty, 0)),
+            new StubCommandRunner(),
             store,
             NullLogger<InternetSpeedTestService>.Instance);
 
@@ -131,11 +195,53 @@ public sealed class InternetSpeedTestServiceTests
         Assert.Equal(21.5, snapshot.Result?.PingMilliseconds);
     }
 
-    private sealed class StubCommandRunner(CommandResult result) : ICommandRunner
+    private static string BuildProgressLine(
+        string stage,
+        int stagePercentComplete,
+        int percentComplete,
+        string statusMessage,
+        string resultPayload)
+    {
+        using var resultDocument = JsonDocument.Parse(resultPayload);
+        var stepIndex = stage switch
+        {
+            "download" => 2,
+            "upload" => 3,
+            _ => 1
+        };
+
+        return JsonSerializer.Serialize(new
+        {
+            stage,
+            statusMessage,
+            stepIndex,
+            stepCount = 3,
+            stagePercentComplete,
+            percentComplete,
+            result = resultDocument.RootElement.Clone()
+        });
+    }
+
+    private sealed class StubCommandRunner(
+        Func<string, IReadOnlyList<string>, CancellationToken, Task<CommandResult>>? runAsync = null,
+        Func<string, IReadOnlyList<string>, Func<CommandOutputLine, ValueTask>?, CancellationToken, Task<CommandResult>>? runStreamingAsync = null) : ICommandRunner
     {
         public Task<CommandResult> RunAsync(string fileName, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
         {
-            return Task.FromResult(result);
+            return runAsync is not null
+                ? runAsync(fileName, arguments, cancellationToken)
+                : Task.FromResult(new CommandResult(true, string.Empty, string.Empty, 0));
+        }
+
+        public Task<CommandResult> RunStreamingAsync(
+            string fileName,
+            IReadOnlyList<string> arguments,
+            Func<CommandOutputLine, ValueTask>? onOutput,
+            CancellationToken cancellationToken)
+        {
+            return runStreamingAsync is not null
+                ? runStreamingAsync(fileName, arguments, onOutput, cancellationToken)
+                : Task.FromResult(new CommandResult(true, string.Empty, string.Empty, 0));
         }
     }
 

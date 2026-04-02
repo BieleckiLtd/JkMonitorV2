@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.RegularExpressions;
 using FluxMonitor.Backend.Models;
 
@@ -465,6 +466,12 @@ public sealed class CloudflareTunnelService(
 public interface ICommandRunner
 {
     Task<CommandResult> RunAsync(string fileName, IReadOnlyList<string> arguments, CancellationToken cancellationToken);
+
+    Task<CommandResult> RunStreamingAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        Func<CommandOutputLine, ValueTask>? onOutput,
+        CancellationToken cancellationToken);
 }
 
 public sealed class ProcessCommandRunner : ICommandRunner
@@ -530,6 +537,114 @@ public sealed class ProcessCommandRunner : ICommandRunner
             throw;
         }
     }
+
+    public async Task<CommandResult> RunStreamingAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        Func<CommandOutputLine, ValueTask>? onOutput,
+        CancellationToken cancellationToken)
+    {
+        using var process = new Process
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = fileName,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            }
+        };
+
+        foreach (var argument in arguments)
+        {
+            process.StartInfo.ArgumentList.Add(argument);
+        }
+
+        try
+        {
+            process.Start();
+        }
+        catch (Exception exception)
+        {
+            return new CommandResult(false, string.Empty, exception.Message, null);
+        }
+
+        var standardOutput = new StringBuilder();
+        var standardError = new StringBuilder();
+
+        try
+        {
+            var standardOutputTask = ReadOutputAsync(
+                process.StandardOutput,
+                standardOutput,
+                isError: false,
+                onOutput,
+                cancellationToken);
+            var standardErrorTask = ReadOutputAsync(
+                process.StandardError,
+                standardError,
+                isError: true,
+                onOutput,
+                cancellationToken);
+
+            await process.WaitForExitAsync(cancellationToken);
+            await Task.WhenAll(standardOutputTask, standardErrorTask);
+
+            return new CommandResult(
+                process.ExitCode == 0,
+                standardOutput.ToString(),
+                standardError.ToString(),
+                process.ExitCode);
+        }
+        catch (OperationCanceledException)
+        {
+            try
+            {
+                if (!process.HasExited)
+                {
+                    process.Kill(entireProcessTree: true);
+                }
+            }
+            catch
+            {
+                // Best effort.
+            }
+
+            throw;
+        }
+    }
+
+    private static async Task ReadOutputAsync(
+        StreamReader reader,
+        StringBuilder builder,
+        bool isError,
+        Func<CommandOutputLine, ValueTask>? onOutput,
+        CancellationToken cancellationToken)
+    {
+        while (true)
+        {
+            var line = await reader.ReadLineAsync(cancellationToken);
+            if (line is null)
+            {
+                return;
+            }
+
+            if (builder.Length > 0)
+            {
+                builder.AppendLine();
+            }
+
+            builder.Append(line);
+
+            if (onOutput is not null)
+            {
+                await onOutput(new CommandOutputLine(line, isError));
+            }
+        }
+    }
 }
+
+public sealed record CommandOutputLine(string Line, bool IsError);
 
 public sealed record CommandResult(bool Succeeded, string StandardOutput, string StandardError, int? ExitCode);

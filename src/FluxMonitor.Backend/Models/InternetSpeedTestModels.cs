@@ -20,6 +20,16 @@ public sealed record class InternetSpeedTestSnapshot
 
     public DateTimeOffset? LastUpdatedAt { get; init; }
 
+    public string? Stage { get; init; }
+
+    public int? StepIndex { get; init; }
+
+    public int? StepCount { get; init; }
+
+    public int? StagePercentComplete { get; init; }
+
+    public int? PercentComplete { get; init; }
+
     public InternetSpeedTestResult? Result { get; init; }
 }
 
