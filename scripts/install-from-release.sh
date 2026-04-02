@@ -748,6 +748,35 @@ install_timescaledb_package_for_local_postgres() {
   local package_name
 
   if timescaledb_is_available_on_server; then
+    local oss_package="timescaledb-2-oss-postgresql-$postgres_major"
+    local community_package="timescaledb-2-postgresql-$postgres_major"
+
+    if dpkg -l "$oss_package" 2>/dev/null | grep -q "^ii" \
+       && ! dpkg -l "$community_package" 2>/dev/null | grep -q "^ii"; then
+      section 'Upgrading TimescaleDB from Apache (OSS) to Community Edition' >&2
+      info "Community Edition enables native compression for reduced storage." >&2
+
+      download_file "$TIMESCALE_REPOSITORY_SETUP_URL" "$repo_setup_script"
+      run_elevated bash "$repo_setup_script" >&2
+      run_elevated apt-get update >&2
+
+      info "Removing $oss_package" >&2
+      run_elevated apt-get remove -y "$oss_package" >&2
+
+      info "Installing $community_package" >&2
+      run_elevated apt-get install -y "$community_package" >&2
+
+      if command -v systemctl >/dev/null 2>&1; then
+        run_elevated systemctl restart postgresql >/dev/null 2>&1 || true
+      fi
+
+      if dpkg -l "$community_package" 2>/dev/null | grep -q "^ii"; then
+        success "Upgraded to TimescaleDB Community Edition ($community_package)." >&2
+      else
+        warn "TimescaleDB Community package '$community_package' could not be installed. Continuing with OSS edition." >&2
+      fi
+    fi
+
     return 0
   fi
 
@@ -795,15 +824,13 @@ ensure_timescaledb_for_local_database() {
     return 1
   fi
 
-  if ! timescaledb_is_available_on_server; then
-    postgres_major="$(get_postgres_server_major_version)"
-    if [ -z "$postgres_major" ]; then
-      warn 'PostgreSQL is installed, but the server major version could not be detected for TimescaleDB package installation.' >&2
-      return 1
-    fi
-
-    install_timescaledb_package_for_local_postgres "$postgres_major" || return 1
+  postgres_major="$(get_postgres_server_major_version)"
+  if [ -z "$postgres_major" ]; then
+    warn 'PostgreSQL is installed, but the server major version could not be detected for TimescaleDB package installation.' >&2
+    return 1
   fi
+
+  install_timescaledb_package_for_local_postgres "$postgres_major" || return 1
 
   if timescaledb_is_enabled_for_database "$database_name"; then
     success "TimescaleDB is already enabled for database '$database_name'." >&2
