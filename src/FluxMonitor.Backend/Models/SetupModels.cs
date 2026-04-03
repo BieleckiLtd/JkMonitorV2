@@ -47,3 +47,46 @@ public sealed record class SaveDeviceConfigurationRequest
 {
     public IReadOnlyList<DeviceConfiguration> Devices { get; init; } = [];
 }
+
+public sealed record class DatabaseSettingsStateResponse
+{
+    public required string EnvironmentName { get; init; }
+
+    public required string StorageProvider { get; init; }
+
+    public required bool DatabaseConfigured { get; init; }
+
+    public required int RawSecondsWindowMinutes { get; init; }
+
+    public required int OneMinuteWindowHours { get; init; }
+
+    public required int FiveMinuteWindowDays { get; init; }
+
+    public required int CompressAfterMinutes { get; init; }
+
+    public required bool CanAutoRestart { get; init; }
+
+    public required string ApplyMessage { get; init; }
+}
+
+public sealed record class SaveDatabaseSettingsRequest
+{
+    public required int RawSecondsWindowMinutes { get; init; }
+
+    public required int OneMinuteWindowHours { get; init; }
+
+    public required int FiveMinuteWindowDays { get; init; }
+
+    public required int CompressAfterMinutes { get; init; }
+
+    public bool RestartApplication { get; init; } = true;
+}
+
+public sealed record class SaveDatabaseSettingsResponse
+{
+    public required bool RestartScheduled { get; init; }
+
+    public required string Message { get; init; }
+
+    public required DatabaseSettingsStateResponse Settings { get; init; }
+}

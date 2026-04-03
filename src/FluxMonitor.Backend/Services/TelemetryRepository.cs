@@ -476,6 +476,9 @@ public sealed class TimescaleTelemetryRepository(
         DateTimeOffset? fiveMinuteCutoff = _retention.FiveMinuteWindowDays > 0
             ? now.Subtract(TimeSpan.FromDays(_retention.FiveMinuteWindowDays))
             : null;
+        var oneMinuteStats = (Batches: 0, SourceRows: 0L, RollupRows: 0L, HitBatchLimit: false);
+        var fiveMinuteStats = (Batches: 0, SourceRows: 0L, RollupRows: 0L, HitBatchLimit: false);
+        var deleteStats = (DeletedRows: 0L, Batches: 0);
 
         await using var connection = new NpgsqlConnection(_storage.ConnectionString);
         await connection.OpenAsync(cancellationToken);
@@ -483,7 +486,7 @@ public sealed class TimescaleTelemetryRepository(
         if (_retention.OneMinuteWindowHours > 0 &&
             TryGetAlignedRollupWindow(oneMinuteCutoff, rawCutoff, "1m") is { } oneMinuteWindow)
         {
-            await RollupMeasurementsAsync(
+            oneMinuteStats = await RollupMeasurementsAsync(
                 connection,
                 oneMinuteWindow.FromInclusive,
                 oneMinuteWindow.ToExclusive,
@@ -494,7 +497,7 @@ public sealed class TimescaleTelemetryRepository(
         if (fiveMinuteCutoff is not null &&
             TryGetAlignedRollupWindow(fiveMinuteCutoff.Value, oneMinuteCutoff, "5m") is { } fiveMinuteWindow)
         {
-            await RollupMeasurementsAsync(
+            fiveMinuteStats = await RollupMeasurementsAsync(
                 connection,
                 fiveMinuteWindow.FromInclusive,
                 fiveMinuteWindow.ToExclusive,
@@ -504,7 +507,7 @@ public sealed class TimescaleTelemetryRepository(
 
         if (fiveMinuteCutoff is not null)
         {
-            await DeleteOlderThanAsync(
+            deleteStats = await DeleteOlderThanAsync(
                 connection,
                 "Measurements",
                 "Time",
@@ -512,7 +515,21 @@ public sealed class TimescaleTelemetryRepository(
                 cancellationToken);
         }
 
-        logger.LogDebug("Retention sweep completed.");
+        logger.LogInformation(
+            "Retention sweep details: rawCutoff={RawCutoff}, oneMinuteCutoff={OneMinuteCutoff}, fiveMinuteCutoff={FiveMinuteCutoff}, oneMinuteBatches={OneMinuteBatches}, oneMinuteSourceRows={OneMinuteSourceRows}, oneMinuteRollupRows={OneMinuteRollupRows}, oneMinuteHitBatchLimit={OneMinuteHitBatchLimit}, fiveMinuteBatches={FiveMinuteBatches}, fiveMinuteSourceRows={FiveMinuteSourceRows}, fiveMinuteRollupRows={FiveMinuteRollupRows}, fiveMinuteHitBatchLimit={FiveMinuteHitBatchLimit}, purgedRows={PurgedRows}, purgeBatches={PurgeBatches}.",
+            rawCutoff,
+            oneMinuteCutoff,
+            fiveMinuteCutoff,
+            oneMinuteStats.Batches,
+            oneMinuteStats.SourceRows,
+            oneMinuteStats.RollupRows,
+            oneMinuteStats.HitBatchLimit,
+            fiveMinuteStats.Batches,
+            fiveMinuteStats.SourceRows,
+            fiveMinuteStats.RollupRows,
+            fiveMinuteStats.HitBatchLimit,
+            deleteStats.DeletedRows,
+            deleteStats.Batches);
     }
 
     public async Task<DatabaseSizeInfo> GetDatabaseSizeAsync(CancellationToken cancellationToken)
@@ -1134,7 +1151,7 @@ public sealed class TimescaleTelemetryRepository(
         _ => $"mod(extract(epoch from {columnExpression})::bigint, 300) <> 0"
     };
 
-    private async Task DeleteOlderThanAsync(
+    private async Task<(long DeletedRows, int Batches)> DeleteOlderThanAsync(
         NpgsqlConnection connection,
         string table,
         string column,
@@ -1178,6 +1195,8 @@ public sealed class TimescaleTelemetryRepository(
                 cutoff,
                 batches);
         }
+
+        return (totalDeleted, batches);
     }
 
     internal static string BuildDeleteOlderThanSql(string table, string column)
@@ -1230,7 +1249,7 @@ public sealed class TimescaleTelemetryRepository(
             SELECT pg_total_relation_size(format('%I.%I', current_schema(), @TableName)::regclass);
             """;
 
-    private async Task RollupMeasurementsAsync(
+    private async Task<(int Batches, long SourceRows, long RollupRows, bool HitBatchLimit)> RollupMeasurementsAsync(
         NpgsqlConnection connection,
         DateTimeOffset fromInclusive,
         DateTimeOffset toExclusive,
@@ -1239,13 +1258,15 @@ public sealed class TimescaleTelemetryRepository(
     {
         if (fromInclusive >= toExclusive)
         {
-            return;
+            return (0, 0, 0, false);
         }
 
         var batchWindow = GetRollupBatchWindow(resolution);
         var maxBatches = GetRollupBatchCountPerSweep(resolution);
         var processedBatches = 0;
         var searchFrom = fromInclusive;
+        long totalSourceRows = 0;
+        long totalRollupRows = 0;
 
         while (processedBatches < maxBatches)
         {
@@ -1313,42 +1334,68 @@ public sealed class TimescaleTelemetryRepository(
                         (array_agg("ValueText" ORDER BY "Time" DESC) FILTER (WHERE "ValueText" IS NOT NULL))[1] AS "ValueText"
                     FROM deleted
                     GROUP BY {GetBucketExpression(resolution)}, "SensorId"
-                )
-                INSERT INTO "Measurements" (
-                    "Time",
-                    "DeviceId",
-                    "SensorId",
-                    "ValueDouble",
-                    "ValueBigInt",
-                    "ValueBool",
-                    "ValueText"
+                ),
+                upserted AS (
+                    INSERT INTO "Measurements" (
+                        "Time",
+                        "DeviceId",
+                        "SensorId",
+                        "ValueDouble",
+                        "ValueBigInt",
+                        "ValueBool",
+                        "ValueText"
+                    )
+                    SELECT
+                        "Time",
+                        "DeviceId",
+                        "SensorId",
+                        "ValueDouble",
+                        "ValueBigInt",
+                        "ValueBool",
+                        "ValueText"
+                    FROM rolled
+                    ON CONFLICT ("Time", "SensorId") DO UPDATE SET
+                        "DeviceId" = EXCLUDED."DeviceId",
+                        "ValueDouble" = EXCLUDED."ValueDouble",
+                        "ValueBigInt" = EXCLUDED."ValueBigInt",
+                        "ValueBool" = EXCLUDED."ValueBool",
+                        "ValueText" = EXCLUDED."ValueText"
+                    RETURNING 1
                 )
                 SELECT
-                    "Time",
-                    "DeviceId",
-                    "SensorId",
-                    "ValueDouble",
-                    "ValueBigInt",
-                    "ValueBool",
-                    "ValueText"
-                FROM rolled
-                ON CONFLICT ("Time", "SensorId") DO UPDATE SET
-                    "DeviceId" = EXCLUDED."DeviceId",
-                    "ValueDouble" = EXCLUDED."ValueDouble",
-                    "ValueBigInt" = EXCLUDED."ValueBigInt",
-                    "ValueBool" = EXCLUDED."ValueBool",
-                    "ValueText" = EXCLUDED."ValueText";
+                    (SELECT COUNT(*)::bigint FROM deleted) AS "DeletedRows",
+                    (SELECT COUNT(*)::bigint FROM rolled) AS "RollupRows",
+                    (SELECT COUNT(*)::bigint FROM upserted) AS "UpsertedRows";
                 """;
             command.Parameters.AddWithValue("From", batchStart);
             command.Parameters.AddWithValue("To", batchEnd);
 
-            await command.ExecuteNonQueryAsync(cancellationToken);
+            try
+            {
+                await using var reader = await command.ExecuteReaderAsync(cancellationToken);
+                if (await reader.ReadAsync(cancellationToken))
+                {
+                    totalSourceRows += reader.GetInt64(0);
+                    totalRollupRows += reader.GetInt64(2);
+                }
+            }
+            catch (PostgresException exception)
+            {
+                logger.LogError(
+                    exception,
+                    "Retention rollup batch failed. Resolution={Resolution}, BatchStart={BatchStart}, BatchEnd={BatchEnd}.",
+                    resolution,
+                    batchStart,
+                    batchEnd);
+                throw;
+            }
 
             processedBatches++;
             searchFrom = batchEnd;
         }
 
-        if (processedBatches == maxBatches)
+        var hitBatchLimit = processedBatches == maxBatches;
+        if (hitBatchLimit)
         {
             logger.LogInformation(
                 "Retention rollup for {Resolution} processed {BatchCount} batches between {FromInclusive} and {ToExclusive}. Remaining data will be handled in later sweeps.",
@@ -1357,6 +1404,8 @@ public sealed class TimescaleTelemetryRepository(
                 fromInclusive,
                 toExclusive);
         }
+
+        return (processedBatches, totalSourceRows, totalRollupRows, hitBatchLimit);
     }
 
     private async Task<long> GetTableSizeBytesAsync(

@@ -39,6 +39,13 @@ public sealed class SetupConfigurationService(
         };
     }
 
+    public DatabaseSettingsStateResponse GetDatabaseSettings()
+    {
+        var configuration = GetMonitorConfiguration();
+
+        return BuildDatabaseSettingsStateResponse(configuration);
+    }
+
     public ApplySetupResponse Apply(ApplySetupRequest request)
     {
         var startupMode = NormalizeStartupMode(request.StartupMode);
@@ -96,6 +103,77 @@ public sealed class SetupConfigurationService(
             Message = restartScheduled
                 ? $"Flux Monitor saved your {startupMode.ToLowerInvariant()} configuration and is restarting now."
                 : $"Flux Monitor saved your {startupMode.ToLowerInvariant()} configuration. Restart the app to apply it."
+        };
+    }
+
+    public SaveDatabaseSettingsResponse SaveDatabaseSettings(SaveDatabaseSettingsRequest request)
+    {
+        ValidateNonNegative(nameof(request.RawSecondsWindowMinutes), request.RawSecondsWindowMinutes);
+        ValidateNonNegative(nameof(request.OneMinuteWindowHours), request.OneMinuteWindowHours);
+        ValidateNonNegative(nameof(request.FiveMinuteWindowDays), request.FiveMinuteWindowDays);
+        ValidateNonNegative(nameof(request.CompressAfterMinutes), request.CompressAfterMinutes);
+
+        var localSettingsPath = GetCurrentEnvironmentLocalSettingsPath();
+        UpdateJson(localSettingsPath, monitor =>
+        {
+            UpsertObject(monitor, "Storage", storage =>
+            {
+                UpsertObject(storage, "Retention", retention =>
+                {
+                    retention["RawSecondsWindowMinutes"] = request.RawSecondsWindowMinutes;
+                    retention["OneMinuteWindowHours"] = request.OneMinuteWindowHours;
+                    retention["FiveMinuteWindowDays"] = request.FiveMinuteWindowDays;
+                });
+
+                UpsertObject(storage, "Compression", compression =>
+                {
+                    compression["CompressAfterMinutes"] = request.CompressAfterMinutes;
+                });
+            });
+        });
+
+        var updatedSettings = BuildDatabaseSettingsStateResponse(new MonitorConfiguration
+        {
+            Storage = new StorageConfiguration
+            {
+                Provider = GetMonitorConfiguration().Storage.Provider,
+                ConnectionString = GetMonitorConfiguration().Storage.ConnectionString,
+                Retention = new RetentionConfiguration
+                {
+                    RawSecondsWindowMinutes = request.RawSecondsWindowMinutes,
+                    OneMinuteWindowHours = request.OneMinuteWindowHours,
+                    FiveMinuteWindowDays = request.FiveMinuteWindowDays,
+                    OneHourWindowDays = GetMonitorConfiguration().Storage.Retention.OneHourWindowDays
+                },
+                Compression = new CompressionConfiguration
+                {
+                    CompressAfterMinutes = request.CompressAfterMinutes
+                }
+            },
+            ApiSecurity = GetMonitorConfiguration().ApiSecurity,
+            DeviceDefinitionsPath = GetMonitorConfiguration().DeviceDefinitionsPath
+        });
+
+        logger.LogInformation(
+            "Saved database retention settings. RawSecondsWindowMinutes={RawSecondsWindowMinutes}, OneMinuteWindowHours={OneMinuteWindowHours}, FiveMinuteWindowDays={FiveMinuteWindowDays}, CompressAfterMinutes={CompressAfterMinutes}.",
+            request.RawSecondsWindowMinutes,
+            request.OneMinuteWindowHours,
+            request.FiveMinuteWindowDays,
+            request.CompressAfterMinutes);
+
+        var restartScheduled = request.RestartApplication && managedRestartService.CanAutoRestart;
+        if (restartScheduled)
+        {
+            managedRestartService.ScheduleRestart();
+        }
+
+        return new SaveDatabaseSettingsResponse
+        {
+            RestartScheduled = restartScheduled,
+            Message = restartScheduled
+                ? "Database retention settings were saved and Flux Monitor is restarting now."
+                : "Database retention settings were saved. Restart the app to apply them.",
+            Settings = updatedSettings
         };
     }
 
@@ -221,6 +299,35 @@ public sealed class SetupConfigurationService(
     private string GetEnvironmentLocalSettingsPath(string environmentName)
     {
         return Path.Combine(_contentRoot, $"appsettings.{environmentName}.Local.json");
+    }
+
+    private string GetCurrentEnvironmentLocalSettingsPath()
+    {
+        return GetEnvironmentLocalSettingsPath(environment.EnvironmentName);
+    }
+
+    private DatabaseSettingsStateResponse BuildDatabaseSettingsStateResponse(MonitorConfiguration configuration)
+    {
+        return new DatabaseSettingsStateResponse
+        {
+            EnvironmentName = environment.EnvironmentName,
+            StorageProvider = configuration.Storage.Provider,
+            DatabaseConfigured = !string.IsNullOrWhiteSpace(configuration.Storage.ConnectionString),
+            RawSecondsWindowMinutes = configuration.Storage.Retention.RawSecondsWindowMinutes,
+            OneMinuteWindowHours = configuration.Storage.Retention.OneMinuteWindowHours,
+            FiveMinuteWindowDays = configuration.Storage.Retention.FiveMinuteWindowDays,
+            CompressAfterMinutes = configuration.Storage.Compression.CompressAfterMinutes,
+            CanAutoRestart = managedRestartService.CanAutoRestart,
+            ApplyMessage = managedRestartService.GetApplyMessage()
+        };
+    }
+
+    private static void ValidateNonNegative(string propertyName, int value)
+    {
+        if (value < 0)
+        {
+            throw new InvalidOperationException($"{propertyName} must be zero or greater.");
+        }
     }
 
     private void UpdateJson(string path, Action<JsonObject> updateMonitor)

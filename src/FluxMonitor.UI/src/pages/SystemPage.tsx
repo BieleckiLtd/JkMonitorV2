@@ -89,6 +89,31 @@ type DatabaseSizeInfo = {
   tables: TableSizeInfo[];
 };
 
+type DatabaseSettingsState = {
+  environmentName: string;
+  storageProvider: string;
+  databaseConfigured: boolean;
+  rawSecondsWindowMinutes: number;
+  oneMinuteWindowHours: number;
+  fiveMinuteWindowDays: number;
+  compressAfterMinutes: number;
+  canAutoRestart: boolean;
+  applyMessage: string;
+};
+
+type SaveDatabaseSettingsResponse = {
+  restartScheduled: boolean;
+  message: string;
+  settings: DatabaseSettingsState;
+};
+
+type DatabaseSettingsFormState = {
+  rawSecondsWindowMinutes: string;
+  oneMinuteWindowHours: string;
+  fiveMinuteWindowDays: string;
+  compressAfterMinutes: string;
+};
+
 type CommitInfo = {
   sha?: string | null;
   message?: string | null;
@@ -426,6 +451,24 @@ function getSystemSectionPath(section: SystemSection) {
   return `/system/${section}`;
 }
 
+function createDatabaseSettingsFormState(settings: DatabaseSettingsState): DatabaseSettingsFormState {
+  return {
+    rawSecondsWindowMinutes: String(settings.rawSecondsWindowMinutes),
+    oneMinuteWindowHours: String(settings.oneMinuteWindowHours),
+    fiveMinuteWindowDays: String(settings.fiveMinuteWindowDays),
+    compressAfterMinutes: String(settings.compressAfterMinutes),
+  };
+}
+
+function parseNonNegativeInteger(value: string, label: string) {
+  const trimmed = value.trim();
+  if (!/^\d+$/.test(trimmed)) {
+    throw new Error(`${label} must be a whole number greater than or equal to zero.`);
+  }
+
+  return Number.parseInt(trimmed, 10);
+}
+
 export function SystemPage() {
   const navigate = useNavigate();
   const { sectionId } = useParams<{ sectionId?: string }>();
@@ -440,6 +483,11 @@ export function SystemPage() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const [dbSize, setDbSize] = useState<DatabaseSizeInfo | null>(null);
   const [dbLoading, setDbLoading] = useState(false);
+  const [dbSettings, setDbSettings] = useState<DatabaseSettingsState | null>(null);
+  const [dbSettingsForm, setDbSettingsForm] = useState<DatabaseSettingsFormState | null>(null);
+  const [dbSettingsLoading, setDbSettingsLoading] = useState(false);
+  const [dbSettingsSaving, setDbSettingsSaving] = useState(false);
+  const [dbSettingsFeedback, setDbSettingsFeedback] = useState<InlineFeedback | null>(null);
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -599,8 +647,31 @@ export function SystemPage() {
     }
   };
 
+  const loadDbSettings = async () => {
+    setDbSettingsLoading(true);
+    try {
+      const response = await fetch('/api/database/settings', { cache: 'no-store' });
+      if (!response.ok) {
+        throw new Error('Unable to load database settings.');
+      }
+
+      const data = await response.json() as DatabaseSettingsState;
+      setDbSettings(data);
+      setDbSettingsForm(createDatabaseSettingsFormState(data));
+      setDbSettingsFeedback(null);
+    } catch (error) {
+      setDbSettingsFeedback({
+        message: error instanceof Error ? error.message : 'Unable to load database settings.',
+        isError: true,
+      });
+    } finally {
+      setDbSettingsLoading(false);
+    }
+  };
+
   useEffect(() => {
     void loadDbSize();
+    void loadDbSettings();
   }, []);
 
   const checkForUpdate = useCallback(async () => {
@@ -1154,6 +1225,63 @@ export function SystemPage() {
     }
   };
 
+  const saveDatabaseSettings = async () => {
+    if (!dbSettingsForm) {
+      return;
+    }
+
+    let payload: {
+      rawSecondsWindowMinutes: number;
+      oneMinuteWindowHours: number;
+      fiveMinuteWindowDays: number;
+      compressAfterMinutes: number;
+      restartApplication: boolean;
+    };
+
+    try {
+      payload = {
+        rawSecondsWindowMinutes: parseNonNegativeInteger(dbSettingsForm.rawSecondsWindowMinutes, 'Raw high-resolution window'),
+        oneMinuteWindowHours: parseNonNegativeInteger(dbSettingsForm.oneMinuteWindowHours, '1-minute rollup window'),
+        fiveMinuteWindowDays: parseNonNegativeInteger(dbSettingsForm.fiveMinuteWindowDays, '5-minute rollup window'),
+        compressAfterMinutes: parseNonNegativeInteger(dbSettingsForm.compressAfterMinutes, 'Compression threshold'),
+        restartApplication: true,
+      };
+    } catch (error) {
+      setDbSettingsFeedback({
+        message: error instanceof Error ? error.message : 'Enter valid database retention values.',
+        isError: true,
+      });
+      return;
+    }
+
+    setDbSettingsSaving(true);
+    setDbSettingsFeedback(null);
+
+    try {
+      const response = await fetch('/api/database/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      const body = await response.json().catch(() => null) as SaveDatabaseSettingsResponse | { message?: string } | null;
+      if (!response.ok || !body || !('settings' in body)) {
+        throw new Error(body && 'message' in body && body.message ? body.message : 'Unable to save database settings.');
+      }
+
+      setDbSettings(body.settings);
+      setDbSettingsForm(createDatabaseSettingsFormState(body.settings));
+      setDbSettingsFeedback({ message: body.message, isError: false });
+    } catch (error) {
+      setDbSettingsFeedback({
+        message: error instanceof Error ? error.message : 'Unable to save database settings.',
+        isError: true,
+      });
+    } finally {
+      setDbSettingsSaving(false);
+    }
+  };
+
   const handleExport = () => {
     window.location.href = '/api/database/export';
   };
@@ -1213,6 +1341,12 @@ export function SystemPage() {
   };
 
   const metrics = status?.systemMetrics ?? null;
+  const dbSettingsDirty = !!(dbSettings && dbSettingsForm && (
+    dbSettingsForm.rawSecondsWindowMinutes !== String(dbSettings.rawSecondsWindowMinutes) ||
+    dbSettingsForm.oneMinuteWindowHours !== String(dbSettings.oneMinuteWindowHours) ||
+    dbSettingsForm.fiveMinuteWindowDays !== String(dbSettings.fiveMinuteWindowDays) ||
+    dbSettingsForm.compressAfterMinutes !== String(dbSettings.compressAfterMinutes)
+  ));
   const cpuUsage = metrics?.cpuUtilizationPercent ?? null;
   const cpuBaseClockSpeed = metrics?.cpuMaxClockSpeedMegahertz ?? null;
   const cpuCurrentClockSpeed = metrics?.cpuCurrentClockSpeedMegahertz ?? null;
@@ -2546,6 +2680,132 @@ export function SystemPage() {
                 ) : (
                   <div className='text-sm text-muted-foreground'>Unable to load database info.</div>
                 )}
+
+                <div className='rounded-2xl border border-border/70 bg-background/50 px-4 py-4'>
+                  <div className='flex flex-wrap items-start justify-between gap-3'>
+                    <div className='space-y-1'>
+                      <div className='text-sm font-semibold text-foreground'>Retention policy</div>
+                      <div className='max-w-2xl text-xs leading-5 text-muted-foreground'>
+                        Keep 1-second history briefly, then compact older data into longer-lived rollups. Set a tier to <span className='font-mono'>0</span> to disable it.
+                      </div>
+                    </div>
+                    {dbSettings ? (
+                      <div className='rounded-xl border border-border/70 bg-card/80 px-3 py-2 text-right'>
+                        <div className='text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Environment</div>
+                        <div className='mt-1 text-sm font-semibold text-foreground'>{dbSettings.environmentName}</div>
+                      </div>
+                    ) : null}
+                  </div>
+
+                  {dbSettingsLoading && !dbSettingsForm ? (
+                    <div className='flex items-center justify-center py-8'>
+                      <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
+                    </div>
+                  ) : dbSettings && dbSettingsForm ? (
+                    <div className='space-y-4 pt-4'>
+                      <div className='grid gap-3 sm:grid-cols-2'>
+                        <DetailTile label='Storage provider' value={dbSettings.storageProvider} />
+                        <DetailTile label='Database status' value={dbSettings.databaseConfigured ? 'Configured' : 'Not configured'} />
+                      </div>
+
+                      <div className='grid gap-4 sm:grid-cols-2'>
+                        <label className='space-y-2'>
+                          <span className='block text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Raw 1s history</span>
+                          <Input
+                            aria-label='Raw 1-second history minutes'
+                            type='number'
+                            min='0'
+                            step='1'
+                            value={dbSettingsForm.rawSecondsWindowMinutes}
+                            onChange={(event) => {
+                              setDbSettingsForm((current) => current ? { ...current, rawSecondsWindowMinutes: event.target.value } : current);
+                              setDbSettingsFeedback(null);
+                            }}
+                          />
+                          <span className='block text-[11px] leading-5 text-muted-foreground'>Minutes of high-resolution samples to keep before compaction starts.</span>
+                        </label>
+
+                        <label className='space-y-2'>
+                          <span className='block text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>1-minute rollups</span>
+                          <Input
+                            aria-label='1-minute rollup hours'
+                            type='number'
+                            min='0'
+                            step='1'
+                            value={dbSettingsForm.oneMinuteWindowHours}
+                            onChange={(event) => {
+                              setDbSettingsForm((current) => current ? { ...current, oneMinuteWindowHours: event.target.value } : current);
+                              setDbSettingsFeedback(null);
+                            }}
+                          />
+                          <span className='block text-[11px] leading-5 text-muted-foreground'>Hours of compacted 1-minute history to retain.</span>
+                        </label>
+
+                        <label className='space-y-2'>
+                          <span className='block text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>5-minute rollups</span>
+                          <Input
+                            aria-label='5-minute rollup days'
+                            type='number'
+                            min='0'
+                            step='1'
+                            value={dbSettingsForm.fiveMinuteWindowDays}
+                            onChange={(event) => {
+                              setDbSettingsForm((current) => current ? { ...current, fiveMinuteWindowDays: event.target.value } : current);
+                              setDbSettingsFeedback(null);
+                            }}
+                          />
+                          <span className='block text-[11px] leading-5 text-muted-foreground'>Days of 5-minute history to retain. Use 0 to keep only raw and 1-minute tiers.</span>
+                        </label>
+
+                        <label className='space-y-2'>
+                          <span className='block text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Compression</span>
+                          <Input
+                            aria-label='Compression after minutes'
+                            type='number'
+                            min='0'
+                            step='1'
+                            value={dbSettingsForm.compressAfterMinutes}
+                            onChange={(event) => {
+                              setDbSettingsForm((current) => current ? { ...current, compressAfterMinutes: event.target.value } : current);
+                              setDbSettingsFeedback(null);
+                            }}
+                          />
+                          <span className='block text-[11px] leading-5 text-muted-foreground'>Compress Timescale chunks older than this many minutes. Use 0 to disable compression.</span>
+                        </label>
+                      </div>
+
+                      <div className='rounded-xl border border-border/70 bg-card/70 px-3 py-3 text-xs leading-5 text-muted-foreground'>
+                        {dbSettings.applyMessage}
+                      </div>
+
+                      {dbSettingsFeedback ? (
+                        <div className={cn(
+                          'rounded-xl border px-3 py-2 text-xs',
+                          dbSettingsFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                        )}>
+                          {dbSettingsFeedback.message}
+                        </div>
+                      ) : null}
+
+                      <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
+                        <div className='text-[11px] leading-5 text-muted-foreground'>
+                          Current policy: {dbSettings.rawSecondsWindowMinutes}m raw, {dbSettings.oneMinuteWindowHours}h at 1m, {dbSettings.fiveMinuteWindowDays === 0 ? '5m archive disabled' : `${dbSettings.fiveMinuteWindowDays}d at 5m`}.
+                        </div>
+                        <button
+                          type='button'
+                          disabled={dbSettingsSaving || !dbSettingsDirty}
+                          onClick={() => { void saveDatabaseSettings(); }}
+                          className='inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50'
+                        >
+                          {dbSettingsSaving ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Database className='h-4 w-4' />}
+                          {dbSettingsSaving ? 'Saving…' : dbSettings.canAutoRestart ? 'Save and restart' : 'Save policy'}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className='pt-4 text-sm text-muted-foreground'>Unable to load database retention settings.</div>
+                  )}
+                </div>
 
                 <div className='flex flex-col gap-2 pt-2'>
                   <button

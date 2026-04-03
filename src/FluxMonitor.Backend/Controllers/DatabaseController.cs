@@ -1,4 +1,5 @@
-﻿using FluxMonitor.Backend.Services;
+using FluxMonitor.Backend.Models;
+using FluxMonitor.Backend.Services;
 using Microsoft.AspNetCore.Mvc;
 
 namespace FluxMonitor.Backend.Controllers;
@@ -7,9 +8,29 @@ namespace FluxMonitor.Backend.Controllers;
 [Route("api/database")]
 public sealed class DatabaseController(
     ITelemetryRepository repository,
+    SetupConfigurationService setupConfigurationService,
     DeviceConfigStore deviceConfigStore,
     DeviceOrchestrator deviceOrchestrator) : ControllerBase
 {
+    [HttpGet("settings")]
+    public ActionResult<DatabaseSettingsStateResponse> GetSettings()
+    {
+        return Ok(setupConfigurationService.GetDatabaseSettings());
+    }
+
+    [HttpPost("settings")]
+    public ActionResult<SaveDatabaseSettingsResponse> SaveSettings([FromBody] SaveDatabaseSettingsRequest request)
+    {
+        try
+        {
+            return Ok(setupConfigurationService.SaveDatabaseSettings(request));
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { message = exception.Message });
+        }
+    }
+
     [HttpGet("size")]
     public async Task<IActionResult> GetSize(CancellationToken cancellationToken)
     {

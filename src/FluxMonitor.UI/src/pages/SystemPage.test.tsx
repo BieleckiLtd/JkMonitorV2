@@ -122,6 +122,23 @@ describe('SystemPage', () => {
         } as Response;
       }
 
+      if (url === '/api/database/settings') {
+        return {
+          ok: true,
+          json: async () => ({
+            environmentName: 'Development',
+            storageProvider: 'TimescaleDb',
+            databaseConfigured: true,
+            rawSecondsWindowMinutes: 10,
+            oneMinuteWindowHours: 1,
+            fiveMinuteWindowDays: 7,
+            compressAfterMinutes: 60,
+            canAutoRestart: false,
+            applyMessage: 'Settings can be saved here, but this environment still needs a manual restart to apply them.',
+          }),
+        } as Response;
+      }
+
       if (url === '/api/system/connectivity') {
         return {
           ok: true,
@@ -276,5 +293,71 @@ describe('SystemPage', () => {
     expect(screen.queryByText(/application logs/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/browse captured log entries filtered by severity and time range/i)).not.toBeInTheDocument();
     expect(screen.getByTestId('location-display')).toHaveTextContent('/system/logs');
+  });
+
+  it('posts database retention changes from the database section', async () => {
+    const baseFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+
+      if (url === '/api/database/settings' && init?.method === 'POST') {
+        return {
+          ok: true,
+          json: async () => ({
+            restartScheduled: false,
+            message: 'Database retention settings were saved. Restart the app to apply them.',
+            settings: {
+              environmentName: 'Development',
+              storageProvider: 'TimescaleDb',
+              databaseConfigured: true,
+              rawSecondsWindowMinutes: 10,
+              oneMinuteWindowHours: 8760,
+              fiveMinuteWindowDays: 0,
+              compressAfterMinutes: 1440,
+              canAutoRestart: false,
+              applyMessage: 'Settings can be saved here, but this environment still needs a manual restart to apply them.',
+            },
+          }),
+        } as Response;
+      }
+
+      return baseFetch(input, init);
+    });
+
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    renderSystemPage('/system/database');
+
+    const oneMinuteInput = await screen.findByLabelText(/1-minute rollup hours/i);
+    fireEvent.change(oneMinuteInput, { target: { value: '8760' } });
+    fireEvent.change(screen.getByLabelText(/5-minute rollup days/i), { target: { value: '0' } });
+    fireEvent.change(screen.getByLabelText(/compression after minutes/i), { target: { value: '1440' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /save policy/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/database/settings', expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }));
+    });
+
+    const postCall = fetchMock.mock.calls.find(([input, init]) =>
+      input === '/api/database/settings' && init && typeof init === 'object' && init.method === 'POST');
+
+    expect(postCall).toBeTruthy();
+    expect(postCall?.[1]).toMatchObject({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
+      rawSecondsWindowMinutes: 10,
+      oneMinuteWindowHours: 8760,
+      fiveMinuteWindowDays: 0,
+      compressAfterMinutes: 1440,
+      restartApplication: true,
+    });
+
+    expect(await screen.findByText(/database retention settings were saved/i)).toBeInTheDocument();
   });
 });

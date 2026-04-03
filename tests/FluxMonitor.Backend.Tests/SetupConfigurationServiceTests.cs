@@ -80,7 +80,48 @@ public sealed class SetupConfigurationServiceTests : IDisposable
             lines);
     }
 
-    private SetupConfigurationService CreateService(string? contentRootPath = null)
+    [Fact]
+    public void GetDatabaseSettings_ReturnsEffectiveRetentionAndCompression()
+    {
+        var service = CreateService(environmentName: "Production");
+
+        var result = service.GetDatabaseSettings();
+
+        Assert.Equal("Production", result.EnvironmentName);
+        Assert.Equal("TimescaleDb", result.StorageProvider);
+        Assert.True(result.DatabaseConfigured);
+        Assert.Equal(10, result.RawSecondsWindowMinutes);
+        Assert.Equal(1, result.OneMinuteWindowHours);
+        Assert.Equal(7, result.FiveMinuteWindowDays);
+        Assert.Equal(60, result.CompressAfterMinutes);
+    }
+
+    [Fact]
+    public void SaveDatabaseSettings_WritesRetentionAndCompressionToCurrentEnvironmentFile()
+    {
+        var service = CreateService(environmentName: "Production");
+
+        var response = service.SaveDatabaseSettings(new SaveDatabaseSettingsRequest
+        {
+            RawSecondsWindowMinutes = 10,
+            OneMinuteWindowHours = 24 * 365,
+            FiveMinuteWindowDays = 0,
+            CompressAfterMinutes = 1440,
+            RestartApplication = false
+        });
+
+        var path = Path.Combine(_tempRootPath, "appsettings.Production.Local.json");
+        var root = JsonNode.Parse(File.ReadAllText(path))?.AsObject();
+
+        Assert.NotNull(root);
+        Assert.False(response.RestartScheduled);
+        Assert.Equal(10, root!["Monitor"]?["Storage"]?["Retention"]?["RawSecondsWindowMinutes"]?.GetValue<int>());
+        Assert.Equal(24 * 365, root["Monitor"]?["Storage"]?["Retention"]?["OneMinuteWindowHours"]?.GetValue<int>());
+        Assert.Equal(0, root["Monitor"]?["Storage"]?["Retention"]?["FiveMinuteWindowDays"]?.GetValue<int>());
+        Assert.Equal(1440, root["Monitor"]?["Storage"]?["Compression"]?["CompressAfterMinutes"]?.GetValue<int>());
+    }
+
+    private SetupConfigurationService CreateService(string? contentRootPath = null, string environmentName = "Test")
     {
         var effectiveContentRoot = contentRootPath ?? _tempRootPath;
         Directory.CreateDirectory(effectiveContentRoot);
@@ -97,7 +138,11 @@ public sealed class SetupConfigurationServiceTests : IDisposable
             })
             .Build();
 
-        var environment = new TestHostEnvironment { ContentRootPath = effectiveContentRoot };
+        var environment = new TestHostEnvironment
+        {
+            EnvironmentName = environmentName,
+            ContentRootPath = effectiveContentRoot
+        };
         var lifetime = new TestHostApplicationLifetime();
         var restartService = new ManagedRestartService(
             environment,
