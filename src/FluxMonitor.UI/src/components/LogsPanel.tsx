@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Filter, Search, RefreshCw, ChevronLeft, ChevronRight, Copy, Check, ClipboardX } from 'lucide-react';
+import { Search, RefreshCw, ChevronLeft, ChevronRight, Copy, Check, ClipboardX } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
 import { cn } from '../lib/utils';
@@ -23,6 +23,14 @@ const severityLevels = ['Trace', 'Debug', 'Information', 'Warning', 'Error', 'Cr
 const defaultSelectedLevels = new Set(['Critical', 'Error', 'Warning']);
 
 const pageSize = 100;
+const compactSeverityLabels: Record<(typeof severityLevels)[number], string> = {
+  Trace: 'Trc',
+  Debug: 'Dbg',
+  Information: 'Info',
+  Warning: 'Warn',
+  Error: 'Err',
+  Critical: 'Crit',
+};
 
 function getDefaultFrom() {
   const date = new Date();
@@ -216,60 +224,43 @@ export function LogsPanel() {
 
   return (
     <Card className='flex min-h-0 flex-1 flex-col border border-border/80 bg-card/85 shadow-sm'>
-      <CardContent className='flex min-h-0 flex-1 flex-col gap-4 pt-5'>
-        <div className='flex items-center justify-between gap-3'>
-          <div className='flex items-center gap-2 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground'>
-            <Filter className='h-3.5 w-3.5' />
-            Severity
-          </div>
-          <Button
-            type='button'
-            variant='outline'
-            onClick={() => void fetchLogs()}
-            disabled={isLoading}
-            className='h-8 gap-1.5 px-3 text-xs text-muted-foreground'
-          >
-            <RefreshCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
-            Refresh
-          </Button>
-        </div>
-
-        {/* Severity filter */}
-        <div className='space-y-2'>
-          <div className='flex flex-wrap gap-1.5'>
+      <CardContent className='flex min-h-0 flex-1 flex-col gap-3 pt-3'>
+        <div className='grid grid-cols-6 gap-1'>
             {severityLevels.map((level) => (
               <button
                 key={level}
+                type='button'
                 onClick={() => toggleLevel(level)}
+                aria-label={`Toggle ${level} severity`}
                 className={cn(
-                  'rounded-full border px-3 py-1 text-xs font-medium transition-colors cursor-pointer',
+                  'min-w-0 rounded-full border px-1.5 py-1 text-[11px] font-medium leading-none transition-colors cursor-pointer sm:px-3 sm:py-1.5 sm:text-xs',
                   severityToggleColor(level, selectedLevels.has(level))
                 )}
               >
-                {level}
+                <span className='sm:hidden'>{compactSeverityLabels[level]}</span>
+                <span className='hidden sm:inline'>{level}</span>
               </button>
             ))}
-          </div>
         </div>
 
         {/* Time range selectors */}
-        <div className='grid gap-3 sm:grid-cols-2'>
-          <div className='space-y-1'>
+        <div className='grid grid-cols-2 gap-2'>
+          <div className='min-w-0 space-y-1'>
             <label className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>From</label>
             <input
               type='datetime-local'
               value={fromDate}
               onChange={(e) => { setFromDate(e.target.value); setPage(0); }}
-              className='w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/30'
+              className='w-full min-w-0 rounded-lg border border-border bg-background px-2 py-2 text-[13px] text-foreground outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/30 sm:px-3 sm:text-sm'
             />
           </div>
-          <div className='space-y-1'>
+          <div className='min-w-0 space-y-1'>
             <label className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>To</label>
             <input
               type='datetime-local'
               value={toDate}
               onChange={(e) => { setToDate(e.target.value); setPage(0); }}
-              className='w-full rounded-lg border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/30'
+              className='w-full min-w-0 rounded-lg border border-border bg-background px-2 py-2 text-[13px] text-foreground outline-none focus:border-primary/50 focus:ring-1 focus:ring-primary/30 sm:px-3 sm:text-sm'
             />
           </div>
         </div>
@@ -287,29 +278,43 @@ export function LogsPanel() {
         </div>
 
         {/* Results summary */}
-        <div className='flex items-center justify-between text-xs text-muted-foreground'>
+        <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
           <span>{totalCount.toLocaleString()} entries found</span>
-          {totalPages > 1 && (
-            <div className='flex items-center gap-2'>
-              <button
-                onClick={() => setPage((p) => Math.max(0, p - 1))}
-                disabled={page === 0}
-                className='rounded p-1 hover:bg-muted disabled:opacity-30'
-              >
-                <ChevronLeft className='h-4 w-4' />
-              </button>
-              <span>
-                Page {page + 1} of {totalPages}
-              </span>
-              <button
-                onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-                disabled={page >= totalPages - 1}
-                className='rounded p-1 hover:bg-muted disabled:opacity-30'
-              >
-                <ChevronRight className='h-4 w-4' />
-              </button>
-            </div>
-          )}
+          <div className='flex items-center gap-2'>
+            <Button
+              type='button'
+              variant='outline'
+              onClick={() => void fetchLogs()}
+              disabled={isLoading}
+              className='h-8 gap-1.5 px-3 text-xs text-muted-foreground'
+            >
+              <RefreshCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
+              Refresh
+            </Button>
+            {totalPages > 1 ? (
+              <div className='flex items-center gap-2'>
+                <button
+                  type='button'
+                  onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  disabled={page === 0}
+                  className='rounded p-1 hover:bg-muted disabled:opacity-30'
+                >
+                  <ChevronLeft className='h-4 w-4' />
+                </button>
+                <span className='whitespace-nowrap'>
+                  Page {page + 1} of {totalPages}
+                </span>
+                <button
+                  type='button'
+                  onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+                  disabled={page >= totalPages - 1}
+                  className='rounded p-1 hover:bg-muted disabled:opacity-30'
+                >
+                  <ChevronRight className='h-4 w-4' />
+                </button>
+              </div>
+            ) : null}
+          </div>
         </div>
 
         {/* Error state */}
@@ -320,7 +325,13 @@ export function LogsPanel() {
         )}
 
         {/* Log entries */}
-        <div className='min-h-0 flex-1 space-y-1.5 overflow-y-auto'>
+        <div
+          className='min-h-0 flex-1 space-y-1.5 overflow-y-auto'
+          style={{
+            paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.75rem)',
+            scrollPaddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.75rem)',
+          }}
+        >
           {entries.length === 0 && !isLoading && (
             <div className='rounded-2xl border border-dashed border-border bg-background/40 px-5 py-10 text-center text-sm text-muted-foreground'>
               No log entries match the current filters.
