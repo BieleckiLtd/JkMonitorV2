@@ -186,17 +186,12 @@
   }
 
   .safe-area-main {
-    padding: 4.25rem 0.5rem 0.75rem;
-  }
-
-  .safe-area-fab {
-    top: max(0.75rem, calc(env(safe-area-inset-top, 0px) + 0.25rem));
-    left: max(0.75rem, calc(env(safe-area-inset-left, 0px) + 0.25rem));
+    padding: 1rem 0.5rem 0.75rem;
   }
 
   @media (min-width: 640px) {
     .safe-area-main {
-      padding: 4.5rem 1rem 1rem;
+      padding: 1.25rem 1rem 1rem;
     }
   }
 
@@ -212,7 +207,46 @@
     isolation: isolate;
   }
 
+  ::view-transition-old(root) {
+    animation: flux-page-out 180ms cubic-bezier(0.4, 0, 0.2, 1);
+  }
+
+  ::view-transition-new(root) {
+    animation: flux-page-in 220ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    ::view-transition-old(root),
+    ::view-transition-new(root) {
+      animation-duration: 1ms;
+    }
+  }
+
   ::selection {
     background: color-mix(in oklch, var(--primary) 22%, white);
+  }
+}
+
+@keyframes flux-page-out {
+  from {
+    opacity: 1;
+    transform: scale(1);
+  }
+
+  to {
+    opacity: 0;
+    transform: scale(0.985);
+  }
+}
+
+@keyframes flux-page-in {
+  from {
+    opacity: 0;
+    transform: translateY(0.65rem) scale(0.992);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 }

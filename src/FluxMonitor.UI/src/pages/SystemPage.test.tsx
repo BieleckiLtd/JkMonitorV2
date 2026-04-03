@@ -211,26 +211,27 @@ describe('SystemPage', () => {
     vi.restoreAllMocks();
   });
 
-  it('opens a system section in a narrow-screen detail view and returns to the menu', async () => {
+  it('treats the system menu as its own page and navigates back from a section detail', async () => {
     renderSystemPage();
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /resource usage/i })).toBeInTheDocument();
     });
 
-    expect(screen.queryByRole('button', { name: /^back$/i })).not.toBeInTheDocument();
+    expect(screen.getByRole('link', { name: /^back$/i })).toHaveAttribute('href', '/');
 
     fireEvent.click(screen.getByRole('button', { name: /hardware interfaces/i }));
 
-    expect(await screen.findByRole('button', { name: /^back$/i })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: /^back$/i })).toHaveAttribute('href', '/system');
     expect(screen.getByText(/serial ports and block devices detected on this host/i)).toBeInTheDocument();
     expect(screen.getByTestId('location-display')).toHaveTextContent('/system/hardware-interfaces');
 
-    fireEvent.click(screen.getByRole('button', { name: /^back$/i }));
+    fireEvent.click(screen.getByRole('link', { name: /^back$/i }));
 
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: /^back$/i })).not.toBeInTheDocument();
+      expect(screen.getByRole('link', { name: /^back$/i })).toHaveAttribute('href', '/');
     });
+    expect(screen.queryByText(/serial ports and block devices detected on this host/i)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /hardware interfaces/i })).toBeInTheDocument();
     expect(screen.getByTestId('location-display')).toHaveTextContent('/system');
   });
@@ -238,7 +239,7 @@ describe('SystemPage', () => {
   it('loads the matching section from a direct system child route', async () => {
     renderSystemPage('/system/logs');
 
-    expect(await screen.findByRole('button', { name: /^back$/i })).toBeInTheDocument();
+    expect(await screen.findByRole('link', { name: /^back$/i })).toHaveAttribute('href', '/system');
     expect(await screen.findByText(/browse captured log entries filtered by severity and time range/i)).toBeInTheDocument();
     expect(screen.getByTestId('location-display')).toHaveTextContent('/system/logs');
   });

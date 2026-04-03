@@ -380,10 +380,6 @@ function scheduleUpdateProgressReconnect(
 }
 
 interface AppState {
-  isDesktopSidebarOpen: boolean;
-  isMobileSidebarOpen: boolean;
-  toggleSidebar: () => void;
-  closeMobileSidebar: () => void;
   themes: ThemeConfig[];
   activeThemeId: string;
   setActiveThemeId: (id: string) => void;
@@ -401,17 +397,6 @@ interface AppState {
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
-  isDesktopSidebarOpen: true,
-  isMobileSidebarOpen: false,
-  toggleSidebar: () => {
-    const isMobileViewport = typeof window !== 'undefined' && window.matchMedia('(max-width: 767px)').matches;
-
-    set((state) => isMobileViewport
-      ? { isMobileSidebarOpen: !state.isMobileSidebarOpen }
-      : { isDesktopSidebarOpen: !state.isDesktopSidebarOpen });
-  },
-  closeMobileSidebar: () => set({ isMobileSidebarOpen: false }),
-
   themes: builtInThemes,
   activeThemeId: (typeof window !== 'undefined' && localStorage.getItem('FluxMonitor-theme')) || 'emerald-dark',
 

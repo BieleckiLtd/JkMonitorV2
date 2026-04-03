@@ -1,13 +1,14 @@
-import { useEffect, useState, useRef, useCallback, type TouchEvent } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSignal, type IconDefinition } from '@fortawesome/free-solid-svg-icons';
-import { Bluetooth, Cable, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Cloud, Cpu, Database, Download, ExternalLink, Gauge, Globe2, HardDrive, Leaf, List, LoaderCircle, Lock, MemoryStick, RefreshCcw, CheckCircle2, Thermometer, Upload, Usb, Wifi, XCircle } from 'lucide-react';
+import { Bluetooth, Cable, ChevronDown, ChevronRight, CircleAlert, Cloud, Cpu, Database, Download, ExternalLink, Gauge, Globe2, HardDrive, Leaf, List, LoaderCircle, Lock, MemoryStick, RefreshCcw, CheckCircle2, Thermometer, Upload, Usb, Wifi, XCircle } from 'lucide-react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { StackPageHeader } from '../components/StackPageHeader';
 import { Input } from '../components/ui/input';
 import { Switch } from '../components/ui/switch';
 import { type UpdateProgress, getUpdateStateTone } from '../lib/systemUpdate';
-import { cn } from '../lib/utils';
+import { cn, supportsViewTransitions } from '../lib/utils';
 import { LogsPanel } from '../components/LogsPanel';
 import { useAppStore } from '../store/useAppStore';
 
@@ -370,13 +371,11 @@ type SystemSection =
   | 'database'
   | 'logs';
 
-type SystemMobileView = 'menu' | 'detail';
-type SystemSectionRouteSegment = Exclude<SystemSection, 'resource-usage'>;
-
 const narrowSystemLayoutMaxWidth = 1120;
 const narrowSystemLayoutQuery = '(max-width: 1023px)';
 
-const systemSectionRouteSegments: SystemSectionRouteSegment[] = [
+const systemSectionRouteSegments: SystemSection[] = [
+  'resource-usage',
   'software-update',
   'internet-speed',
   'tunnel',
@@ -412,25 +411,26 @@ function isNarrowSystemLayoutWidth(width: number) {
 
 function getSystemSectionFromRouteSegment(sectionId?: string): SystemSection | null {
   if (!sectionId) {
-    return 'resource-usage';
+    return null;
   }
 
-  if (systemSectionRouteSegments.includes(sectionId as SystemSectionRouteSegment)) {
-    return sectionId as SystemSectionRouteSegment;
+  if (systemSectionRouteSegments.includes(sectionId as SystemSection)) {
+    return sectionId as SystemSection;
   }
 
   return null;
 }
 
 function getSystemSectionPath(section: SystemSection) {
-  return section === 'resource-usage' ? '/system' : `/system/${section}`;
+  return `/system/${section}`;
 }
 
 export function SystemPage() {
   const navigate = useNavigate();
   const { sectionId } = useParams<{ sectionId?: string }>();
   const routedSystemSection = getSystemSectionFromRouteSegment(sectionId);
-  const activeSystemSection = routedSystemSection ?? 'resource-usage';
+  const activeSystemSection = routedSystemSection;
+  const isSystemMenuPage = activeSystemSection === null;
   const updateProgress = useAppStore((state) => state.updateProgress);
   const updateActionPending = useAppStore((state) => state.updateActionPending);
   const startSystemUpdate = useAppStore((state) => state.startSystemUpdate);
@@ -454,13 +454,6 @@ export function SystemPage() {
   const [cloudflareTunnelError, setCloudflareTunnelError] = useState<string | null>(null);
   const [cloudflareTunnelFeedback, setCloudflareTunnelFeedback] = useState<InlineFeedback | null>(null);
   const [isNarrowSystemLayout, setIsNarrowSystemLayout] = useState(isNarrowSystemLayoutViewport);
-  const [mobileSystemView, setMobileSystemView] = useState<SystemMobileView>(() => {
-    if (!isNarrowSystemLayoutViewport()) {
-      return 'detail';
-    }
-
-    return sectionId ? 'detail' : 'menu';
-  });
   const [cloudflareTunnelSaving, setCloudflareTunnelSaving] = useState(false);
   const [cloudflareTunnelEnabled, setCloudflareTunnelEnabled] = useState(false);
   const [cloudflareTunnelTokenOrCommand, setCloudflareTunnelTokenOrCommand] = useState('');
@@ -489,12 +482,9 @@ export function SystemPage() {
   const [pendingConnectivityAction, setPendingConnectivityAction] = useState<PendingConnectivityAction | null>(null);
   const [expandedConnectivitySection, setExpandedConnectivitySection] = useState<'wifi' | 'bluetooth' | 'ethernet' | null>(null);
   const previousUpdateStatusRef = useRef<UpdateProgress['status'] | null>(null);
-  const previousSystemLayoutRef = useRef(isNarrowSystemLayoutViewport());
-  const previousSystemRouteSectionRef = useRef(sectionId);
   const wifiCredentialRequestRef = useRef(0);
   const cloudflareTunnelDirtyRef = useRef(false);
   const internetSpeedTestRequestInFlightRef = useRef(false);
-  const mobileSwipeStartRef = useRef<{ x: number; y: number } | null>(null);
   const systemPageRef = useRef<HTMLDivElement>(null);
 
   const loadInternetSpeedTest = useCallback(async () => {
@@ -602,10 +592,6 @@ export function SystemPage() {
 
     const syncLayout = (matches: boolean) => {
       setIsNarrowSystemLayout(matches);
-      if (previousSystemLayoutRef.current !== matches) {
-        previousSystemLayoutRef.current = matches;
-        setMobileSystemView(matches ? (sectionId ? 'detail' : 'menu') : 'detail');
-      }
     };
 
     const container = systemPageRef.current;
@@ -647,25 +633,7 @@ export function SystemPage() {
     return () => {
       mediaQueryList.removeListener(handleChange);
     };
-  }, [sectionId]);
-
-  useEffect(() => {
-    if (!isNarrowSystemLayout) {
-      previousSystemRouteSectionRef.current = sectionId;
-      return;
-    }
-
-    const hadChildSectionRoute = Boolean(previousSystemRouteSectionRef.current);
-    const hasChildSectionRoute = Boolean(sectionId);
-
-    if (hasChildSectionRoute) {
-      setMobileSystemView('detail');
-    } else if (hadChildSectionRoute) {
-      setMobileSystemView('menu');
-    }
-
-    previousSystemRouteSectionRef.current = sectionId;
-  }, [isNarrowSystemLayout, sectionId]);
+  }, []);
 
   const loadDbSize = async () => {
     setDbLoading(true);
@@ -826,59 +794,8 @@ export function SystemPage() {
   };
 
   const openSystemSection = useCallback((section: SystemSection) => {
-    navigate(getSystemSectionPath(section));
-
-    if (isNarrowSystemLayout) {
-      setMobileSystemView('detail');
-    }
-  }, [isNarrowSystemLayout, navigate]);
-
-  const handleMobileSystemBack = useCallback(() => {
-    setMobileSystemView('menu');
-    navigate('/system', { replace: true });
+    navigate(getSystemSectionPath(section), { viewTransition: supportsViewTransitions() });
   }, [navigate]);
-
-  const handleSystemViewTouchStart = useCallback((event: TouchEvent<HTMLDivElement>) => {
-    const touch = event.changedTouches[0];
-    if (!touch) {
-      return;
-    }
-
-    mobileSwipeStartRef.current = { x: touch.clientX, y: touch.clientY };
-  }, []);
-
-  const handleSystemViewTouchEnd = useCallback((event: TouchEvent<HTMLDivElement>) => {
-    if (!isNarrowSystemLayout) {
-      return;
-    }
-
-    const touch = event.changedTouches[0];
-    const start = mobileSwipeStartRef.current;
-    mobileSwipeStartRef.current = null;
-
-    if (!touch || !start) {
-      return;
-    }
-
-    const deltaX = touch.clientX - start.x;
-    const deltaY = touch.clientY - start.y;
-
-    if (Math.abs(deltaX) < 60 || Math.abs(deltaY) > 80 || Math.abs(deltaY) > Math.abs(deltaX)) {
-      return;
-    }
-
-    if (deltaX < 0 && mobileSystemView === 'menu') {
-      setMobileSystemView('detail');
-    }
-
-    if (deltaX > 0 && mobileSystemView === 'detail') {
-      if (sectionId) {
-        navigate('/system', { replace: true });
-      } else {
-        setMobileSystemView('menu');
-      }
-    }
-  }, [isNarrowSystemLayout, mobileSystemView, navigate, sectionId]);
 
   const startInternetSpeedTest = async () => {
     setInternetSpeedTestStarting(true);
@@ -1537,7 +1454,9 @@ export function SystemPage() {
     : pendingConnectivityAction?.kind === 'disconnect-ethernet'
       ? 'Disconnect Ethernet'
       : null;
-  const activeSystemSectionItem = systemSectionItems.find((item) => item.id === activeSystemSection) ?? systemSectionItems[0];
+  const activeSystemSectionItem = activeSystemSection
+    ? systemSectionItems.find((item) => item.id === activeSystemSection) ?? systemSectionItems[0]
+    : null;
 
   const renderSystemSectionMenu = () => (
     <Card className='gap-0 bg-card/85 py-0 shadow-none ring-0'>
@@ -1563,7 +1482,7 @@ export function SystemPage() {
                 <div className='text-sm font-medium'>{item.label}</div>
                 <div className='mt-0.5 text-xs opacity-80'>{item.description}</div>
               </div>
-              {isNarrowSystemLayout ? <ChevronRight className='h-4 w-4 shrink-0 opacity-60' /> : null}
+              <ChevronRight className='h-4 w-4 shrink-0 opacity-60' />
             </button>
           );
         })}
@@ -1571,82 +1490,68 @@ export function SystemPage() {
     </Card>
   );
 
-  if (sectionId === 'resource-usage' || routedSystemSection === null) {
+  const renderSystemMenuPage = () => (
+    <div className='space-y-6'>
+      <StackPageHeader
+        backTo='/'
+        title='System'
+        description='Host status, updates, and logs'
+      />
+
+      <div className='grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)] xl:gap-8 2xl:grid-cols-[19rem_minmax(0,1fr)]'>
+        {renderSystemSectionMenu()}
+
+        <Card className='hidden border border-border/70 bg-card/75 shadow-sm xl:flex'>
+          <CardContent className='flex min-h-64 flex-col justify-center space-y-3 pt-6'>
+            <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>
+              System
+            </div>
+            <div className='text-2xl font-semibold tracking-tight text-foreground'>
+              Pick a system area
+            </div>
+            <p className='max-w-lg text-sm leading-6 text-muted-foreground'>
+              Open one system page at a time, then use Back to return to this menu.
+            </p>
+          </CardContent>
+        </Card>
+      </div>
+    </div>
+  );
+
+  if (sectionId && routedSystemSection === null) {
     return <Navigate to='/system' replace />;
   }
 
   return (
     <div ref={systemPageRef} className='min-w-0 space-y-6 pb-8'>
-      {loadError ? (
-        <div className='flex items-start gap-3 rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-4 text-sm text-destructive'>
-          <CircleAlert className='mt-0.5 h-5 w-5 shrink-0' />
-          <div>
-            <div className='font-semibold'>Status feed unavailable</div>
-            <div className='mt-1 text-destructive/90'>{loadError}</div>
-          </div>
-        </div>
-      ) : null}
+      {isSystemMenuPage ? renderSystemMenuPage() : (
+        <>
+          {activeSystemSectionItem ? (
+            <StackPageHeader
+              backTo='/system'
+              title={activeSystemSectionItem.label}
+              description={activeSystemSectionItem.description}
+            />
+          ) : null}
 
-      {isLoading && !status ? (
-        <div className='flex min-h-64 items-center justify-center rounded-2xl border border-border bg-card/60'>
-          <LoaderCircle className='h-6 w-6 animate-spin text-primary' />
-        </div>
-      ) : null}
-
-      {status ? (
-        <div
-          className={cn('min-w-0', isNarrowSystemLayout && 'overflow-hidden')}
-          onTouchStart={isNarrowSystemLayout ? handleSystemViewTouchStart : undefined}
-          onTouchEnd={isNarrowSystemLayout ? handleSystemViewTouchEnd : undefined}
-          onTouchCancel={isNarrowSystemLayout ? () => {
-            mobileSwipeStartRef.current = null;
-          } : undefined}
-        >
-          <div
-            className={cn(
-              isNarrowSystemLayout
-                ? 'flex w-[200%] touch-pan-y transition-transform duration-300 ease-out'
-                : 'grid gap-6 lg:grid-cols-[18rem_minmax(0,1fr)] xl:grid-cols-[19rem_minmax(0,1fr)]'
-            )}
-            style={isNarrowSystemLayout ? { transform: mobileSystemView === 'menu' ? 'translateX(0%)' : 'translateX(-50%)' } : undefined}
-          >
-            <div
-              className={cn(
-                isNarrowSystemLayout && 'w-1/2 shrink-0 pr-1',
-                isNarrowSystemLayout && mobileSystemView !== 'menu' && 'pointer-events-none'
-              )}
-              aria-hidden={isNarrowSystemLayout ? mobileSystemView !== 'menu' : undefined}
-            >
-              {renderSystemSectionMenu()}
+          {loadError ? (
+            <div className='flex items-start gap-3 rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-4 text-sm text-destructive'>
+              <CircleAlert className='mt-0.5 h-5 w-5 shrink-0' />
+              <div>
+                <div className='font-semibold'>Status feed unavailable</div>
+                <div className='mt-1 text-destructive/90'>{loadError}</div>
+              </div>
             </div>
+          ) : null}
 
-            <div
-              className={cn(
-                'min-w-0',
-                isNarrowSystemLayout && 'w-1/2 shrink-0 pl-1',
-                isNarrowSystemLayout && mobileSystemView !== 'detail' && 'pointer-events-none'
-              )}
-              aria-hidden={isNarrowSystemLayout ? mobileSystemView !== 'detail' : undefined}
-            >
-              <div className={cn('min-w-0 space-y-6', isNarrowSystemLayout && 'space-y-4')}>
-                {isNarrowSystemLayout ? (
-                  <div className='flex items-center gap-3 rounded-2xl border border-border/70 bg-background/40 px-3 py-2.5'>
-                    <button
-                      type='button'
-                      onClick={handleMobileSystemBack}
-                      className='inline-flex items-center gap-1 rounded-xl px-2 py-1 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
-                    >
-                      <ChevronLeft className='h-4 w-4' />
-                      Back
-                    </button>
-                    <div className='min-w-0'>
-                      <div className='truncate text-sm font-semibold text-foreground'>{activeSystemSectionItem.label}</div>
-                      <div className='truncate text-xs text-muted-foreground'>{activeSystemSectionItem.description}</div>
-                    </div>
-                  </div>
-                ) : null}
+          {isLoading && !status ? (
+            <div className='flex min-h-64 items-center justify-center rounded-2xl border border-border bg-card/60'>
+              <LoaderCircle className='h-6 w-6 animate-spin text-primary' />
+            </div>
+          ) : null}
 
-                <div className='min-w-0 space-y-6'>
+          {status ? (
+            <div className='min-w-0 space-y-6'>
             {activeSystemSection === 'resource-usage' ? (
               <Card className='border border-border/80 bg-card/85 shadow-sm'>
                 <CardHeader className='border-b border-border/60 pb-4'>
@@ -2697,14 +2602,11 @@ export function SystemPage() {
               </CardContent>
             </Card>
 
-                </div>
-
-                {isNarrowSystemLayout && activeSystemSection === 'logs' ? <LogsPanel /> : null}
-              </div>
+            {isNarrowSystemLayout && activeSystemSection === 'logs' ? <LogsPanel /> : null}
             </div>
-          </div>
-        </div>
-      ) : null}
+          ) : null}
+        </>
+      )}
 
       {wifiConnectDialog ? (
         <div className='fixed inset-0 z-50 flex items-center justify-center bg-background/80 px-4 backdrop-blur-sm'>
