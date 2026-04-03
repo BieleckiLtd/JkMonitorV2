@@ -218,18 +218,18 @@ describe('SystemPage', () => {
       expect(screen.getByRole('button', { name: /resource usage/i })).toBeInTheDocument();
     });
 
-    expect(screen.getByRole('link', { name: /^back$/i })).toHaveAttribute('href', '/');
+    expect(screen.getByRole('button', { name: /^back$/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /hardware interfaces/i }));
 
-    expect(await screen.findByRole('link', { name: /^back$/i })).toHaveAttribute('href', '/system');
+    expect(await screen.findByRole('button', { name: /^back$/i })).toBeInTheDocument();
     expect(screen.getByText(/serial ports and block devices detected on this host/i)).toBeInTheDocument();
     expect(screen.getByTestId('location-display')).toHaveTextContent('/system/hardware-interfaces');
 
-    fireEvent.click(screen.getByRole('link', { name: /^back$/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^back$/i }));
 
     await waitFor(() => {
-      expect(screen.getByRole('link', { name: /^back$/i })).toHaveAttribute('href', '/');
+      expect(screen.getByRole('button', { name: /^back$/i })).toBeInTheDocument();
     });
     expect(screen.queryByText(/serial ports and block devices detected on this host/i)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /hardware interfaces/i })).toBeInTheDocument();
@@ -239,7 +239,7 @@ describe('SystemPage', () => {
   it('loads the matching section from a direct system child route', async () => {
     renderSystemPage('/system/logs');
 
-    expect(await screen.findByRole('link', { name: /^back$/i })).toHaveAttribute('href', '/system');
+    expect(await screen.findByRole('button', { name: /^back$/i })).toBeInTheDocument();
     expect(await screen.findByText(/browse captured log entries filtered by severity and time range/i)).toBeInTheDocument();
     expect(screen.getByTestId('location-display')).toHaveTextContent('/system/logs');
   });

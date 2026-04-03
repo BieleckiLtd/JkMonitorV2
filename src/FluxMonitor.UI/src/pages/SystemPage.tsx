@@ -8,7 +8,8 @@ import { StackPageHeader } from '../components/StackPageHeader';
 import { Input } from '../components/ui/input';
 import { Switch } from '../components/ui/switch';
 import { type UpdateProgress, getUpdateStateTone } from '../lib/systemUpdate';
-import { cn, supportsViewTransitions } from '../lib/utils';
+import { cn } from '../lib/utils';
+import { runWithViewTransition } from '../lib/viewTransitions';
 import { LogsPanel } from '../components/LogsPanel';
 import { useAppStore } from '../store/useAppStore';
 
@@ -794,7 +795,9 @@ export function SystemPage() {
   };
 
   const openSystemSection = useCallback((section: SystemSection) => {
-    navigate(getSystemSectionPath(section), { viewTransition: supportsViewTransitions() });
+    runWithViewTransition(() => {
+      navigate(getSystemSectionPath(section));
+    });
   }, [navigate]);
 
   const startInternetSpeedTest = async () => {

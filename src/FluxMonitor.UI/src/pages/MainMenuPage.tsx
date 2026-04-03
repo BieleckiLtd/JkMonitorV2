@@ -1,9 +1,10 @@
 import { Activity, ChevronRight } from 'lucide-react';
-import { NavLink } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { StackPageHeader } from '../components/StackPageHeader';
 import { Card, CardContent } from '../components/ui/card';
 import { primaryNavigationItems, type PrimaryNavigationItem } from '../lib/navigation';
-import { cn, supportsViewTransitions } from '../lib/utils';
+import { cn } from '../lib/utils';
+import { runWithViewTransition } from '../lib/viewTransitions';
 
 export function MainMenuPage() {
   return (
@@ -42,17 +43,19 @@ export function MainMenuPage() {
 }
 
 function MainMenuLink({ item }: { item: PrimaryNavigationItem }) {
+  const navigate = useNavigate();
   const Icon = item.icon;
 
   return (
-    <NavLink
-      to={item.path}
-      viewTransition={supportsViewTransitions()}
-      className={({ isActive }) => cn(
-        'flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition-colors',
-        isActive
-          ? 'border-primary/30 bg-primary/10 text-foreground shadow-sm'
-          : 'border-border/60 bg-background/30 text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+    <button
+      type='button'
+      onClick={() => {
+        runWithViewTransition(() => {
+          navigate(item.path);
+        });
+      }}
+      className={cn(
+        'flex w-full items-center gap-3 rounded-2xl border border-border/60 bg-background/30 px-4 py-3 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
       )}
     >
       <Icon className='h-4 w-4 shrink-0' />
@@ -61,6 +64,6 @@ function MainMenuLink({ item }: { item: PrimaryNavigationItem }) {
         <div className='mt-0.5 text-xs opacity-80'>{item.description}</div>
       </div>
       <ChevronRight className='h-4 w-4 shrink-0 opacity-60' />
-    </NavLink>
+    </button>
   );
 }

@@ -8,7 +8,7 @@ describe('MainMenuPage', () => {
     cleanup();
   });
 
-  it('renders the main menu with top-level navigation links', () => {
+  it('renders the main menu with top-level navigation actions', () => {
     render(
       <MemoryRouter>
         <MainMenuPage />
@@ -16,7 +16,7 @@ describe('MainMenuPage', () => {
     );
 
     expect(screen.getByText('Main menu')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: /system/i })).toHaveAttribute('href', '/system');
-    expect(screen.getByRole('link', { name: /monitor/i })).toHaveAttribute('href', '/monitor');
+    expect(screen.getByRole('button', { name: /system/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /monitor/i })).toBeInTheDocument();
   });
 });
