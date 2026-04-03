@@ -22,6 +22,13 @@ public sealed class TimescaleRetentionRollupTests
         Assert.Equal(365, retention.FiveMinuteWindowDays);
     }
 
+    [Fact]
+    public void RetentionConfiguration_DefaultPersistedBucketMinutes_Is5()
+    {
+        var retention = new RetentionConfiguration();
+        Assert.Equal(5, retention.PersistedBucketMinutes);
+    }
+
     // ── Rollup window alignment ────────────────────────────────────────────
 
     [Fact]
@@ -54,6 +61,14 @@ public sealed class TimescaleRetentionRollupTests
         var input = new DateTimeOffset(2025, 6, 15, 12, 35, 0, TimeSpan.Zero);
         var aligned = TimescaleTelemetryRepository.AlignToBucketBoundaryFloor(input, "5m");
         Assert.Equal(input, aligned);
+    }
+
+    [Fact]
+    public void AlignToBucketBoundaryFloor_15m_TruncatesToQuarterHour()
+    {
+        var input = new DateTimeOffset(2025, 6, 15, 12, 37, 12, TimeSpan.Zero);
+        var aligned = TimescaleTelemetryRepository.AlignToBucketBoundaryFloor(input, "15m");
+        Assert.Equal(new DateTimeOffset(2025, 6, 15, 12, 30, 0, TimeSpan.Zero), aligned);
     }
 
     [Fact]
@@ -130,6 +145,26 @@ public sealed class TimescaleRetentionRollupTests
         var window = TimescaleTelemetryRepository.TryGetAlignedRollupWindow(from, to, "5m");
 
         Assert.Null(window);
+    }
+
+    [Fact]
+    public void ShouldFlushActiveBucket_ReturnsFalse_BelowThreshold()
+    {
+        var now = new DateTimeOffset(2025, 6, 15, 12, 37, 14, TimeSpan.Zero);
+
+        var shouldFlush = TimescaleTelemetryRepository.ShouldFlushActiveBucket(now, "5m", 0.45);
+
+        Assert.False(shouldFlush);
+    }
+
+    [Fact]
+    public void ShouldFlushActiveBucket_ReturnsTrue_AtThreshold()
+    {
+        var now = new DateTimeOffset(2025, 6, 15, 12, 37, 15, TimeSpan.Zero);
+
+        var shouldFlush = TimescaleTelemetryRepository.ShouldFlushActiveBucket(now, "5m", 0.45);
+
+        Assert.True(shouldFlush);
     }
 
     // ── ConvertDatabaseScalarToInt64 ───────────────────────────────────────

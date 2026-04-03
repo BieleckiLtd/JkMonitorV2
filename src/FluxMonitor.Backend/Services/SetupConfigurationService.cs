@@ -15,6 +15,7 @@ public sealed class SetupConfigurationService(
     ILogger<SetupConfigurationService> logger)
 {
     private const string ManagedAspNetCoreUrls = "http://[::]:5074";
+    private static readonly int[] SupportedPersistedBucketMinutes = [1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60];
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true
@@ -109,6 +110,7 @@ public sealed class SetupConfigurationService(
     public SaveDatabaseSettingsResponse SaveDatabaseSettings(SaveDatabaseSettingsRequest request)
     {
         ValidateNonNegative(nameof(request.RawSecondsWindowMinutes), request.RawSecondsWindowMinutes);
+        ValidatePersistedBucketMinutes(request.PersistedBucketMinutes);
         ValidateNonNegative(nameof(request.FiveMinuteWindowDays), request.FiveMinuteWindowDays);
         ValidateNonNegative(nameof(request.CompressAfterMinutes), request.CompressAfterMinutes);
 
@@ -120,6 +122,7 @@ public sealed class SetupConfigurationService(
                 UpsertObject(storage, "Retention", retention =>
                 {
                     retention["RawSecondsWindowMinutes"] = request.RawSecondsWindowMinutes;
+                    retention["PersistedBucketMinutes"] = request.PersistedBucketMinutes;
                     retention["FiveMinuteWindowDays"] = request.FiveMinuteWindowDays;
                 });
 
@@ -139,6 +142,7 @@ public sealed class SetupConfigurationService(
                 Retention = new RetentionConfiguration
                 {
                     RawSecondsWindowMinutes = request.RawSecondsWindowMinutes,
+                    PersistedBucketMinutes = request.PersistedBucketMinutes,
                     FiveMinuteWindowDays = request.FiveMinuteWindowDays
                 },
                 Compression = new CompressionConfiguration
@@ -151,8 +155,9 @@ public sealed class SetupConfigurationService(
         });
 
         logger.LogInformation(
-            "Saved database retention settings. RawSecondsWindowMinutes={RawSecondsWindowMinutes}, FiveMinuteWindowDays={FiveMinuteWindowDays}, CompressAfterMinutes={CompressAfterMinutes}.",
+            "Saved database retention settings. RawSecondsWindowMinutes={RawSecondsWindowMinutes}, PersistedBucketMinutes={PersistedBucketMinutes}, FiveMinuteWindowDays={FiveMinuteWindowDays}, CompressAfterMinutes={CompressAfterMinutes}.",
             request.RawSecondsWindowMinutes,
+            request.PersistedBucketMinutes,
             request.FiveMinuteWindowDays,
             request.CompressAfterMinutes);
 
@@ -309,11 +314,21 @@ public sealed class SetupConfigurationService(
             StorageProvider = configuration.Storage.Provider,
             DatabaseConfigured = !string.IsNullOrWhiteSpace(configuration.Storage.ConnectionString),
             RawSecondsWindowMinutes = configuration.Storage.Retention.RawSecondsWindowMinutes,
+            PersistedBucketMinutes = configuration.Storage.Retention.PersistedBucketMinutes,
             FiveMinuteWindowDays = configuration.Storage.Retention.FiveMinuteWindowDays,
             CompressAfterMinutes = configuration.Storage.Compression.CompressAfterMinutes,
             CanAutoRestart = managedRestartService.CanAutoRestart,
             ApplyMessage = managedRestartService.GetApplyMessage()
         };
+    }
+
+    private static void ValidatePersistedBucketMinutes(int value)
+    {
+        if (!SupportedPersistedBucketMinutes.Contains(value))
+        {
+            throw new InvalidOperationException(
+                $"PersistedBucketMinutes must be one of: {string.Join(", ", SupportedPersistedBucketMinutes)}.");
+        }
     }
 
     private static void ValidateNonNegative(string propertyName, int value)

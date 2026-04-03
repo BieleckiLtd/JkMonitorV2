@@ -5,7 +5,15 @@ import {
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { cn } from '../lib/utils';
-import { computeEnergyData, computeEnergyGradientStops, formatEnergyValue, type Resolution } from '../lib/energyUtils';
+import {
+  computeEnergyData,
+  computeEnergyGradientStops,
+  formatEnergyValue,
+  getIntervalHours,
+  getIntervalMilliseconds,
+  normalizeResolution,
+  type Resolution,
+} from '../lib/energyUtils';
 import { computeBatteryStatus } from '../lib/batteryStatus';
 import { TrendingUp } from 'lucide-react';
 import type { DeviceDefinition, UiChartDefinition } from '../types/deviceDefinition';
@@ -59,11 +67,23 @@ type DisplayPrecision = {
   deltaVoltage: number;
 };
 
+type CachedHistoryEntry = {
+  points: HistoryPoint[];
+  resolution: Resolution;
+};
+
+type CachedCellEntry = {
+  points: Record<string, unknown>[];
+  resolution: Resolution;
+};
+
+type HistoryDisplayMode = HistoryRangeId | 'today';
+
 const historyRanges: { id: HistoryRangeId; label: string; hint: string; queryResolution: Resolution; windowMs: number }[] = [
   { id: '10m', label: '10m', hint: 'Last 10 minutes — 1s samples from memory', queryResolution: '1s', windowMs: 600_000 },
-  { id: '1h', label: '1h', hint: 'Last hour — 5 min averages', queryResolution: '5m', windowMs: 3_600_000 },
-  { id: '24h', label: '24h', hint: 'Last 24 hours — 5 min averages', queryResolution: '5m', windowMs: 86_400_000 },
-  { id: '7d', label: '7d', hint: 'Last 7 days — 5 min averages', queryResolution: '5m', windowMs: 604_800_000 },
+  { id: '1h', label: '1h', hint: 'Last hour — persisted averages', queryResolution: '5m', windowMs: 3_600_000 },
+  { id: '24h', label: '24h', hint: 'Last 24 hours — persisted averages', queryResolution: '5m', windowMs: 86_400_000 },
+  { id: '7d', label: '7d', hint: 'Last 7 days — persisted averages', queryResolution: '5m', windowMs: 604_800_000 },
 ];
 
 // Map data keys to the precision field that governs their formatting.
@@ -154,7 +174,9 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
   const [sharedSelectedTime, setSharedSelectedTime] = useState<string | null>(null);
 
   const activeRange = historyRanges.find((range) => range.id === selectedRange) ?? historyRanges[2];
-  const effectiveResolution: Resolution = timeRange === 'today' ? '5m' : activeRange.queryResolution;
+  const requestedResolution: Resolution = timeRange === 'today' ? '5m' : activeRange.queryResolution;
+  const displayMode: HistoryDisplayMode = timeRange === 'today' ? 'today' : selectedRange;
+  const [resolvedResolution, setResolvedResolution] = useState<Resolution>(requestedResolution);
 
   const selectedCells = selectedCellIndices ?? [];
   const cellKey = selectedCells.join(',');
@@ -163,8 +185,12 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
   const definitionCharts = definition?.ui?.pages?.history?.charts;
 
   // Per-resolution data cache — survives resolution switches so toggling back is instant
-  const historyCacheRef = useRef(new Map<string, HistoryPoint[]>());
-  const cellCacheRef = useRef(new Map<string, Record<string, unknown>[]>());
+  const historyCacheRef = useRef(new Map<string, CachedHistoryEntry>());
+  const cellCacheRef = useRef(new Map<string, CachedCellEntry>());
+
+  useEffect(() => {
+    setResolvedResolution(requestedResolution);
+  }, [requestedResolution]);
 
   const todayRange = useMemo(() => {
     if (timeRange !== 'today') return null;
@@ -183,60 +209,69 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
   }, [activeRange.windowMs, timeRange]);
 
   const load = useCallback(async () => {
-    const key = `${deviceId}:${timeRange === 'today' ? 'today' : selectedRange}:${effectiveResolution}`;
+    const key = `${deviceId}:${timeRange === 'today' ? 'today' : selectedRange}:${requestedResolution}`;
     const cached = historyCacheRef.current.get(key);
+    const cachedPoints = cached?.points ?? [];
     const windowFrom = getFromIso();
 
     // Incremental: only fetch from the last known timestamp when cache exists
-    const fetchFrom = (cached && cached.length > 0)
-      ? cached[cached.length - 1].timestamp
+    const fetchFrom = cachedPoints.length > 0
+      ? cachedPoints[cachedPoints.length - 1].timestamp
       : windowFrom;
 
     try {
-      const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history?resolution=${effectiveResolution}&from=${encodeURIComponent(fetchFrom)}`);
+      const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history?resolution=${requestedResolution}&from=${encodeURIComponent(fetchFrom)}`);
       if (!resp.ok) return;
       const json = (await resp.json()) as HistoryResponse;
+      const responseResolution = normalizeResolution(json.resolution, requestedResolution);
 
       let points: HistoryPoint[];
-      if (cached && cached.length > 0 && fetchFrom !== windowFrom) {
+      if (cachedPoints.length > 0 && fetchFrom !== windowFrom) {
         // Merge: keep cached points still inside the sliding window, add/overwrite new
         const merged = new Map<string, HistoryPoint>();
-        for (const p of cached) if (p.timestamp >= windowFrom) merged.set(p.timestamp, p);
+        for (const p of cachedPoints) if (p.timestamp >= windowFrom) merged.set(p.timestamp, p);
         for (const p of json.points) merged.set(p.timestamp, p);
         points = [...merged.values()].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
       } else {
         points = json.points;
       }
 
-      historyCacheRef.current.set(key, points);
+      historyCacheRef.current.set(key, { points, resolution: responseResolution });
+      setResolvedResolution(responseResolution);
       setData(points);
     } catch { /* ignore */ }
     finally { setIsLoading(false); }
-  }, [deviceId, effectiveResolution, getFromIso, selectedRange, timeRange]);
+  }, [deviceId, getFromIso, requestedResolution, selectedRange, timeRange]);
 
   const loadCells = useCallback(async () => {
     if (selectedCells.length === 0) { setMultiCellData([]); return; }
-    const key = `${deviceId}:${timeRange === 'today' ? 'today' : selectedRange}:${effectiveResolution}:${cellKey}`;
+    const key = `${deviceId}:${timeRange === 'today' ? 'today' : selectedRange}:${requestedResolution}:${cellKey}`;
     const cached = cellCacheRef.current.get(key);
+    const cachedPoints = cached?.points ?? [];
     const windowFrom = getFromIso();
 
-    const lastTs = cached && cached.length > 0 ? String(cached[cached.length - 1].timestamp ?? '') : '';
+    const lastTs = cachedPoints.length > 0 ? String(cachedPoints[cachedPoints.length - 1].timestamp ?? '') : '';
     const fetchFrom = lastTs || windowFrom;
 
     try {
       const results = await Promise.all(
         selectedCells.map(async (idx) => {
-          const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history/cell/${idx}?resolution=${effectiveResolution}&from=${encodeURIComponent(fetchFrom)}`);
+          const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history/cell/${idx}?resolution=${requestedResolution}&from=${encodeURIComponent(fetchFrom)}`);
           if (!resp.ok) return null;
           const json = (await resp.json()) as CellHistoryResponse;
-          return { index: idx, points: json.points };
+          return {
+            index: idx,
+            points: json.points,
+            resolution: normalizeResolution(json.resolution, requestedResolution),
+          };
         })
       );
+      const responseResolution = results.find((result) => result)?.resolution ?? cached?.resolution ?? requestedResolution;
 
       const timeMap = new Map<string, Record<string, unknown>>();
       // Seed with cached data still within the window
-      if (cached && cached.length > 0 && fetchFrom !== windowFrom) {
-        for (const row of cached) {
+      if (cachedPoints.length > 0 && fetchFrom !== windowFrom) {
+        for (const row of cachedPoints) {
           const ts = String(row.timestamp ?? '');
           if (ts >= windowFrom) timeMap.set(ts, { ...row });
         }
@@ -245,48 +280,54 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
         if (!result) continue;
         for (const point of result.points) {
           if (!timeMap.has(point.timestamp)) {
-            timeMap.set(point.timestamp, { timestamp: point.timestamp, time: fmtTime(point.timestamp, effectiveResolution) });
+            timeMap.set(point.timestamp, { timestamp: point.timestamp, time: fmtTime(point.timestamp, responseResolution, displayMode) });
           }
           timeMap.get(point.timestamp)![`cell_${result.index}`] = point.voltageVolts;
         }
       }
 
       const merged = [...timeMap.values()].sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
-      cellCacheRef.current.set(key, merged);
+      cellCacheRef.current.set(key, { points: merged, resolution: responseResolution });
+      setResolvedResolution(responseResolution);
       setMultiCellData(merged);
     } catch { /* ignore */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [cellKey, deviceId, effectiveResolution, getFromIso, selectedRange, timeRange]);
+  }, [cellKey, deviceId, displayMode, getFromIso, requestedResolution, selectedRange, timeRange]);
 
   useEffect(() => {
     // Show cached data instantly on switch; refresh incrementally in background
-    const histKey = `${deviceId}:${timeRange === 'today' ? 'today' : selectedRange}:${effectiveResolution}`;
+    const histKey = `${deviceId}:${timeRange === 'today' ? 'today' : selectedRange}:${requestedResolution}`;
     const cached = historyCacheRef.current.get(histKey);
-    if (cached && cached.length > 0) {
-      setData(cached);
+    if (cached && cached.points.length > 0) {
+      setData(cached.points);
+      setResolvedResolution(cached.resolution);
       setIsLoading(false);
     } else {
       setIsLoading(true);
       setData([]);
+      setResolvedResolution(requestedResolution);
     }
 
     const cellHistKey = `${histKey}:${cellKey}`;
     const cellCached = cellCacheRef.current.get(cellHistKey);
-    if (cellCached && cellCached.length > 0) {
-      setMultiCellData(cellCached);
+    if (cellCached && cellCached.points.length > 0) {
+      setMultiCellData(cellCached.points);
+      if (!cached) {
+        setResolvedResolution(cellCached.resolution);
+      }
     } else {
       setMultiCellData([]);
     }
 
     void load();
     void loadCells();
-    const id = window.setInterval(() => { void load(); void loadCells(); }, effectiveResolution === '1s' ? 2000 : 30000);
+    const id = window.setInterval(() => { void load(); void loadCells(); }, requestedResolution === '1s' ? 2000 : 30000);
     return () => window.clearInterval(id);
-  }, [cellKey, deviceId, effectiveResolution, load, loadCells, selectedRange, timeRange]);
+  }, [cellKey, deviceId, load, loadCells, requestedResolution, selectedRange, timeRange]);
 
   const formatted = data.map((p) => ({
     ...p,
-    time: fmtTime(p.timestamp, effectiveResolution),
+    time: fmtTime(p.timestamp, resolvedResolution, displayMode),
   }));
 
   // For 'today' mode: pad data to cover the full 12am-12am day so the X-axis spans the entire day
@@ -296,9 +337,9 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
     const existing = new Set(formatted.map(p => String(p.time)));
     const padded = [...formatted];
     const cur = new Date(todayRange.from);
-    const stepMs = effectiveResolution === '1h' ? 3600_000 : effectiveResolution === '5m' ? 300_000 : 60_000;
+    const stepMs = getIntervalMilliseconds(resolvedResolution);
     while (cur < todayRange.to) {
-      const label = fmtTime(cur.toISOString(), effectiveResolution);
+      const label = fmtTime(cur.toISOString(), resolvedResolution, displayMode);
       if (!existing.has(label)) {
         padded.push({ time: label, timestamp: cur.toISOString() } as typeof formatted[number]);
         existing.add(label);
@@ -308,7 +349,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
     // Sort by timestamp
     padded.sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
     return padded;
-  }, [todayRange, formatted, effectiveResolution]);
+  }, [displayMode, todayRange, formatted, resolvedResolution]);
 
   const chartData = timeRange === 'today' ? todayPaddedFormatted : formatted;
 
@@ -319,11 +360,11 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
     const cur = new Date(todayRange.from);
     const end = new Date(todayRange.to);
     while (cur <= end) {
-      ticks.push(fmtTime(cur.toISOString(), effectiveResolution));
-      cur.setHours(cur.getHours() + (effectiveResolution === '1h' ? 2 : 3));
+      ticks.push(fmtTime(cur.toISOString(), resolvedResolution, displayMode));
+      cur.setHours(cur.getHours() + (getIntervalHours(resolvedResolution) >= 1 ? 2 : 3));
     }
     return ticks;
-  }, [todayRange, effectiveResolution]);
+  }, [displayMode, todayRange, resolvedResolution]);
 
   const batteryStatus = useMemo(() => computeBatteryStatus(chartData, capacityAh), [chartData, capacityAh]);
 
@@ -416,9 +457,9 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
                 onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
                 todayXTicks={todayXTicks} />
             )}
-            {definitionCharts ? renderDefinitionCharts(definitionCharts, chartData, precision, effectiveResolution, sharedHoveredTime, sharedSelectedTime, setSharedHoveredTime, setSharedSelectedTime, todayXTicks, batteryStatusSubtitle) : (
+            {definitionCharts ? renderDefinitionCharts(definitionCharts, chartData, precision, resolvedResolution, displayMode, sharedHoveredTime, sharedSelectedTime, setSharedHoveredTime, setSharedSelectedTime, todayXTicks, batteryStatusSubtitle) : (
               <>
-                <EnergyChartSection data={chartData} resolution={effectiveResolution}
+                <EnergyChartSection data={chartData} resolution={resolvedResolution} displayMode={displayMode}
                   hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
                   onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
                   todayXTicks={todayXTicks} />
@@ -466,6 +507,7 @@ function renderDefinitionCharts(
   chartData: Record<string, unknown>[],
   precision: DisplayPrecision,
   resolution: Resolution,
+  displayMode: HistoryDisplayMode,
   hoveredTime: string | null,
   selectedTime: string | null,
   onHover: (time: string | null) => void,
@@ -480,6 +522,7 @@ function renderDefinitionCharts(
           key={`def-chart-${i}`}
           data={chartData}
           resolution={resolution}
+          displayMode={displayMode}
           hoveredTime={hoveredTime}
           selectedTime={selectedTime}
           onHover={onHover}
@@ -629,8 +672,8 @@ function ChartSection({ title, data, lines, domain, precision, hoveredTime, sele
   );
 }
 
-export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime, onHover, onSelect, todayXTicks }: {
-  data: Record<string, unknown>[]; resolution: Resolution;
+export function EnergyChartSection({ data, resolution, displayMode, hoveredTime, selectedTime, onHover, onSelect, todayXTicks }: {
+  data: Record<string, unknown>[]; resolution: Resolution; displayMode: HistoryDisplayMode;
   hoveredTime: string | null; selectedTime: string | null;
   onHover: (time: string | null) => void; onSelect: (time: string | null) => void;
   todayXTicks?: string[];
@@ -642,7 +685,7 @@ export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime
 
   const baselineMarkers = useMemo(() => {
     const result: { time: string; isMajor: boolean }[] = [];
-    if (resolution === '1s') {
+    if (displayMode === '10m') {
       // 10-minute mode: small dot every minute
       let lastMin = -1;
       for (const p of energyData) {
@@ -654,7 +697,7 @@ export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime
           lastMin = min;
         }
       }
-    } else if (resolution === '1m') {
+    } else if (displayMode === '1h') {
       // 1h mode: small dot every 10 minutes
       let lastSlot = -1;
       for (const p of energyData) {
@@ -666,20 +709,8 @@ export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime
           lastSlot = slot;
         }
       }
-    } else if (resolution === '5m') {
-      // 24h / today mode: small dot every 1h, bigger dot at 6h boundaries
-      let lastHour = -1;
-      for (const p of energyData) {
-        const ts = typeof p.timestamp === 'string' ? new Date(p.timestamp as string) : null;
-        if (!ts || isNaN(ts.getTime())) continue;
-        const hour = ts.getHours();
-        if (hour !== lastHour) {
-          result.push({ time: String(p.time), isMajor: hour % 6 === 0 });
-          lastHour = hour;
-        }
-      }
     } else {
-      // today / 7d (1h resolution): small dot every 1h, bigger dot at 6h boundaries
+      // 24h / today / 7d modes: small dot every 1h, bigger dot at 6h boundaries
       let lastHour = -1;
       for (const p of energyData) {
         const ts = typeof p.timestamp === 'string' ? new Date(p.timestamp as string) : null;
@@ -692,7 +723,7 @@ export function EnergyChartSection({ data, resolution, hoveredTime, selectedTime
       }
     }
     return result;
-  }, [energyData, resolution]);
+  }, [displayMode, energyData]);
 
   const activePoint = getActivePoint(energyData, hoveredTime, selectedTime);
   const activeEnergyText = useMemo(() => {
@@ -908,23 +939,29 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hove
   );
 }
 
-function fmtTime(iso: string, resolution: Resolution): string {
+function fmtTime(iso: string, resolution: Resolution, displayMode: HistoryDisplayMode): string {
   const d = new Date(iso);
-  if (resolution === '1h') {
+  if (resolution === '1s') {
+    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
+  }
+  if (displayMode === '1h') {
+    return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
+  }
+  if (getIntervalHours(resolution) >= 1) {
     return `${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getDate().toString().padStart(2, '0')} ${d.getHours().toString().padStart(2, '0')}:00`;
   }
   const time = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}`;
-  if (resolution === '5m') {
+  if (displayMode === 'today') {
+    return time;
+  }
+  if (displayMode === '24h' || displayMode === '7d') {
     const now = new Date();
     if (d.getDate() !== now.getDate() || d.getMonth() !== now.getMonth() || d.getFullYear() !== now.getFullYear()) {
       return `${(d.getMonth() + 1).toString().padStart(2, '0')}/${d.getDate().toString().padStart(2, '0')} ${time}`;
     }
     return time;
   }
-  if (resolution === '1m') {
-    return time;
-  }
-  return `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
+  return time;
 }
 
 function extractActiveIndex(state: unknown): number | null {

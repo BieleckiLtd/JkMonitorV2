@@ -58,6 +58,8 @@ public sealed record class DatabaseSettingsStateResponse
 
     public required int RawSecondsWindowMinutes { get; init; }
 
+    public required int PersistedBucketMinutes { get; init; }
+
     public required int FiveMinuteWindowDays { get; init; }
 
     public required int CompressAfterMinutes { get; init; }
@@ -70,6 +72,8 @@ public sealed record class DatabaseSettingsStateResponse
 public sealed record class SaveDatabaseSettingsRequest
 {
     public required int RawSecondsWindowMinutes { get; init; }
+
+    public required int PersistedBucketMinutes { get; init; }
 
     public required int FiveMinuteWindowDays { get; init; }
 

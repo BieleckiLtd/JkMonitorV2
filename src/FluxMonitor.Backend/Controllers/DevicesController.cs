@@ -3,6 +3,7 @@ using FluxMonitor.Backend.Models;
 using FluxMonitor.Backend.Services;
 using FluxMonitor.Contracts.Configuration;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.Extensions.Options;
 
 namespace FluxMonitor.Backend.Controllers;
 
@@ -18,9 +19,11 @@ public sealed class DevicesController(
     PollingClientDispatcher pollingClientDispatcher,
     DeviceDefinitionLoader definitionLoader,
     ITelemetryRepository telemetryRepository,
+    IOptions<MonitorConfiguration> configuration,
     PollTrigger pollTrigger,
     ILogger<DevicesController> logger) : ControllerBase
 {
+    private readonly RetentionConfiguration _retention = configuration.Value.Storage.Retention;
 
     [HttpGet("current")]
     public IActionResult GetCurrent()
@@ -88,27 +91,37 @@ public sealed class DevicesController(
     public async Task<IActionResult> GetHistory(
         string deviceId,
         [FromQuery] string resolution = "5m",
+        [FromQuery] string bucketView = "avg",
         [FromQuery] DateTimeOffset? from = null,
         [FromQuery] DateTimeOffset? to = null,
         CancellationToken cancellationToken = default)
     {
-        var allowed = new HashSet<string>(StringComparer.Ordinal) { "1s", "1m", "5m", "1h" };
+        var persistedResolution = TimescaleTelemetryRepository.GetPersistedResolution(_retention.PersistedBucketMinutes);
+        var allowed = new HashSet<string>(StringComparer.Ordinal) { "1s", "1m", "5m", "1h", persistedResolution };
         if (!allowed.Contains(resolution))
-            return BadRequest(new { message = $"Invalid resolution '{resolution}'. Use 1s or 5m. Legacy 1m and 1h inputs are accepted as 5m aliases." });
+            return BadRequest(new { message = $"Invalid resolution '{resolution}'. Use 1s or {persistedResolution}. Legacy 1m, 5m, and 1h inputs are accepted as persisted-history aliases." });
+
+        if (!TimescaleTelemetryRepository.TryParseBucketValueKind(bucketView, out var bucketValueKind))
+            return BadRequest(new { message = $"Invalid bucket view '{bucketView}'. Use avg, min, max, or last." });
 
         var toValue = to ?? DateTimeOffset.UtcNow;
-        var fromValue = from ?? resolution switch
-        {
-            "1s" => toValue.AddMinutes(-10),
-            "1m" => toValue.AddHours(-1),
-            "5m" => toValue.AddDays(-1),
-            "1h" => toValue.AddDays(-7),
-            _ => toValue.AddHours(-1),
-        };
+        var fromValue = from ?? (
+            string.Equals(resolution, "1s", StringComparison.Ordinal) ? toValue.AddMinutes(-10) :
+            string.Equals(resolution, "1m", StringComparison.Ordinal) ? toValue.AddHours(-1) :
+            string.Equals(resolution, "1h", StringComparison.Ordinal) ? toValue.AddDays(-7) :
+            toValue.AddDays(-1));
 
-        var normalizedResolution = string.Equals(resolution, "1s", StringComparison.Ordinal) ? "1s" : "5m";
-        var points = await telemetryRepository.QueryHistoryAsync(deviceId, normalizedResolution, fromValue, toValue, cancellationToken);
-        return Ok(new { deviceId, resolution = normalizedResolution, from = fromValue, to = toValue, points });
+        var normalizedResolution = string.Equals(resolution, "1s", StringComparison.Ordinal) ? "1s" : persistedResolution;
+        var points = await telemetryRepository.QueryHistoryAsync(deviceId, normalizedResolution, bucketValueKind, fromValue, toValue, cancellationToken);
+        return Ok(new
+        {
+            deviceId,
+            resolution = normalizedResolution,
+            bucketView = TimescaleTelemetryRepository.FormatBucketValueKind(bucketValueKind),
+            from = fromValue,
+            to = toValue,
+            points
+        });
     }
 
     [HttpGet("{deviceId}/history/cell/{cellIndex:int}")]
@@ -116,6 +129,7 @@ public sealed class DevicesController(
         string deviceId,
         int cellIndex,
         [FromQuery] string resolution = "5m",
+        [FromQuery] string bucketView = "avg",
         [FromQuery] DateTimeOffset? from = null,
         [FromQuery] DateTimeOffset? to = null,
         CancellationToken cancellationToken = default)
@@ -123,23 +137,33 @@ public sealed class DevicesController(
         if (cellIndex < 1 || cellIndex > 31)
             return BadRequest(new { message = "Cell index must be between 1 and 31." });
 
-        var allowed = new HashSet<string>(StringComparer.Ordinal) { "1s", "1m", "5m", "1h" };
+        var persistedResolution = TimescaleTelemetryRepository.GetPersistedResolution(_retention.PersistedBucketMinutes);
+        var allowed = new HashSet<string>(StringComparer.Ordinal) { "1s", "1m", "5m", "1h", persistedResolution };
         if (!allowed.Contains(resolution))
-            return BadRequest(new { message = $"Invalid resolution '{resolution}'. Use 1s or 5m. Legacy 1m and 1h inputs are accepted as 5m aliases." });
+            return BadRequest(new { message = $"Invalid resolution '{resolution}'. Use 1s or {persistedResolution}. Legacy 1m, 5m, and 1h inputs are accepted as persisted-history aliases." });
+
+        if (!TimescaleTelemetryRepository.TryParseBucketValueKind(bucketView, out var bucketValueKind))
+            return BadRequest(new { message = $"Invalid bucket view '{bucketView}'. Use avg, min, max, or last." });
 
         var toValue = to ?? DateTimeOffset.UtcNow;
-        var fromValue = from ?? resolution switch
-        {
-            "1s" => toValue.AddMinutes(-10),
-            "1m" => toValue.AddHours(-1),
-            "5m" => toValue.AddDays(-1),
-            "1h" => toValue.AddDays(-7),
-            _ => toValue.AddHours(-1),
-        };
+        var fromValue = from ?? (
+            string.Equals(resolution, "1s", StringComparison.Ordinal) ? toValue.AddMinutes(-10) :
+            string.Equals(resolution, "1m", StringComparison.Ordinal) ? toValue.AddHours(-1) :
+            string.Equals(resolution, "1h", StringComparison.Ordinal) ? toValue.AddDays(-7) :
+            toValue.AddDays(-1));
 
-        var normalizedResolution = string.Equals(resolution, "1s", StringComparison.Ordinal) ? "1s" : "5m";
-        var points = await telemetryRepository.QueryCellHistoryAsync(deviceId, cellIndex, normalizedResolution, fromValue, toValue, cancellationToken);
-        return Ok(new { deviceId, cellIndex, resolution = normalizedResolution, from = fromValue, to = toValue, points });
+        var normalizedResolution = string.Equals(resolution, "1s", StringComparison.Ordinal) ? "1s" : persistedResolution;
+        var points = await telemetryRepository.QueryCellHistoryAsync(deviceId, cellIndex, normalizedResolution, bucketValueKind, fromValue, toValue, cancellationToken);
+        return Ok(new
+        {
+            deviceId,
+            cellIndex,
+            resolution = normalizedResolution,
+            bucketView = TimescaleTelemetryRepository.FormatBucketValueKind(bucketValueKind),
+            from = fromValue,
+            to = toValue,
+            points
+        });
     }
 
     [HttpPost("{deviceId}/parameters/{parameterKey}")]

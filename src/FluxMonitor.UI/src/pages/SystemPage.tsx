@@ -94,6 +94,7 @@ type DatabaseSettingsState = {
   storageProvider: string;
   databaseConfigured: boolean;
   rawSecondsWindowMinutes: number;
+  persistedBucketMinutes: number;
   fiveMinuteWindowDays: number;
   compressAfterMinutes: number;
   canAutoRestart: boolean;
@@ -108,9 +109,12 @@ type SaveDatabaseSettingsResponse = {
 
 type DatabaseSettingsFormState = {
   rawSecondsWindowMinutes: string;
+  persistedBucketMinutes: string;
   fiveMinuteWindowDays: string;
   compressAfterMinutes: string;
 };
+
+const supportedPersistedBucketMinutes = [1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60];
 
 type CommitInfo = {
   sha?: string | null;
@@ -452,9 +456,19 @@ function getSystemSectionPath(section: SystemSection) {
 function createDatabaseSettingsFormState(settings: DatabaseSettingsState): DatabaseSettingsFormState {
   return {
     rawSecondsWindowMinutes: String(settings.rawSecondsWindowMinutes),
+    persistedBucketMinutes: String(settings.persistedBucketMinutes),
     fiveMinuteWindowDays: String(settings.fiveMinuteWindowDays),
     compressAfterMinutes: String(settings.compressAfterMinutes),
   };
+}
+
+function parsePositiveInteger(value: string, label: string) {
+  const trimmed = value.trim();
+  if (!/^[1-9]\d*$/.test(trimmed)) {
+    throw new Error(`${label} must be a whole number greater than zero.`);
+  }
+
+  return Number.parseInt(trimmed, 10);
 }
 
 function parseNonNegativeInteger(value: string, label: string) {
@@ -464,6 +478,15 @@ function parseNonNegativeInteger(value: string, label: string) {
   }
 
   return Number.parseInt(trimmed, 10);
+}
+
+function parsePersistedBucketMinutes(value: string) {
+  const minutes = parsePositiveInteger(value, 'Persisted bucket size');
+  if (!supportedPersistedBucketMinutes.includes(minutes)) {
+    throw new Error(`Persisted bucket size must be one of: ${supportedPersistedBucketMinutes.join(', ')}.`);
+  }
+
+  return minutes;
 }
 
 export function SystemPage() {
@@ -1229,6 +1252,7 @@ export function SystemPage() {
 
     let payload: {
       rawSecondsWindowMinutes: number;
+      persistedBucketMinutes: number;
       fiveMinuteWindowDays: number;
       compressAfterMinutes: number;
       restartApplication: boolean;
@@ -1237,7 +1261,8 @@ export function SystemPage() {
     try {
       payload = {
         rawSecondsWindowMinutes: parseNonNegativeInteger(dbSettingsForm.rawSecondsWindowMinutes, 'In-memory 1-second window'),
-        fiveMinuteWindowDays: parseNonNegativeInteger(dbSettingsForm.fiveMinuteWindowDays, '5-minute database window'),
+        persistedBucketMinutes: parsePersistedBucketMinutes(dbSettingsForm.persistedBucketMinutes),
+        fiveMinuteWindowDays: parseNonNegativeInteger(dbSettingsForm.fiveMinuteWindowDays, 'Persisted history window'),
         compressAfterMinutes: parseNonNegativeInteger(dbSettingsForm.compressAfterMinutes, 'Compression threshold'),
         restartApplication: true,
       };
@@ -1338,6 +1363,7 @@ export function SystemPage() {
   const metrics = status?.systemMetrics ?? null;
   const dbSettingsDirty = !!(dbSettings && dbSettingsForm && (
     dbSettingsForm.rawSecondsWindowMinutes !== String(dbSettings.rawSecondsWindowMinutes) ||
+    dbSettingsForm.persistedBucketMinutes !== String(dbSettings.persistedBucketMinutes) ||
     dbSettingsForm.fiveMinuteWindowDays !== String(dbSettings.fiveMinuteWindowDays) ||
     dbSettingsForm.compressAfterMinutes !== String(dbSettings.compressAfterMinutes)
   ));
@@ -2720,9 +2746,25 @@ export function SystemPage() {
                         </label>
 
                         <label className='space-y-2'>
-                          <span className='block text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>5-minute database history</span>
+                          <span className='block text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Persisted bucket size</span>
                           <Input
-                            aria-label='5-minute rollup days'
+                            aria-label='Persisted bucket minutes'
+                            type='number'
+                            min='1'
+                            step='1'
+                            value={dbSettingsForm.persistedBucketMinutes}
+                            onChange={(event) => {
+                              setDbSettingsForm((current) => current ? { ...current, persistedBucketMinutes: event.target.value } : current);
+                              setDbSettingsFeedback(null);
+                            }}
+                          />
+                          <span className='block text-[11px] leading-5 text-muted-foreground'>Store persisted averages in clock-aligned buckets. Supported values: 1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, or 60 minutes.</span>
+                        </label>
+
+                        <label className='space-y-2'>
+                          <span className='block text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Long-term database history</span>
+                          <Input
+                            aria-label='Persisted history days'
                             type='number'
                             min='0'
                             step='1'
@@ -2732,7 +2774,7 @@ export function SystemPage() {
                               setDbSettingsFeedback(null);
                             }}
                           />
-                          <span className='block text-[11px] leading-5 text-muted-foreground'>Days of persisted 5-minute averages to retain. Use 0 to keep all long-term history.</span>
+                          <span className='block text-[11px] leading-5 text-muted-foreground'>Days of persisted averages to retain. Use 0 to keep all long-term history.</span>
                         </label>
 
                         <label className='space-y-2'>
@@ -2767,7 +2809,7 @@ export function SystemPage() {
 
                       <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
                         <div className='text-[11px] leading-5 text-muted-foreground'>
-                          Current policy: {dbSettings.rawSecondsWindowMinutes}m of raw 1s samples in memory, {dbSettings.fiveMinuteWindowDays === 0 ? '5m averages kept forever in the database' : `${dbSettings.fiveMinuteWindowDays}d of 5m averages in the database`}.
+                          Current policy: {dbSettings.rawSecondsWindowMinutes}m of raw 1s samples in memory, {dbSettings.fiveMinuteWindowDays === 0 ? `${dbSettings.persistedBucketMinutes}m averages kept forever in the database` : `${dbSettings.fiveMinuteWindowDays}d of ${dbSettings.persistedBucketMinutes}m averages in the database`}.
                         </div>
                         <button
                           type='button'

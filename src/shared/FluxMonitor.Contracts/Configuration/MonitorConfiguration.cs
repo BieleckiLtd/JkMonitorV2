@@ -35,6 +35,8 @@ public sealed class RetentionConfiguration
 {
     public int RawSecondsWindowMinutes { get; init; } = 10;
 
+    public int PersistedBucketMinutes { get; init; } = 5;
+
     public int FiveMinuteWindowDays { get; init; } = 365;
 }
 

@@ -61,7 +61,7 @@ function isoAt(minutesOffset: number) {
 
 describe('EnergyChartSection', () => {
   it('renders without crashing with empty data', () => {
-    render(<EnergyChartSection data={[]} resolution='1m' />);
+    render(<EnergyChartSection data={[]} resolution='1m' displayMode='1h' />);
     expect(screen.getByText('Energy')).toBeInTheDocument();
   });
 
@@ -70,7 +70,7 @@ describe('EnergyChartSection', () => {
       makePoint('12:00', isoAt(0), 600, -3), // discharging
       makePoint('12:01', isoAt(1), 400, 2),   // charging
     ];
-    const { container } = render(<EnergyChartSection data={data} resolution='1m' />);
+    const { container } = render(<EnergyChartSection data={data} resolution='1m' displayMode='1h' />);
 
     expect(container.textContent).toContain('Charged:');
     expect(container.textContent).toContain('Discharged:');
@@ -80,7 +80,7 @@ describe('EnergyChartSection', () => {
     const data = [
       makePoint('12:00', isoAt(0), 400, 2), // charging
     ];
-    const { container } = render(<EnergyChartSection data={data} resolution='1m' />);
+    const { container } = render(<EnergyChartSection data={data} resolution='1m' displayMode='1h' />);
     // The ↑ arrow is before the Charged label
     expect(container.textContent).toContain('↑');
     expect(container.textContent).toContain('Charged:');
@@ -90,7 +90,7 @@ describe('EnergyChartSection', () => {
     const data = [
       makePoint('12:00', isoAt(0), 600, -3), // discharging
     ];
-    const { container } = render(<EnergyChartSection data={data} resolution='1m' />);
+    const { container } = render(<EnergyChartSection data={data} resolution='1m' displayMode='1h' />);
     expect(container.textContent).toContain('↓');
     expect(container.textContent).toContain('Discharged:');
   });
@@ -104,7 +104,7 @@ describe('EnergyChartSection', () => {
         const time = `${d.getUTCHours().toString().padStart(2, '0')}:${d.getUTCMinutes().toString().padStart(2, '0')}`;
         return makePoint(time, ts, 100, -1);
       });
-      render(<EnergyChartSection data={data} resolution='5m' />);
+      render(<EnergyChartSection data={data} resolution='5m' displayMode='24h' />);
 
       const dots = screen.getAllByTestId('ref-dot');
       expect(dots.length).toBeGreaterThanOrEqual(1);
@@ -118,7 +118,7 @@ describe('EnergyChartSection', () => {
         const time = `${d.getUTCHours().toString().padStart(2, '0')}:${d.getUTCMinutes().toString().padStart(2, '0')}:${d.getUTCSeconds().toString().padStart(2, '0')}`;
         return makePoint(time, ts, 100, -1);
       });
-      render(<EnergyChartSection data={data} resolution='1s' />);
+      render(<EnergyChartSection data={data} resolution='1s' displayMode='10m' />);
 
       const dots = screen.getAllByTestId('ref-dot');
       // Should have dots for each minute boundary
@@ -133,7 +133,7 @@ describe('EnergyChartSection', () => {
         const time = `${d.getUTCHours().toString().padStart(2, '0')}:${d.getUTCMinutes().toString().padStart(2, '0')}`;
         return makePoint(time, ts, 100, -1);
       });
-      render(<EnergyChartSection data={data} resolution='1m' />);
+      render(<EnergyChartSection data={data} resolution='1m' displayMode='1h' />);
 
       const dots = screen.getAllByTestId('ref-dot');
       // Should have roughly 3 dots (one per 10-min slot: :00, :10, :20)
@@ -148,7 +148,7 @@ describe('EnergyChartSection', () => {
         const time = `${ts.getUTCHours().toString().padStart(2, '0')}:00`;
         return makePoint(time, ts.toISOString(), 100, -1);
       });
-      render(<EnergyChartSection data={data} resolution='1h' />);
+      render(<EnergyChartSection data={data} resolution='1h' displayMode='7d' />);
 
       const dots = screen.getAllByTestId('ref-dot');
       // 6h boundaries at 0:00, 6:00, 12:00 should be larger (r=3)
@@ -160,7 +160,7 @@ describe('EnergyChartSection', () => {
   describe('Y-axis', () => {
     it('is positioned on the right', () => {
       const data = [makePoint('12:00', isoAt(0), 600, -3)];
-      const { container } = render(<EnergyChartSection data={data} resolution='1m' />);
+      const { container } = render(<EnergyChartSection data={data} resolution='1m' displayMode='1h' />);
 
       const yAxes = container.querySelectorAll('[data-testid="y-axis"]');
       expect(yAxes.length).toBeGreaterThanOrEqual(1);

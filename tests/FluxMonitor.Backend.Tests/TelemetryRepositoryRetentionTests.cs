@@ -115,4 +115,42 @@ public sealed class TelemetryRepositoryRetentionTests
     {
         Assert.True(TimescaleTelemetryRepository.SupportsImportTable("Measurements"));
     }
+
+    [Fact]
+    public void NormalizePersistedBucketMinutes_FallsBackTo5_ForUnsupportedValues()
+    {
+        Assert.Equal(5, TimescaleTelemetryRepository.NormalizePersistedBucketMinutes(7));
+        Assert.Equal(5, TimescaleTelemetryRepository.NormalizePersistedBucketMinutes(0));
+    }
+
+    [Fact]
+    public void GetPersistedResolution_FormatsConfiguredBucketSize()
+    {
+        Assert.Equal("15m", TimescaleTelemetryRepository.GetPersistedResolution(15));
+    }
+
+    [Theory]
+    [InlineData(null, BucketValueKind.Average)]
+    [InlineData("", BucketValueKind.Average)]
+    [InlineData("avg", BucketValueKind.Average)]
+    [InlineData("average", BucketValueKind.Average)]
+    [InlineData("min", BucketValueKind.Min)]
+    [InlineData("max", BucketValueKind.Max)]
+    [InlineData("last", BucketValueKind.Last)]
+    public void TryParseBucketValueKind_RecognizesSupportedViews(string? input, BucketValueKind expected)
+    {
+        var parsed = TimescaleTelemetryRepository.TryParseBucketValueKind(input, out var actual);
+
+        Assert.True(parsed);
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void TryParseBucketValueKind_ReturnsFalse_ForUnsupportedView()
+    {
+        var parsed = TimescaleTelemetryRepository.TryParseBucketValueKind("median", out var actual);
+
+        Assert.False(parsed);
+        Assert.Equal(BucketValueKind.Average, actual);
+    }
 }

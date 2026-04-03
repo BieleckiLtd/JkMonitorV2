@@ -130,6 +130,7 @@ describe('SystemPage', () => {
             storageProvider: 'TimescaleDb',
             databaseConfigured: true,
             rawSecondsWindowMinutes: 10,
+            persistedBucketMinutes: 5,
             fiveMinuteWindowDays: 7,
             compressAfterMinutes: 60,
             canAutoRestart: false,
@@ -310,6 +311,7 @@ describe('SystemPage', () => {
               storageProvider: 'TimescaleDb',
               databaseConfigured: true,
               rawSecondsWindowMinutes: 10,
+              persistedBucketMinutes: 15,
               fiveMinuteWindowDays: 0,
               compressAfterMinutes: 1440,
               canAutoRestart: false,
@@ -326,12 +328,14 @@ describe('SystemPage', () => {
 
     renderSystemPage('/system/database');
 
-    expect(await screen.findByText(/5m averages kept forever in the database/i)).toBeInTheDocument();
+    expect(await screen.findByText(/7d of 5m averages in the database/i)).toBeInTheDocument();
     expect(screen.getByText(/use 0 to keep all long-term history/i)).toBeInTheDocument();
+    expect(screen.getByText(/clock-aligned buckets/i)).toBeInTheDocument();
 
     const rawWindowInput = await screen.findByLabelText(/raw 1-second history minutes/i);
     fireEvent.change(rawWindowInput, { target: { value: '10' } });
-    fireEvent.change(screen.getByLabelText(/5-minute rollup days/i), { target: { value: '0' } });
+    fireEvent.change(screen.getByLabelText(/persisted bucket minutes/i), { target: { value: '15' } });
+    fireEvent.change(screen.getByLabelText(/persisted history days/i), { target: { value: '0' } });
     fireEvent.change(screen.getByLabelText(/compression after minutes/i), { target: { value: '1440' } });
 
     fireEvent.click(screen.getByRole('button', { name: /save policy/i }));
@@ -353,11 +357,13 @@ describe('SystemPage', () => {
     });
     expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
       rawSecondsWindowMinutes: 10,
+      persistedBucketMinutes: 15,
       fiveMinuteWindowDays: 0,
       compressAfterMinutes: 1440,
       restartApplication: true,
     });
 
     expect(await screen.findByText(/database retention settings were saved/i)).toBeInTheDocument();
+    expect(screen.getByText(/15m averages kept forever in the database/i)).toBeInTheDocument();
   });
 });

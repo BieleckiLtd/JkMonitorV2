@@ -1,12 +1,48 @@
-export type Resolution = '1s' | '1m' | '5m' | '1h';
+export type Resolution = '1s' | '1h' | `${number}m`;
+
+export function normalizeResolution(resolution: string, fallback: Resolution = '1m'): Resolution {
+  const trimmed = resolution.trim();
+  if (trimmed === '1s' || trimmed === '1h') {
+    return trimmed;
+  }
+
+  if (/^\d+m$/.test(trimmed)) {
+    const minutes = Number.parseInt(trimmed.slice(0, -1), 10);
+    if (minutes > 0) {
+      return `${minutes}m` as Resolution;
+    }
+  }
+
+  return fallback;
+}
+
+export function getResolutionMinutes(resolution: Resolution): number | null {
+  if (resolution === '1s') {
+    return null;
+  }
+
+  if (resolution === '1h') {
+    return 60;
+  }
+
+  return Number.parseInt(resolution.slice(0, -1), 10);
+}
 
 export function getIntervalHours(resolution: Resolution): number {
-  switch (resolution) {
-    case '1s': return 1 / 3600;
-    case '1m': return 1 / 60;
-    case '5m': return 5 / 60;
-    case '1h': return 1;
+  if (resolution === '1s') {
+    return 1 / 3600;
   }
+
+  const minutes = getResolutionMinutes(resolution);
+  if (minutes != null) {
+    return minutes / 60;
+  }
+
+  return 1 / 60;
+}
+
+export function getIntervalMilliseconds(resolution: Resolution): number {
+  return getIntervalHours(resolution) * 3_600_000;
 }
 
 export interface EnergyComputationResult {

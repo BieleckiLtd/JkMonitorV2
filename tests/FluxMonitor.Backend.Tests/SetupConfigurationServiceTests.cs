@@ -91,6 +91,7 @@ public sealed class SetupConfigurationServiceTests : IDisposable
         Assert.Equal("TimescaleDb", result.StorageProvider);
         Assert.True(result.DatabaseConfigured);
         Assert.Equal(10, result.RawSecondsWindowMinutes);
+        Assert.Equal(5, result.PersistedBucketMinutes);
         Assert.Equal(7, result.FiveMinuteWindowDays);
         Assert.Equal(60, result.CompressAfterMinutes);
     }
@@ -103,6 +104,7 @@ public sealed class SetupConfigurationServiceTests : IDisposable
         var response = service.SaveDatabaseSettings(new SaveDatabaseSettingsRequest
         {
             RawSecondsWindowMinutes = 10,
+            PersistedBucketMinutes = 15,
             FiveMinuteWindowDays = 0,
             CompressAfterMinutes = 1440,
             RestartApplication = false
@@ -114,8 +116,26 @@ public sealed class SetupConfigurationServiceTests : IDisposable
         Assert.NotNull(root);
         Assert.False(response.RestartScheduled);
         Assert.Equal(10, root!["Monitor"]?["Storage"]?["Retention"]?["RawSecondsWindowMinutes"]?.GetValue<int>());
+        Assert.Equal(15, root["Monitor"]?["Storage"]?["Retention"]?["PersistedBucketMinutes"]?.GetValue<int>());
         Assert.Equal(0, root["Monitor"]?["Storage"]?["Retention"]?["FiveMinuteWindowDays"]?.GetValue<int>());
         Assert.Equal(1440, root["Monitor"]?["Storage"]?["Compression"]?["CompressAfterMinutes"]?.GetValue<int>());
+    }
+
+    [Fact]
+    public void SaveDatabaseSettings_RejectsUnsupportedPersistedBucketMinutes()
+    {
+        var service = CreateService(environmentName: "Production");
+
+        var ex = Assert.Throws<InvalidOperationException>(() => service.SaveDatabaseSettings(new SaveDatabaseSettingsRequest
+        {
+            RawSecondsWindowMinutes = 10,
+            PersistedBucketMinutes = 7,
+            FiveMinuteWindowDays = 30,
+            CompressAfterMinutes = 60,
+            RestartApplication = false
+        }));
+
+        Assert.Contains("PersistedBucketMinutes must be one of", ex.Message);
     }
 
     private SetupConfigurationService CreateService(string? contentRootPath = null, string environmentName = "Test")
@@ -129,6 +149,7 @@ public sealed class SetupConfigurationServiceTests : IDisposable
                 ["Monitor:Storage:Provider"] = "TimescaleDb",
                 ["Monitor:Storage:ConnectionString"] = "Host=localhost;Database=seed;",
                 ["Monitor:Storage:Retention:RawSecondsWindowMinutes"] = "10",
+                ["Monitor:Storage:Retention:PersistedBucketMinutes"] = "5",
                 ["Monitor:Storage:Retention:FiveMinuteWindowDays"] = "7",
                 ["Monitor:ApiSecurity:TunnelProvider"] = "none"
             })

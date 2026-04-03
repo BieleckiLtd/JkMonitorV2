@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { computeEnergyData, computeEnergyGradientStops, formatEnergyValue, getIntervalHours } from './energyUtils';
+import { computeEnergyData, computeEnergyGradientStops, formatEnergyValue, getIntervalHours, normalizeResolution } from './energyUtils';
 
 // ---------------------------------------------------------------------------
 // getIntervalHours
@@ -9,7 +9,15 @@ describe('getIntervalHours', () => {
     expect(getIntervalHours('1s')).toBeCloseTo(1 / 3600);
     expect(getIntervalHours('1m')).toBeCloseTo(1 / 60);
     expect(getIntervalHours('5m')).toBeCloseTo(5 / 60);
+    expect(getIntervalHours('10m')).toBeCloseTo(10 / 60);
     expect(getIntervalHours('1h')).toBe(1);
+  });
+});
+
+describe('normalizeResolution', () => {
+  it('parses arbitrary minute resolutions and falls back when invalid', () => {
+    expect(normalizeResolution('15m')).toBe('15m');
+    expect(normalizeResolution('wat', '5m')).toBe('5m');
   });
 });
 
