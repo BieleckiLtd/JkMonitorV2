@@ -52,7 +52,7 @@ function MainMenuLink({ item }: { item: PrimaryNavigationItem }) {
       onClick={() => {
         runWithViewTransition(() => {
           navigate(item.path);
-        });
+        }, { direction: 'forward' });
       }}
       className={cn(
         'flex w-full items-center gap-3 rounded-2xl border border-border/60 bg-background/30 px-4 py-3 text-left text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground'

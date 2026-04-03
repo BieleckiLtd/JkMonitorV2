@@ -797,7 +797,7 @@ export function SystemPage() {
   const openSystemSection = useCallback((section: SystemSection) => {
     runWithViewTransition(() => {
       navigate(getSystemSectionPath(section));
-    });
+    }, { direction: 'forward' });
   }, [navigate]);
 
   const startInternetSpeedTest = async () => {

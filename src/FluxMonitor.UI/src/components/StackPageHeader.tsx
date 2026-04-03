@@ -1,13 +1,14 @@
 import { ChevronLeft, type LucideIcon } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { cn } from '../lib/utils';
-import { runWithViewTransition } from '../lib/viewTransitions';
+import { runWithViewTransition, type ViewTransitionDirection } from '../lib/viewTransitions';
 
 type StackPageHeaderProps = {
   title: string;
   description: string;
   backTo?: string;
   backLabel?: string;
+  navigationDirection?: ViewTransitionDirection;
   icon?: LucideIcon;
   className?: string;
 };
@@ -17,6 +18,7 @@ export function StackPageHeader({
   description,
   backTo,
   backLabel = 'Back',
+  navigationDirection = 'back',
   icon: Icon,
   className,
 }: StackPageHeaderProps) {
@@ -30,7 +32,7 @@ export function StackPageHeader({
           onClick={() => {
             runWithViewTransition(() => {
               navigate(backTo);
-            });
+            }, { direction: navigationDirection });
           }}
           className='inline-flex items-center gap-1 rounded-xl px-2 py-1 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
         >
