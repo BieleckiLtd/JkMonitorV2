@@ -87,13 +87,8 @@ public sealed class SetupConfigurationServiceTests : IDisposable
 
         var result = service.GetDatabaseSettings();
 
-        Assert.Equal("Production", result.EnvironmentName);
-        Assert.Equal("TimescaleDb", result.StorageProvider);
-        Assert.True(result.DatabaseConfigured);
         Assert.Equal(10, result.RawSecondsWindowMinutes);
         Assert.Equal(5, result.PersistedBucketMinutes);
-        Assert.Equal(7, result.FiveMinuteWindowDays);
-        Assert.Equal(60, result.CompressAfterMinutes);
     }
 
     [Fact]
@@ -104,9 +99,7 @@ public sealed class SetupConfigurationServiceTests : IDisposable
         var response = service.SaveDatabaseSettings(new SaveDatabaseSettingsRequest
         {
             RawSecondsWindowMinutes = 10,
-            PersistedBucketMinutes = 15,
-            FiveMinuteWindowDays = 0,
-            CompressAfterMinutes = 1440,
+            PersistedBucketMinutes = 30,
             RestartApplication = false
         });
 
@@ -116,9 +109,9 @@ public sealed class SetupConfigurationServiceTests : IDisposable
         Assert.NotNull(root);
         Assert.False(response.RestartScheduled);
         Assert.Equal(10, root!["Monitor"]?["Storage"]?["Retention"]?["RawSecondsWindowMinutes"]?.GetValue<int>());
-        Assert.Equal(15, root["Monitor"]?["Storage"]?["Retention"]?["PersistedBucketMinutes"]?.GetValue<int>());
+        Assert.Equal(30, root["Monitor"]?["Storage"]?["Retention"]?["PersistedBucketMinutes"]?.GetValue<int>());
         Assert.Equal(0, root["Monitor"]?["Storage"]?["Retention"]?["FiveMinuteWindowDays"]?.GetValue<int>());
-        Assert.Equal(1440, root["Monitor"]?["Storage"]?["Compression"]?["CompressAfterMinutes"]?.GetValue<int>());
+        Assert.Equal(0, root["Monitor"]?["Storage"]?["Compression"]?["CompressAfterMinutes"]?.GetValue<int>());
     }
 
     [Fact]
@@ -130,12 +123,25 @@ public sealed class SetupConfigurationServiceTests : IDisposable
         {
             RawSecondsWindowMinutes = 10,
             PersistedBucketMinutes = 7,
-            FiveMinuteWindowDays = 30,
-            CompressAfterMinutes = 60,
             RestartApplication = false
         }));
 
         Assert.Contains("PersistedBucketMinutes must be one of", ex.Message);
+    }
+
+    [Fact]
+    public void SaveDatabaseSettings_RejectsUnsupportedTemporaryHistoryMinutes()
+    {
+        var service = CreateService(environmentName: "Production");
+
+        var ex = Assert.Throws<InvalidOperationException>(() => service.SaveDatabaseSettings(new SaveDatabaseSettingsRequest
+        {
+            RawSecondsWindowMinutes = 2,
+            PersistedBucketMinutes = 5,
+            RestartApplication = false
+        }));
+
+        Assert.Contains("RawSecondsWindowMinutes must be one of", ex.Message);
     }
 
     private SetupConfigurationService CreateService(string? contentRootPath = null, string environmentName = "Test")

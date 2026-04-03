@@ -6,6 +6,7 @@ import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { StackPageHeader } from '../components/StackPageHeader';
 import { Input } from '../components/ui/input';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Switch } from '../components/ui/switch';
 import { type UpdateProgress, getUpdateStateTone } from '../lib/systemUpdate';
 import { cn } from '../lib/utils';
@@ -90,15 +91,8 @@ type DatabaseSizeInfo = {
 };
 
 type DatabaseSettingsState = {
-  environmentName: string;
-  storageProvider: string;
-  databaseConfigured: boolean;
   rawSecondsWindowMinutes: number;
   persistedBucketMinutes: number;
-  fiveMinuteWindowDays: number;
-  compressAfterMinutes: number;
-  canAutoRestart: boolean;
-  applyMessage: string;
 };
 
 type SaveDatabaseSettingsResponse = {
@@ -110,11 +104,10 @@ type SaveDatabaseSettingsResponse = {
 type DatabaseSettingsFormState = {
   rawSecondsWindowMinutes: string;
   persistedBucketMinutes: string;
-  fiveMinuteWindowDays: string;
-  compressAfterMinutes: string;
 };
 
-const supportedPersistedBucketMinutes = [1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60];
+const supportedTemporaryHistoryMinutes = [1, 5, 10, 30];
+const supportedPersistedBucketMinutes = [1, 5, 10, 30];
 
 type CommitInfo = {
   sha?: string | null;
@@ -457,8 +450,6 @@ function createDatabaseSettingsFormState(settings: DatabaseSettingsState): Datab
   return {
     rawSecondsWindowMinutes: String(settings.rawSecondsWindowMinutes),
     persistedBucketMinutes: String(settings.persistedBucketMinutes),
-    fiveMinuteWindowDays: String(settings.fiveMinuteWindowDays),
-    compressAfterMinutes: String(settings.compressAfterMinutes),
   };
 }
 
@@ -471,19 +462,10 @@ function parsePositiveInteger(value: string, label: string) {
   return Number.parseInt(trimmed, 10);
 }
 
-function parseNonNegativeInteger(value: string, label: string) {
-  const trimmed = value.trim();
-  if (!/^\d+$/.test(trimmed)) {
-    throw new Error(`${label} must be a whole number greater than or equal to zero.`);
-  }
-
-  return Number.parseInt(trimmed, 10);
-}
-
-function parsePersistedBucketMinutes(value: string) {
-  const minutes = parsePositiveInteger(value, 'Persisted bucket size');
-  if (!supportedPersistedBucketMinutes.includes(minutes)) {
-    throw new Error(`Persisted bucket size must be one of: ${supportedPersistedBucketMinutes.join(', ')}.`);
+function parseSupportedMinutes(value: string, label: string, supportedValues: number[]) {
+  const minutes = parsePositiveInteger(value, label);
+  if (!supportedValues.includes(minutes)) {
+    throw new Error(`${label} must be one of: ${supportedValues.join(', ')}.`);
   }
 
   return minutes;
@@ -1253,17 +1235,13 @@ export function SystemPage() {
     let payload: {
       rawSecondsWindowMinutes: number;
       persistedBucketMinutes: number;
-      fiveMinuteWindowDays: number;
-      compressAfterMinutes: number;
       restartApplication: boolean;
     };
 
     try {
       payload = {
-        rawSecondsWindowMinutes: parseNonNegativeInteger(dbSettingsForm.rawSecondsWindowMinutes, 'In-memory 1-second window'),
-        persistedBucketMinutes: parsePersistedBucketMinutes(dbSettingsForm.persistedBucketMinutes),
-        fiveMinuteWindowDays: parseNonNegativeInteger(dbSettingsForm.fiveMinuteWindowDays, 'Persisted history window'),
-        compressAfterMinutes: parseNonNegativeInteger(dbSettingsForm.compressAfterMinutes, 'Compression threshold'),
+        rawSecondsWindowMinutes: parseSupportedMinutes(dbSettingsForm.rawSecondsWindowMinutes, 'Temporary history window', supportedTemporaryHistoryMinutes),
+        persistedBucketMinutes: parseSupportedMinutes(dbSettingsForm.persistedBucketMinutes, 'Persisted bucket size', supportedPersistedBucketMinutes),
         restartApplication: false,
       };
     } catch (error) {
@@ -1363,9 +1341,7 @@ export function SystemPage() {
   const metrics = status?.systemMetrics ?? null;
   const dbSettingsDirty = !!(dbSettings && dbSettingsForm && (
     dbSettingsForm.rawSecondsWindowMinutes !== String(dbSettings.rawSecondsWindowMinutes) ||
-    dbSettingsForm.persistedBucketMinutes !== String(dbSettings.persistedBucketMinutes) ||
-    dbSettingsForm.fiveMinuteWindowDays !== String(dbSettings.fiveMinuteWindowDays) ||
-    dbSettingsForm.compressAfterMinutes !== String(dbSettings.compressAfterMinutes)
+    dbSettingsForm.persistedBucketMinutes !== String(dbSettings.persistedBucketMinutes)
   ));
   const cpuUsage = metrics?.cpuUtilizationPercent ?? null;
   const cpuBaseClockSpeed = metrics?.cpuMaxClockSpeedMegahertz ?? null;
@@ -2702,19 +2678,11 @@ export function SystemPage() {
                 )}
 
                 <div className='rounded-2xl border border-border/70 bg-background/50 px-4 py-4'>
-                  <div className='flex flex-wrap items-start justify-between gap-3'>
-                    <div className='space-y-1'>
-                      <div className='text-sm font-semibold text-foreground'>Retention policy</div>
-                      <div className='max-w-2xl text-xs leading-5 text-muted-foreground'>
-                        Keep 1-second history briefly, then compact older data into longer-lived rollups. Set a tier to <span className='font-mono'>0</span> to disable it.
-                      </div>
+                  <div className='space-y-1'>
+                    <div className='text-sm font-semibold text-foreground'>Storage policy</div>
+                    <div className='max-w-2xl text-xs leading-5 text-muted-foreground'>
+                      Temporary history stays in memory at the device&apos;s raw poll cadence, so faster polling can keep sub-second samples. Persisted buckets are written to the database forever.
                     </div>
-                    {dbSettings ? (
-                      <div className='rounded-xl border border-border/70 bg-card/80 px-3 py-2 text-right'>
-                        <div className='text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Environment</div>
-                        <div className='mt-1 text-sm font-semibold text-foreground'>{dbSettings.environmentName}</div>
-                      </div>
-                    ) : null}
                   </div>
 
                   {dbSettingsLoading && !dbSettingsForm ? (
@@ -2723,79 +2691,56 @@ export function SystemPage() {
                     </div>
                   ) : dbSettings && dbSettingsForm ? (
                     <div className='space-y-4 pt-4'>
-                      <div className='grid gap-3 sm:grid-cols-2'>
-                        <DetailTile label='Storage provider' value={dbSettings.storageProvider} />
-                        <DetailTile label='Database status' value={dbSettings.databaseConfigured ? 'Configured' : 'Not configured'} />
-                      </div>
-
                       <div className='grid gap-4 sm:grid-cols-2'>
                         <label className='space-y-2'>
-                          <span className='block text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>In-memory 1s history</span>
-                          <Input
-                            aria-label='Raw 1-second history minutes'
-                            type='number'
-                            min='0'
-                            step='1'
+                          <span className='block text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Temporary memory history</span>
+                          <Select
                             value={dbSettingsForm.rawSecondsWindowMinutes}
-                            onChange={(event) => {
-                              setDbSettingsForm((current) => current ? { ...current, rawSecondsWindowMinutes: event.target.value } : current);
+                            onValueChange={(value) => {
+                              if (value === null) {
+                                return;
+                              }
+
+                              setDbSettingsForm((current) => current ? { ...current, rawSecondsWindowMinutes: value } : current);
                               setDbSettingsFeedback(null);
                             }}
-                          />
-                          <span className='block text-[11px] leading-5 text-muted-foreground'>Minutes of raw 1-second samples to keep in memory before purge.</span>
+                          >
+                            <SelectTrigger aria-label='Temporary memory history minutes' className='w-full'>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {supportedTemporaryHistoryMinutes.map((minutes) => (
+                                <SelectItem key={minutes} value={String(minutes)}>{minutes} min</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <span className='block text-[11px] leading-5 text-muted-foreground'>Larger temporary memory windows use more RAM, especially when devices poll faster than once per second.</span>
                         </label>
 
                         <label className='space-y-2'>
                           <span className='block text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Persisted bucket size</span>
-                          <Input
-                            aria-label='Persisted bucket minutes'
-                            type='number'
-                            min='1'
-                            step='1'
+                          <Select
                             value={dbSettingsForm.persistedBucketMinutes}
-                            onChange={(event) => {
-                              setDbSettingsForm((current) => current ? { ...current, persistedBucketMinutes: event.target.value } : current);
+                            onValueChange={(value) => {
+                              if (value === null) {
+                                return;
+                              }
+
+                              setDbSettingsForm((current) => current ? { ...current, persistedBucketMinutes: value } : current);
                               setDbSettingsFeedback(null);
                             }}
-                          />
-                          <span className='block text-[11px] leading-5 text-muted-foreground'>Store persisted averages in clock-aligned buckets. Supported values: 1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, or 60 minutes.</span>
+                          >
+                            <SelectTrigger aria-label='Persisted bucket minutes' className='w-full'>
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {supportedPersistedBucketMinutes.map((minutes) => (
+                                <SelectItem key={minutes} value={String(minutes)}>{minutes} min</SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                          <span className='block text-[11px] leading-5 text-muted-foreground'>Smaller persisted buckets capture more detail, but they also grow the database faster.</span>
                         </label>
-
-                        <label className='space-y-2'>
-                          <span className='block text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Long-term database history</span>
-                          <Input
-                            aria-label='Persisted history days'
-                            type='number'
-                            min='0'
-                            step='1'
-                            value={dbSettingsForm.fiveMinuteWindowDays}
-                            onChange={(event) => {
-                              setDbSettingsForm((current) => current ? { ...current, fiveMinuteWindowDays: event.target.value } : current);
-                              setDbSettingsFeedback(null);
-                            }}
-                          />
-                          <span className='block text-[11px] leading-5 text-muted-foreground'>Days of persisted averages to retain. Use 0 to keep all long-term history.</span>
-                        </label>
-
-                        <label className='space-y-2'>
-                          <span className='block text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Compression</span>
-                          <Input
-                            aria-label='Compression after minutes'
-                            type='number'
-                            min='0'
-                            step='1'
-                            value={dbSettingsForm.compressAfterMinutes}
-                            onChange={(event) => {
-                              setDbSettingsForm((current) => current ? { ...current, compressAfterMinutes: event.target.value } : current);
-                              setDbSettingsFeedback(null);
-                            }}
-                          />
-                          <span className='block text-[11px] leading-5 text-muted-foreground'>Compress Timescale chunks older than this many minutes. Use 0 to disable compression.</span>
-                        </label>
-                      </div>
-
-                      <div className='rounded-xl border border-border/70 bg-card/70 px-3 py-3 text-xs leading-5 text-muted-foreground'>
-                        {dbSettings.applyMessage}
                       </div>
 
                       {dbSettingsFeedback ? (
@@ -2809,7 +2754,7 @@ export function SystemPage() {
 
                       <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
                         <div className='text-[11px] leading-5 text-muted-foreground'>
-                          Current policy: {dbSettings.rawSecondsWindowMinutes}m of raw 1s samples in memory, {dbSettings.fiveMinuteWindowDays === 0 ? `${dbSettings.persistedBucketMinutes}m averages kept forever in the database` : `${dbSettings.fiveMinuteWindowDays}d of ${dbSettings.persistedBucketMinutes}m averages in the database`}.
+                          Current policy: {dbSettings.rawSecondsWindowMinutes}m of temporary in-memory history, {dbSettings.persistedBucketMinutes}m persisted buckets stored forever in the database.
                         </div>
                         <button
                           type='button'
@@ -2818,7 +2763,7 @@ export function SystemPage() {
                           className='inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50'
                         >
                           {dbSettingsSaving ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Database className='h-4 w-4' />}
-                          {dbSettingsSaving ? 'Saving…' : dbSettings.canAutoRestart ? 'Save and restart' : 'Save policy'}
+                          {dbSettingsSaving ? 'Saving…' : 'Save'}
                         </button>
                       </div>
                     </div>

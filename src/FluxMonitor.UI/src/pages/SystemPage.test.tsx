@@ -126,15 +126,8 @@ describe('SystemPage', () => {
         return {
           ok: true,
           json: async () => ({
-            environmentName: 'Development',
-            storageProvider: 'TimescaleDb',
-            databaseConfigured: true,
             rawSecondsWindowMinutes: 10,
             persistedBucketMinutes: 5,
-            fiveMinuteWindowDays: 7,
-            compressAfterMinutes: 60,
-            canAutoRestart: false,
-            applyMessage: 'Settings can be saved here, but this environment still needs a manual restart to apply them.',
           }),
         } as Response;
       }
@@ -305,17 +298,10 @@ describe('SystemPage', () => {
           ok: true,
           json: async () => ({
             restartScheduled: false,
-            message: 'Database retention settings were saved and applied immediately.',
+            message: 'Database settings were saved and applied immediately.',
             settings: {
-              environmentName: 'Development',
-              storageProvider: 'TimescaleDb',
-              databaseConfigured: true,
               rawSecondsWindowMinutes: 10,
-              persistedBucketMinutes: 15,
-              fiveMinuteWindowDays: 0,
-              compressAfterMinutes: 1440,
-              canAutoRestart: false,
-              applyMessage: 'Settings can be saved here, but this environment still needs a manual restart to apply them.',
+              persistedBucketMinutes: 30,
             },
           }),
         } as Response;
@@ -328,17 +314,24 @@ describe('SystemPage', () => {
 
     renderSystemPage('/system/database');
 
-    expect(await screen.findByText(/7d of 5m averages in the database/i)).toBeInTheDocument();
-    expect(screen.getByText(/use 0 to keep all long-term history/i)).toBeInTheDocument();
-    expect(screen.getByText(/clock-aligned buckets/i)).toBeInTheDocument();
+    expect(await screen.findByText(/temporary history stays in memory at the device's raw poll cadence/i)).toBeInTheDocument();
+    expect(screen.getByText(/larger temporary memory windows use more ram/i)).toBeInTheDocument();
+    expect(screen.getByText(/smaller persisted buckets capture more detail, but they also grow the database faster/i)).toBeInTheDocument();
+    expect(screen.queryByText(/storage provider/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/database status/i)).not.toBeInTheDocument();
 
-    const rawWindowInput = await screen.findByLabelText(/raw 1-second history minutes/i);
-    fireEvent.change(rawWindowInput, { target: { value: '10' } });
-    fireEvent.change(screen.getByLabelText(/persisted bucket minutes/i), { target: { value: '15' } });
-    fireEvent.change(screen.getByLabelText(/persisted history days/i), { target: { value: '0' } });
-    fireEvent.change(screen.getByLabelText(/compression after minutes/i), { target: { value: '1440' } });
+    const persistedBucketSelect = await screen.findByRole('combobox', { name: /persisted bucket minutes/i });
+    fireEvent.click(persistedBucketSelect);
+    await screen.findByRole('listbox');
+    const option = await screen.findByRole('option', { name: '30 min' });
+    fireEvent.mouseMove(option);
+    fireEvent.click(option);
 
-    fireEvent.click(screen.getByRole('button', { name: /save policy/i }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /^save$/i })).toBeEnabled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/api/database/settings', expect.objectContaining({
@@ -357,13 +350,11 @@ describe('SystemPage', () => {
     });
     expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
       rawSecondsWindowMinutes: 10,
-      persistedBucketMinutes: 15,
-      fiveMinuteWindowDays: 0,
-      compressAfterMinutes: 1440,
+      persistedBucketMinutes: 30,
       restartApplication: false,
     });
 
-    expect(await screen.findByText(/database retention settings were saved/i)).toBeInTheDocument();
-    expect(screen.getByText(/15m averages kept forever in the database/i)).toBeInTheDocument();
+    expect(await screen.findByText(/database settings were saved and applied immediately/i)).toBeInTheDocument();
+    expect(screen.getByText(/30m persisted buckets stored forever in the database/i)).toBeInTheDocument();
   });
 });

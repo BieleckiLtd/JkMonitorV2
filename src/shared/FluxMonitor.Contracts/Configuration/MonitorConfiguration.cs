@@ -25,10 +25,10 @@ public sealed class StorageConfiguration
 public sealed class CompressionConfiguration
 {
     /// <summary>
-    /// Compress hypertable chunks older than this many minutes.
-    /// Set to 0 to disable compression. Default: 60 minutes.
+    /// Deprecated age-based compression policy setting.
+    /// Compression now runs as a nightly midnight sweep, so the default stays at 0.
     /// </summary>
-    public int CompressAfterMinutes { get; init; } = 60;
+    public int CompressAfterMinutes { get; init; } = 0;
 }
 
 public sealed class RetentionConfiguration
@@ -37,7 +37,7 @@ public sealed class RetentionConfiguration
 
     public int PersistedBucketMinutes { get; init; } = 5;
 
-    public int FiveMinuteWindowDays { get; init; } = 365;
+    public int FiveMinuteWindowDays { get; init; } = 0;
 }
 
 public sealed class ApiSecurityConfiguration

@@ -15,7 +15,8 @@ public sealed class SetupConfigurationService(
     ILogger<SetupConfigurationService> logger)
 {
     private const string ManagedAspNetCoreUrls = "http://[::]:5074";
-    private static readonly int[] SupportedPersistedBucketMinutes = [1, 2, 3, 4, 5, 6, 10, 12, 15, 20, 30, 60];
+    private static readonly int[] SupportedTemporaryHistoryMinutes = [1, 5, 10, 30];
+    private static readonly int[] SupportedPersistedBucketMinutes = [1, 5, 10, 30];
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true
@@ -109,10 +110,8 @@ public sealed class SetupConfigurationService(
 
     public SaveDatabaseSettingsResponse SaveDatabaseSettings(SaveDatabaseSettingsRequest request)
     {
-        ValidateNonNegative(nameof(request.RawSecondsWindowMinutes), request.RawSecondsWindowMinutes);
+        ValidateTemporaryHistoryMinutes(request.RawSecondsWindowMinutes);
         ValidatePersistedBucketMinutes(request.PersistedBucketMinutes);
-        ValidateNonNegative(nameof(request.FiveMinuteWindowDays), request.FiveMinuteWindowDays);
-        ValidateNonNegative(nameof(request.CompressAfterMinutes), request.CompressAfterMinutes);
 
         var localSettingsPath = GetCurrentEnvironmentLocalSettingsPath();
         UpdateJson(localSettingsPath, monitor =>
@@ -123,12 +122,12 @@ public sealed class SetupConfigurationService(
                 {
                     retention["RawSecondsWindowMinutes"] = request.RawSecondsWindowMinutes;
                     retention["PersistedBucketMinutes"] = request.PersistedBucketMinutes;
-                    retention["FiveMinuteWindowDays"] = request.FiveMinuteWindowDays;
+                    retention["FiveMinuteWindowDays"] = 0;
                 });
 
                 UpsertObject(storage, "Compression", compression =>
                 {
-                    compression["CompressAfterMinutes"] = request.CompressAfterMinutes;
+                    compression["CompressAfterMinutes"] = 0;
                 });
             });
         });
@@ -143,11 +142,11 @@ public sealed class SetupConfigurationService(
                 {
                     RawSecondsWindowMinutes = request.RawSecondsWindowMinutes,
                     PersistedBucketMinutes = request.PersistedBucketMinutes,
-                    FiveMinuteWindowDays = request.FiveMinuteWindowDays
+                    FiveMinuteWindowDays = 0
                 },
                 Compression = new CompressionConfiguration
                 {
-                    CompressAfterMinutes = request.CompressAfterMinutes
+                    CompressAfterMinutes = 0
                 }
             },
             ApiSecurity = GetMonitorConfiguration().ApiSecurity,
@@ -155,16 +154,14 @@ public sealed class SetupConfigurationService(
         });
 
         logger.LogInformation(
-            "Saved database retention settings. RawSecondsWindowMinutes={RawSecondsWindowMinutes}, PersistedBucketMinutes={PersistedBucketMinutes}, FiveMinuteWindowDays={FiveMinuteWindowDays}, CompressAfterMinutes={CompressAfterMinutes}.",
+            "Saved database settings. RawSecondsWindowMinutes={RawSecondsWindowMinutes}, PersistedBucketMinutes={PersistedBucketMinutes}.",
             request.RawSecondsWindowMinutes,
-            request.PersistedBucketMinutes,
-            request.FiveMinuteWindowDays,
-            request.CompressAfterMinutes);
+            request.PersistedBucketMinutes);
 
         return new SaveDatabaseSettingsResponse
         {
             RestartScheduled = false,
-            Message = "Database retention settings were saved and applied immediately.",
+            Message = "Database settings were saved and applied immediately.",
             Settings = updatedSettings
         };
     }
@@ -302,16 +299,18 @@ public sealed class SetupConfigurationService(
     {
         return new DatabaseSettingsStateResponse
         {
-            EnvironmentName = environment.EnvironmentName,
-            StorageProvider = configuration.Storage.Provider,
-            DatabaseConfigured = !string.IsNullOrWhiteSpace(configuration.Storage.ConnectionString),
             RawSecondsWindowMinutes = configuration.Storage.Retention.RawSecondsWindowMinutes,
-            PersistedBucketMinutes = configuration.Storage.Retention.PersistedBucketMinutes,
-            FiveMinuteWindowDays = configuration.Storage.Retention.FiveMinuteWindowDays,
-            CompressAfterMinutes = configuration.Storage.Compression.CompressAfterMinutes,
-            CanAutoRestart = managedRestartService.CanAutoRestart,
-            ApplyMessage = managedRestartService.GetApplyMessage()
+            PersistedBucketMinutes = configuration.Storage.Retention.PersistedBucketMinutes
         };
+    }
+
+    private static void ValidateTemporaryHistoryMinutes(int value)
+    {
+        if (!SupportedTemporaryHistoryMinutes.Contains(value))
+        {
+            throw new InvalidOperationException(
+                $"RawSecondsWindowMinutes must be one of: {string.Join(", ", SupportedTemporaryHistoryMinutes)}.");
+        }
     }
 
     private static void ValidatePersistedBucketMinutes(int value)
@@ -320,14 +319,6 @@ public sealed class SetupConfigurationService(
         {
             throw new InvalidOperationException(
                 $"PersistedBucketMinutes must be one of: {string.Join(", ", SupportedPersistedBucketMinutes)}.");
-        }
-    }
-
-    private static void ValidateNonNegative(string propertyName, int value)
-    {
-        if (value < 0)
-        {
-            throw new InvalidOperationException($"{propertyName} must be zero or greater.");
         }
     }
 

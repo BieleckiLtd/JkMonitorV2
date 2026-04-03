@@ -29,8 +29,6 @@ public sealed class DatabaseController(
             await repository.ApplyDatabaseSettingsAsync(
                 response.Settings.RawSecondsWindowMinutes,
                 response.Settings.PersistedBucketMinutes,
-                response.Settings.FiveMinuteWindowDays,
-                response.Settings.CompressAfterMinutes,
                 cancellationToken);
             return Ok(response);
         }

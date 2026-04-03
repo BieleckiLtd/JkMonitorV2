@@ -16,10 +16,10 @@ public sealed class TimescaleRetentionRollupTests
     }
 
     [Fact]
-    public void RetentionConfiguration_DefaultFiveMinuteWindow_Is365Days()
+    public void RetentionConfiguration_DefaultFiveMinuteWindow_IsDisabled()
     {
         var retention = new RetentionConfiguration();
-        Assert.Equal(365, retention.FiveMinuteWindowDays);
+        Assert.Equal(0, retention.FiveMinuteWindowDays);
     }
 
     [Fact]
@@ -234,10 +234,10 @@ public sealed class TimescaleRetentionRollupTests
     // ── CompressionConfiguration defaults ──────────────────────────────────
 
     [Fact]
-    public void CompressionConfiguration_DefaultCompressAfterMinutes_Is60()
+    public void CompressionConfiguration_DefaultCompressAfterMinutes_IsZero()
     {
         var config = new CompressionConfiguration();
-        Assert.Equal(60, config.CompressAfterMinutes);
+        Assert.Equal(0, config.CompressAfterMinutes);
     }
 
     [Fact]
@@ -251,7 +251,7 @@ public sealed class TimescaleRetentionRollupTests
         };
 
         Assert.NotNull(storage.Compression);
-        Assert.Equal(60, storage.Compression.CompressAfterMinutes);
+        Assert.Equal(0, storage.Compression.CompressAfterMinutes);
     }
 
     [Fact]
@@ -302,43 +302,39 @@ public sealed class TimescaleRetentionRollupTests
     }
 
     [Fact]
-    public void BuildCompressionPolicySql_ContainsConfiguredInterval()
+    public void BuildNightlyCompressionSql_TargetsOneDayOldChunks()
     {
-        var sql = TimescaleTelemetryRepository.BuildCompressionPolicySql(60);
-        Assert.Contains("INTERVAL '60 minutes'", sql);
+        var sql = TimescaleTelemetryRepository.BuildNightlyCompressionSql();
+        Assert.Contains("show_chunks", sql);
+        Assert.Contains("INTERVAL '1 day'", sql);
     }
 
     [Fact]
-    public void BuildCompressionPolicySql_CustomInterval()
+    public void BuildNightlyCompressionSql_CompressesIfNotAlreadyCompressed()
     {
-        var sql = TimescaleTelemetryRepository.BuildCompressionPolicySql(120);
-        Assert.Contains("INTERVAL '120 minutes'", sql);
+        var sql = TimescaleTelemetryRepository.BuildNightlyCompressionSql();
+        Assert.Contains("compress_chunk", sql);
+        Assert.Contains("if_not_compressed => TRUE", sql);
     }
 
     [Fact]
-    public void BuildCompressionPolicySql_RemovesExistingPolicyFirst()
+    public void BuildRemoveCompressionPolicySql_RemovesExistingPolicy()
     {
-        var sql = TimescaleTelemetryRepository.BuildCompressionPolicySql(60);
-
-        var removeIndex = sql.IndexOf("remove_compression_policy", StringComparison.Ordinal);
-        var addIndex = sql.IndexOf("add_compression_policy", StringComparison.Ordinal);
-
-        Assert.True(removeIndex >= 0, "SQL should contain remove_compression_policy");
-        Assert.True(addIndex >= 0, "SQL should contain add_compression_policy");
-        Assert.True(removeIndex < addIndex, "remove_compression_policy must run before add_compression_policy");
+        var sql = TimescaleTelemetryRepository.BuildRemoveCompressionPolicySql();
+        Assert.Contains("remove_compression_policy", sql);
     }
 
     [Fact]
-    public void BuildCompressionPolicySql_RemovesWithIfExists()
+    public void BuildRemoveCompressionPolicySql_UsesIfExists()
     {
-        var sql = TimescaleTelemetryRepository.BuildCompressionPolicySql(60);
+        var sql = TimescaleTelemetryRepository.BuildRemoveCompressionPolicySql();
         Assert.Contains("if_exists => true", sql);
     }
 
     [Fact]
-    public void BuildCompressionPolicySql_TargetsMeasurementsTable()
+    public void BuildNightlyCompressionSql_TargetsMeasurementsTable()
     {
-        var sql = TimescaleTelemetryRepository.BuildCompressionPolicySql(60);
+        var sql = TimescaleTelemetryRepository.BuildNightlyCompressionSql();
         Assert.Contains(@"""Measurements""", sql);
     }
 

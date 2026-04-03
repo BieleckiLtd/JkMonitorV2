@@ -26,9 +26,9 @@ public interface ITelemetryRepository
     Task ApplyDatabaseSettingsAsync(
         int rawSecondsWindowMinutes,
         int persistedBucketMinutes,
-        int fiveMinuteWindowDays,
-        int compressAfterMinutes,
         CancellationToken cancellationToken);
+
+    Task CompressHistoricalDataAsync(CancellationToken cancellationToken);
 
     Task<IReadOnlyList<HistoryDataPoint>> QueryHistoryAsync(string deviceId, string resolution, BucketValueKind bucketValueKind, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken);
 
@@ -86,10 +86,10 @@ public sealed class NoOpTelemetryRepository : ITelemetryRepository
     public Task ApplyDatabaseSettingsAsync(
         int rawSecondsWindowMinutes,
         int persistedBucketMinutes,
-        int fiveMinuteWindowDays,
-        int compressAfterMinutes,
         CancellationToken cancellationToken)
         => Task.CompletedTask;
+
+    public Task CompressHistoricalDataAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
     public Task<IReadOnlyList<HistoryDataPoint>> QueryHistoryAsync(string deviceId, string resolution, BucketValueKind bucketValueKind, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
         => Task.FromResult<IReadOnlyList<HistoryDataPoint>>([]);
@@ -223,17 +223,13 @@ public sealed class TimescaleTelemetryRepository(
     public async Task ApplyDatabaseSettingsAsync(
         int rawSecondsWindowMinutes,
         int persistedBucketMinutes,
-        int fiveMinuteWindowDays,
-        int compressAfterMinutes,
         CancellationToken cancellationToken)
     {
         await InitializeAsync(cancellationToken);
 
         var updatedSettings = new TelemetryRuntimeSettings(
             rawSecondsWindowMinutes,
-            NormalizePersistedBucketMinutes(persistedBucketMinutes),
-            fiveMinuteWindowDays,
-            compressAfterMinutes);
+            NormalizePersistedBucketMinutes(persistedBucketMinutes));
 
         TelemetryRuntimeSettings previousSettings;
         List<MeasurementValueRow> rowsToPersist = [];
@@ -255,14 +251,11 @@ public sealed class TimescaleTelemetryRepository(
         }
 
         await UpsertMeasurementsAsync(rowsToPersist, cancellationToken);
-        await ApplyCompressionSettingsAsync(previousSettings.CompressAfterMinutes, updatedSettings.CompressAfterMinutes, cancellationToken);
 
         logger.LogInformation(
-            "Applied database settings live. RawSecondsWindowMinutes={RawSecondsWindowMinutes}, PersistedBucketMinutes={PersistedBucketMinutes}, FiveMinuteWindowDays={FiveMinuteWindowDays}, CompressAfterMinutes={CompressAfterMinutes}, FlushedRowsOnBucketChange={FlushedRowsOnBucketChange}.",
+            "Applied database settings live. RawSecondsWindowMinutes={RawSecondsWindowMinutes}, PersistedBucketMinutes={PersistedBucketMinutes}, FlushedRowsOnBucketChange={FlushedRowsOnBucketChange}.",
             updatedSettings.RawSecondsWindowMinutes,
             updatedSettings.PersistedBucketMinutes,
-            updatedSettings.FiveMinuteWindowDays,
-            updatedSettings.CompressAfterMinutes,
             rowsToPersist.Count);
     }
 
@@ -351,28 +344,10 @@ public sealed class TimescaleTelemetryRepository(
 
         await UpsertMeasurementsAsync(rowsToPersist, cancellationToken);
 
-        var runtimeSettings = GetRuntimeSettings();
-        if (runtimeSettings.FiveMinuteWindowDays <= 0)
-        {
-            logger.LogInformation(
-                "Retention sweep kept all persisted {PersistedBucket} samples. In-memory raw history remains capped at {Minutes} minutes.",
-                GetPersistedBucketDescription(),
-                GetRawHistoryWindow().TotalMinutes);
-            return;
-        }
-
-        var cutoff = now.Subtract(TimeSpan.FromDays(runtimeSettings.FiveMinuteWindowDays));
-
-        await using var connection = new NpgsqlConnection(_storage.ConnectionString);
-        await connection.OpenAsync(cancellationToken);
-
-        var deleteStats = await DeleteOlderThanAsync(connection, "Measurements", "Time", cutoff, cancellationToken);
         logger.LogInformation(
-            "Retention sweep finished. PersistedRowsFlushed={PersistedRowsFlushed}, PersistedCutoff={PersistedCutoff}, DeletedRows={DeletedRows}, DeleteBatches={DeleteBatches}.",
+            "Retention sweep finished. PersistedRowsFlushed={PersistedRowsFlushed}, PersistedHistoryKeptForever=true, RawHistoryMinutes={RawHistoryMinutes}.",
             rowsToPersist.Count,
-            cutoff,
-            deleteStats.DeletedRows,
-            deleteStats.Batches);
+            GetRawHistoryWindow().TotalMinutes);
     }
 
     public async Task FlushBufferedAsync(bool includeActiveBucket, CancellationToken cancellationToken)
@@ -459,6 +434,32 @@ public sealed class TimescaleTelemetryRepository(
         catch (PostgresException)
         {
             return null;
+        }
+    }
+
+    public async Task CompressHistoricalDataAsync(CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken);
+
+        if (!_timescaleMetadataAvailable)
+        {
+            return;
+        }
+
+        await using var connection = new NpgsqlConnection(_storage.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        try
+        {
+            await ExecuteNonQueryAsync(connection, BuildNightlyCompressionSql(), cancellationToken);
+            logger.LogInformation("Nightly TimescaleDB compression sweep completed.");
+        }
+        catch (PostgresException exception)
+        {
+            logger.LogWarning(
+                exception,
+                "Nightly TimescaleDB compression sweep failed for database '{Database}'.",
+                connection.Database);
         }
     }
 
@@ -786,13 +787,13 @@ public sealed class TimescaleTelemetryRepository(
     internal static bool SupportsImportTable(string tableName)
         => ExportTables.Contains(tableName, StringComparer.Ordinal);
 
-    internal static string BuildCompressionPolicySql(int intervalMinutes) => $"""
-        SELECT remove_compression_policy('"Measurements"', if_exists => true);
-        SELECT add_compression_policy('"Measurements"', INTERVAL '{intervalMinutes} minutes');
-        """;
-
     internal static string BuildRemoveCompressionPolicySql() => """
         SELECT remove_compression_policy('"Measurements"', if_exists => true);
+        """;
+
+    internal static string BuildNightlyCompressionSql() => """
+        SELECT compress_chunk(chunk, if_not_compressed => TRUE)
+        FROM show_chunks('"Measurements"', older_than => INTERVAL '1 day') AS chunk;
         """;
 
     private async Task<bool> EnsureTelemetrySchemaAsync(
@@ -1362,7 +1363,7 @@ public sealed class TimescaleTelemetryRepository(
         {
             await ExecuteNonQueryAsync(
                 connection,
-                """SELECT create_hypertable('"Measurements"', by_range('Time'), if_not_exists => TRUE);""",
+                """SELECT create_hypertable('"Measurements"', by_range('Time', INTERVAL '1 day'), if_not_exists => TRUE);""",
                 cancellationToken);
             return true;
         }
@@ -1378,61 +1379,17 @@ public sealed class TimescaleTelemetryRepository(
 
     private async Task TryEnableCompressionAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
     {
-        var compressAfterMinutes = GetRuntimeSettings().CompressAfterMinutes;
-        if (compressAfterMinutes <= 0)
-        {
-            await ExecuteNonQueryAsync(connection, BuildRemoveCompressionPolicySql(), cancellationToken);
-            logger.LogInformation("TimescaleDB compression is disabled (CompressAfterMinutes = {Value}).", compressAfterMinutes);
-            return;
-        }
-
         try
         {
             await ExecuteNonQueryAsync(connection, BuildEnableCompressionSql(), cancellationToken);
-            await ExecuteNonQueryAsync(connection, BuildCompressionPolicySql(compressAfterMinutes), cancellationToken);
+            await ExecuteNonQueryAsync(connection, BuildRemoveCompressionPolicySql(), cancellationToken);
+            logger.LogInformation("TimescaleDB compression is enabled with nightly midnight sweeps.");
         }
         catch (PostgresException exception)
         {
             logger.LogWarning(
                 exception,
                 "TimescaleDB compression could not be enabled for database '{Database}'. Storage will continue without compression.",
-                connection.Database);
-        }
-    }
-
-    private async Task ApplyCompressionSettingsAsync(
-        int previousCompressAfterMinutes,
-        int currentCompressAfterMinutes,
-        CancellationToken cancellationToken)
-    {
-        if (!_timescaleMetadataAvailable || previousCompressAfterMinutes == currentCompressAfterMinutes)
-        {
-            return;
-        }
-
-        await using var connection = new NpgsqlConnection(_storage.ConnectionString);
-        await connection.OpenAsync(cancellationToken);
-
-        try
-        {
-            if (currentCompressAfterMinutes <= 0)
-            {
-                await ExecuteNonQueryAsync(connection, BuildRemoveCompressionPolicySql(), cancellationToken);
-                logger.LogInformation("Disabled TimescaleDB compression policy live.");
-                return;
-            }
-
-            await ExecuteNonQueryAsync(connection, BuildEnableCompressionSql(), cancellationToken);
-            await ExecuteNonQueryAsync(connection, BuildCompressionPolicySql(currentCompressAfterMinutes), cancellationToken);
-            logger.LogInformation(
-                "Updated TimescaleDB compression policy live. CompressAfterMinutes={CompressAfterMinutes}.",
-                currentCompressAfterMinutes);
-        }
-        catch (PostgresException exception)
-        {
-            logger.LogWarning(
-                exception,
-                "TimescaleDB compression settings could not be updated live for database '{Database}'.",
                 connection.Database);
         }
     }
@@ -1869,16 +1826,12 @@ public sealed class TimescaleTelemetryRepository(
 
     private sealed record TelemetryRuntimeSettings(
         int RawSecondsWindowMinutes,
-        int PersistedBucketMinutes,
-        int FiveMinuteWindowDays,
-        int CompressAfterMinutes)
+        int PersistedBucketMinutes)
     {
         public static TelemetryRuntimeSettings FromStorage(StorageConfiguration storage)
             => new(
                 storage.Retention.RawSecondsWindowMinutes,
-                NormalizePersistedBucketMinutes(storage.Retention.PersistedBucketMinutes),
-                storage.Retention.FiveMinuteWindowDays,
-                storage.Compression.CompressAfterMinutes);
+                NormalizePersistedBucketMinutes(storage.Retention.PersistedBucketMinutes));
     }
 
     private readonly record struct ResolvedHistorySensors(
