@@ -21,20 +21,31 @@ export function MainLayout({ children }: { children: ReactNode }) {
     };
   }, [hasUpdateOverlay]);
 
+  // Save scroll position before navigating away.
+  // This cleanup runs BEFORE the restore effect below changes scrollTop,
+  // so we capture the true position for the route we're leaving.
   useLayoutEffect(() => {
     if (!scrollContainer) {
       return;
     }
 
-    const restoreScrollPosition = () => {
-      scrollContainer.scrollTop = scrollPositionsRef.current.get(scrollKey) ?? 0;
+    return () => {
+      scrollPositionsRef.current.set(scrollKey, scrollContainer.scrollTop);
     };
+  }, [scrollContainer, scrollKey]);
 
-    restoreScrollPosition();
+  // Restore scroll position when arriving at a route.
+  useLayoutEffect(() => {
+    if (!scrollContainer) {
+      return;
+    }
+
+    const saved = scrollPositionsRef.current.get(scrollKey) ?? 0;
+    scrollContainer.scrollTop = saved;
 
     if (typeof window !== 'undefined') {
       restoreFrameRef.current = window.requestAnimationFrame(() => {
-        restoreScrollPosition();
+        scrollContainer.scrollTop = saved;
         restoreFrameRef.current = null;
       });
     }
@@ -44,23 +55,6 @@ export function MainLayout({ children }: { children: ReactNode }) {
         window.cancelAnimationFrame(restoreFrameRef.current);
         restoreFrameRef.current = null;
       }
-    };
-  }, [scrollContainer, scrollKey]);
-
-  useEffect(() => {
-    if (!scrollContainer) {
-      return;
-    }
-
-    const saveScrollPosition = () => {
-      scrollPositionsRef.current.set(scrollKey, scrollContainer.scrollTop);
-    };
-
-    saveScrollPosition();
-    scrollContainer.addEventListener('scroll', saveScrollPosition, { passive: true });
-
-    return () => {
-      scrollContainer.removeEventListener('scroll', saveScrollPosition);
     };
   }, [scrollContainer, scrollKey]);
 
