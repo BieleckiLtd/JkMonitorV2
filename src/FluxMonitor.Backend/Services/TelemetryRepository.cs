@@ -1079,6 +1079,18 @@ public sealed class TimescaleTelemetryRepository(
         _ => 0
     };
 
+    internal static DateTimeOffset? ConvertDatabaseScalarToDateTimeOffset(object? result) => result switch
+    {
+        null => null,
+        DBNull => null,
+        DateTimeOffset value => value.ToUniversalTime(),
+        DateTime value when value.Kind == DateTimeKind.Unspecified
+            => new DateTimeOffset(DateTime.SpecifyKind(value, DateTimeKind.Utc)),
+        DateTime value => new DateTimeOffset(value).ToUniversalTime(),
+        _ => throw new InvalidOperationException(
+            $"Expected a timestamp scalar but received {result.GetType().FullName}.")
+    };
+
     private static string GetBucketExpression(string resolution) => resolution switch
     {
         "1s" => "\"Time\"",
@@ -1382,7 +1394,7 @@ public sealed class TimescaleTelemetryRepository(
         command.Parameters.AddWithValue("To", toExclusive);
 
         var result = await command.ExecuteScalarAsync(cancellationToken);
-        return result is DateTimeOffset value ? value : null;
+        return ConvertDatabaseScalarToDateTimeOffset(result);
     }
 
     private static async Task ExecuteNonQueryAsync(

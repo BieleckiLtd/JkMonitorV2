@@ -51,6 +51,24 @@ public sealed class TelemetryRepositoryRetentionTests
     }
 
     [Fact]
+    public void ConvertDatabaseScalarToDateTimeOffset_HandlesUtcDateTimeResults()
+    {
+        var value = TimescaleTelemetryRepository.ConvertDatabaseScalarToDateTimeOffset(
+            new DateTime(2026, 4, 3, 17, 30, 0, DateTimeKind.Utc));
+
+        Assert.Equal(new DateTimeOffset(2026, 4, 3, 17, 30, 0, TimeSpan.Zero), value);
+    }
+
+    [Fact]
+    public void ConvertDatabaseScalarToDateTimeOffset_HandlesDateTimeOffsetResults()
+    {
+        var value = TimescaleTelemetryRepository.ConvertDatabaseScalarToDateTimeOffset(
+            new DateTimeOffset(2026, 4, 3, 18, 30, 0, TimeSpan.FromHours(1)));
+
+        Assert.Equal(new DateTimeOffset(2026, 4, 3, 17, 30, 0, TimeSpan.Zero), value);
+    }
+
+    [Fact]
     public void BuildDeleteOlderThanSql_ForMeasurements_UsesPrimaryKeyBatchDelete()
     {
         var sql = TimescaleTelemetryRepository.BuildDeleteOlderThanSql("Measurements", "Time");
