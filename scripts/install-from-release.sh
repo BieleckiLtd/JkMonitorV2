@@ -1484,6 +1484,10 @@ INSTALL_SCRIPT="$TEMP_ROOT/dotnet-install-fluxmonitor-runtime.sh"
 mkdir -p "$TEMP_BASE" "$TEMP_ROOT" "$EXTRACT_PATH" "$PRESERVE_PATH"
 
 cleanup() {
+  if [ -n "${BROWSER_PID:-}" ]; then
+    kill "$BROWSER_PID" >/dev/null 2>&1 || true
+  fi
+
   rm -rf "$TEMP_ROOT"
 }
 
@@ -1669,5 +1673,4 @@ BROWSER_PID=''
 open_browser_when_ready
 
 cd "$APP_ROOT"
-trap 'if [ -n "${BROWSER_PID:-}" ]; then kill "$BROWSER_PID" >/dev/null 2>&1 || true; fi' EXIT
 ASPNETCORE_ENVIRONMENT="$ENVIRONMENT" ASPNETCORE_URLS="$APP_BIND_URL" "$DOTNET_CMD" ./FluxMonitor.Backend.dll

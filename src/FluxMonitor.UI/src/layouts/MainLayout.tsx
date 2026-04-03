@@ -69,10 +69,10 @@ export function MainLayout({ children }: { children: ReactNode }) {
   }, [scrollContainer, scrollKey]);
 
   return (
-    <div className='app-shell flex h-full w-full overflow-hidden bg-background font-sans text-foreground'>
+    <div className='app-shell flex h-full w-full overflow-hidden font-sans text-foreground'>
       {!hasBlockingUpdateOverlay ? (
         <div className='flex h-full min-w-0 flex-1 flex-col'>
-          <main ref={setScrollContainer} className='safe-area-main flex min-h-0 flex-1 w-full overflow-y-auto'>
+          <main ref={setScrollContainer} className='app-main flex min-h-0 flex-1 w-full overflow-y-auto'>
             <div className='mx-auto flex min-h-full w-full max-w-none flex-col'>
               {children}
             </div>
