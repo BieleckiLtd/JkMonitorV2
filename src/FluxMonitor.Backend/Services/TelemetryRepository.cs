@@ -23,6 +23,13 @@ public interface ITelemetryRepository
 
     Task PersistAsync(DeviceConfiguration device, DevicePollResult sample, CancellationToken cancellationToken);
 
+    Task ApplyDatabaseSettingsAsync(
+        int rawSecondsWindowMinutes,
+        int persistedBucketMinutes,
+        int fiveMinuteWindowDays,
+        int compressAfterMinutes,
+        CancellationToken cancellationToken);
+
     Task<IReadOnlyList<HistoryDataPoint>> QueryHistoryAsync(string deviceId, string resolution, BucketValueKind bucketValueKind, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<CellHistoryDataPoint>> QueryCellHistoryAsync(string deviceId, int cellIndex, string resolution, BucketValueKind bucketValueKind, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken);
@@ -76,6 +83,14 @@ public sealed class NoOpTelemetryRepository : ITelemetryRepository
 
     public Task PersistAsync(DeviceConfiguration device, DevicePollResult sample, CancellationToken cancellationToken) => Task.CompletedTask;
 
+    public Task ApplyDatabaseSettingsAsync(
+        int rawSecondsWindowMinutes,
+        int persistedBucketMinutes,
+        int fiveMinuteWindowDays,
+        int compressAfterMinutes,
+        CancellationToken cancellationToken)
+        => Task.CompletedTask;
+
     public Task<IReadOnlyList<HistoryDataPoint>> QueryHistoryAsync(string deviceId, string resolution, BucketValueKind bucketValueKind, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
         => Task.FromResult<IReadOnlyList<HistoryDataPoint>>([]);
 
@@ -98,18 +113,17 @@ public sealed class NoOpTelemetryRepository : ITelemetryRepository
 }
 
 public sealed class TimescaleTelemetryRepository(
-    IOptions<MonitorConfiguration> configuration,
+    IOptionsMonitor<MonitorConfiguration> configuration,
     DeviceConfigStore deviceConfigStore,
     DeviceDefinitionLoader definitionLoader,
     ILogger<TimescaleTelemetryRepository> logger) : ITelemetryRepository
 {
-    private readonly StorageConfiguration _storage = configuration.Value.Storage;
-    private readonly RetentionConfiguration _retention = configuration.Value.Storage.Retention;
-    private readonly CompressionConfiguration _compression = configuration.Value.Storage.Compression;
+    private readonly StorageConfiguration _storage = configuration.CurrentValue.Storage;
     private readonly SemaphoreSlim _initializationLock = new(1, 1);
     private readonly object _stateGate = new();
     private readonly Dictionary<string, Queue<BufferedSnapshot>> _recentSamples = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<AggregateKey, AggregateAccumulator> _pendingBuckets = new();
+    private TelemetryRuntimeSettings _runtimeSettings = TelemetryRuntimeSettings.FromStorage(configuration.CurrentValue.Storage);
     private volatile bool _initialized;
     private volatile bool _timescaleMetadataAvailable;
 
@@ -119,9 +133,17 @@ public sealed class TimescaleTelemetryRepository(
     private const int RetentionDeleteCommandTimeoutSeconds = 120;
     private const double ShutdownFlushMinimumCompletionRatio = 0.45;
 
-    private int GetPersistedBucketMinutes() => NormalizePersistedBucketMinutes(_retention.PersistedBucketMinutes);
+    private TelemetryRuntimeSettings GetRuntimeSettings()
+    {
+        lock (_stateGate)
+        {
+            return _runtimeSettings;
+        }
+    }
 
-    private string GetPersistedResolution() => GetPersistedResolution(_retention.PersistedBucketMinutes);
+    private int GetPersistedBucketMinutes() => GetRuntimeSettings().PersistedBucketMinutes;
+
+    private string GetPersistedResolution() => GetPersistedResolution(GetPersistedBucketMinutes());
 
     private string GetPersistedBucketDescription() => $"{GetPersistedBucketMinutes()}-minute";
 
@@ -176,18 +198,72 @@ public sealed class TimescaleTelemetryRepository(
             return;
         }
 
-        var persistedResolution = GetPersistedResolution();
-        var currentBucket = AlignToBucketBoundaryFloor(sample.Snapshot.CollectedAt, persistedResolution);
         List<MeasurementValueRow> rowsToPersist;
 
         lock (_stateGate)
         {
+            var runtimeSettings = _runtimeSettings;
+            var persistedBucketMinutes = runtimeSettings.PersistedBucketMinutes;
+            var persistedResolution = GetPersistedResolution(persistedBucketMinutes);
+            var currentBucket = AlignToBucketBoundaryFloor(sample.Snapshot.CollectedAt, persistedResolution);
+
             EnqueueRecentSampleLocked(device.DeviceId, sample.Snapshot.CollectedAt, measurements);
-            AccumulatePersistedBucketLocked(device.DeviceId, currentBucket, sample.Snapshot.CollectedAt, measurements);
+            AccumulatePersistedBucketLocked(
+                device.DeviceId,
+                persistedBucketMinutes,
+                currentBucket,
+                sample.Snapshot.CollectedAt,
+                measurements);
             rowsToPersist = DrainPendingBucketsLocked(currentBucket);
         }
 
         await UpsertMeasurementsAsync(rowsToPersist, cancellationToken);
+    }
+
+    public async Task ApplyDatabaseSettingsAsync(
+        int rawSecondsWindowMinutes,
+        int persistedBucketMinutes,
+        int fiveMinuteWindowDays,
+        int compressAfterMinutes,
+        CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken);
+
+        var updatedSettings = new TelemetryRuntimeSettings(
+            rawSecondsWindowMinutes,
+            NormalizePersistedBucketMinutes(persistedBucketMinutes),
+            fiveMinuteWindowDays,
+            compressAfterMinutes);
+
+        TelemetryRuntimeSettings previousSettings;
+        List<MeasurementValueRow> rowsToPersist = [];
+        lock (_stateGate)
+        {
+            previousSettings = _runtimeSettings;
+            if (previousSettings == updatedSettings)
+            {
+                return;
+            }
+
+            if (previousSettings.PersistedBucketMinutes != updatedSettings.PersistedBucketMinutes)
+            {
+                rowsToPersist = DrainAllPendingBucketsLocked();
+            }
+
+            _runtimeSettings = updatedSettings;
+            TrimRecentSamplesLocked(DateTimeOffset.UtcNow.Subtract(GetRawHistoryWindow(updatedSettings)));
+        }
+
+        await UpsertMeasurementsAsync(rowsToPersist, cancellationToken);
+        await ApplyCompressionSettingsAsync(previousSettings.CompressAfterMinutes, updatedSettings.CompressAfterMinutes, cancellationToken);
+
+        logger.LogInformation(
+            "Applied database settings live. RawSecondsWindowMinutes={RawSecondsWindowMinutes}, PersistedBucketMinutes={PersistedBucketMinutes}, FiveMinuteWindowDays={FiveMinuteWindowDays}, CompressAfterMinutes={CompressAfterMinutes}, FlushedRowsOnBucketChange={FlushedRowsOnBucketChange}.",
+            updatedSettings.RawSecondsWindowMinutes,
+            updatedSettings.PersistedBucketMinutes,
+            updatedSettings.FiveMinuteWindowDays,
+            updatedSettings.CompressAfterMinutes,
+            rowsToPersist.Count);
     }
 
     public async Task<IReadOnlyList<HistoryDataPoint>> QueryHistoryAsync(
@@ -223,7 +299,7 @@ public sealed class TimescaleTelemetryRepository(
 
         return string.Equals(resolution, "1s", StringComparison.Ordinal)
             ? QueryBufferedHistory(deviceId, sensors, bucketValueKind, from, to)
-            : await QueryPersistedHistoryAsync(deviceId, sensors, bucketValueKind, from, to, cancellationToken);
+            : await QueryPersistedHistoryAsync(deviceId, sensors, resolution, bucketValueKind, from, to, cancellationToken);
     }
 
     public async Task<IReadOnlyList<CellHistoryDataPoint>> QueryCellHistoryAsync(
@@ -255,7 +331,7 @@ public sealed class TimescaleTelemetryRepository(
 
         return string.Equals(resolution, "1s", StringComparison.Ordinal)
             ? QueryBufferedCellHistory(deviceId, sensorName, bucketValueKind, from, to)
-            : await QueryPersistedCellHistoryAsync(deviceId, sensorName, bucketValueKind, from, to, cancellationToken);
+            : await QueryPersistedCellHistoryAsync(deviceId, sensorName, resolution, bucketValueKind, from, to, cancellationToken);
     }
 
     public async Task ApplyRetentionAsync(CancellationToken cancellationToken)
@@ -275,7 +351,8 @@ public sealed class TimescaleTelemetryRepository(
 
         await UpsertMeasurementsAsync(rowsToPersist, cancellationToken);
 
-        if (_retention.FiveMinuteWindowDays <= 0)
+        var runtimeSettings = GetRuntimeSettings();
+        if (runtimeSettings.FiveMinuteWindowDays <= 0)
         {
             logger.LogInformation(
                 "Retention sweep kept all persisted {PersistedBucket} samples. In-memory raw history remains capped at {Minutes} minutes.",
@@ -284,7 +361,7 @@ public sealed class TimescaleTelemetryRepository(
             return;
         }
 
-        var cutoff = now.Subtract(TimeSpan.FromDays(_retention.FiveMinuteWindowDays));
+        var cutoff = now.Subtract(TimeSpan.FromDays(runtimeSettings.FiveMinuteWindowDays));
 
         await using var connection = new NpgsqlConnection(_storage.ConnectionString);
         await connection.OpenAsync(cancellationToken);
@@ -653,15 +730,16 @@ public sealed class TimescaleTelemetryRepository(
         {
             return """
                 WITH batch AS (
-                    SELECT "Time", "DeviceId", "SensorName"
+                    SELECT "BucketMinutes", "Time", "DeviceId", "SensorName"
                     FROM "Measurements"
                     WHERE "Time" < @Cutoff
-                    ORDER BY "Time", "DeviceId", "SensorName"
+                    ORDER BY "Time", "BucketMinutes", "DeviceId", "SensorName"
                     LIMIT @BatchSize
                 )
                 DELETE FROM "Measurements" AS target
                 USING batch
-                WHERE target."Time" = batch."Time"
+                WHERE target."BucketMinutes" = batch."BucketMinutes"
+                  AND target."Time" = batch."Time"
                   AND target."DeviceId" = batch."DeviceId"
                   AND target."SensorName" = batch."SensorName";
                 """;
@@ -700,7 +778,7 @@ public sealed class TimescaleTelemetryRepository(
     internal static string BuildEnableCompressionSql() => """
         ALTER TABLE "Measurements" SET (
             timescaledb.compress,
-            timescaledb.compress_segmentby = '"DeviceId", "SensorName"',
+            timescaledb.compress_segmentby = '"BucketMinutes", "DeviceId", "SensorName"',
             timescaledb.compress_orderby = '"Time" DESC'
         );
         """;
@@ -713,6 +791,10 @@ public sealed class TimescaleTelemetryRepository(
         SELECT add_compression_policy('"Measurements"', INTERVAL '{intervalMinutes} minutes');
         """;
 
+    internal static string BuildRemoveCompressionPolicySql() => """
+        SELECT remove_compression_policy('"Measurements"', if_exists => true);
+        """;
+
     private async Task<bool> EnsureTelemetrySchemaAsync(
         NpgsqlConnection connection,
         bool useTimescale,
@@ -720,7 +802,7 @@ public sealed class TimescaleTelemetryRepository(
     {
         if (await ShouldResetMeasurementsSchemaAsync(connection, cancellationToken))
         {
-            logger.LogWarning("Resetting telemetry storage to the bucket-stat Measurements(device, sensor, min, max, average, last) schema.");
+            logger.LogWarning("Resetting telemetry storage to the bucket-stat Measurements(bucket_minutes, device, sensor, min, max, average, last) schema.");
             await ExecuteNonQueryAsync(connection, """DROP TABLE IF EXISTS "Measurements" CASCADE;""", cancellationToken);
         }
 
@@ -734,6 +816,7 @@ public sealed class TimescaleTelemetryRepository(
 
         await ExecuteNonQueryAsync(connection, """
             CREATE TABLE IF NOT EXISTS "Measurements" (
+                "BucketMinutes" INTEGER NOT NULL,
                 "Time" TIMESTAMPTZ NOT NULL,
                 "DeviceId" TEXT NOT NULL,
                 "SensorName" TEXT NOT NULL,
@@ -741,7 +824,7 @@ public sealed class TimescaleTelemetryRepository(
                 "MaxValue" DOUBLE PRECISION NOT NULL,
                 "AverageValue" DOUBLE PRECISION NOT NULL,
                 "LastValue" DOUBLE PRECISION NOT NULL,
-                CONSTRAINT "PK_Measurements" PRIMARY KEY ("Time", "DeviceId", "SensorName")
+                CONSTRAINT "PK_Measurements" PRIMARY KEY ("BucketMinutes", "Time", "DeviceId", "SensorName")
             );
             """, cancellationToken);
 
@@ -756,11 +839,11 @@ public sealed class TimescaleTelemetryRepository(
         }
 
         await ExecuteNonQueryAsync(connection, """
-            CREATE INDEX IF NOT EXISTS "IX_Measurements_DeviceId_TimeDesc"
-                ON "Measurements" ("DeviceId", "Time" DESC);
+            CREATE INDEX IF NOT EXISTS "IX_Measurements_DeviceId_BucketMinutes_TimeDesc"
+                ON "Measurements" ("DeviceId", "BucketMinutes", "Time" DESC);
 
-            CREATE INDEX IF NOT EXISTS "IX_Measurements_DeviceId_SensorName_TimeDesc"
-                ON "Measurements" ("DeviceId", "SensorName", "Time" DESC);
+            CREATE INDEX IF NOT EXISTS "IX_Measurements_DeviceId_SensorName_BucketMinutes_TimeDesc"
+                ON "Measurements" ("DeviceId", "SensorName", "BucketMinutes", "Time" DESC);
             """, cancellationToken);
 
         return useTimescale;
@@ -790,7 +873,8 @@ public sealed class TimescaleTelemetryRepository(
             return false;
         }
 
-        return !columns.TryGetValue("Time", out var timeType) ||
+        return !columns.TryGetValue("BucketMinutes", out var bucketMinutesType) ||
+               !columns.TryGetValue("Time", out var timeType) ||
                !columns.TryGetValue("DeviceId", out var deviceIdType) ||
                !columns.TryGetValue("SensorName", out var sensorNameType) ||
                !columns.TryGetValue("MinValue", out var minValueType) ||
@@ -800,6 +884,7 @@ public sealed class TimescaleTelemetryRepository(
                columns.ContainsKey("Value") ||
                columns.ContainsKey("SensorId") ||
                columns.ContainsKey("ValueDouble") ||
+               !string.Equals(bucketMinutesType, "integer", StringComparison.OrdinalIgnoreCase) ||
                !string.Equals(timeType, "timestamp with time zone", StringComparison.OrdinalIgnoreCase) ||
                !string.Equals(deviceIdType, "text", StringComparison.OrdinalIgnoreCase) ||
                !string.Equals(sensorNameType, "text", StringComparison.OrdinalIgnoreCase) ||
@@ -826,13 +911,14 @@ public sealed class TimescaleTelemetryRepository(
 
     private void AccumulatePersistedBucketLocked(
         string deviceId,
+        int bucketMinutes,
         DateTimeOffset bucketStart,
         DateTimeOffset sampleTimestamp,
         IReadOnlyDictionary<string, double> measurements)
     {
         foreach (var measurement in measurements)
         {
-            var key = new AggregateKey(deviceId, bucketStart, measurement.Key);
+            var key = new AggregateKey(bucketMinutes, deviceId, bucketStart, measurement.Key);
             if (!_pendingBuckets.TryGetValue(key, out var accumulator))
             {
                 accumulator = new AggregateAccumulator();
@@ -844,30 +930,38 @@ public sealed class TimescaleTelemetryRepository(
     }
 
     private List<MeasurementValueRow> DrainPendingBucketsLocked(DateTimeOffset drainBeforeExclusive)
+        => DrainMatchingPendingBucketsLocked(key => key.Time < drainBeforeExclusive);
+
+    private List<MeasurementValueRow> DrainAllPendingBucketsLocked()
+        => DrainMatchingPendingBucketsLocked(static _ => true);
+
+    private List<MeasurementValueRow> DrainMatchingPendingBucketsLocked(Func<AggregateKey, bool> predicate)
     {
         if (_pendingBuckets.Count == 0)
         {
             return [];
         }
 
-        var completedKeys = _pendingBuckets.Keys
-            .Where(key => key.Time < drainBeforeExclusive)
+        var matchingKeys = _pendingBuckets.Keys
+            .Where(predicate)
             .OrderBy(key => key.Time)
+            .ThenBy(key => key.BucketMinutes)
             .ThenBy(key => key.DeviceId, StringComparer.OrdinalIgnoreCase)
             .ThenBy(key => key.SensorName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-        if (completedKeys.Length == 0)
+        if (matchingKeys.Length == 0)
         {
             return [];
         }
 
-        var rows = new List<MeasurementValueRow>(completedKeys.Length);
-        foreach (var key in completedKeys)
+        var rows = new List<MeasurementValueRow>(matchingKeys.Length);
+        foreach (var key in matchingKeys)
         {
             if (_pendingBuckets.Remove(key, out var accumulator) && accumulator.HasValue)
             {
                 rows.Add(new MeasurementValueRow(
+                    key.BucketMinutes,
                     key.Time,
                     key.DeviceId,
                     key.SensorName,
@@ -913,6 +1007,7 @@ public sealed class TimescaleTelemetryRepository(
 
         const string sql = """
             INSERT INTO "Measurements" (
+                "BucketMinutes",
                 "Time",
                 "DeviceId",
                 "SensorName",
@@ -922,6 +1017,7 @@ public sealed class TimescaleTelemetryRepository(
                 "LastValue"
             )
             VALUES (
+                @BucketMinutes,
                 @Time,
                 @DeviceId,
                 @SensorName,
@@ -930,7 +1026,7 @@ public sealed class TimescaleTelemetryRepository(
                 @AverageValue,
                 @LastValue
             )
-            ON CONFLICT ("Time", "DeviceId", "SensorName") DO UPDATE SET
+            ON CONFLICT ("BucketMinutes", "Time", "DeviceId", "SensorName") DO UPDATE SET
                 "MinValue" = EXCLUDED."MinValue",
                 "MaxValue" = EXCLUDED."MaxValue",
                 "AverageValue" = EXCLUDED."AverageValue",
@@ -940,6 +1036,7 @@ public sealed class TimescaleTelemetryRepository(
         foreach (var row in rows)
         {
             var command = new NpgsqlBatchCommand(sql);
+            command.Parameters.AddWithValue("BucketMinutes", row.BucketMinutes);
             command.Parameters.AddWithValue("Time", row.Time);
             command.Parameters.AddWithValue("DeviceId", row.DeviceId);
             command.Parameters.AddWithValue("SensorName", row.SensorName);
@@ -1002,12 +1099,14 @@ public sealed class TimescaleTelemetryRepository(
     private async Task<IReadOnlyList<HistoryDataPoint>> QueryPersistedHistoryAsync(
         string deviceId,
         ResolvedHistorySensors sensors,
+        string resolution,
         BucketValueKind bucketValueKind,
         DateTimeOffset from,
         DateTimeOffset to,
         CancellationToken cancellationToken)
     {
-        var effectiveFrom = AlignToBucketBoundaryFloor(from, GetPersistedResolution());
+        var bucketMinutes = GetBucketMinutes(resolution);
+        var effectiveFrom = AlignToBucketBoundaryFloor(from, resolution);
         var sensorNames = sensors
             .AsEnumerable()
             .Where(name => !string.IsNullOrWhiteSpace(name))
@@ -1015,8 +1114,8 @@ public sealed class TimescaleTelemetryRepository(
             .Distinct(StringComparer.OrdinalIgnoreCase)
             .ToArray();
 
-        var rows = await LoadPersistedMeasurementRowsAsync(deviceId, sensorNames, effectiveFrom, to, cancellationToken);
-        rows.AddRange(GetPendingMeasurementRows(deviceId, sensorNames, effectiveFrom, to));
+        var rows = await LoadPersistedMeasurementRowsAsync(deviceId, bucketMinutes, sensorNames, effectiveFrom, to, cancellationToken);
+        rows.AddRange(GetPendingMeasurementRows(deviceId, bucketMinutes, sensorNames, effectiveFrom, to));
 
         if (rows.Count == 0)
         {
@@ -1092,14 +1191,16 @@ public sealed class TimescaleTelemetryRepository(
     private async Task<IReadOnlyList<CellHistoryDataPoint>> QueryPersistedCellHistoryAsync(
         string deviceId,
         string sensorName,
+        string resolution,
         BucketValueKind bucketValueKind,
         DateTimeOffset from,
         DateTimeOffset to,
         CancellationToken cancellationToken)
     {
-        var effectiveFrom = AlignToBucketBoundaryFloor(from, GetPersistedResolution());
-        var rows = await LoadPersistedMeasurementRowsAsync(deviceId, [sensorName], effectiveFrom, to, cancellationToken);
-        rows.AddRange(GetPendingMeasurementRows(deviceId, [sensorName], effectiveFrom, to));
+        var bucketMinutes = GetBucketMinutes(resolution);
+        var effectiveFrom = AlignToBucketBoundaryFloor(from, resolution);
+        var rows = await LoadPersistedMeasurementRowsAsync(deviceId, bucketMinutes, [sensorName], effectiveFrom, to, cancellationToken);
+        rows.AddRange(GetPendingMeasurementRows(deviceId, bucketMinutes, [sensorName], effectiveFrom, to));
 
         return rows
             .OrderBy(row => row.Time)
@@ -1109,6 +1210,7 @@ public sealed class TimescaleTelemetryRepository(
 
     private async Task<List<MeasurementValueRow>> LoadPersistedMeasurementRowsAsync(
         string deviceId,
+        int bucketMinutes,
         IReadOnlyList<string> sensorNames,
         DateTimeOffset from,
         DateTimeOffset to,
@@ -1125,15 +1227,17 @@ public sealed class TimescaleTelemetryRepository(
         await connection.OpenAsync(cancellationToken);
         await using var command = connection.CreateCommand();
         command.CommandText = """
-            SELECT "Time", "SensorName", "MinValue", "MaxValue", "AverageValue", "LastValue"
+            SELECT "BucketMinutes", "Time", "SensorName", "MinValue", "MaxValue", "AverageValue", "LastValue"
             FROM "Measurements"
             WHERE "DeviceId" = @DeviceId
+              AND "BucketMinutes" = @BucketMinutes
               AND "Time" >= @From
               AND "Time" <= @To
               AND "SensorName" = ANY(@SensorNames)
             ORDER BY "Time", "SensorName";
             """;
         command.Parameters.AddWithValue("DeviceId", deviceId);
+        command.Parameters.AddWithValue("BucketMinutes", bucketMinutes);
         command.Parameters.AddWithValue("From", from);
         command.Parameters.AddWithValue("To", to);
         command.Parameters.Add(new NpgsqlParameter("SensorNames", NpgsqlDbType.Array | NpgsqlDbType.Text)
@@ -1145,13 +1249,14 @@ public sealed class TimescaleTelemetryRepository(
         while (await reader.ReadAsync(cancellationToken))
         {
             rows.Add(new MeasurementValueRow(
-                reader.GetFieldValue<DateTimeOffset>(0),
+                reader.GetInt32(0),
+                reader.GetFieldValue<DateTimeOffset>(1),
                 deviceId,
-                reader.GetString(1),
-                reader.GetDouble(2),
+                reader.GetString(2),
                 reader.GetDouble(3),
                 reader.GetDouble(4),
-                reader.GetDouble(5)));
+                reader.GetDouble(5),
+                reader.GetDouble(6)));
         }
 
         return rows;
@@ -1159,6 +1264,7 @@ public sealed class TimescaleTelemetryRepository(
 
     private List<MeasurementValueRow> GetPendingMeasurementRows(
         string deviceId,
+        int bucketMinutes,
         IReadOnlyList<string> sensorNames,
         DateTimeOffset from,
         DateTimeOffset to)
@@ -1168,6 +1274,7 @@ public sealed class TimescaleTelemetryRepository(
             var nameSet = sensorNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
             return _pendingBuckets
                 .Where(entry =>
+                    entry.Key.BucketMinutes == bucketMinutes &&
                     string.Equals(entry.Key.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase) &&
                     nameSet.Contains(entry.Key.SensorName) &&
                     entry.Key.Time >= from &&
@@ -1176,6 +1283,7 @@ public sealed class TimescaleTelemetryRepository(
                 .OrderBy(entry => entry.Key.Time)
                 .ThenBy(entry => entry.Key.SensorName, StringComparer.OrdinalIgnoreCase)
                 .Select(entry => new MeasurementValueRow(
+                    entry.Key.BucketMinutes,
                     entry.Key.Time,
                     entry.Key.DeviceId,
                     entry.Key.SensorName,
@@ -1270,22 +1378,61 @@ public sealed class TimescaleTelemetryRepository(
 
     private async Task TryEnableCompressionAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
     {
-        if (_compression.CompressAfterMinutes <= 0)
+        var compressAfterMinutes = GetRuntimeSettings().CompressAfterMinutes;
+        if (compressAfterMinutes <= 0)
         {
-            logger.LogInformation("TimescaleDB compression is disabled (CompressAfterMinutes = {Value}).", _compression.CompressAfterMinutes);
+            await ExecuteNonQueryAsync(connection, BuildRemoveCompressionPolicySql(), cancellationToken);
+            logger.LogInformation("TimescaleDB compression is disabled (CompressAfterMinutes = {Value}).", compressAfterMinutes);
             return;
         }
 
         try
         {
             await ExecuteNonQueryAsync(connection, BuildEnableCompressionSql(), cancellationToken);
-            await ExecuteNonQueryAsync(connection, BuildCompressionPolicySql(_compression.CompressAfterMinutes), cancellationToken);
+            await ExecuteNonQueryAsync(connection, BuildCompressionPolicySql(compressAfterMinutes), cancellationToken);
         }
         catch (PostgresException exception)
         {
             logger.LogWarning(
                 exception,
                 "TimescaleDB compression could not be enabled for database '{Database}'. Storage will continue without compression.",
+                connection.Database);
+        }
+    }
+
+    private async Task ApplyCompressionSettingsAsync(
+        int previousCompressAfterMinutes,
+        int currentCompressAfterMinutes,
+        CancellationToken cancellationToken)
+    {
+        if (!_timescaleMetadataAvailable || previousCompressAfterMinutes == currentCompressAfterMinutes)
+        {
+            return;
+        }
+
+        await using var connection = new NpgsqlConnection(_storage.ConnectionString);
+        await connection.OpenAsync(cancellationToken);
+
+        try
+        {
+            if (currentCompressAfterMinutes <= 0)
+            {
+                await ExecuteNonQueryAsync(connection, BuildRemoveCompressionPolicySql(), cancellationToken);
+                logger.LogInformation("Disabled TimescaleDB compression policy live.");
+                return;
+            }
+
+            await ExecuteNonQueryAsync(connection, BuildEnableCompressionSql(), cancellationToken);
+            await ExecuteNonQueryAsync(connection, BuildCompressionPolicySql(currentCompressAfterMinutes), cancellationToken);
+            logger.LogInformation(
+                "Updated TimescaleDB compression policy live. CompressAfterMinutes={CompressAfterMinutes}.",
+                currentCompressAfterMinutes);
+        }
+        catch (PostgresException exception)
+        {
+            logger.LogWarning(
+                exception,
+                "TimescaleDB compression settings could not be updated live for database '{Database}'.",
                 connection.Database);
         }
     }
@@ -1316,8 +1463,11 @@ public sealed class TimescaleTelemetryRepository(
     }
 
     private TimeSpan GetRawHistoryWindow()
+        => GetRawHistoryWindow(GetRuntimeSettings());
+
+    private static TimeSpan GetRawHistoryWindow(TelemetryRuntimeSettings settings)
     {
-        var configuredMinutes = _retention.RawSecondsWindowMinutes;
+        var configuredMinutes = settings.RawSecondsWindowMinutes;
         return TimeSpan.FromMinutes(configuredMinutes > 0 ? configuredMinutes : 10);
     }
 
@@ -1423,6 +1573,30 @@ public sealed class TimescaleTelemetryRepository(
         return TimeSpan.FromMinutes(5);
     }
 
+    private static int GetBucketMinutes(string resolution)
+    {
+        if (string.IsNullOrWhiteSpace(resolution))
+        {
+            return 5;
+        }
+
+        if (resolution.EndsWith("m", StringComparison.Ordinal) &&
+            int.TryParse(resolution[..^1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var minutes) &&
+            minutes > 0)
+        {
+            return NormalizePersistedBucketMinutes(minutes);
+        }
+
+        if (resolution.EndsWith("h", StringComparison.Ordinal) &&
+            int.TryParse(resolution[..^1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var hours) &&
+            hours > 0)
+        {
+            return NormalizePersistedBucketMinutes(hours * 60);
+        }
+
+        return 5;
+    }
+
     private static string? FindEntityKeyByRole(DeviceDefinition definition, string role)
         => definition.Entities.FirstOrDefault(entity =>
                string.Equals(entity.Role, role, StringComparison.OrdinalIgnoreCase))?.Id
@@ -1468,6 +1642,7 @@ public sealed class TimescaleTelemetryRepository(
         IReadOnlyDictionary<string, double> Measurements);
 
     private readonly record struct AggregateKey(
+        int BucketMinutes,
         string DeviceId,
         DateTimeOffset Time,
         string SensorName);
@@ -1674,6 +1849,7 @@ public sealed class TimescaleTelemetryRepository(
     }
 
     private sealed record MeasurementValueRow(
+        int BucketMinutes,
         DateTimeOffset Time,
         string DeviceId,
         string SensorName,
@@ -1689,6 +1865,20 @@ public sealed class TimescaleTelemetryRepository(
             BucketValueKind.Last => LastValue,
             _ => AverageValue
         };
+    }
+
+    private sealed record TelemetryRuntimeSettings(
+        int RawSecondsWindowMinutes,
+        int PersistedBucketMinutes,
+        int FiveMinuteWindowDays,
+        int CompressAfterMinutes)
+    {
+        public static TelemetryRuntimeSettings FromStorage(StorageConfiguration storage)
+            => new(
+                storage.Retention.RawSecondsWindowMinutes,
+                NormalizePersistedBucketMinutes(storage.Retention.PersistedBucketMinutes),
+                storage.Retention.FiveMinuteWindowDays,
+                storage.Compression.CompressAfterMinutes);
     }
 
     private readonly record struct ResolvedHistorySensors(

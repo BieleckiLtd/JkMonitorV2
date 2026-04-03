@@ -19,11 +19,20 @@ public sealed class DatabaseController(
     }
 
     [HttpPost("settings")]
-    public ActionResult<SaveDatabaseSettingsResponse> SaveSettings([FromBody] SaveDatabaseSettingsRequest request)
+    public async Task<ActionResult<SaveDatabaseSettingsResponse>> SaveSettings(
+        [FromBody] SaveDatabaseSettingsRequest request,
+        CancellationToken cancellationToken)
     {
         try
         {
-            return Ok(setupConfigurationService.SaveDatabaseSettings(request));
+            var response = setupConfigurationService.SaveDatabaseSettings(request);
+            await repository.ApplyDatabaseSettingsAsync(
+                response.Settings.RawSecondsWindowMinutes,
+                response.Settings.PersistedBucketMinutes,
+                response.Settings.FiveMinuteWindowDays,
+                response.Settings.CompressAfterMinutes,
+                cancellationToken);
+            return Ok(response);
         }
         catch (InvalidOperationException exception)
         {

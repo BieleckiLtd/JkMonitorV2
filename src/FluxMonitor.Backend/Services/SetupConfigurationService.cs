@@ -161,18 +161,10 @@ public sealed class SetupConfigurationService(
             request.FiveMinuteWindowDays,
             request.CompressAfterMinutes);
 
-        var restartScheduled = request.RestartApplication && managedRestartService.CanAutoRestart;
-        if (restartScheduled)
-        {
-            managedRestartService.ScheduleRestart();
-        }
-
         return new SaveDatabaseSettingsResponse
         {
-            RestartScheduled = restartScheduled,
-            Message = restartScheduled
-                ? "Database retention settings were saved and Flux Monitor is restarting now."
-                : "Database retention settings were saved. Restart the app to apply them.",
+            RestartScheduled = false,
+            Message = "Database retention settings were saved and applied immediately.",
             Settings = updatedSettings
         };
     }

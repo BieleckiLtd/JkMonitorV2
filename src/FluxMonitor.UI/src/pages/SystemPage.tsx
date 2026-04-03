@@ -1264,7 +1264,7 @@ export function SystemPage() {
         persistedBucketMinutes: parsePersistedBucketMinutes(dbSettingsForm.persistedBucketMinutes),
         fiveMinuteWindowDays: parseNonNegativeInteger(dbSettingsForm.fiveMinuteWindowDays, 'Persisted history window'),
         compressAfterMinutes: parseNonNegativeInteger(dbSettingsForm.compressAfterMinutes, 'Compression threshold'),
-        restartApplication: true,
+        restartApplication: false,
       };
     } catch (error) {
       setDbSettingsFeedback({

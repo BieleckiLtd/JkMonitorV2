@@ -19,11 +19,11 @@ public sealed class DevicesController(
     PollingClientDispatcher pollingClientDispatcher,
     DeviceDefinitionLoader definitionLoader,
     ITelemetryRepository telemetryRepository,
-    IOptions<MonitorConfiguration> configuration,
+    IOptionsMonitor<MonitorConfiguration> configuration,
     PollTrigger pollTrigger,
     ILogger<DevicesController> logger) : ControllerBase
 {
-    private readonly RetentionConfiguration _retention = configuration.Value.Storage.Retention;
+    private RetentionConfiguration GetCurrentRetention() => configuration.CurrentValue.Storage.Retention;
 
     [HttpGet("current")]
     public IActionResult GetCurrent()
@@ -96,7 +96,7 @@ public sealed class DevicesController(
         [FromQuery] DateTimeOffset? to = null,
         CancellationToken cancellationToken = default)
     {
-        var persistedResolution = TimescaleTelemetryRepository.GetPersistedResolution(_retention.PersistedBucketMinutes);
+        var persistedResolution = TimescaleTelemetryRepository.GetPersistedResolution(GetCurrentRetention().PersistedBucketMinutes);
         var allowed = new HashSet<string>(StringComparer.Ordinal) { "1s", "1m", "5m", "1h", persistedResolution };
         if (!allowed.Contains(resolution))
             return BadRequest(new { message = $"Invalid resolution '{resolution}'. Use 1s or {persistedResolution}. Legacy 1m, 5m, and 1h inputs are accepted as persisted-history aliases." });
@@ -137,7 +137,7 @@ public sealed class DevicesController(
         if (cellIndex < 1 || cellIndex > 31)
             return BadRequest(new { message = "Cell index must be between 1 and 31." });
 
-        var persistedResolution = TimescaleTelemetryRepository.GetPersistedResolution(_retention.PersistedBucketMinutes);
+        var persistedResolution = TimescaleTelemetryRepository.GetPersistedResolution(GetCurrentRetention().PersistedBucketMinutes);
         var allowed = new HashSet<string>(StringComparer.Ordinal) { "1s", "1m", "5m", "1h", persistedResolution };
         if (!allowed.Contains(resolution))
             return BadRequest(new { message = $"Invalid resolution '{resolution}'. Use 1s or {persistedResolution}. Legacy 1m, 5m, and 1h inputs are accepted as persisted-history aliases." });

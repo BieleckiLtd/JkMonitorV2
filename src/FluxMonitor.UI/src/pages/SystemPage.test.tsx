@@ -305,7 +305,7 @@ describe('SystemPage', () => {
           ok: true,
           json: async () => ({
             restartScheduled: false,
-            message: 'Database retention settings were saved. Restart the app to apply them.',
+            message: 'Database retention settings were saved and applied immediately.',
             settings: {
               environmentName: 'Development',
               storageProvider: 'TimescaleDb',
@@ -360,7 +360,7 @@ describe('SystemPage', () => {
       persistedBucketMinutes: 15,
       fiveMinuteWindowDays: 0,
       compressAfterMinutes: 1440,
-      restartApplication: true,
+      restartApplication: false,
     });
 
     expect(await screen.findByText(/database retention settings were saved/i)).toBeInTheDocument();

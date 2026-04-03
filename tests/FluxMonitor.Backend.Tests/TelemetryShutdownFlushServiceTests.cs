@@ -32,6 +32,14 @@ public sealed class TelemetryShutdownFlushServiceTests
 
         public Task PersistAsync(DeviceConfiguration device, DevicePollResult sample, CancellationToken cancellationToken) => Task.CompletedTask;
 
+        public Task ApplyDatabaseSettingsAsync(
+            int rawSecondsWindowMinutes,
+            int persistedBucketMinutes,
+            int fiveMinuteWindowDays,
+            int compressAfterMinutes,
+            CancellationToken cancellationToken)
+            => Task.CompletedTask;
+
         public Task<IReadOnlyList<HistoryDataPoint>> QueryHistoryAsync(string deviceId, string resolution, BucketValueKind bucketValueKind, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<HistoryDataPoint>>([]);
 

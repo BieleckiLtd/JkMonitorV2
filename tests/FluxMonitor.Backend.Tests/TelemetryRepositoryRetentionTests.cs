@@ -73,6 +73,7 @@ public sealed class TelemetryRepositoryRetentionTests
     {
         var sql = TimescaleTelemetryRepository.BuildDeleteOlderThanSql("Measurements", "Time");
 
+        Assert.Contains(@"""BucketMinutes""", sql);
         Assert.Contains(@"""Time""", sql);
         Assert.Contains(@"""DeviceId""", sql);
         Assert.Contains(@"""SensorName""", sql);
