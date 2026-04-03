@@ -47,6 +47,8 @@ type CellHistoryResponse = {
 
 // Resolution type imported from energyUtils
 
+type HistoryRangeId = '10m' | '1h' | '24h' | '7d';
+
 type DisplayPrecision = {
   voltage: number;
   cellVoltage: number;
@@ -57,11 +59,11 @@ type DisplayPrecision = {
   deltaVoltage: number;
 };
 
-const resolutions: { value: Resolution; label: string; hint: string }[] = [
-  { value: '1s', label: '10m', hint: 'Last 10 minutes — 1s samples' },
-  { value: '1m', label: '1h', hint: 'Last hour — 1 min averages' },
-  { value: '5m', label: '24h', hint: 'Last 24 hours — 5 min averages' },
-  { value: '1h', label: '7d', hint: 'Last 7 days — 1 hour averages' },
+const historyRanges: { id: HistoryRangeId; label: string; hint: string; queryResolution: Resolution; windowMs: number }[] = [
+  { id: '10m', label: '10m', hint: 'Last 10 minutes — 1s samples from memory', queryResolution: '1s', windowMs: 600_000 },
+  { id: '1h', label: '1h', hint: 'Last hour — 5 min averages', queryResolution: '5m', windowMs: 3_600_000 },
+  { id: '24h', label: '24h', hint: 'Last 24 hours — 5 min averages', queryResolution: '5m', windowMs: 86_400_000 },
+  { id: '7d', label: '7d', hint: 'Last 7 days — 5 min averages', queryResolution: '5m', windowMs: 604_800_000 },
 ];
 
 // Map data keys to the precision field that governs their formatting.
@@ -142,16 +144,17 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
   deviceId: string; precision: DisplayPrecision; selectedCellIndices?: number[]; onClearCellSelection?: () => void;
   definition?: DeviceDefinition; capacityAh?: number | null;
 }) {
-  const [resolution, setResolution] = useState<Resolution | null>(null);
+  const [selectedRange, setSelectedRange] = useState<HistoryRangeId>('24h');
   const [data, setData] = useState<HistoryPoint[]>([]);
   const [multiCellData, setMultiCellData] = useState<Record<string, unknown>[]>([]);
   const [isLoading, setIsLoading] = useState(true);
-  const [timeRange, setTimeRange] = useState<'default' | 'today'>('today');
+  const [timeRange, setTimeRange] = useState<'range' | 'today'>('today');
   // Shared hover/selection state across all chart sections (synchronised by timestamp)
   const [sharedHoveredTime, setSharedHoveredTime] = useState<string | null>(null);
   const [sharedSelectedTime, setSharedSelectedTime] = useState<string | null>(null);
 
-  const effectiveResolution: Resolution = resolution ?? '5m';
+  const activeRange = historyRanges.find((range) => range.id === selectedRange) ?? historyRanges[2];
+  const effectiveResolution: Resolution = timeRange === 'today' ? '5m' : activeRange.queryResolution;
 
   const selectedCells = selectedCellIndices ?? [];
   const cellKey = selectedCells.join(',');
@@ -172,16 +175,15 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
   }, [timeRange]);
 
   const getFromIso = useCallback(() => {
-    const now = new Date();
     if (timeRange === 'today') {
+      const now = new Date();
       return new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString();
     }
-    const ms: Record<Resolution, number> = { '1s': 600_000, '1m': 3_600_000, '5m': 86_400_000, '1h': 604_800_000 };
-    return new Date(now.getTime() - ms[effectiveResolution]).toISOString();
-  }, [timeRange, effectiveResolution]);
+    return new Date(Date.now() - activeRange.windowMs).toISOString();
+  }, [activeRange.windowMs, timeRange]);
 
   const load = useCallback(async () => {
-    const key = `${deviceId}:${effectiveResolution}:${timeRange}`;
+    const key = `${deviceId}:${timeRange === 'today' ? 'today' : selectedRange}:${effectiveResolution}`;
     const cached = historyCacheRef.current.get(key);
     const windowFrom = getFromIso();
 
@@ -210,11 +212,11 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
       setData(points);
     } catch { /* ignore */ }
     finally { setIsLoading(false); }
-  }, [deviceId, effectiveResolution, timeRange, getFromIso]);
+  }, [deviceId, effectiveResolution, getFromIso, selectedRange, timeRange]);
 
   const loadCells = useCallback(async () => {
     if (selectedCells.length === 0) { setMultiCellData([]); return; }
-    const key = `${deviceId}:${effectiveResolution}:${timeRange}:${cellKey}`;
+    const key = `${deviceId}:${timeRange === 'today' ? 'today' : selectedRange}:${effectiveResolution}:${cellKey}`;
     const cached = cellCacheRef.current.get(key);
     const windowFrom = getFromIso();
 
@@ -254,11 +256,11 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
       setMultiCellData(merged);
     } catch { /* ignore */ }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [deviceId, effectiveResolution, timeRange, cellKey, getFromIso]);
+  }, [cellKey, deviceId, effectiveResolution, getFromIso, selectedRange, timeRange]);
 
   useEffect(() => {
     // Show cached data instantly on switch; refresh incrementally in background
-    const histKey = `${deviceId}:${effectiveResolution}:${timeRange}`;
+    const histKey = `${deviceId}:${timeRange === 'today' ? 'today' : selectedRange}:${effectiveResolution}`;
     const cached = historyCacheRef.current.get(histKey);
     if (cached && cached.length > 0) {
       setData(cached);
@@ -280,7 +282,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
     void loadCells();
     const id = window.setInterval(() => { void load(); void loadCells(); }, effectiveResolution === '1s' ? 2000 : 30000);
     return () => window.clearInterval(id);
-  }, [load, loadCells, effectiveResolution, timeRange, cellKey, deviceId]);
+  }, [cellKey, deviceId, effectiveResolution, load, loadCells, selectedRange, timeRange]);
 
   const formatted = data.map((p) => ({
     ...p,
@@ -338,17 +340,15 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
 
   const handleTodayClick = () => {
     if (timeRange === 'today') {
-      setTimeRange('default');
-      if (resolution == null) setResolution('5m');
+      setTimeRange('range');
     } else {
       setTimeRange('today');
-      setResolution(null);
     }
   };
 
-  const handleResolutionClick = (r: Resolution) => {
-    setResolution(r);
-    setTimeRange('default');
+  const handleRangeClick = (rangeId: HistoryRangeId) => {
+    setSelectedRange(rangeId);
+    setTimeRange('range');
   };
 
   return (
@@ -373,13 +373,13 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
               Today
             </button>
             <div className='mx-0.5 h-4 w-px bg-border/60' />
-            {resolutions.map((r) => (
+            {historyRanges.map((r) => (
               <button
-                key={r.value}
-                onClick={() => handleResolutionClick(r.value)}
+                key={r.id}
+                onClick={() => handleRangeClick(r.id)}
                 className={cn(
                   'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
-                  resolution === r.value
+                  timeRange === 'range' && selectedRange === r.id
                     ? 'bg-primary text-primary-foreground'
                     : 'text-muted-foreground hover:bg-muted/60 hover:text-foreground'
                 )}

@@ -130,7 +130,6 @@ describe('SystemPage', () => {
             storageProvider: 'TimescaleDb',
             databaseConfigured: true,
             rawSecondsWindowMinutes: 10,
-            oneMinuteWindowHours: 1,
             fiveMinuteWindowDays: 7,
             compressAfterMinutes: 60,
             canAutoRestart: false,
@@ -311,7 +310,6 @@ describe('SystemPage', () => {
               storageProvider: 'TimescaleDb',
               databaseConfigured: true,
               rawSecondsWindowMinutes: 10,
-              oneMinuteWindowHours: 8760,
               fiveMinuteWindowDays: 0,
               compressAfterMinutes: 1440,
               canAutoRestart: false,
@@ -328,8 +326,11 @@ describe('SystemPage', () => {
 
     renderSystemPage('/system/database');
 
-    const oneMinuteInput = await screen.findByLabelText(/1-minute rollup hours/i);
-    fireEvent.change(oneMinuteInput, { target: { value: '8760' } });
+    expect(await screen.findByText(/5m averages kept forever in the database/i)).toBeInTheDocument();
+    expect(screen.getByText(/use 0 to keep all long-term history/i)).toBeInTheDocument();
+
+    const rawWindowInput = await screen.findByLabelText(/raw 1-second history minutes/i);
+    fireEvent.change(rawWindowInput, { target: { value: '10' } });
     fireEvent.change(screen.getByLabelText(/5-minute rollup days/i), { target: { value: '0' } });
     fireEvent.change(screen.getByLabelText(/compression after minutes/i), { target: { value: '1440' } });
 
@@ -352,7 +353,6 @@ describe('SystemPage', () => {
     });
     expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
       rawSecondsWindowMinutes: 10,
-      oneMinuteWindowHours: 8760,
       fiveMinuteWindowDays: 0,
       compressAfterMinutes: 1440,
       restartApplication: true,

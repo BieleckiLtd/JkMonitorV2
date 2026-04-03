@@ -94,7 +94,6 @@ type DatabaseSettingsState = {
   storageProvider: string;
   databaseConfigured: boolean;
   rawSecondsWindowMinutes: number;
-  oneMinuteWindowHours: number;
   fiveMinuteWindowDays: number;
   compressAfterMinutes: number;
   canAutoRestart: boolean;
@@ -109,7 +108,6 @@ type SaveDatabaseSettingsResponse = {
 
 type DatabaseSettingsFormState = {
   rawSecondsWindowMinutes: string;
-  oneMinuteWindowHours: string;
   fiveMinuteWindowDays: string;
   compressAfterMinutes: string;
 };
@@ -454,7 +452,6 @@ function getSystemSectionPath(section: SystemSection) {
 function createDatabaseSettingsFormState(settings: DatabaseSettingsState): DatabaseSettingsFormState {
   return {
     rawSecondsWindowMinutes: String(settings.rawSecondsWindowMinutes),
-    oneMinuteWindowHours: String(settings.oneMinuteWindowHours),
     fiveMinuteWindowDays: String(settings.fiveMinuteWindowDays),
     compressAfterMinutes: String(settings.compressAfterMinutes),
   };
@@ -1232,7 +1229,6 @@ export function SystemPage() {
 
     let payload: {
       rawSecondsWindowMinutes: number;
-      oneMinuteWindowHours: number;
       fiveMinuteWindowDays: number;
       compressAfterMinutes: number;
       restartApplication: boolean;
@@ -1240,9 +1236,8 @@ export function SystemPage() {
 
     try {
       payload = {
-        rawSecondsWindowMinutes: parseNonNegativeInteger(dbSettingsForm.rawSecondsWindowMinutes, 'Raw high-resolution window'),
-        oneMinuteWindowHours: parseNonNegativeInteger(dbSettingsForm.oneMinuteWindowHours, '1-minute rollup window'),
-        fiveMinuteWindowDays: parseNonNegativeInteger(dbSettingsForm.fiveMinuteWindowDays, '5-minute rollup window'),
+        rawSecondsWindowMinutes: parseNonNegativeInteger(dbSettingsForm.rawSecondsWindowMinutes, 'In-memory 1-second window'),
+        fiveMinuteWindowDays: parseNonNegativeInteger(dbSettingsForm.fiveMinuteWindowDays, '5-minute database window'),
         compressAfterMinutes: parseNonNegativeInteger(dbSettingsForm.compressAfterMinutes, 'Compression threshold'),
         restartApplication: true,
       };
@@ -1343,7 +1338,6 @@ export function SystemPage() {
   const metrics = status?.systemMetrics ?? null;
   const dbSettingsDirty = !!(dbSettings && dbSettingsForm && (
     dbSettingsForm.rawSecondsWindowMinutes !== String(dbSettings.rawSecondsWindowMinutes) ||
-    dbSettingsForm.oneMinuteWindowHours !== String(dbSettings.oneMinuteWindowHours) ||
     dbSettingsForm.fiveMinuteWindowDays !== String(dbSettings.fiveMinuteWindowDays) ||
     dbSettingsForm.compressAfterMinutes !== String(dbSettings.compressAfterMinutes)
   ));
@@ -2710,7 +2704,7 @@ export function SystemPage() {
 
                       <div className='grid gap-4 sm:grid-cols-2'>
                         <label className='space-y-2'>
-                          <span className='block text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Raw 1s history</span>
+                          <span className='block text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>In-memory 1s history</span>
                           <Input
                             aria-label='Raw 1-second history minutes'
                             type='number'
@@ -2722,27 +2716,11 @@ export function SystemPage() {
                               setDbSettingsFeedback(null);
                             }}
                           />
-                          <span className='block text-[11px] leading-5 text-muted-foreground'>Minutes of high-resolution samples to keep before compaction starts.</span>
+                          <span className='block text-[11px] leading-5 text-muted-foreground'>Minutes of raw 1-second samples to keep in memory before purge.</span>
                         </label>
 
                         <label className='space-y-2'>
-                          <span className='block text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>1-minute rollups</span>
-                          <Input
-                            aria-label='1-minute rollup hours'
-                            type='number'
-                            min='0'
-                            step='1'
-                            value={dbSettingsForm.oneMinuteWindowHours}
-                            onChange={(event) => {
-                              setDbSettingsForm((current) => current ? { ...current, oneMinuteWindowHours: event.target.value } : current);
-                              setDbSettingsFeedback(null);
-                            }}
-                          />
-                          <span className='block text-[11px] leading-5 text-muted-foreground'>Hours of compacted 1-minute history to retain.</span>
-                        </label>
-
-                        <label className='space-y-2'>
-                          <span className='block text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>5-minute rollups</span>
+                          <span className='block text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>5-minute database history</span>
                           <Input
                             aria-label='5-minute rollup days'
                             type='number'
@@ -2754,7 +2732,7 @@ export function SystemPage() {
                               setDbSettingsFeedback(null);
                             }}
                           />
-                          <span className='block text-[11px] leading-5 text-muted-foreground'>Days of 5-minute history to retain. Use 0 to keep only raw and 1-minute tiers.</span>
+                          <span className='block text-[11px] leading-5 text-muted-foreground'>Days of persisted 5-minute averages to retain. Use 0 to keep all long-term history.</span>
                         </label>
 
                         <label className='space-y-2'>
@@ -2789,7 +2767,7 @@ export function SystemPage() {
 
                       <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
                         <div className='text-[11px] leading-5 text-muted-foreground'>
-                          Current policy: {dbSettings.rawSecondsWindowMinutes}m raw, {dbSettings.oneMinuteWindowHours}h at 1m, {dbSettings.fiveMinuteWindowDays === 0 ? '5m archive disabled' : `${dbSettings.fiveMinuteWindowDays}d at 5m`}.
+                          Current policy: {dbSettings.rawSecondsWindowMinutes}m of raw 1s samples in memory, {dbSettings.fiveMinuteWindowDays === 0 ? '5m averages kept forever in the database' : `${dbSettings.fiveMinuteWindowDays}d of 5m averages in the database`}.
                         </div>
                         <button
                           type='button'

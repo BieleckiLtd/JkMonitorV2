@@ -91,7 +91,6 @@ public sealed class SetupConfigurationServiceTests : IDisposable
         Assert.Equal("TimescaleDb", result.StorageProvider);
         Assert.True(result.DatabaseConfigured);
         Assert.Equal(10, result.RawSecondsWindowMinutes);
-        Assert.Equal(1, result.OneMinuteWindowHours);
         Assert.Equal(7, result.FiveMinuteWindowDays);
         Assert.Equal(60, result.CompressAfterMinutes);
     }
@@ -104,7 +103,6 @@ public sealed class SetupConfigurationServiceTests : IDisposable
         var response = service.SaveDatabaseSettings(new SaveDatabaseSettingsRequest
         {
             RawSecondsWindowMinutes = 10,
-            OneMinuteWindowHours = 24 * 365,
             FiveMinuteWindowDays = 0,
             CompressAfterMinutes = 1440,
             RestartApplication = false
@@ -116,7 +114,6 @@ public sealed class SetupConfigurationServiceTests : IDisposable
         Assert.NotNull(root);
         Assert.False(response.RestartScheduled);
         Assert.Equal(10, root!["Monitor"]?["Storage"]?["Retention"]?["RawSecondsWindowMinutes"]?.GetValue<int>());
-        Assert.Equal(24 * 365, root["Monitor"]?["Storage"]?["Retention"]?["OneMinuteWindowHours"]?.GetValue<int>());
         Assert.Equal(0, root["Monitor"]?["Storage"]?["Retention"]?["FiveMinuteWindowDays"]?.GetValue<int>());
         Assert.Equal(1440, root["Monitor"]?["Storage"]?["Compression"]?["CompressAfterMinutes"]?.GetValue<int>());
     }
@@ -132,7 +129,6 @@ public sealed class SetupConfigurationServiceTests : IDisposable
                 ["Monitor:Storage:Provider"] = "TimescaleDb",
                 ["Monitor:Storage:ConnectionString"] = "Host=localhost;Database=seed;",
                 ["Monitor:Storage:Retention:RawSecondsWindowMinutes"] = "10",
-                ["Monitor:Storage:Retention:OneMinuteWindowHours"] = "1",
                 ["Monitor:Storage:Retention:FiveMinuteWindowDays"] = "7",
                 ["Monitor:ApiSecurity:TunnelProvider"] = "none"
             })

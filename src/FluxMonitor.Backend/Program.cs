@@ -97,6 +97,7 @@ else
 
 if (storageConfigured)
 {
+    builder.Services.AddHostedService<FluxMonitor.Backend.Services.TelemetryShutdownFlushService>();
     builder.Services.AddHostedService<FluxMonitor.Backend.Services.PollingBackgroundService>();
     builder.Services.AddHostedService<FluxMonitor.Backend.Services.RetentionBackgroundService>();
 }

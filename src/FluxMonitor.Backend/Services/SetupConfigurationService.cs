@@ -109,7 +109,6 @@ public sealed class SetupConfigurationService(
     public SaveDatabaseSettingsResponse SaveDatabaseSettings(SaveDatabaseSettingsRequest request)
     {
         ValidateNonNegative(nameof(request.RawSecondsWindowMinutes), request.RawSecondsWindowMinutes);
-        ValidateNonNegative(nameof(request.OneMinuteWindowHours), request.OneMinuteWindowHours);
         ValidateNonNegative(nameof(request.FiveMinuteWindowDays), request.FiveMinuteWindowDays);
         ValidateNonNegative(nameof(request.CompressAfterMinutes), request.CompressAfterMinutes);
 
@@ -121,7 +120,6 @@ public sealed class SetupConfigurationService(
                 UpsertObject(storage, "Retention", retention =>
                 {
                     retention["RawSecondsWindowMinutes"] = request.RawSecondsWindowMinutes;
-                    retention["OneMinuteWindowHours"] = request.OneMinuteWindowHours;
                     retention["FiveMinuteWindowDays"] = request.FiveMinuteWindowDays;
                 });
 
@@ -141,9 +139,7 @@ public sealed class SetupConfigurationService(
                 Retention = new RetentionConfiguration
                 {
                     RawSecondsWindowMinutes = request.RawSecondsWindowMinutes,
-                    OneMinuteWindowHours = request.OneMinuteWindowHours,
-                    FiveMinuteWindowDays = request.FiveMinuteWindowDays,
-                    OneHourWindowDays = GetMonitorConfiguration().Storage.Retention.OneHourWindowDays
+                    FiveMinuteWindowDays = request.FiveMinuteWindowDays
                 },
                 Compression = new CompressionConfiguration
                 {
@@ -155,9 +151,8 @@ public sealed class SetupConfigurationService(
         });
 
         logger.LogInformation(
-            "Saved database retention settings. RawSecondsWindowMinutes={RawSecondsWindowMinutes}, OneMinuteWindowHours={OneMinuteWindowHours}, FiveMinuteWindowDays={FiveMinuteWindowDays}, CompressAfterMinutes={CompressAfterMinutes}.",
+            "Saved database retention settings. RawSecondsWindowMinutes={RawSecondsWindowMinutes}, FiveMinuteWindowDays={FiveMinuteWindowDays}, CompressAfterMinutes={CompressAfterMinutes}.",
             request.RawSecondsWindowMinutes,
-            request.OneMinuteWindowHours,
             request.FiveMinuteWindowDays,
             request.CompressAfterMinutes);
 
@@ -314,7 +309,6 @@ public sealed class SetupConfigurationService(
             StorageProvider = configuration.Storage.Provider,
             DatabaseConfigured = !string.IsNullOrWhiteSpace(configuration.Storage.ConnectionString),
             RawSecondsWindowMinutes = configuration.Storage.Retention.RawSecondsWindowMinutes,
-            OneMinuteWindowHours = configuration.Storage.Retention.OneMinuteWindowHours,
             FiveMinuteWindowDays = configuration.Storage.Retention.FiveMinuteWindowDays,
             CompressAfterMinutes = configuration.Storage.Compression.CompressAfterMinutes,
             CanAutoRestart = managedRestartService.CanAutoRestart,

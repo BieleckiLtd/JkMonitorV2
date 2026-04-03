@@ -16,24 +16,10 @@ public sealed class TimescaleRetentionRollupTests
     }
 
     [Fact]
-    public void RetentionConfiguration_DefaultOneMinuteWindow_Is1Hour()
-    {
-        var retention = new RetentionConfiguration();
-        Assert.Equal(1, retention.OneMinuteWindowHours);
-    }
-
-    [Fact]
     public void RetentionConfiguration_DefaultFiveMinuteWindow_Is365Days()
     {
         var retention = new RetentionConfiguration();
         Assert.Equal(365, retention.FiveMinuteWindowDays);
-    }
-
-    [Fact]
-    public void RetentionConfiguration_DefaultOneHourWindowDays_IsZero_MeansKeepForever()
-    {
-        var retention = new RetentionConfiguration();
-        Assert.Equal(0, retention.OneHourWindowDays);
     }
 
     // ── Rollup window alignment ────────────────────────────────────────────
@@ -257,11 +243,11 @@ public sealed class TimescaleRetentionRollupTests
     }
 
     [Fact]
-    public void BuildEnableCompressionSql_SegmentsByDeviceIdAndSensorId()
+    public void BuildEnableCompressionSql_SegmentsByDeviceIdAndSensorName()
     {
         var sql = TimescaleTelemetryRepository.BuildEnableCompressionSql();
         Assert.Contains(@"""DeviceId""", sql);
-        Assert.Contains(@"""SensorId""", sql);
+        Assert.Contains(@"""SensorName""", sql);
         Assert.Contains("compress_segmentby", sql);
     }
 

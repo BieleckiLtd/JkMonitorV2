@@ -87,14 +87,14 @@ public sealed class DevicesController(
     [HttpGet("{deviceId}/history")]
     public async Task<IActionResult> GetHistory(
         string deviceId,
-        [FromQuery] string resolution = "1m",
+        [FromQuery] string resolution = "5m",
         [FromQuery] DateTimeOffset? from = null,
         [FromQuery] DateTimeOffset? to = null,
         CancellationToken cancellationToken = default)
     {
         var allowed = new HashSet<string>(StringComparer.Ordinal) { "1s", "1m", "5m", "1h" };
         if (!allowed.Contains(resolution))
-            return BadRequest(new { message = $"Invalid resolution '{resolution}'. Use: 1s, 1m, 5m, 1h." });
+            return BadRequest(new { message = $"Invalid resolution '{resolution}'. Use 1s or 5m. Legacy 1m and 1h inputs are accepted as 5m aliases." });
 
         var toValue = to ?? DateTimeOffset.UtcNow;
         var fromValue = from ?? resolution switch
@@ -106,15 +106,16 @@ public sealed class DevicesController(
             _ => toValue.AddHours(-1),
         };
 
-        var points = await telemetryRepository.QueryHistoryAsync(deviceId, resolution, fromValue, toValue, cancellationToken);
-        return Ok(new { deviceId, resolution, from = fromValue, to = toValue, points });
+        var normalizedResolution = string.Equals(resolution, "1s", StringComparison.Ordinal) ? "1s" : "5m";
+        var points = await telemetryRepository.QueryHistoryAsync(deviceId, normalizedResolution, fromValue, toValue, cancellationToken);
+        return Ok(new { deviceId, resolution = normalizedResolution, from = fromValue, to = toValue, points });
     }
 
     [HttpGet("{deviceId}/history/cell/{cellIndex:int}")]
     public async Task<IActionResult> GetCellHistory(
         string deviceId,
         int cellIndex,
-        [FromQuery] string resolution = "1m",
+        [FromQuery] string resolution = "5m",
         [FromQuery] DateTimeOffset? from = null,
         [FromQuery] DateTimeOffset? to = null,
         CancellationToken cancellationToken = default)
@@ -124,7 +125,7 @@ public sealed class DevicesController(
 
         var allowed = new HashSet<string>(StringComparer.Ordinal) { "1s", "1m", "5m", "1h" };
         if (!allowed.Contains(resolution))
-            return BadRequest(new { message = $"Invalid resolution '{resolution}'. Use: 1s, 1m, 5m, 1h." });
+            return BadRequest(new { message = $"Invalid resolution '{resolution}'. Use 1s or 5m. Legacy 1m and 1h inputs are accepted as 5m aliases." });
 
         var toValue = to ?? DateTimeOffset.UtcNow;
         var fromValue = from ?? resolution switch
@@ -136,8 +137,9 @@ public sealed class DevicesController(
             _ => toValue.AddHours(-1),
         };
 
-        var points = await telemetryRepository.QueryCellHistoryAsync(deviceId, cellIndex, resolution, fromValue, toValue, cancellationToken);
-        return Ok(new { deviceId, cellIndex, resolution, from = fromValue, to = toValue, points });
+        var normalizedResolution = string.Equals(resolution, "1s", StringComparison.Ordinal) ? "1s" : "5m";
+        var points = await telemetryRepository.QueryCellHistoryAsync(deviceId, cellIndex, normalizedResolution, fromValue, toValue, cancellationToken);
+        return Ok(new { deviceId, cellIndex, resolution = normalizedResolution, from = fromValue, to = toValue, points });
     }
 
     [HttpPost("{deviceId}/parameters/{parameterKey}")]

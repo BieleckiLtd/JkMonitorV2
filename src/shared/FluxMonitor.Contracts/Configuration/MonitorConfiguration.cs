@@ -35,12 +35,7 @@ public sealed class RetentionConfiguration
 {
     public int RawSecondsWindowMinutes { get; init; } = 10;
 
-    public int OneMinuteWindowHours { get; init; } = 1;
-
     public int FiveMinuteWindowDays { get; init; } = 365;
-
-    /// <summary>Set to 0 to keep 1-hour rollups forever.</summary>
-    public int OneHourWindowDays { get; init; } = 0;
 }
 
 public sealed class ApiSecurityConfiguration

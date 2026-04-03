@@ -74,7 +74,8 @@ public sealed class TelemetryRepositoryRetentionTests
         var sql = TimescaleTelemetryRepository.BuildDeleteOlderThanSql("Measurements", "Time");
 
         Assert.Contains(@"""Time""", sql);
-        Assert.Contains(@"""SensorId""", sql);
+        Assert.Contains(@"""DeviceId""", sql);
+        Assert.Contains(@"""SensorName""", sql);
         Assert.DoesNotContain("ctid", sql, StringComparison.OrdinalIgnoreCase);
     }
 
@@ -101,5 +102,17 @@ public sealed class TelemetryRepositoryRetentionTests
         var sql = TimescaleTelemetryRepository.BuildTableSizeSql(includeTimescaleChunks: true);
 
         Assert.Contains("timescaledb_information.chunks", sql, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
+    public void SupportsImportTable_ReturnsFalse_ForUnsupportedLegacySection()
+    {
+        Assert.False(TimescaleTelemetryRepository.SupportsImportTable("DeviceSensors"));
+    }
+
+    [Fact]
+    public void SupportsImportTable_ReturnsTrue_ForSupportedSection()
+    {
+        Assert.True(TimescaleTelemetryRepository.SupportsImportTable("Measurements"));
     }
 }
