@@ -84,15 +84,15 @@
   --sidebar-ring: oklch(0.68 0.07 48);
 }
 
-@supports (height: 100svh) {
-  :root {
-    --app-viewport-height: 100svh;
-  }
-}
-
 @supports (height: 100dvh) {
   :root {
     --app-viewport-height: 100dvh;
+  }
+}
+
+@supports (height: 100lvh) {
+  :root {
+    --app-viewport-height: 100lvh;
   }
 }
 
@@ -189,9 +189,17 @@
     padding: 1rem 0.5rem 0.75rem;
   }
 
+  .browser-ui-safe-bottom {
+    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 3.25rem);
+  }
+
   @media (min-width: 640px) {
     .safe-area-main {
       padding: 1.25rem 1rem 1rem;
+    }
+
+    .browser-ui-safe-bottom {
+      padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
     }
   }
 

@@ -224,23 +224,23 @@ export function LogsPanel() {
 
   return (
     <Card className='flex min-h-0 flex-1 flex-col border border-border/80 bg-card/85 shadow-sm'>
-      <CardContent className='flex min-h-0 flex-1 flex-col gap-3 pt-3'>
+      <CardContent className='flex min-h-0 flex-1 flex-col gap-3 pt-2'>
         <div className='grid grid-cols-6 gap-1'>
-            {severityLevels.map((level) => (
-              <button
-                key={level}
-                type='button'
-                onClick={() => toggleLevel(level)}
-                aria-label={`Toggle ${level} severity`}
-                className={cn(
-                  'min-w-0 rounded-full border px-1.5 py-1 text-[11px] font-medium leading-none transition-colors cursor-pointer sm:px-3 sm:py-1.5 sm:text-xs',
-                  severityToggleColor(level, selectedLevels.has(level))
-                )}
-              >
-                <span className='sm:hidden'>{compactSeverityLabels[level]}</span>
-                <span className='hidden sm:inline'>{level}</span>
-              </button>
-            ))}
+          {severityLevels.map((level) => (
+            <button
+              key={level}
+              type='button'
+              onClick={() => toggleLevel(level)}
+              aria-label={`Toggle ${level} severity`}
+              className={cn(
+                'min-w-0 rounded-full border px-1.5 py-1 text-[11px] font-medium leading-none transition-colors cursor-pointer sm:px-3 sm:py-1.5 sm:text-xs',
+                severityToggleColor(level, selectedLevels.has(level))
+              )}
+            >
+              <span className='sm:hidden'>{compactSeverityLabels[level]}</span>
+              <span className='hidden sm:inline'>{level}</span>
+            </button>
+          ))}
         </div>
 
         {/* Time range selectors */}
@@ -281,16 +281,6 @@ export function LogsPanel() {
         <div className='flex items-center justify-between gap-2 text-xs text-muted-foreground'>
           <span>{totalCount.toLocaleString()} entries found</span>
           <div className='flex items-center gap-2'>
-            <Button
-              type='button'
-              variant='outline'
-              onClick={() => void fetchLogs()}
-              disabled={isLoading}
-              className='h-8 gap-1.5 px-3 text-xs text-muted-foreground'
-            >
-              <RefreshCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
-              Refresh
-            </Button>
             {totalPages > 1 ? (
               <div className='flex items-center gap-2'>
                 <button
@@ -311,9 +301,19 @@ export function LogsPanel() {
                   className='rounded p-1 hover:bg-muted disabled:opacity-30'
                 >
                   <ChevronRight className='h-4 w-4' />
-                </button>
+                  </button>
               </div>
             ) : null}
+            <Button
+              type='button'
+              variant='outline'
+              onClick={() => void fetchLogs()}
+              disabled={isLoading}
+              className='h-8 gap-1.5 px-3 text-xs text-muted-foreground'
+            >
+              <RefreshCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
+              Refresh
+            </Button>
           </div>
         </div>
 
@@ -417,29 +417,6 @@ export function LogsPanel() {
             </div>
           ))}
         </div>
-
-        {/* Bottom pagination for long lists */}
-        {totalPages > 1 && (
-          <div className='flex items-center justify-center gap-2 pt-2 text-xs text-muted-foreground'>
-            <button
-              onClick={() => setPage((p) => Math.max(0, p - 1))}
-              disabled={page === 0}
-              className='rounded p-1 hover:bg-muted disabled:opacity-30'
-            >
-              <ChevronLeft className='h-4 w-4' />
-            </button>
-            <span>
-              Page {page + 1} of {totalPages}
-            </span>
-            <button
-              onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-              disabled={page >= totalPages - 1}
-              className='rounded p-1 hover:bg-muted disabled:opacity-30'
-            >
-              <ChevronRight className='h-4 w-4' />
-            </button>
-          </div>
-        )}
       </CardContent>
     </Card>
   );

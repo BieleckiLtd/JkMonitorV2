@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { LogsPanel } from './LogsPanel';
 
@@ -33,6 +33,7 @@ describe('LogsPanel', () => {
   });
 
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
   });
 
@@ -80,5 +81,32 @@ describe('LogsPanel', () => {
     }
 
     expect(scrollArea).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto');
+  });
+
+  it('renders a single top pager before the refresh button when multiple pages exist', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        totalCount: 250,
+        entries: [
+          {
+            id: 42,
+            timestamp: '2026-03-27T10:30:45.000Z',
+            level: 'Error',
+            category: 'FluxMonitor.Backend.Services.DeviceOrchestrator',
+            message: 'Polling failed for device inverter-1.',
+            exception: 'System.TimeoutException: Poll timed out.',
+          },
+        ],
+      }),
+    }) as unknown as typeof fetch;
+
+    render(<LogsPanel />);
+
+    const pageLabel = await screen.findByText('Page 1 of 3');
+    const refreshButton = screen.getByRole('button', { name: /^refresh$/i });
+
+    expect(screen.getAllByText('Page 1 of 3')).toHaveLength(1);
+    expect(pageLabel.compareDocumentPosition(refreshButton) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });
