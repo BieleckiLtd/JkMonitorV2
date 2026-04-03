@@ -1480,7 +1480,7 @@ export function SystemPage() {
   );
 
   const renderLogsPage = () => (
-    <div className='browser-ui-safe-bottom flex min-h-full flex-1 flex-col gap-6 overflow-hidden'>
+    <div className='flex min-h-full flex-1 flex-col gap-6 overflow-hidden'>
       {activeSystemSectionItem ? (
         <StackPageHeader
           backTo='/system'

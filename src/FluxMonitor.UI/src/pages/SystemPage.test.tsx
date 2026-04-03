@@ -272,11 +272,6 @@ describe('SystemPage', () => {
       throw new Error('Expected the logs panel card to render.');
     }
 
-    const safeBottomWrapper = container.querySelector('.browser-ui-safe-bottom');
-    if (!safeBottomWrapper) {
-      throw new Error('Expected the logs page to reserve bottom padding for browser chrome and safe areas.');
-    }
-
     expect(logsCard).toHaveClass('flex-1');
     expect(screen.queryByText(/application logs/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/browse captured log entries filtered by severity and time range/i)).not.toBeInTheDocument();

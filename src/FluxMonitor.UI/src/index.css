@@ -186,20 +186,12 @@
   }
 
   .safe-area-main {
-    padding: 1rem 0.5rem 0.75rem;
-  }
-
-  .browser-ui-safe-bottom {
-    padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 3.25rem);
+    padding: 1rem 0.5rem calc(0.75rem + 3.25rem);
   }
 
   @media (min-width: 640px) {
     .safe-area-main {
       padding: 1.25rem 1rem 1rem;
-    }
-
-    .browser-ui-safe-bottom {
-      padding-bottom: calc(env(safe-area-inset-bottom, 0px) + 0.75rem);
     }
   }
 

@@ -328,8 +328,8 @@ export function LogsPanel() {
         <div
           className='min-h-0 flex-1 space-y-1.5 overflow-y-auto'
           style={{
-            paddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.75rem)',
-            scrollPaddingBottom: 'calc(env(safe-area-inset-bottom, 0px) + 0.75rem)',
+            paddingBottom: '0.75rem',
+            scrollPaddingBottom: '0.75rem',
           }}
         >
           {entries.length === 0 && !isLoading && (
