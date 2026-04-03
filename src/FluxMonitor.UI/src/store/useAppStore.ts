@@ -411,6 +411,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   applyTheme: (theme) => {
     const root = document.documentElement;
+    root.dataset.theme = theme.id;
+
     if (theme.mode === 'dark') {
       root.classList.add('dark');
       root.classList.remove('light');
@@ -428,6 +430,8 @@ export const useAppStore = create<AppState>((set, get) => ({
         root.style.setProperty(key, value);
       });
     }
+
+    root.style.colorScheme = theme.mode;
 
     const bg = theme.colors?.['--background'] ?? (theme.mode === 'dark' ? '#09090b' : '#f8fafc');
     const meta = document.querySelector('meta[name="theme-color"]');

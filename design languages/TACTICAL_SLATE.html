@@ -1,0 +1,387 @@
+<!DOCTYPE html>
+
+<html class="dark" lang="en"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>TACTICAL_SLATE_v1.0 | Storage &amp; Data</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&amp;family=Space+Grotesk:wght@700&amp;family=Public+Sans:wght@300;400;600&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {},
+                    borderRadius: {
+                        "DEFAULT": "0.25rem",
+                        "lg": "0.5rem",
+                        "xl": "0.75rem",
+                        "full": "9999px"
+                    },
+                    fontFamily: {
+                        "headline": ["Public Sans"],
+                        "body": ["Public Sans"],
+                        "label": ["Public Sans"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+            font-size: 18px;
+        }
+        body {
+            background-color: #0A0B10;
+            color: #8D937B;
+            font-family: 'JetBrains Mono', monospace;
+        }
+        .block-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(8px, 1fr));
+            gap: 2px;
+        }
+        .custom-scrollbar::-webkit-scrollbar {
+            width: 4px;
+        }
+        .custom-scrollbar::-webkit-scrollbar-track {
+            background: rgba(255, 255, 255, 0.02);
+        }
+        .custom-scrollbar::-webkit-scrollbar-thumb {
+            background: #C5FF41;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body class="antialiased overflow-hidden flex h-screen">
+<!-- SideNavBar -->
+<aside class="fixed left-0 top-0 h-full flex flex-col justify-between py-8 z-40 bg-[#1A1B21] docked left-0 h-full w-20 border-r border-white/5 transition-all duration-100 ease-in-out">
+<div class="flex flex-col items-center gap-8">
+<div class="flex flex-col items-center gap-1 mb-4">
+<div class="w-10 h-10 rounded bg-[#C5FF41]/10 flex items-center justify-center border border-[#C5FF41]/20">
+<span class="material-symbols-outlined text-[#C5FF41]">memory</span>
+</div>
+<span class="hidden">ADM_SYS</span>
+</div>
+<nav class="flex flex-col items-center w-full gap-2">
+<button class="w-full flex flex-col items-center py-3 gap-1 text-[#8D937B] hover:bg-white/5 hover:text-white transition-all duration-100 ease-in-out">
+<span class="material-symbols-outlined" data-icon="grid_view">grid_view</span>
+<span class="font-['JetBrains_Mono'] text-[10px] tracking-widest uppercase">DASHBOARD</span>
+</button>
+<button class="w-full flex flex-col items-center py-3 gap-1 text-[#8D937B] hover:bg-white/5 hover:text-white transition-all duration-100 ease-in-out">
+<span class="material-symbols-outlined" data-icon="lan">lan</span>
+<span class="font-['JetBrains_Mono'] text-[10px] tracking-widest uppercase">NETWORK</span>
+</button>
+<!-- Active Tab: STORAGE -->
+<button class="w-full flex flex-col items-center py-3 gap-1 text-[#C5FF41] bg-[#C5FF41]/5 border-l-2 border-[#C5FF41] transition-all duration-100 ease-in-out">
+<span class="material-symbols-outlined" data-icon="database">database</span>
+<span class="font-['JetBrains_Mono'] text-[10px] tracking-widest uppercase">STORAGE</span>
+</button>
+<button class="w-full flex flex-col items-center py-3 gap-1 text-[#8D937B] hover:bg-white/5 hover:text-white transition-all duration-100 ease-in-out">
+<span class="material-symbols-outlined" data-icon="package_2">package_2</span>
+<span class="font-['JetBrains_Mono'] text-[10px] tracking-widest uppercase">CONTAINERS</span>
+</button>
+<button class="w-full flex flex-col items-center py-3 gap-1 text-[#8D937B] hover:bg-white/5 hover:text-white transition-all duration-100 ease-in-out">
+<span class="material-symbols-outlined" data-icon="terminal">terminal</span>
+<span class="font-['JetBrains_Mono'] text-[10px] tracking-widest uppercase">LOGS</span>
+</button>
+</nav>
+</div>
+<div class="flex flex-col items-center w-full gap-2">
+<button class="w-full flex flex-col items-center py-3 gap-1 text-[#8D937B] hover:bg-white/5 hover:text-white transition-all duration-100 ease-in-out">
+<span class="material-symbols-outlined" data-icon="lock">lock</span>
+<span class="font-['JetBrains_Mono'] text-[10px] tracking-widest uppercase">LOCK</span>
+</button>
+<button class="w-full flex flex-col items-center py-3 gap-1 text-[#8D937B] hover:bg-white/5 hover:text-white transition-all duration-100 ease-in-out">
+<span class="material-symbols-outlined" data-icon="power_settings_new">power_settings_new</span>
+<span class="font-['JetBrains_Mono'] text-[10px] tracking-widest uppercase">SHUTDOWN</span>
+</button>
+</div>
+</aside>
+<main class="flex-1 ml-20 flex flex-col overflow-hidden">
+<!-- TopAppBar -->
+<header class="flex justify-between items-center w-full px-6 py-2 bg-[#0A0B10]/60 backdrop-blur-xl docked full-width top-0 border-b border-white/10 shadow-[0_10px_40px_-10px_rgba(197,255,65,0.08)] z-30">
+<div class="flex items-center gap-6">
+<span class="font-['Space_Grotesk'] font-bold text-[#C5FF41] tracking-[-0.02em] text-lg">TACTICAL_SLATE_v1.0</span>
+<div class="flex items-center gap-4 border-l border-white/10 pl-6 h-4">
+<span class="font-['JetBrains_Mono'] tracking-tighter uppercase text-xs text-[#8D937B]">CPU: 24%</span>
+<span class="font-['JetBrains_Mono'] tracking-tighter uppercase text-xs text-[#8D937B]">TEMP: 42°C</span>
+<span class="font-['JetBrains_Mono'] tracking-tighter uppercase text-xs text-[#C5FF41]">RAM: 1.2GB</span>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<button class="transition-all duration-100 ease-linear active:scale-95 font-['JetBrains_Mono'] tracking-tighter uppercase text-xs px-3 py-1 bg-[#C5FF41] text-[#0A0B10] font-bold rounded-sm">REBOOT</button>
+<div class="flex items-center gap-3 border-l border-white/10 pl-4">
+<span class="material-symbols-outlined text-[#8D937B] cursor-pointer hover:text-[#C5FF41]" data-icon="settings">settings</span>
+<span class="material-symbols-outlined text-[#8D937B] cursor-pointer hover:text-[#C5FF41]" data-icon="terminal">terminal</span>
+</div>
+</div>
+</header>
+<!-- Content Canvas -->
+<div class="flex-1 overflow-y-auto p-6 custom-scrollbar">
+<div class="grid grid-cols-12 gap-6">
+<!-- Section: Volumes Block Storage Map -->
+<div class="col-span-12 lg:col-span-8 bg-[#13141A] border border-white/5 rounded-lg p-5">
+<div class="flex justify-between items-center mb-6">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-[#C5FF41]" data-icon="repartition">repartition</span>
+<h2 class="font-['JetBrains_Mono'] text-sm font-bold text-white uppercase tracking-widest">Volumes &amp; Block Map</h2>
+</div>
+<div class="flex items-center gap-4 text-[10px] text-[#8D937B] uppercase font-bold">
+<div class="flex items-center gap-1.5"><div class="w-2 h-2 bg-[#C5FF41]"></div> Used</div>
+<div class="flex items-center gap-1.5"><div class="w-2 h-2 bg-[#C5FF41]/20"></div> Free</div>
+<div class="flex items-center gap-1.5"><div class="w-2 h-2 bg-red-500/40"></div> Corrupt</div>
+</div>
+</div>
+<div class="grid grid-cols-1 md:grid-cols-2 gap-8">
+<div>
+<div class="mb-2 flex justify-between text-[10px] uppercase text-[#8D937B] font-bold">
+<span>/dev/sda1 (EXT4)</span>
+<span class="text-[#C5FF41]">84.2 GB / 120 GB</span>
+</div>
+<div class="block-grid">
+<!-- Block Map Visualization -->
+<!-- Generating 128 "blocks" for visual density -->
+<div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]/20"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-red-500/40"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]/20"></div><div class="w-full h-2 bg-[#C5FF41]/20"></div><div class="w-full h-2 bg-[#C5FF41]/20"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]/20"></div><div class="w-full h-2 bg-[#C5FF41]/20"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]/20"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div>
+</div>
+<div class="mt-4 grid grid-cols-2 gap-4">
+<div class="bg-white/5 p-3 rounded">
+<div class="text-[9px] uppercase text-[#8D937B]">IOPS Read</div>
+<div class="text-lg font-bold text-white">4.2k <span class="text-[10px] text-[#C5FF41]">/s</span></div>
+</div>
+<div class="bg-white/5 p-3 rounded">
+<div class="text-[9px] uppercase text-[#8D937B]">IOPS Write</div>
+<div class="text-lg font-bold text-white">1.1k <span class="text-[10px] text-[#C5FF41]">/s</span></div>
+</div>
+</div>
+</div>
+<div>
+<div class="mb-2 flex justify-between text-[10px] uppercase text-[#8D937B] font-bold">
+<span>/dev/sdb1 (ZFS)</span>
+<span class="text-[#C5FF41]">412 GB / 1024 GB</span>
+</div>
+<div class="block-grid">
+<!-- Visual block filler for density -->
+<div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]/20"></div><div class="w-full h-2 bg-[#C5FF41]/20"></div><div class="w-full h-2 bg-[#C5FF41]/20"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]/20"></div><div class="w-full h-2 bg-[#C5FF41]/20"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]/20"></div><div class="w-full h-2 bg-[#C5FF41]/20"></div><div class="w-full h-2 bg-[#C5FF41]/20"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]/20"></div><div class="w-full h-2 bg-[#C5FF41]"></div><div class="w-full h-2 bg-[#C5FF41]"></div>
+</div>
+<div class="mt-4 grid grid-cols-1">
+<div class="bg-white/5 p-3 rounded flex justify-between items-center">
+<div>
+<div class="text-[9px] uppercase text-[#8D937B]">Pool Health</div>
+<div class="text-sm font-bold text-emerald-400">ONLINE (DEGRADED: 0)</div>
+</div>
+<div class="text-right">
+<div class="text-[9px] uppercase text-[#8D937B]">Scrub Status</div>
+<div class="text-xs font-bold text-white">COMPLETE (2D AGO)</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+<!-- Section: Database Stats (MariaDB) -->
+<div class="col-span-12 lg:col-span-4 bg-[#13141A] border border-white/5 rounded-lg p-5">
+<div class="flex items-center gap-3 mb-6">
+<span class="material-symbols-outlined text-[#C5FF41]" data-icon="database">database</span>
+<h2 class="font-['JetBrains_Mono'] text-sm font-bold text-white uppercase tracking-widest">MariaDB Metrics</h2>
+</div>
+<div class="space-y-6">
+<div class="flex justify-between items-end border-b border-white/5 pb-4">
+<div>
+<div class="text-[10px] uppercase text-[#8D937B] mb-1">Total Records</div>
+<div class="text-3xl font-bold text-white font-['Space_Grotesk']">12.8M</div>
+</div>
+<div class="text-right">
+<div class="text-[10px] uppercase text-emerald-400 mb-1">+4.2% / HR</div>
+<div class="w-24 h-1 bg-white/10 rounded-full overflow-hidden">
+<div class="h-full bg-emerald-400 w-3/4"></div>
+</div>
+</div>
+</div>
+<div class="grid grid-cols-2 gap-4">
+<div class="bg-[#0A0B10] p-4 border border-white/5 rounded flex flex-col justify-center items-center">
+<div class="text-[10px] uppercase text-[#8D937B] mb-1">Avg Latency</div>
+<div class="text-2xl font-bold text-[#C5FF41]">12<span class="text-xs ml-1">ms</span></div>
+</div>
+<div class="bg-[#0A0B10] p-4 border border-white/5 rounded flex flex-col justify-center items-center">
+<div class="text-[10px] uppercase text-[#8D937B] mb-1">Slow Queries</div>
+<div class="text-2xl font-bold text-red-400">03<span class="text-xs ml-1">/24H</span></div>
+</div>
+</div>
+<div class="space-y-3">
+<div class="flex justify-between text-[10px] uppercase text-[#8D937B]">
+<span>Buffer Pool Usage</span>
+<span class="text-white">82%</span>
+</div>
+<div class="h-1.5 w-full bg-white/5 rounded-full overflow-hidden">
+<div class="h-full bg-[#C5FF41] w-[82%]"></div>
+</div>
+</div>
+<div class="p-3 bg-white/5 rounded border border-white/5">
+<div class="flex items-center gap-2 mb-2">
+<span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+<span class="text-[10px] uppercase font-bold text-white">Primary Cluster Active</span>
+</div>
+<code class="text-[9px] text-[#8D937B] block leading-tight">
+                                node-01: 192.168.1.100 [M]<br/>
+                                node-02: 192.168.1.101 [S]
+                            </code>
+</div>
+</div>
+</div>
+<!-- Section: Quick Explorer /var/www -->
+<div class="col-span-12 bg-[#13141A] border border-white/5 rounded-lg overflow-hidden flex flex-col">
+<div class="p-4 border-b border-white/5 flex justify-between items-center bg-[#1A1B21]">
+<div class="flex items-center gap-4">
+<div class="flex items-center gap-2">
+<span class="material-symbols-outlined text-[#C5FF41]" data-icon="folder_open">folder_open</span>
+<span class="text-xs font-bold text-white uppercase tracking-widest">Quick Explorer: /var/www</span>
+</div>
+<div class="h-4 w-px bg-white/10"></div>
+<div class="flex items-center gap-1">
+<span class="text-[10px] text-[#8D937B] uppercase">Filter:</span>
+<span class="text-[10px] text-[#C5FF41] font-bold">ALL_FILES</span>
+</div>
+</div>
+<div class="flex items-center gap-4">
+<span class="material-symbols-outlined text-[#8D937B] text-sm cursor-pointer hover:text-white" data-icon="search">search</span>
+<span class="material-symbols-outlined text-[#8D937B] text-sm cursor-pointer hover:text-white" data-icon="refresh">refresh</span>
+<button class="bg-[#C5FF41]/10 text-[#C5FF41] px-3 py-1 rounded text-[10px] font-bold border border-[#C5FF41]/20">UPLOAD</button>
+</div>
+</div>
+<div class="flex h-[400px]">
+<!-- Sidebar: Directory Tree -->
+<div class="w-64 border-r border-white/5 p-4 overflow-y-auto custom-scrollbar font-['JetBrains_Mono'] text-[11px]">
+<div class="space-y-1">
+<div class="flex items-center gap-2 text-white p-1 hover:bg-white/5 cursor-pointer rounded">
+<span class="material-symbols-outlined text-[14px]" data-icon="keyboard_arrow_down">keyboard_arrow_down</span>
+<span class="material-symbols-outlined text-[14px] text-amber-400" data-icon="folder">folder</span>
+<span>html</span>
+</div>
+<div class="ml-4 space-y-1">
+<div class="flex items-center gap-2 text-[#8D937B] p-1 hover:bg-white/5 cursor-pointer rounded">
+<span class="material-symbols-outlined text-[14px]" data-icon="keyboard_arrow_right">keyboard_arrow_right</span>
+<span class="material-symbols-outlined text-[14px] text-amber-400" data-icon="folder">folder</span>
+<span>assets</span>
+</div>
+<div class="flex items-center gap-2 text-[#8D937B] p-1 hover:bg-white/5 cursor-pointer rounded">
+<span class="material-symbols-outlined text-[14px]" data-icon="keyboard_arrow_right">keyboard_arrow_right</span>
+<span class="material-symbols-outlined text-[14px] text-amber-400" data-icon="folder">folder</span>
+<span>api</span>
+</div>
+<div class="flex items-center gap-2 text-[#C5FF41] bg-[#C5FF41]/10 p-1 rounded border-l-2 border-[#C5FF41]">
+<span class="material-symbols-outlined text-[14px]" data-icon="keyboard_arrow_down">keyboard_arrow_down</span>
+<span class="material-symbols-outlined text-[14px] text-[#C5FF41]" data-icon="folder_open" style="font-variation-settings: 'FILL' 1;">folder_open</span>
+<span>production_v1</span>
+</div>
+<div class="ml-4 space-y-1">
+<div class="flex items-center gap-2 text-[#8D937B] p-1 hover:bg-white/5 cursor-pointer rounded">
+<span class="material-symbols-outlined text-[14px] text-blue-400" data-icon="description">description</span>
+<span>index.php</span>
+</div>
+<div class="flex items-center gap-2 text-[#8D937B] p-1 hover:bg-white/5 cursor-pointer rounded">
+<span class="material-symbols-outlined text-[14px] text-purple-400" data-icon="style">style</span>
+<span>global.css</span>
+</div>
+</div>
+</div>
+<div class="flex items-center gap-2 text-[#8D937B] p-1 hover:bg-white/5 cursor-pointer rounded">
+<span class="material-symbols-outlined text-[14px]" data-icon="keyboard_arrow_right">keyboard_arrow_right</span>
+<span class="material-symbols-outlined text-[14px] text-amber-400" data-icon="folder">folder</span>
+<span>logs</span>
+</div>
+</div>
+</div>
+<!-- Main Explorer View -->
+<div class="flex-1 overflow-y-auto custom-scrollbar bg-[#0A0B10]/50 p-4">
+<table class="w-full text-left font-['JetBrains_Mono'] text-[11px] border-separate border-spacing-y-2">
+<thead class="text-[#8D937B] uppercase sticky top-0 bg-[#0A0B10] z-10">
+<tr>
+<th class="pb-4 pl-4 font-normal">File Name</th>
+<th class="pb-4 font-normal">Size</th>
+<th class="pb-4 font-normal">Perms</th>
+<th class="pb-4 font-normal">Owner</th>
+<th class="pb-4 font-normal">Modified</th>
+<th class="pb-4 pr-4 text-right font-normal">Actions</th>
+</tr>
+</thead>
+<tbody class="text-[#8D937B]">
+<tr class="bg-white/5 hover:bg-white/10 transition-colors group">
+<td class="py-3 pl-4 text-white rounded-l">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-blue-400" data-icon="description">description</span>
+<span>index.php</span>
+</div>
+</td>
+<td>4.2 KB</td>
+<td class="font-bold text-emerald-400">0644</td>
+<td>www-data</td>
+<td>2023-10-24 14:12</td>
+<td class="pr-4 rounded-r text-right">
+<div class="invisible group-hover:visible flex justify-end gap-2">
+<span class="material-symbols-outlined hover:text-[#C5FF41] cursor-pointer" data-icon="edit">edit</span>
+<span class="material-symbols-outlined hover:text-red-400 cursor-pointer" data-icon="delete">delete</span>
+</div>
+</td>
+</tr>
+<tr class="bg-white/5 hover:bg-white/10 transition-colors group">
+<td class="py-3 pl-4 text-white rounded-l">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-purple-400" data-icon="style">style</span>
+<span>global.css</span>
+</div>
+</td>
+<td>18.4 KB</td>
+<td class="font-bold text-emerald-400">0644</td>
+<td>www-data</td>
+<td>2023-10-23 09:45</td>
+<td class="pr-4 rounded-r text-right">
+<div class="invisible group-hover:visible flex justify-end gap-2">
+<span class="material-symbols-outlined hover:text-[#C5FF41] cursor-pointer" data-icon="edit">edit</span>
+<span class="material-symbols-outlined hover:text-red-400 cursor-pointer" data-icon="delete">delete</span>
+</div>
+</td>
+</tr>
+<tr class="bg-white/5 hover:bg-white/10 transition-colors group">
+<td class="py-3 pl-4 text-white rounded-l">
+<div class="flex items-center gap-3">
+<span class="material-symbols-outlined text-amber-400" data-icon="settings">settings</span>
+<span>config.json</span>
+</div>
+</td>
+<td>1.2 KB</td>
+<td class="font-bold text-red-400">0400</td>
+<td>root</td>
+<td>2023-10-20 18:02</td>
+<td class="pr-4 rounded-r text-right">
+<div class="invisible group-hover:visible flex justify-end gap-2">
+<span class="material-symbols-outlined hover:text-[#C5FF41] cursor-pointer" data-icon="lock">lock</span>
+<span class="material-symbols-outlined hover:text-red-400 cursor-pointer" data-icon="delete">delete</span>
+</div>
+</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Contextual Status Bar -->
+<footer class="fixed bottom-0 left-20 right-0 h-6 bg-[#0A0B10] border-t border-white/5 flex items-center px-4 justify-between font-['JetBrains_Mono'] text-[9px] uppercase tracking-widest z-50">
+<div class="flex items-center gap-4">
+<span class="flex items-center gap-1.5"><span class="w-1.5 h-1.5 rounded-full bg-[#C5FF41]"></span> SYSTEM_STATUS: NOMINAL</span>
+<span class="text-white/20">|</span>
+<span>MOUNT_POINT: /VAR/WWW/PRODUCTION_V1</span>
+</div>
+<div class="flex items-center gap-4 text-[#8D937B]">
+<span>UTF-8</span>
+<span>SSH: AES-256-GCM</span>
+<span class="text-[#C5FF41]">LOAD: 0.24 0.12 0.05</span>
+</div>
+</footer>
+</body></html>

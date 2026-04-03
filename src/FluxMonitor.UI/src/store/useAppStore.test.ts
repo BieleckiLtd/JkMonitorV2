@@ -530,3 +530,49 @@ describe('useAppStore update restart recovery', () => {
     expect(String(locationReplace.mock.calls[0]?.[0])).toContain('_reload=');
   });
 });
+
+describe('useAppStore theme application', () => {
+  const originalThemeColor = document.querySelector('meta[name="theme-color"]')?.getAttribute('content') ?? null;
+
+  beforeEach(() => {
+    localStorage.clear();
+    document.documentElement.removeAttribute('data-theme');
+    document.documentElement.style.colorScheme = '';
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+    document.documentElement.removeAttribute('data-theme');
+    document.documentElement.style.colorScheme = '';
+
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) {
+      if (originalThemeColor === null) {
+        meta.removeAttribute('content');
+      } else {
+        meta.setAttribute('content', originalThemeColor);
+      }
+    }
+  });
+
+  it('applies the active theme id and mode to the document root', () => {
+    useAppStore.getState().setActiveThemeId('tactical-slate');
+
+    expect(useAppStore.getState().activeThemeId).toBe('tactical-slate');
+    expect(document.documentElement.dataset.theme).toBe('tactical-slate');
+    expect(document.documentElement.classList.contains('dark')).toBe(true);
+    expect(document.documentElement.style.colorScheme).toBe('dark');
+    expect(document.documentElement.style.getPropertyValue('--primary')).toBe('#c5ff41');
+    expect(localStorage.getItem('FluxMonitor-theme')).toBe('tactical-slate');
+  });
+
+  it('switches the document root back to a light theme when selected', () => {
+    useAppStore.getState().setActiveThemeId('ocean-light');
+
+    expect(document.documentElement.dataset.theme).toBe('ocean-light');
+    expect(document.documentElement.classList.contains('light')).toBe(true);
+    expect(document.documentElement.classList.contains('dark')).toBe(false);
+    expect(document.documentElement.style.colorScheme).toBe('light');
+    expect(document.documentElement.style.getPropertyValue('--background')).toBe('#f8fafc');
+  });
+});

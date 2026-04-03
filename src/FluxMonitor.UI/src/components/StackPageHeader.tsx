@@ -25,9 +25,13 @@ export function StackPageHeader({
   const navigate = useNavigate();
 
   return (
-    <div className={cn('flex items-center gap-3 rounded-2xl border border-border/70 bg-background/40 px-3 py-2.5', className)}>
+    <div
+      data-slot='stack-page-header'
+      className={cn('flex items-center gap-3 rounded-2xl border border-border/70 bg-background/40 px-3 py-2.5', className)}
+    >
       {backTo ? (
         <button
+          data-slot='stack-page-header-back'
           type='button'
           onClick={() => {
             runWithViewTransition(() => {
@@ -46,8 +50,8 @@ export function StackPageHeader({
       ) : null}
 
       <div className='min-w-0'>
-        <div className='truncate text-sm font-semibold text-foreground'>{title}</div>
-        <div className='truncate text-xs text-muted-foreground'>{description}</div>
+        <div data-slot='stack-page-header-title' className='truncate text-sm font-semibold text-foreground'>{title}</div>
+        <div data-slot='stack-page-header-description' className='truncate text-xs text-muted-foreground'>{description}</div>
       </div>
     </div>
   );

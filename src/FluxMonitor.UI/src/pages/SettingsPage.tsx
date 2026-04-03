@@ -23,42 +23,61 @@ export function SettingsPage({ hideHeader = false }: { hideHeader?: boolean }) {
             Select a visual aesthetic. These are kept in app memory for fast switching.
           </p>
           
-          <div className='grid grid-cols-1 md:grid-cols-2 lg:grid-cols-2 md:grid-cols-3 gap-4'>
+          <div className='grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-3'>
             {themes.map((t) => {
               const bg = t.colors['--background'] || '#000';
+              const card = t.colors['--card'] || bg;
               const fg = t.colors['--foreground'] || '#fff';
               const pr = t.colors['--primary'] || '#888';
               const isActive = activeThemeId === t.id;
               
               return (
                 <button
+                  data-slot='theme-option'
+                  data-active={isActive}
                   key={t.id}
                   onClick={() => setActiveThemeId(t.id)}
-                  className={'flex flex-col gap-3 p-4 rounded-xl border-2 text-left transition-all ' + (isActive ? 'border-primary bg-primary/5 shadow-lg' : 'border-border hover:border-primary/50 hover:bg-muted/50')}
+                  className={'flex flex-col gap-4 rounded-xl border-2 p-4 text-left transition-all ' + (isActive ? 'border-primary bg-primary/5 shadow-lg' : 'border-border hover:border-primary/50 hover:bg-muted/50')}
                 >
-                  <div className='flex items-center justify-between w-full'>
-                    <span className='font-medium text-foreground truncate'>{t.themeName}</span>
+                  <div className='flex items-start justify-between gap-3 w-full'>
+                    <div className='min-w-0'>
+                      <div className='font-medium text-foreground truncate'>{t.themeName}</div>
+                      {t.description ? (
+                        <div className='mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground'>
+                          {t.description}
+                        </div>
+                      ) : null}
+                    </div>
                     {isActive && (
                       <span className='h-2 w-2 rounded-full bg-primary animate-pulse shrink-0 shadow-[0_0_8px_var(--primary)]' />
                     )}
                   </div>
                   
-                  <div className='flex gap-2 w-full'>
+                  <div className='grid grid-cols-3 gap-2 w-full'>
                     <div 
-                      className='h-8 flex-1 rounded border border-border/50 shadow-inner flex items-center justify-center' 
+                      className='h-10 rounded border border-border/50 shadow-inner flex items-center justify-center' 
                       style={{ backgroundColor: bg }}
                     >
                       <span className='text-[10px] font-mono opacity-80' style={{ color: fg }}>Bg</span>
                     </div>
                     <div 
-                      className='h-8 w-8 rounded border border-border/50 shadow-inner' 
+                      className='h-10 rounded border border-border/50 shadow-inner flex items-center justify-center'
+                      style={{ backgroundColor: card }}
+                    >
+                      <span className='text-[10px] font-mono opacity-80' style={{ color: fg }}>Card</span>
+                    </div>
+                    <div 
+                      className='h-10 rounded border border-border/50 shadow-inner flex items-center justify-center' 
                       style={{ backgroundColor: pr }} 
-                    />
+                    >
+                      <span className='text-[10px] font-mono opacity-80' style={{ color: t.colors['--primary-foreground'] || fg }}>Pri</span>
+                    </div>
                   </div>
 
-                  <span className='text-[10px] text-muted-foreground text-xs uppercase tracking-wider font-semibold'>
-                    {t.mode}
-                  </span>
+                  <div className='flex items-center justify-between gap-3 text-[10px] uppercase tracking-[0.22em] text-muted-foreground font-semibold'>
+                    <span>{t.mode}</span>
+                    <span>Radius {t.radius}</span>
+                  </div>
                 </button>
               );
             })}

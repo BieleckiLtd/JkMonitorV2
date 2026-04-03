@@ -149,7 +149,7 @@ export function DashboardPage() {
 
   return (
     <div className='space-y-6 pb-8'>
-      <section className='rounded-3xl border border-border bg-card/80 p-6 shadow-sm backdrop-blur md:p-8'>
+      <section data-slot='page-hero-shell' className='page-hero-shell rounded-3xl border border-border bg-card/80 p-6 shadow-sm backdrop-blur md:p-8'>
         <div className='flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between'>
           <div className='space-y-3'>
             <div className='inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.24em] text-primary'>
@@ -412,7 +412,7 @@ function UsagePanel({ label, percent, summary, secondary }: { label: string; per
 
 function DetailTile({ label, value }: { label: string; value: string }) {
   return (
-    <div className='rounded-2xl border border-border/70 bg-background/50 px-4 py-3'>
+    <div data-slot='data-tile' className='rounded-2xl border border-border/70 bg-background/50 px-4 py-3'>
       <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>{label}</div>
       <div className='mt-2 text-sm font-semibold text-foreground'>{value}</div>
     </div>
@@ -421,7 +421,7 @@ function DetailTile({ label, value }: { label: string; value: string }) {
 
 function StatusChip({ label, value }: { label: string; value: string }) {
   return (
-    <div className='rounded-2xl border border-border/70 bg-background/70 px-4 py-3'>
+    <div data-slot='data-tile' className='rounded-2xl border border-border/70 bg-background/70 px-4 py-3'>
       <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>{label}</div>
       <div className='mt-1 text-sm font-semibold text-foreground'>{value}</div>
     </div>

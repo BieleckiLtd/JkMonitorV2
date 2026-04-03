@@ -48,6 +48,7 @@ function MainMenuLink({ item }: { item: PrimaryNavigationItem }) {
 
   return (
     <button
+      data-slot='main-menu-link'
       type='button'
       onClick={() => {
         runWithViewTransition(() => {

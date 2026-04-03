@@ -122,7 +122,7 @@ export function MonitorPage() {
 
   return (
     <div className='space-y-3 pb-4 sm:space-y-6 sm:pb-8'>
-      <section className='rounded-3xl border border-border bg-card/80 p-4 shadow-sm backdrop-blur sm:p-6 md:p-8'>
+      <section data-slot='page-hero-shell' className='page-hero-shell rounded-3xl border border-border bg-card/80 p-4 shadow-sm backdrop-blur sm:p-6 md:p-8'>
         <div className='space-y-3'>
           <div className='inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.24em] text-primary'>
             <Activity className='h-3.5 w-3.5' />
@@ -299,7 +299,7 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
 
 function HeroMetric({ icon: Icon, label, value, unit, accent, subtitle }: { icon: typeof Zap; label: string; value: string; unit: string; accent: string; subtitle?: React.ReactNode }) {
   return (
-    <div className='rounded-2xl border border-border/80 bg-card/85 p-3 shadow-sm sm:p-5'>
+    <div data-slot='data-tile' className='rounded-2xl border border-border/80 bg-card/85 p-3 shadow-sm sm:p-5'>
       <div className='flex items-start justify-between'>
         <div>
           <div className='text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground'>{label}</div>
