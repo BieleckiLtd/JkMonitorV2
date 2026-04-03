@@ -1,6 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MemoryRouter, Route, Routes, useNavigate } from 'react-router-dom';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MainLayout } from './MainLayout';
 import { useAppStore } from '../store/useAppStore';
 
@@ -26,7 +26,30 @@ function TestPage({
 }
 
 describe('MainLayout', () => {
+  let scrollYValue = 0;
+
   beforeEach(() => {
+    scrollYValue = 0;
+
+    Object.defineProperty(window, 'scrollY', {
+      configurable: true,
+      get: () => scrollYValue,
+    });
+
+    Object.defineProperty(window, 'pageYOffset', {
+      configurable: true,
+      get: () => scrollYValue,
+    });
+
+    window.scrollTo = vi.fn((optionsOrX?: number | ScrollToOptions, y?: number) => {
+      if (typeof optionsOrX === 'object') {
+        scrollYValue = optionsOrX.top ?? 0;
+        return;
+      }
+
+      scrollYValue = y ?? 0;
+    });
+
     useAppStore.setState({
       updateProgress: null,
       updateActionPending: null,
@@ -56,7 +79,7 @@ describe('MainLayout', () => {
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
   });
 
-  it('restores scroll position independently for each route in the shared scroll container', async () => {
+  it('restores scroll position independently for each route in the document scroll position', async () => {
     render(
       <MemoryRouter initialEntries={['/system']}>
         <MainLayout>
@@ -86,38 +109,31 @@ describe('MainLayout', () => {
       </MemoryRouter>
     );
 
-    const scrollContainer = document.querySelector('main');
-    expect(scrollContainer).not.toBeNull();
-
-    if (!scrollContainer) {
-      throw new Error('Expected the shared main scroll container to be rendered.');
-    }
-
-    scrollContainer.scrollTop = 240;
-    fireEvent.scroll(scrollContainer);
+    scrollYValue = 240;
+    fireEvent.scroll(window);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open resource usage' }));
 
     await waitFor(() => {
       expect(screen.getByText('Resource usage')).toBeInTheDocument();
-      expect(scrollContainer.scrollTop).toBe(0);
+      expect(scrollYValue).toBe(0);
     });
 
-    scrollContainer.scrollTop = 96;
-    fireEvent.scroll(scrollContainer);
+    scrollYValue = 96;
+    fireEvent.scroll(window);
 
     fireEvent.click(screen.getByRole('button', { name: 'Back to system menu' }));
 
     await waitFor(() => {
       expect(screen.getByText('System menu')).toBeInTheDocument();
-      expect(scrollContainer.scrollTop).toBe(240);
+      expect(scrollYValue).toBe(240);
     });
 
     fireEvent.click(screen.getByRole('button', { name: 'Open resource usage' }));
 
     await waitFor(() => {
       expect(screen.getByText('Resource usage')).toBeInTheDocument();
-      expect(scrollContainer.scrollTop).toBe(96);
+      expect(scrollYValue).toBe(96);
     });
   });
 });

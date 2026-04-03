@@ -50,6 +50,10 @@
 
 :root {
   --app-viewport-height: 100vh;
+  --app-safe-top: env(safe-area-inset-top, 0px);
+  --app-safe-right: env(safe-area-inset-right, 0px);
+  --app-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --app-safe-left: env(safe-area-inset-left, 0px);
   --app-font-heading: 'Bahnschrift', 'Arial Narrow', 'Segoe UI', system-ui, sans-serif;
   --app-font-sans: 'Aptos', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
   --app-font-mono: 'Cascadia Code', 'Cascadia Mono', 'Consolas', 'SFMono-Regular', monospace;
@@ -87,15 +91,15 @@
   --sidebar-ring: oklch(0.68 0.07 48);
 }
 
-@supports (height: 100dvh) {
+@supports (height: 100svh) {
   :root {
-    --app-viewport-height: 100dvh;
+    --app-viewport-height: 100svh;
   }
 }
 
-@supports (height: 100lvh) {
+@supports (height: 100dvh) {
   :root {
-    --app-viewport-height: 100lvh;
+    --app-viewport-height: 100dvh;
   }
 }
 
@@ -143,18 +147,19 @@
     min-height: 100%;
     min-height: -webkit-fill-available;
     background: var(--background);
+    scroll-padding-top: calc(1rem + var(--app-safe-top));
+    scroll-padding-bottom: calc(1rem + var(--app-safe-bottom));
     touch-action: pan-x pan-y;
     -ms-touch-action: pan-x pan-y;
   }
 
   body {
     @apply bg-background text-foreground;
-    min-height: 100%;
+    min-height: var(--app-viewport-height);
     min-height: -webkit-fill-available;
     background:
-      radial-gradient(circle at top, color-mix(in oklch, var(--accent) 20%, transparent) 0%, transparent 46%),
-      linear-gradient(180deg, color-mix(in oklch, var(--background) 88%, white) 0%, var(--background) 100%);
-    overscroll-behavior: none;
+      linear-gradient(180deg, color-mix(in oklch, var(--background) 94%, white 6%) 0%, var(--background) 100%);
+    overflow-x: clip;
   }
 
   /* Prevent iOS zoom on input focus */
@@ -182,7 +187,11 @@
   .app-shell {
     position: relative;
     min-height: var(--app-viewport-height);
-    height: var(--app-viewport-height);
+    padding:
+      var(--app-safe-top)
+      var(--app-safe-right)
+      var(--app-safe-bottom)
+      var(--app-safe-left);
   }
 
   .app-main {
@@ -202,8 +211,7 @@
   }
 
   #root {
-    height: var(--app-viewport-height);
-    overflow: hidden;
+    min-height: var(--app-viewport-height);
     isolation: isolate;
   }
 
@@ -258,9 +266,7 @@ html[data-theme='tactical-slate'] {
 
 html[data-theme='tactical-slate'] body {
   background:
-    radial-gradient(circle at 18% 0%, rgb(197 255 65 / 15%), transparent 28rem),
-    radial-gradient(circle at 100% 0%, rgb(111 168 255 / 9%), transparent 20rem),
-    linear-gradient(180deg, #11161c 0%, #090b10 38%, #05070b 100%);
+    linear-gradient(180deg, #11161c 0%, #0b0f15 42%, #06090d 100%);
 }
 
 html[data-theme='tactical-slate'] .app-shell {
@@ -272,10 +278,10 @@ html[data-theme='tactical-slate'] .app-shell::before {
   position: absolute;
   inset: 0;
   background:
-    linear-gradient(180deg, rgb(197 255 65 / 6%), transparent 11rem),
+    linear-gradient(180deg, rgb(197 255 65 / 5%), transparent 10rem),
     repeating-linear-gradient(90deg, transparent 0 111px, rgb(141 147 123 / 7%) 111px 112px),
     repeating-linear-gradient(180deg, transparent 0 111px, rgb(141 147 123 / 5%) 111px 112px);
-  opacity: 0.32;
+  opacity: 0.18;
   pointer-events: none;
 }
 
@@ -284,8 +290,9 @@ html[data-theme='tactical-slate'] .app-shell::after {
   position: absolute;
   inset: 0;
   background:
-    radial-gradient(circle at 82% 0%, rgb(197 255 65 / 13%), transparent 18rem),
-    linear-gradient(180deg, transparent, rgb(0 0 0 / 22%));
+    radial-gradient(circle at 82% 0%, rgb(197 255 65 / 10%), transparent 16rem),
+    linear-gradient(180deg, transparent, rgb(0 0 0 / 16%));
+  opacity: 0.72;
   pointer-events: none;
 }
 

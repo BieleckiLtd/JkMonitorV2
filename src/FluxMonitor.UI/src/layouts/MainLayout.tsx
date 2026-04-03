@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { UpdateLockOverlay } from '../components/UpdateLockOverlay';
 import { useAppStore } from '../store/useAppStore';
@@ -8,13 +8,13 @@ export function MainLayout({ children }: { children: ReactNode }) {
   const updateProgress = useAppStore((state) => state.updateProgress);
   const hasUpdateOverlay = updateProgress !== null;
   const hasBlockingUpdateOverlay = updateProgress?.isRunning ?? false;
-  const [scrollContainer, setScrollContainer] = useState<HTMLElement | null>(null);
   const scrollPositionsRef = useRef(new Map<string, number>());
   const restoreFrameRef = useRef<number | null>(null);
   const scrollKey = `${location.pathname}${location.search}${location.hash}`;
+  const activeScrollKeyRef = useRef(scrollKey);
+  const previousScrollKeyRef = useRef(scrollKey);
 
-  const scrollKeyRef = useRef(scrollKey);
-  scrollKeyRef.current = scrollKey;
+  activeScrollKeyRef.current = scrollKey;
 
   useEffect(() => {
     document.body.style.overflow = hasUpdateOverlay ? 'hidden' : '';
@@ -24,55 +24,64 @@ export function MainLayout({ children }: { children: ReactNode }) {
     };
   }, [hasUpdateOverlay]);
 
-  // Continuously save scroll position as the user scrolls.
-  // The listener depends only on scrollContainer (not scrollKey) so it is never
-  // torn down and re-created on navigation. It reads scrollKeyRef.current which
-  // is always up-to-date.
   useEffect(() => {
-    if (!scrollContainer) {
+    if (typeof window === 'undefined') {
       return;
     }
 
     const onScroll = () => {
-      scrollPositionsRef.current.set(scrollKeyRef.current, scrollContainer.scrollTop);
+      scrollPositionsRef.current.set(activeScrollKeyRef.current, window.scrollY);
     };
 
-    scrollContainer.addEventListener('scroll', onScroll, { passive: true });
+    window.addEventListener('scroll', onScroll, { passive: true });
 
     return () => {
-      scrollContainer.removeEventListener('scroll', onScroll);
+      window.removeEventListener('scroll', onScroll);
     };
-  }, [scrollContainer]);
+  }, []);
 
-  // Restore scroll position when arriving at a route.
   useLayoutEffect(() => {
-    if (!scrollContainer) {
+    if (typeof window === 'undefined') {
       return;
     }
 
-    const saved = scrollPositionsRef.current.get(scrollKey) ?? 0;
-    scrollContainer.scrollTop = saved;
+    scrollPositionsRef.current.set(previousScrollKeyRef.current, window.scrollY);
 
-    if (typeof window !== 'undefined') {
-      restoreFrameRef.current = window.requestAnimationFrame(() => {
-        scrollContainer.scrollTop = saved;
-        restoreFrameRef.current = null;
-      });
-    }
+    const saved = scrollPositionsRef.current.get(scrollKey) ?? 0;
+    previousScrollKeyRef.current = scrollKey;
+    window.scrollTo(0, saved);
+
+    restoreFrameRef.current = window.requestAnimationFrame(() => {
+      window.scrollTo(0, saved);
+      restoreFrameRef.current = null;
+    });
 
     return () => {
-      if (restoreFrameRef.current !== null && typeof window !== 'undefined') {
+      if (restoreFrameRef.current !== null) {
         window.cancelAnimationFrame(restoreFrameRef.current);
         restoreFrameRef.current = null;
       }
     };
-  }, [scrollContainer, scrollKey]);
+  }, [scrollKey]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.history) {
+      return;
+    }
+
+    const previousValue = window.history.scrollRestoration;
+    window.history.scrollRestoration = 'manual';
+
+    return () => {
+      window.history.scrollRestoration = previousValue;
+    };
+  }, []);
 
   return (
-    <div className='app-shell flex h-full w-full overflow-hidden font-sans text-foreground'>
+    <div className='app-shell flex w-full flex-col font-sans text-foreground'>
       {!hasBlockingUpdateOverlay ? (
-        <div className='flex h-full min-w-0 flex-1 flex-col'>
-          <main ref={setScrollContainer} className='app-main flex min-h-0 flex-1 w-full overflow-y-auto'>
+        <div className='flex min-w-0 flex-1 flex-col'>
+          <main className='app-main flex min-w-0 flex-1 w-full'>
             <div className='mx-auto flex min-h-full w-full max-w-none flex-col'>
               {children}
             </div>
