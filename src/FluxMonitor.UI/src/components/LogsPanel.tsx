@@ -1,7 +1,7 @@
 import { useEffect, useState, useCallback } from 'react';
-import { AlertTriangle, Filter, Search, RefreshCw, ChevronLeft, ChevronRight, Copy, Check, ClipboardX } from 'lucide-react';
+import { Filter, Search, RefreshCw, ChevronLeft, ChevronRight, Copy, Check, ClipboardX } from 'lucide-react';
 import { Button } from '../components/ui/button';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { Card, CardContent } from '../components/ui/card';
 import { cn } from '../lib/utils';
 
 type LogEntry = {
@@ -215,40 +215,27 @@ export function LogsPanel() {
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
 
   return (
-    <Card className='border border-border/80 bg-card/85 shadow-sm'>
-      <CardHeader className='border-b border-border/60 pb-4'>
-        <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
-          <div>
-            <CardTitle className='flex items-center gap-2'>
-              <AlertTriangle className='h-5 w-5 text-muted-foreground' />
-              Application logs
-            </CardTitle>
-            <CardDescription className='mt-1'>
-              Browse captured log entries filtered by severity and time range.
-            </CardDescription>
-          </div>
-          <div className='flex items-center gap-2 self-start'>
-            <Button
-              type='button'
-              variant='outline'
-              onClick={() => void fetchLogs()}
-              disabled={isLoading}
-              className='text-xs text-muted-foreground'
-            >
-              <RefreshCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
-              Refresh
-            </Button>
-          </div>
-        </div>
-      </CardHeader>
-
-      <CardContent className='space-y-4 pt-5'>
-        {/* Severity filter */}
-        <div className='space-y-2'>
+    <Card className='flex min-h-0 flex-1 flex-col border border-border/80 bg-card/85 shadow-sm'>
+      <CardContent className='flex min-h-0 flex-1 flex-col gap-4 pt-5'>
+        <div className='flex items-center justify-between gap-3'>
           <div className='flex items-center gap-2 text-xs font-medium uppercase tracking-[0.2em] text-muted-foreground'>
             <Filter className='h-3.5 w-3.5' />
             Severity
           </div>
+          <Button
+            type='button'
+            variant='outline'
+            onClick={() => void fetchLogs()}
+            disabled={isLoading}
+            className='h-8 gap-1.5 px-3 text-xs text-muted-foreground'
+          >
+            <RefreshCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
+            Refresh
+          </Button>
+        </div>
+
+        {/* Severity filter */}
+        <div className='space-y-2'>
           <div className='flex flex-wrap gap-1.5'>
             {severityLevels.map((level) => (
               <button
@@ -333,7 +320,7 @@ export function LogsPanel() {
         )}
 
         {/* Log entries */}
-        <div className='space-y-1.5 max-h-[600px] overflow-y-auto'>
+        <div className='min-h-0 flex-1 space-y-1.5 overflow-y-auto'>
           {entries.length === 0 && !isLoading && (
             <div className='rounded-2xl border border-dashed border-border bg-background/40 px-5 py-10 text-center text-sm text-muted-foreground'>
               No log entries match the current filters.

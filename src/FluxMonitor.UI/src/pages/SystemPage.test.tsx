@@ -256,10 +256,25 @@ describe('SystemPage', () => {
   });
 
   it('loads the matching section from a direct system child route', async () => {
-    renderSystemPage('/system/logs');
+    const { container } = renderSystemPage('/system/logs');
 
     expect(await screen.findByRole('button', { name: /^back$/i })).toBeInTheDocument();
-    expect(await screen.findByText(/browse captured log entries filtered by severity and time range/i)).toBeInTheDocument();
+
+    const root = container.firstElementChild as HTMLElement | null;
+    if (!root) {
+      throw new Error('Expected the system page root to render.');
+    }
+
+    expect(root).toHaveClass('flex', 'min-h-full', 'flex-1', 'flex-col', 'overflow-hidden');
+
+    const logsCard = container.querySelector('[data-slot="card"]');
+    if (!logsCard) {
+      throw new Error('Expected the logs panel card to render.');
+    }
+
+    expect(logsCard).toHaveClass('flex-1');
+    expect(screen.queryByText(/application logs/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/browse captured log entries filtered by severity and time range/i)).not.toBeInTheDocument();
     expect(screen.getByTestId('location-display')).toHaveTextContent('/system/logs');
   });
 });

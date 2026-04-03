@@ -54,4 +54,31 @@ describe('LogsPanel', () => {
       expect.stringContaining('FluxMonitor.Backend.Services.DeviceOrchestrator')
     );
   });
+
+  it('fills the available height and keeps the log list as the scrollable region', async () => {
+    const { container } = render(<LogsPanel />);
+
+    await screen.findByText('Polling failed for device inverter-1.');
+
+    const card = container.querySelector('[data-slot="card"]');
+    if (!card) {
+      throw new Error('Expected the logs panel card to render.');
+    }
+
+    expect(card).toHaveClass('flex-1');
+
+    const scrollArea = Array.from(container.querySelectorAll('div')).find((element) => {
+      const className = element.className;
+      return typeof className === 'string'
+        && className.includes('min-h-0')
+        && className.includes('flex-1')
+        && className.includes('overflow-y-auto');
+    }) as HTMLElement | undefined;
+
+    if (!scrollArea) {
+      throw new Error('Expected the log list to render as a flexing scroll area.');
+    }
+
+    expect(scrollArea).toHaveClass('min-h-0', 'flex-1', 'overflow-y-auto');
+  });
 });

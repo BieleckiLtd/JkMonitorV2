@@ -372,9 +372,6 @@ type SystemSection =
   | 'database'
   | 'logs';
 
-const narrowSystemLayoutMaxWidth = 1120;
-const narrowSystemLayoutQuery = '(max-width: 1023px)';
-
 const systemSectionRouteSegments: SystemSection[] = [
   'resource-usage',
   'software-update',
@@ -412,14 +409,6 @@ const systemShortcutItems: Array<{
   { id: 'notifications', label: 'Notifications', description: 'Alerts, channels, and delivery rules', icon: Bell, path: '/system/notifications' },
   { id: 'theme', label: 'Theme', description: 'Choose the active visual theme', icon: Palette, path: '/system/theme' },
 ];
-
-function isNarrowSystemLayoutViewport() {
-  return typeof window !== 'undefined' && window.matchMedia(narrowSystemLayoutQuery).matches;
-}
-
-function isNarrowSystemLayoutWidth(width: number) {
-  return width <= narrowSystemLayoutMaxWidth;
-}
 
 function getSystemSectionFromRouteSegment(sectionId?: string): SystemSection | null {
   if (!sectionId) {
@@ -465,7 +454,6 @@ export function SystemPage() {
   const [cloudflareTunnelLoading, setCloudflareTunnelLoading] = useState(true);
   const [cloudflareTunnelError, setCloudflareTunnelError] = useState<string | null>(null);
   const [cloudflareTunnelFeedback, setCloudflareTunnelFeedback] = useState<InlineFeedback | null>(null);
-  const [isNarrowSystemLayout, setIsNarrowSystemLayout] = useState(isNarrowSystemLayoutViewport);
   const [cloudflareTunnelSaving, setCloudflareTunnelSaving] = useState(false);
   const [cloudflareTunnelEnabled, setCloudflareTunnelEnabled] = useState(false);
   const [cloudflareTunnelTokenOrCommand, setCloudflareTunnelTokenOrCommand] = useState('');
@@ -594,56 +582,6 @@ export function SystemPage() {
     return () => {
       isMounted = false;
       window.clearInterval(intervalId);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') {
-      return;
-    }
-
-    const syncLayout = (matches: boolean) => {
-      setIsNarrowSystemLayout(matches);
-    };
-
-    const container = systemPageRef.current;
-    if (container && typeof ResizeObserver !== 'undefined') {
-      const resizeObserver = new ResizeObserver((entries) => {
-        const entry = entries[0];
-        if (!entry) {
-          return;
-        }
-
-        syncLayout(isNarrowSystemLayoutWidth(entry.contentRect.width));
-      });
-
-      resizeObserver.observe(container);
-      syncLayout(isNarrowSystemLayoutWidth(container.getBoundingClientRect().width));
-
-      return () => {
-        resizeObserver.disconnect();
-      };
-    }
-
-    const mediaQueryList = window.matchMedia(narrowSystemLayoutQuery);
-    const handleChange = (event: MediaQueryListEvent) => {
-      syncLayout(event.matches);
-    };
-
-    syncLayout(mediaQueryList.matches);
-
-    if (typeof mediaQueryList.addEventListener === 'function') {
-      mediaQueryList.addEventListener('change', handleChange);
-
-      return () => {
-        mediaQueryList.removeEventListener('change', handleChange);
-      };
-    }
-
-    mediaQueryList.addListener(handleChange);
-
-    return () => {
-      mediaQueryList.removeListener(handleChange);
     };
   }, []);
 
@@ -1471,6 +1409,7 @@ export function SystemPage() {
   const activeSystemSectionItem = activeSystemSection
     ? systemSectionItems.find((item) => item.id === activeSystemSection) ?? systemSectionItems[0]
     : null;
+  const isLogsSystemSection = activeSystemSection === 'logs';
   const systemMenuItems = [
     ...systemSectionItems.map((item) => ({ ...item, path: getSystemSectionPath(item.id), sectionId: item.id })),
     ...systemShortcutItems,
@@ -1540,13 +1479,37 @@ export function SystemPage() {
     </div>
   );
 
+  const renderLogsPage = () => (
+    <div className='flex min-h-full flex-1 flex-col gap-6 overflow-hidden'>
+      {activeSystemSectionItem ? (
+        <StackPageHeader
+          backTo='/system'
+          title={activeSystemSectionItem.label}
+          description={activeSystemSectionItem.description}
+        />
+      ) : null}
+
+      <div className='flex min-h-0 flex-1 flex-col'>
+        <LogsPanel />
+      </div>
+    </div>
+  );
+
   if (sectionId && routedSystemSection === null) {
     return <Navigate to='/system' replace />;
   }
 
   return (
-    <div ref={systemPageRef} className='min-w-0 space-y-6 pb-8'>
-      {isSystemMenuPage ? renderSystemMenuPage() : (
+    <div
+      ref={systemPageRef}
+      className={cn(
+        'min-w-0',
+        isLogsSystemSection
+          ? 'flex min-h-full flex-1 flex-col gap-6 overflow-hidden'
+          : 'space-y-6 pb-8'
+      )}
+    >
+      {isSystemMenuPage ? renderSystemMenuPage() : isLogsSystemSection ? renderLogsPage() : (
         <>
           {activeSystemSectionItem ? (
             <StackPageHeader
@@ -2624,7 +2587,6 @@ export function SystemPage() {
               </CardContent>
             </Card>
 
-            {isNarrowSystemLayout && activeSystemSection === 'logs' ? <LogsPanel /> : null}
             </div>
           ) : null}
         </>
@@ -2738,9 +2700,6 @@ export function SystemPage() {
           </div>
         </div>
       ) : null}
-
-      {/* Application Logs */}
-      {!isNarrowSystemLayout && activeSystemSection === 'logs' ? <LogsPanel /> : null}
     </div>
   );
 }
