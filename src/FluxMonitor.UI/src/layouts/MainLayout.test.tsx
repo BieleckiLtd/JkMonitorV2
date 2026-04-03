@@ -94,6 +94,7 @@ describe('MainLayout', () => {
     }
 
     scrollContainer.scrollTop = 240;
+    fireEvent.scroll(scrollContainer);
 
     fireEvent.click(screen.getByRole('button', { name: 'Open resource usage' }));
 
@@ -103,6 +104,7 @@ describe('MainLayout', () => {
     });
 
     scrollContainer.scrollTop = 96;
+    fireEvent.scroll(scrollContainer);
 
     fireEvent.click(screen.getByRole('button', { name: 'Back to system menu' }));
 

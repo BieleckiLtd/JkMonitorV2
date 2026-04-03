@@ -44,8 +44,23 @@ export function MainLayout({ children }: { children: ReactNode }) {
         window.cancelAnimationFrame(restoreFrameRef.current);
         restoreFrameRef.current = null;
       }
+    };
+  }, [scrollContainer, scrollKey]);
 
+  useEffect(() => {
+    if (!scrollContainer) {
+      return;
+    }
+
+    const saveScrollPosition = () => {
       scrollPositionsRef.current.set(scrollKey, scrollContainer.scrollTop);
+    };
+
+    saveScrollPosition();
+    scrollContainer.addEventListener('scroll', saveScrollPosition, { passive: true });
+
+    return () => {
+      scrollContainer.removeEventListener('scroll', saveScrollPosition);
     };
   }, [scrollContainer, scrollKey]);
 
