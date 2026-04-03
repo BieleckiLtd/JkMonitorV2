@@ -13,6 +13,9 @@ export function MainLayout({ children }: { children: ReactNode }) {
   const restoreFrameRef = useRef<number | null>(null);
   const scrollKey = `${location.pathname}${location.search}${location.hash}`;
 
+  const scrollKeyRef = useRef(scrollKey);
+  scrollKeyRef.current = scrollKey;
+
   useEffect(() => {
     document.body.style.overflow = hasUpdateOverlay ? 'hidden' : '';
 
@@ -21,18 +24,25 @@ export function MainLayout({ children }: { children: ReactNode }) {
     };
   }, [hasUpdateOverlay]);
 
-  // Save scroll position before navigating away.
-  // This cleanup runs BEFORE the restore effect below changes scrollTop,
-  // so we capture the true position for the route we're leaving.
-  useLayoutEffect(() => {
+  // Continuously save scroll position as the user scrolls.
+  // The listener depends only on scrollContainer (not scrollKey) so it is never
+  // torn down and re-created on navigation. It reads scrollKeyRef.current which
+  // is always up-to-date.
+  useEffect(() => {
     if (!scrollContainer) {
       return;
     }
 
-    return () => {
-      scrollPositionsRef.current.set(scrollKey, scrollContainer.scrollTop);
+    const onScroll = () => {
+      scrollPositionsRef.current.set(scrollKeyRef.current, scrollContainer.scrollTop);
     };
-  }, [scrollContainer, scrollKey]);
+
+    scrollContainer.addEventListener('scroll', onScroll, { passive: true });
+
+    return () => {
+      scrollContainer.removeEventListener('scroll', onScroll);
+    };
+  }, [scrollContainer]);
 
   // Restore scroll position when arriving at a route.
   useLayoutEffect(() => {

@@ -202,8 +202,8 @@
   }
 
   #root {
-    @apply min-h-full;
-    min-height: var(--app-viewport-height);
+    height: var(--app-viewport-height);
+    overflow: hidden;
     isolation: isolate;
   }
 
