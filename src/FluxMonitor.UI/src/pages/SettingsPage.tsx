@@ -1,18 +1,20 @@
 import { useAppStore } from '../store/useAppStore';
 
-export function SettingsPage() {
+export function SettingsPage({ hideHeader = false }: { hideHeader?: boolean }) {
   const themes = useAppStore((state) => state.themes);
   const activeThemeId = useAppStore((state) => state.activeThemeId);
   const setActiveThemeId = useAppStore((state) => state.setActiveThemeId);
 
   return (
     <div className='space-y-6 max-w-4xl mx-auto pb-12'>
-      <div className='flex flex-col gap-1 border-b border-border pb-4'>
-        <h2 className='text-3xl font-bold tracking-tight text-foreground mb-2'>Global Settings</h2>
-        <p className='text-sm text-muted-foreground'>
-          Core configuration for network, MQTT, database retention, and the visual engine.
-        </p>
-      </div>
+      {!hideHeader ? (
+        <div className='flex flex-col gap-1 border-b border-border pb-4'>
+          <h2 className='mb-2 text-3xl font-bold tracking-tight text-foreground'>Theme</h2>
+          <p className='text-sm text-muted-foreground'>
+            Choose the visual theme used across the app.
+          </p>
+        </div>
+      ) : null}
 
       <div className='grid gap-6 mt-6'>
         <section className='bg-card/50 border border-border rounded-xl p-6 shadow-sm'>

@@ -39,12 +39,28 @@ function App() {
         <Routes>
           <Route path='/' element={<MainMenuPage />} />
           <Route path='/system' element={<SystemPage />} />
+          <Route
+            path='/system/notifications'
+            element={(
+              <SystemSubpage title='Notifications' description='Alerts, channels, and delivery rules'>
+                <NotificationsPage hideHeader />
+              </SystemSubpage>
+            )}
+          />
+          <Route
+            path='/system/theme'
+            element={(
+              <SystemSubpage title='Theme' description='Choose the active visual theme'>
+                <SettingsPage hideHeader />
+              </SystemSubpage>
+            )}
+          />
           <Route path='/system/:sectionId' element={<SystemPage />} />
           <Route path='/monitor' element={<PrimaryPage titlePath='/monitor'><MonitorPage /></PrimaryPage>} />
           <Route path='/devices' element={<PrimaryPage titlePath='/devices'><DevicesPage /></PrimaryPage>} />
           <Route path='/services' element={<PrimaryPage titlePath='/services'><ServicesPage /></PrimaryPage>} />
-          <Route path='/notifications' element={<PrimaryPage titlePath='/notifications'><NotificationsPage /></PrimaryPage>} />
-          <Route path='/settings' element={<PrimaryPage titlePath='/settings'><SettingsPage /></PrimaryPage>} />
+          <Route path='/notifications' element={<Navigate to='/system/notifications' replace />} />
+          <Route path='/settings' element={<Navigate to='/system/theme' replace />} />
           <Route path='*' element={<div className='text-zinc-500 font-mono p-8 text-center bg-zinc-900/50 rounded-xl border border-zinc-800 border-dashed'>Route not found or Extension not loaded</div>} />
         </Routes>
       </MainLayout>
@@ -67,6 +83,19 @@ function PrimaryPage({ titlePath, children }: { titlePath: string; children: Rea
         backTo='/'
         title={item.name}
         description={item.description}
+      />
+      {children}
+    </div>
+  );
+}
+
+function SystemSubpage({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+  return (
+    <div className='space-y-6 pb-8'>
+      <StackPageHeader
+        backTo='/system'
+        title={title}
+        description={description}
       />
       {children}
     </div>

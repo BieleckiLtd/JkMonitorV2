@@ -51,6 +51,8 @@ function renderSystemPage(initialEntry = '/system') {
     <MemoryRouter initialEntries={[initialEntry]}>
       <Routes>
         <Route path='/system' element={<SystemPage />} />
+        <Route path='/system/theme' element={<div>Theme page</div>} />
+        <Route path='/system/notifications' element={<div>Notifications page</div>} />
         <Route path='/system/:sectionId' element={<SystemPage />} />
       </Routes>
       <LocationDisplay />
@@ -218,6 +220,8 @@ describe('SystemPage', () => {
       expect(screen.getByRole('button', { name: /resource usage/i })).toBeInTheDocument();
     });
 
+    expect(screen.getByRole('button', { name: /notifications/i })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /theme/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /^back$/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /hardware interfaces/i }));
@@ -234,6 +238,21 @@ describe('SystemPage', () => {
     expect(screen.queryByText(/serial ports and block devices detected on this host/i)).not.toBeInTheDocument();
     expect(screen.getByRole('button', { name: /hardware interfaces/i })).toBeInTheDocument();
     expect(screen.getByTestId('location-display')).toHaveTextContent('/system');
+  });
+
+  it('opens system subpages from the system menu', async () => {
+    renderSystemPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: /theme/i })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /theme/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText('Theme page')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('location-display')).toHaveTextContent('/system/theme');
   });
 
   it('loads the matching section from a direct system child route', async () => {

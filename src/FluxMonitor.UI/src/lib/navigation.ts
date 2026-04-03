@@ -1,4 +1,4 @@
-import { Bell, Cable, Gauge, Monitor, Settings, Sparkles, type LucideIcon } from 'lucide-react';
+import { Cable, Gauge, Monitor, Sparkles, type LucideIcon } from 'lucide-react';
 
 export type PrimaryNavigationItem = {
   name: string;
@@ -12,8 +12,6 @@ export const primaryNavigationItems: readonly PrimaryNavigationItem[] = [
   { name: 'Monitor', description: 'Live telemetry and power flow', path: '/monitor', icon: Gauge },
   { name: 'Devices', description: 'Ports, transports, and device setup', path: '/devices', icon: Cable },
   { name: 'Services', description: 'Installed packages and runtime insight', path: '/services', icon: Sparkles },
-  { name: 'Notifications', description: 'Alerts, channels, and delivery rules', path: '/notifications', icon: Bell },
-  { name: 'Settings', description: 'Theme and application preferences', path: '/settings', icon: Settings },
 ];
 
 export function getPrimaryNavigationItem(pathname: string) {

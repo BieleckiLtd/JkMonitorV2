@@ -18,5 +18,7 @@ describe('MainMenuPage', () => {
     expect(screen.getByText('Main menu')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /system/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /monitor/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /notifications/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /settings/i })).not.toBeInTheDocument();
   });
 });

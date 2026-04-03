@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSignal, type IconDefinition } from '@fortawesome/free-solid-svg-icons';
-import { Bluetooth, Cable, ChevronDown, ChevronRight, CircleAlert, Cloud, Cpu, Database, Download, ExternalLink, Gauge, Globe2, HardDrive, Leaf, List, LoaderCircle, Lock, MemoryStick, RefreshCcw, CheckCircle2, Thermometer, Upload, Usb, Wifi, XCircle } from 'lucide-react';
+import { Bell, Bluetooth, Cable, ChevronDown, ChevronRight, CircleAlert, Cloud, Cpu, Database, Download, ExternalLink, Gauge, Globe2, HardDrive, Leaf, List, LoaderCircle, Lock, MemoryStick, Palette, RefreshCcw, CheckCircle2, Thermometer, Upload, Usb, Wifi, XCircle } from 'lucide-react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
 import { StackPageHeader } from '../components/StackPageHeader';
@@ -400,6 +400,17 @@ const systemSectionItems: Array<{
   { id: 'hardware-interfaces', label: 'Hardware interfaces', description: 'Serial ports and block devices', icon: Usb },
   { id: 'database', label: 'Database', description: 'Storage size, backup, and restore', icon: Database },
   { id: 'logs', label: 'Logs', description: 'Application log output', icon: List },
+];
+
+const systemShortcutItems: Array<{
+  id: 'notifications' | 'theme';
+  label: string;
+  description: string;
+  icon: typeof Cpu;
+  path: string;
+}> = [
+  { id: 'notifications', label: 'Notifications', description: 'Alerts, channels, and delivery rules', icon: Bell, path: '/system/notifications' },
+  { id: 'theme', label: 'Theme', description: 'Choose the active visual theme', icon: Palette, path: '/system/theme' },
 ];
 
 function isNarrowSystemLayoutViewport() {
@@ -1460,19 +1471,27 @@ export function SystemPage() {
   const activeSystemSectionItem = activeSystemSection
     ? systemSectionItems.find((item) => item.id === activeSystemSection) ?? systemSectionItems[0]
     : null;
+  const systemMenuItems = [
+    ...systemSectionItems.map((item) => ({ ...item, path: getSystemSectionPath(item.id), sectionId: item.id })),
+    ...systemShortcutItems,
+  ];
 
   const renderSystemSectionMenu = () => (
     <Card className='gap-0 bg-card/85 py-0 shadow-none ring-0'>
       <CardContent className='space-y-2 p-3'>
-        {systemSectionItems.map((item) => {
+        {systemMenuItems.map((item) => {
           const Icon = item.icon;
-          const active = activeSystemSection === item.id;
+          const active = 'sectionId' in item && activeSystemSection === item.sectionId;
 
           return (
             <button
-              key={item.id}
+              key={item.path}
               type='button'
-              onClick={() => openSystemSection(item.id)}
+              onClick={() => {
+                runWithViewTransition(() => {
+                  navigate(item.path);
+                }, { direction: 'forward' });
+              }}
               className={cn(
                 'flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition-colors',
                 active

@@ -110,7 +110,7 @@ function TabButton({ active, label, icon: Icon, onClick }: { active: boolean; la
 
 // ── main page ──
 
-export function NotificationsPage() {
+export function NotificationsPage({ hideHeader = false }: { hideHeader?: boolean }) {
   const { config, isLoading, error, saveChannels, saveRules, testChannel } = useNotificationConfig();
   const { log } = useNotificationLog();
   const { entities, devices } = useNotificationMetadata();
@@ -243,15 +243,16 @@ export function NotificationsPage() {
 
   return (
     <div className='space-y-6 max-w-6xl mx-auto pb-12'>
-      {/* header */}
-      <div className='flex flex-col gap-2 border-b border-border pb-4 md:flex-row md:items-end md:justify-between'>
-        <div>
-          <h2 className='text-3xl font-bold tracking-tight text-foreground'>Notifications</h2>
-          <p className='mt-2 text-sm text-muted-foreground'>
-            Configure notification channels and rules. Use NCalc expressions for flexible triggers.
-          </p>
+      {!hideHeader ? (
+        <div className='flex flex-col gap-2 border-b border-border pb-4 md:flex-row md:items-end md:justify-between'>
+          <div>
+            <h2 className='text-3xl font-bold tracking-tight text-foreground'>Notifications</h2>
+            <p className='mt-2 text-sm text-muted-foreground'>
+              Configure notification channels and rules. Use NCalc expressions for flexible triggers.
+            </p>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       {/* tabs */}
       <div className='flex gap-2 rounded-xl border border-border bg-card/60 p-2'>
