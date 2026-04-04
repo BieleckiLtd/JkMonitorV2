@@ -398,7 +398,7 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set, get) => ({
   themes: builtInThemes,
-  activeThemeId: (typeof window !== 'undefined' && localStorage.getItem('FluxMonitor-theme')) || 'emerald-dark',
+  activeThemeId: (typeof window !== 'undefined' && localStorage.getItem('FluxMonitor-theme')) || 'tactical-slate',
 
   setActiveThemeId: (id) => {
     const theme = get().themes.find(t => t.id === id);

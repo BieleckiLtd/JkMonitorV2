@@ -1546,9 +1546,13 @@ export function SystemPage() {
   ];
 
   const renderSystemSectionMenu = () => (
-    <Card className='gap-0 bg-card/85 py-0 shadow-none ring-0'>
-      <CardContent className='space-y-2 p-3'>
-        {systemMenuItems.map((item) => {
+    <div className='bg-card border border-white/5 p-4'>
+      <div className='mb-4 flex items-center justify-between'>
+        <span className='font-mono text-[10px] uppercase tracking-widest text-muted-foreground'>SYSTEM_SECTIONS</span>
+        <span className='border border-primary/20 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] text-primary'>{systemMenuItems.length}_ITEMS</span>
+      </div>
+      <div>
+        {systemMenuItems.map((item, index) => {
           const Icon = item.icon;
           const active = 'sectionId' in item && activeSystemSection === item.sectionId;
 
@@ -1562,23 +1566,31 @@ export function SystemPage() {
                 }, { direction: 'forward' });
               }}
               className={cn(
-                'flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition-colors',
+                'flex w-full items-center justify-between py-3 text-left transition-all duration-100',
                 active
-                  ? 'border-primary/30 bg-primary/10 text-foreground shadow-sm'
-                  : 'border-border/60 bg-background/30 text-muted-foreground hover:bg-accent hover:text-accent-foreground',
+                  ? 'bg-primary/5'
+                  : 'hover:bg-white/5',
+                index < systemMenuItems.length - 1 && 'border-b border-white/5',
               )}
             >
-              <Icon className='h-4 w-4 shrink-0' />
-              <div className='min-w-0 flex-1'>
-                <div className='text-sm font-medium'>{item.label}</div>
-                <div className='mt-0.5 text-xs opacity-80'>{item.description}</div>
+              <div className='flex items-center gap-3'>
+                <div className={cn(
+                  'flex h-8 w-8 shrink-0 items-center justify-center',
+                  active ? 'bg-primary/10' : 'bg-white/5',
+                )}>
+                  <Icon className={cn('h-4 w-4', active ? 'text-primary opacity-80' : 'opacity-50')} />
+                </div>
+                <div>
+                  <div className={cn('font-mono text-xs', active ? 'text-primary' : 'text-foreground')}>{item.label.toLowerCase()}</div>
+                  <div className='font-mono text-[9px] uppercase tracking-tighter text-muted-foreground'>{item.description}</div>
+                </div>
               </div>
-              <ChevronRight className='h-4 w-4 shrink-0 opacity-60' />
+              <ChevronRight className={cn('h-4 w-4 shrink-0', active ? 'text-primary opacity-80' : 'opacity-50')} />
             </button>
           );
         })}
-      </CardContent>
-    </Card>
+      </div>
+    </div>
   );
 
   const renderSystemMenuPage = () => (
@@ -1592,19 +1604,19 @@ export function SystemPage() {
       <div className='grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)] xl:gap-8 2xl:grid-cols-[19rem_minmax(0,1fr)]'>
         {renderSystemSectionMenu()}
 
-        <Card className='hidden border border-border/70 bg-card/75 shadow-sm xl:flex'>
-          <CardContent className='flex min-h-64 flex-col justify-center space-y-3 pt-6'>
-            <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>
-              System
+        <div className='hidden border border-white/5 bg-card/75 p-5 xl:flex'>
+          <div className='flex min-h-64 flex-col justify-center space-y-3'>
+            <div className='font-mono text-[10px] uppercase tracking-widest text-muted-foreground'>
+              SYSTEM
             </div>
-            <div className='text-2xl font-semibold tracking-tight text-foreground'>
+            <div className='font-mono text-lg font-bold tracking-tight text-foreground'>
               Pick a system area
             </div>
-            <p className='max-w-lg text-sm leading-6 text-muted-foreground'>
+            <p className='max-w-lg font-mono text-xs leading-5 text-muted-foreground'>
               Open one system page at a time, then use Back to return to this menu.
             </p>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </div>
     </div>
   );

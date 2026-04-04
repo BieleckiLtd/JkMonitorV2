@@ -27,7 +27,7 @@ export function StackPageHeader({
   return (
     <div
       data-slot='stack-page-header'
-      className={cn('flex items-center gap-3 rounded-2xl border border-border/70 bg-background/40 px-3 py-2.5', className)}
+      className={cn('flex items-center gap-3 border-b border-white/5 px-1 py-3', className)}
     >
       {backTo ? (
         <button
@@ -38,20 +38,20 @@ export function StackPageHeader({
               navigate(backTo);
             }, { direction: navigationDirection });
           }}
-          className='inline-flex items-center gap-1 rounded-xl px-2 py-1 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
+          className='inline-flex items-center gap-1 px-2 py-1 font-mono text-xs text-muted-foreground transition-colors hover:text-foreground'
         >
           <ChevronLeft className='h-4 w-4' />
           {backLabel}
         </button>
       ) : Icon ? (
-        <div className='flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/10 text-primary'>
+        <div className='flex h-8 w-8 shrink-0 items-center justify-center bg-white/5 text-primary'>
           <Icon className='h-4 w-4' />
         </div>
       ) : null}
 
       <div className='min-w-0'>
-        <div data-slot='stack-page-header-title' className='truncate text-sm font-semibold text-foreground'>{title}</div>
-        <div data-slot='stack-page-header-description' className='truncate text-xs text-muted-foreground'>{description}</div>
+        <div data-slot='stack-page-header-title' className='truncate font-mono text-xs font-bold uppercase tracking-wider text-foreground'>{title}</div>
+        <div data-slot='stack-page-header-description' className='truncate font-mono text-[9px] uppercase tracking-tighter text-muted-foreground'>{description}</div>
       </div>
     </div>
   );
