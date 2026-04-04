@@ -1,9 +1,10 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSignal, type IconDefinition } from '@fortawesome/free-solid-svg-icons';
-import { Bell, Bluetooth, Cable, ChevronDown, ChevronRight, CircleAlert, Cloud, Cpu, Database, Download, ExternalLink, Gauge, Globe2, HardDrive, Leaf, List, LoaderCircle, Lock, MemoryStick, Palette, RefreshCcw, CheckCircle2, Thermometer, Upload, Usb, Wifi, XCircle } from 'lucide-react';
+import { Bell, Bluetooth, Cable, ChevronDown, ChevronRight, CircleAlert, Cloud, Cpu, Database, Download, ExternalLink, Globe2, HardDrive, Leaf, List, LoaderCircle, Lock, MemoryStick, Palette, RefreshCcw, CheckCircle2, Thermometer, Upload, Usb, Wifi, XCircle } from 'lucide-react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { PanelHeader } from '../components/PanelHeader';
+import { Card, CardContent } from '../components/ui/card';
 import { useSetAppBar } from '../components/AppBar';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -1673,18 +1674,16 @@ export function SystemPage() {
             <div className='min-w-0 space-y-6'>
             {activeSystemSection === 'resource-usage' ? (
               <Card className='border border-border/80 bg-card/85 shadow-sm'>
-                <CardHeader className='border-b border-border/60 pb-4'>
-                  <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
-                    <div>
-                      <CardTitle>Resource usage</CardTitle>
-                      <CardDescription>CPU, memory, and storage capacity on the host running the monitor service.</CardDescription>
-                    </div>
+                <PanelHeader
+                  title='Resource usage'
+                  description='CPU, memory, and storage capacity on the host running the monitor service.'
+                  aside={(
                     <div className='space-y-1 text-right text-xs text-muted-foreground'>
                       <div>Host uptime {formatElapsedDuration(metrics?.systemUptimeSeconds)}</div>
                       <div>App uptime {applicationUptime}</div>
                     </div>
-                  </div>
-                </CardHeader>
+                  )}
+                />
                 <CardContent className='grid gap-5 pt-5'>
                   <UsagePanel
                     icon={Cpu}
@@ -1719,24 +1718,17 @@ export function SystemPage() {
             ) : null}
 
             <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'software-update' && 'hidden')}>
-              <CardHeader className='pb-4'>
-                <div className='flex w-full items-start gap-3 text-left'>
-                  <div className='flex items-start gap-3'>
-                    <RefreshCcw className='mt-1 h-5 w-5 shrink-0 text-muted-foreground' />
-                    <div>
-                      <CardTitle>Software update</CardTitle>
-                      <CardDescription>Check for new releases and install updates from GitHub.</CardDescription>
-                    </div>
+              <PanelHeader
+                title='Software update'
+                description='Check for new releases and install updates from GitHub.'
+                aside={(
+                  <div className='space-y-1 text-right'>
+                    <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>Published</div>
+                    <div className='text-sm font-semibold text-foreground'>{installedReleasePublishedLabel}</div>
                   </div>
-                  <div className='ml-auto flex items-start gap-3 pl-3'>
-                    <div className='space-y-1 text-right'>
-                      <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>Published</div>
-                      <div className='text-sm font-semibold text-foreground'>{installedReleasePublishedLabel}</div>
-                    </div>
-                  </div>
-                </div>
-              </CardHeader>
-              <CardContent className='space-y-4 border-t border-border/60 pt-5'>
+                )}
+              />
+              <CardContent className='space-y-4 pt-5'>
                   <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
                     <DetailTile label='Channel' value={formatReleaseChannel(updateChannel)} />
                     <DetailTile label='Commit' value={formatCommit(installedCommit)} />
@@ -1867,22 +1859,17 @@ export function SystemPage() {
               </CardContent>
             </Card>
             <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'internet-speed' && 'hidden')}>
-              <CardHeader className='pb-4'>
-                <div className='flex w-full items-center gap-3 text-left'>
-                  <div className='flex items-start gap-3'>
-                    <Globe2 className='mt-1 h-5 w-5 shrink-0 text-muted-foreground' />
-                    <div>
-                      <CardTitle>Internet speed</CardTitle>
-                      <CardDescription>Run a live bandwidth check on this device.</CardDescription>
-                    </div>
-                  </div>
-                  <div className='ml-auto flex min-w-0 items-center gap-3 pl-3 text-sm text-muted-foreground'>
+              <PanelHeader
+                title='Internet speed'
+                description='Run a live bandwidth check on this device.'
+                aside={(
+                  <div className='flex min-w-0 items-center gap-3 text-xs text-muted-foreground'>
                     {internetSpeedTest?.isRunning ? <LoaderCircle className='h-4 w-4 shrink-0 animate-spin text-primary' /> : null}
                     <span className='inline-flex min-w-0 items-center gap-2 truncate'>{internetSpeedSummary}</span>
                   </div>
-                </div>
-              </CardHeader>
-              <CardContent className='space-y-4 border-t border-border/60 pt-5'>
+                )}
+              />
+              <CardContent className='space-y-4 pt-5'>
                   {internetSpeedTestLoading && !internetSpeedTest ? (
                     <div className='flex items-center justify-center py-8'>
                       <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
@@ -1928,7 +1915,6 @@ export function SystemPage() {
 
                       <div className='grid gap-3 sm:grid-cols-3'>
                         <SpeedMetricCard
-                          icon={Gauge}
                           label='Ping'
                           value={internetSpeedPingValue}
                           dialValue={internetSpeedPingDialDisplay}
@@ -1938,7 +1924,6 @@ export function SystemPage() {
                           isActive={internetSpeedPingIsActive}
                         />
                         <SpeedMetricCard
-                          icon={Download}
                           label='Download'
                           value={internetSpeedDownloadValue}
                           dialValue={internetSpeedDownloadDialDisplay}
@@ -1948,7 +1933,6 @@ export function SystemPage() {
                           isActive={internetSpeedDownloadIsActive}
                         />
                         <SpeedMetricCard
-                          icon={Upload}
                           label='Upload'
                           value={internetSpeedUploadValue}
                           dialValue={internetSpeedUploadDialDisplay}
@@ -1992,24 +1976,19 @@ export function SystemPage() {
             </Card>
 
             <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'tunnel' && 'hidden')}>
-              <CardHeader className='pb-4'>
-                <div className='flex w-full items-center gap-3 text-left'>
-                  <div className='flex items-center gap-2'>
-                    <Cloud className='h-4 w-4 text-muted-foreground' />
-                    <div>
-                      <CardTitle>Tunnel</CardTitle>
-                      <CardDescription>Expose Flux Monitor over the internet through Cloudflare Tunnel.</CardDescription>
-                    </div>
-                  </div>
-                  <div className='ml-auto flex items-center gap-2 pl-3 text-xs text-muted-foreground'>
+              <PanelHeader
+                title='Tunnel'
+                description='Expose Flux Monitor over the internet through Cloudflare Tunnel.'
+                aside={(
+                  <div className='flex items-center gap-2 text-xs text-muted-foreground'>
                     <span className='hidden sm:inline'>{cloudflareTunnelSummary}</span>
                     <span className='rounded-full border border-border/70 bg-background/70 px-3 py-1 font-medium uppercase tracking-[0.16em]'>
                       {cloudflareTunnelStateLabel}
                     </span>
                   </div>
-                </div>
-              </CardHeader>
-              <CardContent className='space-y-4 border-t border-border/60 pt-5'>
+                )}
+              />
+              <CardContent className='space-y-4 pt-5'>
                   {cloudflareTunnelLoading && !cloudflareTunnelStatus ? (
                     <div className='flex items-center justify-center py-6'>
                       <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
@@ -2075,10 +2054,7 @@ export function SystemPage() {
                       </div>
 
                       <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-4'>
-                        <div className='flex items-center gap-2 text-sm font-semibold text-foreground'>
-                          <ExternalLink className='h-4 w-4 text-muted-foreground' />
-                          Cloudflare setup
-                        </div>
+                        <div className='text-sm font-semibold text-foreground'>Cloudflare setup</div>
                         <div className='mt-3 space-y-2 text-sm text-muted-foreground'>
                           <div>1. In Cloudflare Tunnel, create a tunnel and copy the command or token shown on the connector page.</div>
                           <div>2. In Published applications, choose your hostname. Use your own domain if you have one. If you use a temporary Cloudflare URL, that is configured on the Cloudflare side, not here in Flux Monitor.</div>
@@ -2109,10 +2085,7 @@ export function SystemPage() {
                       </div>
 
                       <div className='rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-4'>
-                        <div className='flex items-center gap-2 text-sm font-semibold text-foreground'>
-                          <Lock className='h-4 w-4 text-amber-200' />
-                          Protect it with Cloudflare Access
-                        </div>
+                        <div className='text-sm font-semibold text-foreground'>Protect it with Cloudflare Access</div>
                         <div className='mt-3 space-y-2 text-sm text-amber-50/90'>
                           <div>Access → Applications</div>
                           <div>Add application</div>
@@ -2204,15 +2177,10 @@ export function SystemPage() {
             </Card>
 
             <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'connectivity' && 'hidden')}>
-              <CardHeader className='border-b border-border/60 pb-4'>
-                <div className='flex items-center gap-2'>
-                  <Wifi className='h-4 w-4 text-muted-foreground' />
-                  <div>
-                    <CardTitle>Connectivity</CardTitle>
-                    <CardDescription>Wi-Fi, Bluetooth, and Ethernet state on this device.</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
+              <PanelHeader
+                title='Connectivity'
+                description='Wi-Fi, Bluetooth, and Ethernet state on this device.'
+              />
               <CardContent className='space-y-4 pt-5'>
                 {connectivityLoading && !connectivity ? (
                   <div className='flex items-center justify-center py-6'>
@@ -2594,15 +2562,10 @@ export function SystemPage() {
             </Card>
 
             <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'hardware-interfaces' && 'hidden')}>
-              <CardHeader className='border-b border-border/60 pb-4'>
-                <div className='flex items-center gap-2'>
-                  <Usb className='h-4 w-4 text-muted-foreground' />
-                  <div>
-                    <CardTitle>Hardware interfaces</CardTitle>
-                    <CardDescription>Serial ports and block devices detected on this host.</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
+              <PanelHeader
+                title='Hardware interfaces'
+                description='Serial ports and block devices detected on this host.'
+              />
               <CardContent className='space-y-4 pt-5'>
                 {interfaces ? (
                   <>
@@ -2648,15 +2611,10 @@ export function SystemPage() {
             </Card>
 
             <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'database' && 'hidden')}>
-              <CardHeader className='border-b border-border/60 pb-4'>
-                <div className='flex items-center gap-2'>
-                  <Database className='h-4 w-4 text-muted-foreground' />
-                  <div>
-                    <CardTitle>Database</CardTitle>
-                    <CardDescription>TimescaleDB storage size, backup, and restore.</CardDescription>
-                  </div>
-                </div>
-              </CardHeader>
+              <PanelHeader
+                title='Database'
+                description='TimescaleDB storage size, backup, and restore.'
+              />
               <CardContent className='space-y-4 pt-5'>
                 {dbLoading && !dbSize ? (
                   <div className='flex items-center justify-center py-6'>
@@ -2994,7 +2952,6 @@ function DetailTile({ label, value }: { label: string; value: string }) {
 }
 
 function SpeedMetricCard({
-  icon: Icon,
   label,
   value,
   dialValue,
@@ -3003,7 +2960,6 @@ function SpeedMetricCard({
   tone,
   isActive = false,
 }: {
-  icon: typeof Cpu;
   label: string;
   value: string;
   dialValue: string;
@@ -3012,8 +2968,6 @@ function SpeedMetricCard({
   tone: 'emerald' | 'sky' | 'emerald-soft' | 'amber' | 'rose';
   isActive?: boolean;
 }) {
-  const circumference = 2 * Math.PI * 36;
-  const offset = circumference - ((Math.max(0, Math.min(100, gaugePercent)) / 100) * circumference);
   const toneClassName = tone === 'emerald'
     ? 'text-emerald-400'
     : tone === 'sky'
@@ -3023,42 +2977,37 @@ function SpeedMetricCard({
         : tone === 'rose'
           ? 'text-rose-400'
           : 'text-emerald-300';
+  const toneBarClassName = tone === 'emerald'
+    ? 'bg-emerald-400'
+    : tone === 'sky'
+      ? 'bg-sky-400'
+      : tone === 'amber'
+        ? 'bg-amber-400'
+        : tone === 'rose'
+          ? 'bg-rose-400'
+          : 'bg-emerald-300';
 
   return (
     <div className={cn(
-      'rounded-[28px] border border-border/70 bg-[radial-gradient(circle_at_top,rgba(255,255,255,0.07),transparent_55%),linear-gradient(180deg,rgba(255,255,255,0.03),transparent)] px-4 py-4 transition-colors duration-300',
+      'rounded-2xl border border-border/70 bg-background/50 px-4 py-4 transition-colors duration-300',
       isActive && 'border-primary/35 bg-primary/5'
     )}>
-      <div className='flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
-        <Icon className='h-3.5 w-3.5' />
-        {label}
-      </div>
-      <div className='mt-4 flex items-center gap-4'>
-        <div className='relative flex size-24 shrink-0 items-center justify-center'>
-          <svg viewBox='0 0 96 96' className='size-24 -rotate-90'>
-            <circle cx='48' cy='48' r='36' className='fill-none stroke-muted/70' strokeWidth='10' />
-            <circle
-              cx='48'
-              cy='48'
-              r='36'
-              className={cn('fill-none transition-all duration-700 ease-out', toneClassName)}
-              stroke='currentColor'
-              strokeWidth='10'
-              strokeLinecap='round'
-              strokeDasharray={circumference}
-              strokeDashoffset={offset}
-            />
-          </svg>
-          <div className='pointer-events-none absolute inset-0 flex items-center justify-center'>
-            <div className='text-center'>
-              <div className='text-lg font-semibold tracking-tight text-foreground'>{dialValue}</div>
-            </div>
-          </div>
-        </div>
-        <div className='min-w-0'>
+      <div className='flex items-start justify-between gap-4'>
+        <div className='min-w-0 space-y-1'>
+          <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>{label}</div>
           <div className='text-sm font-semibold text-foreground'>{value}</div>
-          {caption ? <div className='mt-1 text-xs leading-5 text-muted-foreground'>{caption}</div> : null}
+          {caption ? <div className='text-xs leading-5 text-muted-foreground'>{caption}</div> : null}
         </div>
+        <div className='shrink-0 text-right'>
+          <div className={cn('text-xl font-semibold tracking-tight', toneClassName)}>{dialValue}</div>
+          <div className='mt-1 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Current</div>
+        </div>
+      </div>
+      <div className='mt-4 h-1.5 overflow-hidden rounded-full bg-background/70'>
+        <div
+          className={cn('h-full rounded-full transition-[width] duration-700 ease-out', toneBarClassName)}
+          style={{ width: `${Math.max(8, Math.min(100, gaugePercent))}%` }}
+        />
       </div>
     </div>
   );

@@ -17,3 +17,7 @@ export const primaryNavigationItems: readonly PrimaryNavigationItem[] = [
 export function getPrimaryNavigationItem(pathname: string) {
   return primaryNavigationItems.find((item) => item.path === pathname) ?? null;
 }
+
+export function isPrimaryNavigationItemActive(itemPath: string, pathname: string) {
+  return pathname === itemPath || pathname.startsWith(`${itemPath}/`);
+}
