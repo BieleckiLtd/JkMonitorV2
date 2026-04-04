@@ -244,6 +244,14 @@
     animation-timing-function: cubic-bezier(0.22, 1, 0.36, 1);
   }
 
+  /* Persistent menu panels: no animation during view transitions */
+  ::view-transition-old(nav-menu-1),
+  ::view-transition-new(nav-menu-1),
+  ::view-transition-old(nav-menu-2),
+  ::view-transition-new(nav-menu-2) {
+    animation: none;
+  }
+
   ::view-transition-old(root) {
     animation-name: flux-page-out;
   }

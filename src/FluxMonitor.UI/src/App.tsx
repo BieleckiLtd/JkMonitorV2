@@ -1,13 +1,8 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { useEffect, type ReactNode } from 'react';
+import { useEffect } from 'react';
 import { useAppStore } from './store/useAppStore';
 import { MainLayout } from './layouts/MainLayout';
 import { PrimaryNavigationLayout } from './layouts/PrimaryNavigationLayout';
-import { useSetAppBar } from './components/AppBar';
-import { PrimaryNavigationEmptyState } from './components/PrimaryNavigationPanel';
-import { useMediaQuery } from './hooks/useMediaQuery';
-import { getPrimaryNavigationItem } from './lib/navigation';
-import { MainMenuContent } from './pages/MainMenuPage';
 import { SystemPage } from './pages/SystemPage';
 import { MonitorPage } from './pages/MonitorPage';
 import { DevicesPage } from './pages/DevicesPage';
@@ -41,28 +36,20 @@ function App() {
       <MainLayout>
         <Routes>
           <Route element={<PrimaryNavigationLayout />}>
-            <Route path='/' element={<PrimaryNavigationHomePage />} />
-            <Route path='/system' element={<SystemPage />} />
+            <Route path='/' element={null} />
+            <Route path='/system' element={null} />
             <Route
               path='/system/notifications'
-              element={(
-                <SystemSubpage title='Notifications' description='Alerts, channels, and delivery rules'>
-                  <NotificationsPage hideHeader />
-                </SystemSubpage>
-              )}
+              element={<PageContent><NotificationsPage hideHeader /></PageContent>}
             />
             <Route
               path='/system/theme'
-              element={(
-                <SystemSubpage title='Theme' description='Choose the active visual theme'>
-                  <SettingsPage hideHeader />
-                </SystemSubpage>
-              )}
+              element={<PageContent><SettingsPage hideHeader /></PageContent>}
             />
             <Route path='/system/:sectionId' element={<SystemPage />} />
-            <Route path='/monitor' element={<PrimaryPage titlePath='/monitor'><MonitorPage /></PrimaryPage>} />
-            <Route path='/devices' element={<PrimaryPage titlePath='/devices'><DevicesPage /></PrimaryPage>} />
-            <Route path='/services' element={<PrimaryPage titlePath='/services'><ServicesPage /></PrimaryPage>} />
+            <Route path='/monitor' element={<PageContent><MonitorPage /></PageContent>} />
+            <Route path='/devices' element={<PageContent><DevicesPage /></PageContent>} />
+            <Route path='/services' element={<PageContent><ServicesPage /></PageContent>} />
             <Route path='/notifications' element={<Navigate to='/system/notifications' replace />} />
             <Route path='/settings' element={<Navigate to='/system/theme' replace />} />
           </Route>
@@ -75,36 +62,6 @@ function App() {
 
 export default App;
 
-function PrimaryNavigationHomePage() {
-  const showSplitLayout = useMediaQuery('(min-width: 768px)');
-
-  useSetAppBar({ title: 'FLUX_MONITOR', description: '' });
-
-  return showSplitLayout ? <PrimaryNavigationEmptyState /> : <MainMenuContent />;
-}
-
-function PrimaryPage({ titlePath, children }: { titlePath: string; children: ReactNode }) {
-  const item = getPrimaryNavigationItem(titlePath);
-
-  if (!item) {
-    return <Navigate to='/' replace />;
-  }
-
-  useSetAppBar({ title: item.name, description: item.description, backTo: '/' });
-
-  return (
-    <div className='space-y-6 pb-8'>
-      {children}
-    </div>
-  );
-}
-
-function SystemSubpage({ title, description, children }: { title: string; description: string; children: ReactNode }) {
-  useSetAppBar({ title, description, backTo: '/system' });
-
-  return (
-    <div className='space-y-6 pb-8'>
-      {children}
-    </div>
-  );
+function PageContent({ children }: { children: React.ReactNode }) {
+  return <div className='space-y-6 pb-8'>{children}</div>;
 }

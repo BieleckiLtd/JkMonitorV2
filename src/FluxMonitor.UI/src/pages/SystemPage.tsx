@@ -1,11 +1,10 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSignal, type IconDefinition } from '@fortawesome/free-solid-svg-icons';
-import { Bell, Bluetooth, Cable, ChevronDown, ChevronRight, CircleAlert, Cloud, Cpu, Database, Download, ExternalLink, Globe2, HardDrive, Leaf, List, LoaderCircle, Lock, MemoryStick, Palette, RefreshCcw, CheckCircle2, Thermometer, Upload, Usb, Wifi, XCircle } from 'lucide-react';
+import { Bluetooth, Cable, ChevronDown, ChevronRight, CircleAlert, Cloud, Cpu, Database, Download, ExternalLink, HardDrive, Leaf, LoaderCircle, Lock, MemoryStick, RefreshCcw, CheckCircle2, Thermometer, Upload, Wifi, XCircle } from 'lucide-react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { PanelHeader } from '../components/PanelHeader';
 import { Card, CardContent } from '../components/ui/card';
-import { useSetAppBar } from '../components/AppBar';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Switch } from '../components/ui/switch';
@@ -14,6 +13,7 @@ import { cn } from '../lib/utils';
 import { runWithViewTransition } from '../lib/viewTransitions';
 import { LogsPanel } from '../components/LogsPanel';
 import { useAppStore } from '../store/useAppStore';
+import { getSystemSectionFromRouteSegment, getSystemSectionPath, type SystemSection } from '../lib/systemNavigation';
 
 type DeviceTelemetrySnapshot = {
   totalVoltageVolts?: number | null;
@@ -383,70 +383,6 @@ type WifiConnectDialogState = {
   title: string;
 };
 
-type SystemSection =
-  | 'resource-usage'
-  | 'software-update'
-  | 'internet-speed'
-  | 'tunnel'
-  | 'connectivity'
-  | 'hardware-interfaces'
-  | 'database'
-  | 'logs';
-
-const systemSectionRouteSegments: SystemSection[] = [
-  'resource-usage',
-  'software-update',
-  'internet-speed',
-  'tunnel',
-  'connectivity',
-  'hardware-interfaces',
-  'database',
-  'logs',
-];
-
-const systemSectionItems: Array<{
-  id: SystemSection;
-  label: string;
-  description: string;
-  icon: typeof Cpu;
-}> = [
-  { id: 'resource-usage', label: 'Resource usage', description: 'CPU, memory, and storage', icon: Cpu },
-  { id: 'software-update', label: 'Software update', description: 'Check and install releases', icon: RefreshCcw },
-  { id: 'internet-speed', label: 'Internet speed', description: 'Run a live bandwidth check', icon: Globe2 },
-  { id: 'tunnel', label: 'Tunnel', description: 'Cloudflare Tunnel settings', icon: Cloud },
-  { id: 'connectivity', label: 'Connectivity', description: 'Wi-Fi, Bluetooth, and Ethernet', icon: Wifi },
-  { id: 'hardware-interfaces', label: 'Hardware interfaces', description: 'Serial ports and block devices', icon: Usb },
-  { id: 'database', label: 'Database', description: 'Storage size, backup, and restore', icon: Database },
-  { id: 'logs', label: 'Logs', description: 'Application log output', icon: List },
-];
-
-const systemShortcutItems: Array<{
-  id: 'notifications' | 'theme';
-  label: string;
-  description: string;
-  icon: typeof Cpu;
-  path: string;
-}> = [
-  { id: 'notifications', label: 'Notifications', description: 'Alerts, channels, and delivery rules', icon: Bell, path: '/system/notifications' },
-  { id: 'theme', label: 'Theme', description: 'Choose the active visual theme', icon: Palette, path: '/system/theme' },
-];
-
-function getSystemSectionFromRouteSegment(sectionId?: string): SystemSection | null {
-  if (!sectionId) {
-    return null;
-  }
-
-  if (systemSectionRouteSegments.includes(sectionId as SystemSection)) {
-    return sectionId as SystemSection;
-  }
-
-  return null;
-}
-
-function getSystemSectionPath(section: SystemSection) {
-  return `/system/${section}`;
-}
-
 function createDatabaseSettingsFormState(settings: DatabaseSettingsState): DatabaseSettingsFormState {
   return {
     rawSecondsWindowMinutes: String(settings.rawSecondsWindowMinutes),
@@ -477,7 +413,6 @@ export function SystemPage() {
   const { sectionId } = useParams<{ sectionId?: string }>();
   const routedSystemSection = getSystemSectionFromRouteSegment(sectionId);
   const activeSystemSection = routedSystemSection;
-  const isSystemMenuPage = activeSystemSection === null;
   const updateProgress = useAppStore((state) => state.updateProgress);
   const updateActionPending = useAppStore((state) => state.updateActionPending);
   const startSystemUpdate = useAppStore((state) => state.startSystemUpdate);
@@ -537,18 +472,6 @@ export function SystemPage() {
   const cloudflareTunnelDirtyRef = useRef(false);
   const internetSpeedTestRequestInFlightRef = useRef(false);
   const systemPageRef = useRef<HTMLDivElement>(null);
-
-  const activeSystemSectionItem = activeSystemSection
-    ? systemSectionItems.find((item) => item.id === activeSystemSection) ?? null
-    : null;
-
-  useSetAppBar(
-    isSystemMenuPage
-      ? { title: 'System', description: 'Host status, updates, and logs', backTo: '/' }
-      : activeSystemSectionItem
-        ? { title: activeSystemSectionItem.label, description: activeSystemSectionItem.description, backTo: '/system' }
-        : { title: 'System', description: '', backTo: '/' }
-  );
 
   const loadInternetSpeedTest = useCallback(async () => {
     if (internetSpeedTestRequestInFlightRef.current) {
@@ -1550,85 +1473,6 @@ export function SystemPage() {
       ? 'Disconnect Ethernet'
       : null;
   const isLogsSystemSection = activeSystemSection === 'logs';
-  const systemMenuItems = [
-    ...systemSectionItems.map((item) => ({ ...item, path: getSystemSectionPath(item.id), sectionId: item.id })),
-    ...systemShortcutItems,
-  ];
-
-  const renderSystemSectionMenu = () => (
-    <div className='bg-card'>
-      <div className='flex items-center justify-between px-4 pt-4 pb-3'>
-        <span className='font-mono text-[10px] uppercase tracking-widest text-muted-foreground'>SYSTEM_SECTIONS</span>
-        <span className='border border-primary/20 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] text-primary'>{systemMenuItems.length}_ITEMS</span>
-      </div>
-      <div>
-        {systemMenuItems.map((item, index) => {
-          const Icon = item.icon;
-          const active = 'sectionId' in item && activeSystemSection === item.sectionId;
-
-          return (
-            <div key={item.path}>
-              <button
-                type='button'
-                onClick={() => {
-                  runWithViewTransition(() => {
-                    navigate(item.path);
-                  }, { direction: 'forward' });
-                }}
-                className={cn(
-                  'flex w-full items-center justify-between px-4 py-3.5 text-left transition-all duration-100',
-                  active
-                    ? 'bg-primary/5'
-                    : 'hover:bg-white/5',
-                )}
-              >
-                <div className='flex items-center gap-3.5'>
-                  <div className={cn(
-                    'flex h-10 w-10 shrink-0 items-center justify-center',
-                    active ? 'bg-primary/10' : 'bg-white/5',
-                  )}>
-                    <Icon className={cn('h-5 w-5', active ? 'text-primary opacity-80' : 'opacity-50')} />
-                  </div>
-                  <div>
-                    <div className={cn('font-mono text-sm', active ? 'text-primary' : 'text-foreground')}>{item.label.toLowerCase()}</div>
-                    <div className='font-mono text-[10px] uppercase tracking-tight text-muted-foreground'>{item.description}</div>
-                  </div>
-                </div>
-                <ChevronRight className={cn('h-5 w-5 shrink-0', active ? 'text-primary opacity-80' : 'opacity-50')} />
-              </button>
-              {index < systemMenuItems.length - 1 ? (
-                <div aria-hidden='true' className='px-4'>
-                  <div className='h-px bg-white/5' />
-                </div>
-              ) : null}
-            </div>
-          );
-        })}
-      </div>
-    </div>
-  );
-
-  const renderSystemMenuPage = () => (
-    <div>
-      <div className='grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)] xl:gap-8 2xl:grid-cols-[19rem_minmax(0,1fr)]'>
-        {renderSystemSectionMenu()}
-
-        <div className='hidden bg-card p-5 xl:flex'>
-          <div className='flex min-h-64 flex-col justify-center space-y-3'>
-            <div className='font-mono text-[10px] uppercase tracking-widest text-muted-foreground'>
-              SYSTEM
-            </div>
-            <div className='font-mono text-lg font-bold tracking-tight text-foreground'>
-              Pick a system area
-            </div>
-            <p className='max-w-lg font-mono text-xs leading-5 text-muted-foreground'>
-              Open one system page at a time, then use Back to return to this menu.
-            </p>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
 
   const renderLogsPage = () => (
     <div className='flex min-h-full flex-1 flex-col overflow-hidden'>
@@ -1652,7 +1496,7 @@ export function SystemPage() {
           : 'space-y-6 pb-8'
       )}
     >
-      {isSystemMenuPage ? renderSystemMenuPage() : isLogsSystemSection ? renderLogsPage() : (
+      {isLogsSystemSection ? renderLogsPage() : (
         <>
           {loadError ? (
             <div className='flex items-start gap-3 rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-4 text-sm text-destructive'>

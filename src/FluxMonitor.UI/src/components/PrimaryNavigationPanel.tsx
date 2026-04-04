@@ -1,11 +1,14 @@
 import { ChevronRight } from 'lucide-react';
 import { useLocation, useNavigate } from 'react-router-dom';
-import { primaryNavigationItems, isPrimaryNavigationItemActive, type PrimaryNavigationItem } from '../lib/navigation';
+import { primaryNavigationItems, isPrimaryNavigationItemActive, twoMenuQuery, type PrimaryNavigationItem } from '../lib/navigation';
+import { defaultSystemSection } from '../lib/systemNavigation';
 import { cn } from '../lib/utils';
 import { runWithViewTransition } from '../lib/viewTransitions';
+import { useMediaQuery } from '../hooks/useMediaQuery';
 
 export function PrimaryNavigationPanel({ className }: { className?: string }) {
   const location = useLocation();
+  const canFitTwoMenus = useMediaQuery(twoMenuQuery);
 
   return (
     <nav
@@ -25,8 +28,8 @@ export function PrimaryNavigationPanel({ className }: { className?: string }) {
             key={item.path}
             item={item}
             isActive={isPrimaryNavigationItemActive(item.path, location.pathname)}
-            isExactMatch={location.pathname === item.path}
             isLast={index === primaryNavigationItems.length - 1}
+            canFitTwoMenus={canFitTwoMenus}
           />
         ))}
       </div>
@@ -58,13 +61,13 @@ export function PrimaryNavigationEmptyState({ className }: { className?: string 
 function PrimaryNavigationLink({
   item,
   isActive,
-  isExactMatch,
   isLast,
+  canFitTwoMenus,
 }: {
   item: PrimaryNavigationItem;
   isActive: boolean;
-  isExactMatch: boolean;
   isLast: boolean;
+  canFitTwoMenus: boolean;
 }) {
   const navigate = useNavigate();
   const Icon = item.icon;
@@ -75,12 +78,16 @@ function PrimaryNavigationLink({
         type='button'
         data-active={isActive ? 'true' : undefined}
         onClick={() => {
-          if (isExactMatch) {
+          if (isActive) {
             return;
           }
 
+          const targetPath = canFitTwoMenus && item.path === '/system'
+            ? `/system/${defaultSystemSection}`
+            : item.path;
+
           runWithViewTransition(() => {
-            navigate(item.path);
+            navigate(targetPath);
           }, { direction: 'forward' });
         }}
         className={cn(
