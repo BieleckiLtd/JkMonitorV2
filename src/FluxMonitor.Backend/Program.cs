@@ -47,6 +47,7 @@ builder.Services.AddSingleton<FluxMonitor.Backend.Services.DeviceStateStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.NetworkManagementService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.WifiCredentialStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.BluetoothManagementService>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.DirectAccessStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.DirectAccessService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.HostServicesCatalogService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.ICommandRunner, FluxMonitor.Backend.Services.ProcessCommandRunner>();
@@ -174,6 +175,12 @@ using (var scope = app.Services.CreateScope())
 
     var internetSpeedTestService = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.InternetSpeedTestService>();
     await internetSpeedTestService.InitializeAsync(CancellationToken.None);
+
+    var directAccessStore = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.DirectAccessStore>();
+    await directAccessStore.InitializeAsync(CancellationToken.None);
+
+    var directAccessService = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.DirectAccessService>();
+    await directAccessService.InitializeAsync(CancellationToken.None);
 }
 
 app.UseDefaultFiles();

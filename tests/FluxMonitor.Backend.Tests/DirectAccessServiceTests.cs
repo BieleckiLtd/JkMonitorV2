@@ -15,14 +15,41 @@ public sealed class DirectAccessServiceTests
     }
 
     [Fact]
-    public void BuildDefaultWifiPassword_IsStableForTheSameIdentity()
+    public void BuildWifiSecurityArguments_UsesOpenNetworkWhenPasswordIsBlank()
     {
-        var first = DirectAccessService.BuildDefaultWifiPassword("device-identity-123");
-        var second = DirectAccessService.BuildDefaultWifiPassword("device-identity-123");
+        var arguments = DirectAccessService.BuildWifiSecurityArguments(string.Empty);
 
-        Assert.Equal(first, second);
-        Assert.StartsWith("Flux", first, StringComparison.Ordinal);
-        Assert.Equal(16, first.Length);
+        Assert.Empty(arguments);
+    }
+
+    [Fact]
+    public void BuildWifiSecurityArguments_UsesWpaPskForStandardPasswords()
+    {
+        var arguments = DirectAccessService.BuildWifiSecurityArguments("password1");
+
+        Assert.Equal(
+            [
+                "802-11-wireless-security.key-mgmt",
+                "wpa-psk",
+                "802-11-wireless-security.psk",
+                "password1"
+            ],
+            arguments);
+    }
+
+    [Fact]
+    public void BuildWifiSecurityArguments_UsesSaeForShortPasswords()
+    {
+        var arguments = DirectAccessService.BuildWifiSecurityArguments("abc");
+
+        Assert.Equal(
+            [
+                "802-11-wireless-security.key-mgmt",
+                "sae",
+                "802-11-wireless-security.psk",
+                "abc"
+            ],
+            arguments);
     }
 
     [Fact]
@@ -34,5 +61,22 @@ public sealed class DirectAccessServiceTests
         Assert.Equal("FluxMonitor:Direct", connection!.Name);
         Assert.Equal("802-11-wireless", connection.Type);
         Assert.Equal("wlan0", connection.Device);
+    }
+
+    [Fact]
+    public void NormalizeWifiPassword_PreservesWhitespaceOnlyPassword()
+    {
+        Assert.Equal("   ", DirectAccessStore.NormalizeWifiPassword("   "));
+    }
+
+    [Fact]
+    public void BuildSettingsSavedMessage_ReportsRestartWhenPasswordChangesAndWifiIsActive()
+    {
+        var message = DirectAccessService.BuildSettingsSavedMessage(
+            new DirectAccessStore.DirectAccessSettings(true, DirectAccessStore.AutoStartModeWhenWifiNotConnected, null),
+            new DirectAccessStore.DirectAccessSettings(true, DirectAccessStore.AutoStartModeWhenWifiNotConnected, "abc"),
+            directWifiActive: true);
+
+        Assert.Equal("Direct AP settings were saved. Restart Direct AP Wi-Fi before the new password takes effect.", message);
     }
 }

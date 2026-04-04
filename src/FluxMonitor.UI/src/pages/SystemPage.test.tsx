@@ -170,15 +170,19 @@ describe('SystemPage', () => {
               devices: [],
             },
             directAccess: {
+              settings: {
+                storageAvailable: true,
+                autoStartMode: 'when-wifi-not-connected',
+                wifiPassword: null,
+              },
               wifi: {
                 supported: true,
                 enabled: false,
-                statusMessage: "Turning this on will disconnect 'Home Mesh' and move the Raspberry Pi onto its own hotspot.",
+                statusMessage: "Turning this on will disconnect 'Home Mesh' and move Wi-Fi onto the Raspberry Pi hotspot.",
                 interfaceName: 'wlan0',
                 currentNetworkName: 'Home Mesh',
                 disconnectsCurrentWifi: true,
                 ssid: 'FluxMonitor-test',
-                password: 'FluxABC123456',
                 addresses: [],
               },
               bluetooth: {
@@ -215,6 +219,21 @@ describe('SystemPage', () => {
             success: true,
             enabled: true,
             message: 'Bluetooth direct mode is on.',
+          }),
+        } as Response;
+      }
+
+      if (url === '/api/system/direct-access/settings') {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            message: 'Direct AP settings were saved.',
+            settings: {
+              storageAvailable: true,
+              autoStartMode: 'when-wifi-not-connected',
+              wifiPassword: null,
+            },
           }),
         } as Response;
       }
@@ -354,14 +373,99 @@ describe('SystemPage', () => {
   it('warns before enabling direct wi-fi when that will disconnect the current home network', async () => {
     renderSystemPage('/system/connectivity');
 
-    expect(await screen.findByText(/direct access/i)).toBeInTheDocument();
-    expect(screen.getByText(/takes over home mesh/i)).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: /direct ap/i }));
 
-    fireEvent.click(screen.getByRole('switch', { name: /toggle direct wi-fi/i }));
+    expect(await screen.findByText(/startup behavior/i)).toBeInTheDocument();
+    expect(screen.getByText(/disconnects the pi from/i)).toBeInTheDocument();
 
-    expect(await screen.findByRole('button', { name: /^turn on direct wi-fi$/i })).toBeInTheDocument();
-    expect(screen.getByText(/will disconnect 'Home Mesh'/i)).toBeInTheDocument();
-    expect(screen.getByText(/stop using that home network until direct wi-fi is turned off/i)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('switch', { name: /toggle direct ap wi-fi/i }));
+
+    expect(await screen.findByRole('button', { name: /^turn on direct ap wi-fi$/i })).toBeInTheDocument();
+    expect(screen.getByText(/move wlan0 away from home mesh/i)).toBeInTheDocument();
+    expect(screen.getByText(/stop using that home network until direct ap wi-fi is turned off/i)).toBeInTheDocument();
+  });
+
+  it('saves direct ap startup settings from the collapsible connectivity section', async () => {
+    const baseFetch = globalThis.fetch;
+    let directApSettings = {
+      storageAvailable: true,
+      autoStartMode: 'when-wifi-not-connected',
+      wifiPassword: null as string | null,
+    };
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = typeof input === 'string' ? input : input.toString();
+
+      if (url === '/api/system/connectivity') {
+        const response = await baseFetch(input, init);
+        const data = await response.json() as Record<string, unknown>;
+        const directAccess = data.directAccess as Record<string, unknown>;
+
+        return {
+          ok: true,
+          json: async () => ({
+            ...data,
+            directAccess: {
+              ...directAccess,
+              settings: directApSettings,
+            },
+          }),
+        } as Response;
+      }
+
+      if (url === '/api/system/direct-access/settings' && init?.method === 'POST') {
+        directApSettings = {
+          storageAvailable: true,
+          autoStartMode: 'when-wifi-not-connected',
+          wifiPassword: 'abc',
+        };
+
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            message: 'Direct AP settings were saved.',
+            settings: directApSettings,
+          }),
+        } as Response;
+      }
+
+      return baseFetch(input, init);
+    });
+
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    renderSystemPage('/system/connectivity');
+
+    fireEvent.click(await screen.findByRole('button', { name: /direct ap/i }));
+
+    const modeSelect = await screen.findByRole('combobox', { name: /direct ap startup mode/i });
+    fireEvent.click(modeSelect);
+    expect(await screen.findByRole('option', { name: /^off$/i })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /on when wi-fi not connected/i })).toBeInTheDocument();
+
+    const passwordInput = screen.getByLabelText(/direct ap wi-fi password/i);
+    fireEvent.change(passwordInput, { target: { value: 'abc' } });
+
+    fireEvent.click(screen.getByRole('button', { name: /save direct ap settings/i }));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith('/api/system/direct-access/settings', expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }));
+    });
+
+    const postCall = fetchMock.mock.calls.find(([input, init]) =>
+      input === '/api/system/direct-access/settings' && init && typeof init === 'object' && init.method === 'POST');
+
+    expect(postCall).toBeTruthy();
+    expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
+      autoStartMode: 'when-wifi-not-connected',
+      wifiPassword: 'abc',
+    });
+
+    expect(await screen.findByText(/direct ap settings were saved/i)).toBeInTheDocument();
+    expect(screen.getByText(/saved mode: auto when wi-fi is not connected/i)).toBeInTheDocument();
   });
 
   it('posts database retention changes from the database section', async () => {

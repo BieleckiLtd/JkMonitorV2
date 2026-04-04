@@ -1,8 +1,6 @@
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
-using System.Security.Cryptography;
-using System.Text;
 using System.Text.RegularExpressions;
 using FluxMonitor.Backend.Models;
 
@@ -10,6 +8,7 @@ namespace FluxMonitor.Backend.Services;
 
 public sealed class DirectAccessService(
     ICommandRunner commandRunner,
+    DirectAccessStore directAccessStore,
     NetworkManagementService networkManagementService,
     BluetoothManagementService bluetoothManagementService,
     ILogger<DirectAccessService> logger)
@@ -22,36 +21,83 @@ public sealed class DirectAccessService(
         @"[^A-Za-z0-9_-]+",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+    public async Task InitializeAsync(CancellationToken cancellationToken = default)
+    {
+        await directAccessStore.InitializeAsync(cancellationToken);
+        await ReconcileStartupStateAsync(cancellationToken);
+    }
+
     public async Task<DirectAccessSnapshot> GetSnapshotAsync(
         NetworkConnectivitySnapshot network,
         BluetoothRuntimeSnapshot bluetooth,
         CancellationToken cancellationToken = default)
     {
+        var settings = await directAccessStore.GetSettingsAsync(cancellationToken);
+
         if (!OperatingSystem.IsLinux())
         {
-            return BuildUnsupportedSnapshot("Direct access is supported on Linux hosts with NetworkManager.", bluetooth);
+            return BuildUnsupportedSnapshot(
+                "Direct AP is supported on Linux hosts with NetworkManager.",
+                settings,
+                bluetooth);
         }
 
         var toolCheck = await RunNmcliAsync(["--version"], cancellationToken);
         if (!toolCheck.Succeeded)
         {
             logger.LogDebug(
-                "Direct access snapshot could not check nmcli availability. StdOut={StandardOutput}. StdErr={ErrorOutput}.",
+                "Direct AP snapshot could not check nmcli availability. StdOut={StandardOutput}. StdErr={ErrorOutput}.",
                 toolCheck.StandardOutput,
                 toolCheck.ErrorOutput);
-            return BuildUnsupportedSnapshot("NetworkManager command-line tools are not available on this host.", bluetooth);
+            return BuildUnsupportedSnapshot(
+                "NetworkManager command-line tools are not available on this host.",
+                settings,
+                bluetooth);
         }
 
         var activeConnections = await GetActiveConnectionsAsync(cancellationToken);
-        var wifiTask = BuildWifiSnapshotAsync(network, activeConnections, cancellationToken);
+        var wifiTask = BuildWifiSnapshotAsync(network, activeConnections, settings, cancellationToken);
         var bluetoothTask = BuildBluetoothSnapshotAsync(bluetooth, activeConnections, cancellationToken);
 
         await Task.WhenAll(wifiTask, bluetoothTask);
 
         return new DirectAccessSnapshot
         {
+            Settings = ToSettingsSnapshot(settings),
             Wifi = await wifiTask,
             Bluetooth = await bluetoothTask
+        };
+    }
+
+    public async Task<SaveDirectAccessSettingsResult> SaveSettingsAsync(
+        string? autoStartMode,
+        string? wifiPassword,
+        CancellationToken cancellationToken = default)
+    {
+        var currentSettings = await directAccessStore.GetSettingsAsync(cancellationToken);
+
+        try
+        {
+            await directAccessStore.SaveSettingsAsync(autoStartMode, wifiPassword, cancellationToken);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
+        {
+            return new SaveDirectAccessSettingsResult
+            {
+                Success = false,
+                Message = exception.Message,
+                Settings = ToSettingsSnapshot(currentSettings)
+            };
+        }
+
+        var updatedSettings = await directAccessStore.GetSettingsAsync(cancellationToken);
+        var directWifiActive = await IsDirectWifiActiveAsync(cancellationToken);
+
+        return new SaveDirectAccessSettingsResult
+        {
+            Success = true,
+            Message = BuildSettingsSavedMessage(currentSettings, updatedSettings, directWifiActive),
+            Settings = ToSettingsSnapshot(updatedSettings)
         };
     }
 
@@ -63,7 +109,7 @@ public sealed class DirectAccessService(
             {
                 Success = false,
                 Enabled = false,
-                Message = "Direct Wi-Fi is supported on Linux hosts with NetworkManager."
+                Message = "Direct AP Wi-Fi is supported on Linux hosts with NetworkManager."
             };
         }
 
@@ -86,7 +132,7 @@ public sealed class DirectAccessService(
             {
                 Success = false,
                 Enabled = false,
-                Message = "No Wi-Fi interface is available for direct access."
+                Message = "No Wi-Fi interface is available for Direct AP."
             };
         }
 
@@ -106,43 +152,34 @@ public sealed class DirectAccessService(
                 }
             }
 
-            var settings = await GetWifiProfileSettingsAsync(cancellationToken);
-            var profileExists = await ConnectionProfileExistsAsync(WifiProfileName, cancellationToken);
-            var result = profileExists
-                ? await RunNmcliAsync(["connection", "up", "id", WifiProfileName, "ifname", interfaceName], cancellationToken)
-                : await RunNmcliAsync(
-                    [
-                        "device",
-                        "wifi",
-                        "hotspot",
-                        "ifname",
-                        interfaceName,
-                        "con-name",
-                        WifiProfileName,
-                        "ssid",
-                        settings.Ssid,
-                        "password",
-                        settings.Password
-                    ],
-                    cancellationToken);
-
-            if (!result.Succeeded)
+            var settings = await directAccessStore.GetSettingsAsync(cancellationToken);
+            var configureResult = await EnsureWifiProfileAsync(interfaceName, settings, cancellationToken);
+            if (!configureResult.Succeeded)
             {
                 return new DirectAccessCommandResult
                 {
                     Success = false,
                     Enabled = false,
-                    Message = BuildCommandFailureMessage(result, "Direct Wi-Fi could not be turned on.")
+                    Message = BuildCommandFailureMessage(configureResult, "Direct AP Wi-Fi could not be configured.")
                 };
             }
 
-            await TrySetConnectionAutoconnectAsync(WifiProfileName, enabled: false, cancellationToken);
+            var upResult = await RunNmcliAsync(["connection", "up", "id", WifiProfileName, "ifname", interfaceName], cancellationToken);
+            if (!upResult.Succeeded)
+            {
+                return new DirectAccessCommandResult
+                {
+                    Success = false,
+                    Enabled = false,
+                    Message = BuildCommandFailureMessage(upResult, "Direct AP Wi-Fi could not be turned on.")
+                };
+            }
 
             return new DirectAccessCommandResult
             {
                 Success = true,
                 Enabled = true,
-                Message = $"Direct Wi-Fi is on. Join '{settings.Ssid}' to reach this Raspberry Pi without the home router."
+                Message = BuildWifiEnabledMessage(settings)
             };
         }
 
@@ -153,7 +190,7 @@ public sealed class DirectAccessService(
             {
                 Success = true,
                 Enabled = false,
-                Message = "Direct Wi-Fi is already off."
+                Message = "Direct AP Wi-Fi is already off."
             };
         }
 
@@ -164,7 +201,7 @@ public sealed class DirectAccessService(
             {
                 Success = false,
                 Enabled = true,
-                Message = BuildCommandFailureMessage(downResult, "Direct Wi-Fi could not be turned off.")
+                Message = BuildCommandFailureMessage(downResult, "Direct AP Wi-Fi could not be turned off.")
             };
         }
 
@@ -172,7 +209,7 @@ public sealed class DirectAccessService(
         {
             Success = true,
             Enabled = false,
-            Message = "Direct Wi-Fi is off."
+            Message = "Direct AP Wi-Fi is off."
         };
     }
 
@@ -184,7 +221,7 @@ public sealed class DirectAccessService(
             {
                 Success = false,
                 Enabled = false,
-                Message = "Direct Bluetooth access is supported on Linux hosts with BlueZ and NetworkManager."
+                Message = "Direct AP Bluetooth is supported on Linux hosts with BlueZ and NetworkManager."
             };
         }
 
@@ -206,7 +243,7 @@ public sealed class DirectAccessService(
             {
                 Success = false,
                 Enabled = false,
-                Message = bluetoothState.StatusMessage ?? "No Bluetooth adapter is available for direct access."
+                Message = bluetoothState.StatusMessage ?? "No Bluetooth adapter is available for Direct AP."
             };
         }
 
@@ -226,42 +263,16 @@ public sealed class DirectAccessService(
                 }
             }
 
-            var profileExists = await ConnectionProfileExistsAsync(BluetoothProfileName, cancellationToken);
-            if (!profileExists)
+            var configureResult = await EnsureBluetoothProfileAsync(cancellationToken);
+            if (!configureResult.Succeeded)
             {
-                var addResult = await RunNmcliAsync(
-                    [
-                        "connection",
-                        "add",
-                        "type",
-                        "bluetooth",
-                        "con-name",
-                        BluetoothProfileName,
-                        "autoconnect",
-                        "no",
-                        "ifname",
-                        BluetoothInterfaceName,
-                        "bluetooth.type",
-                        "nap",
-                        "ipv4.method",
-                        "shared",
-                        "ipv6.method",
-                        "shared"
-                    ],
-                    cancellationToken);
-
-                if (!addResult.Succeeded)
+                return new DirectAccessCommandResult
                 {
-                    return new DirectAccessCommandResult
-                    {
-                        Success = false,
-                        Enabled = false,
-                        Message = BuildCommandFailureMessage(addResult, "Bluetooth direct mode could not be created.")
-                    };
-                }
+                    Success = false,
+                    Enabled = false,
+                    Message = BuildCommandFailureMessage(configureResult, "Direct AP Bluetooth could not be configured.")
+                };
             }
-
-            await TrySetConnectionAutoconnectAsync(BluetoothProfileName, enabled: false, cancellationToken);
 
             var visibilityResult = await bluetoothManagementService.SetDirectAccessVisibilityAsync(enabled: true, cancellationToken);
             if (!visibilityResult.Success)
@@ -281,7 +292,7 @@ public sealed class DirectAccessService(
                 {
                     Success = false,
                     Enabled = false,
-                    Message = BuildCommandFailureMessage(upResult, "Bluetooth direct mode could not be turned on.")
+                    Message = BuildCommandFailureMessage(upResult, "Direct AP Bluetooth could not be turned on.")
                 };
             }
 
@@ -290,7 +301,7 @@ public sealed class DirectAccessService(
             {
                 Success = true,
                 Enabled = true,
-                Message = $"Bluetooth direct mode is on. Pair with '{adapterState.Alias ?? Environment.MachineName}' and join the PAN connection to reach this Raspberry Pi."
+                Message = $"Direct AP Bluetooth is on. Pair with '{adapterState.Alias ?? Environment.MachineName}' and join the PAN connection."
             };
         }
 
@@ -306,7 +317,7 @@ public sealed class DirectAccessService(
             {
                 Success = false,
                 Enabled = true,
-                Message = BuildCommandFailureMessage(downResult, "Bluetooth direct mode could not be turned off.")
+                Message = BuildCommandFailureMessage(downResult, "Direct AP Bluetooth could not be turned off.")
             };
         }
 
@@ -324,7 +335,7 @@ public sealed class DirectAccessService(
         {
             Success = true,
             Enabled = false,
-            Message = "Bluetooth direct mode is off."
+            Message = "Direct AP Bluetooth is off."
         };
     }
 
@@ -349,12 +360,6 @@ public sealed class DirectAccessService(
         return $"{prefix}{normalizedHostName}";
     }
 
-    internal static string BuildDefaultWifiPassword(string stableIdentity)
-    {
-        var hash = SHA256.HashData(Encoding.UTF8.GetBytes($"FluxMonitorDirectWifi::{stableIdentity}"));
-        return $"Flux{Convert.ToHexString(hash)[..12]}";
-    }
-
     internal static ActiveConnectionInfo? ParseActiveConnectionLine(string line)
     {
         var fields = NetworkManagementService.SplitNmcliFields(line);
@@ -369,15 +374,127 @@ public sealed class DirectAccessService(
             Device: fields[2].Trim());
     }
 
-    private static DirectAccessSnapshot BuildUnsupportedSnapshot(string message, BluetoothRuntimeSnapshot bluetooth)
+    internal static string BuildSettingsSavedMessage(
+        DirectAccessStore.DirectAccessSettings previousSettings,
+        DirectAccessStore.DirectAccessSettings updatedSettings,
+        bool directWifiActive)
+    {
+        var passwordChanged = !string.Equals(
+            previousSettings.WifiPassword,
+            updatedSettings.WifiPassword,
+            StringComparison.Ordinal);
+
+        if (passwordChanged && directWifiActive)
+        {
+            return "Direct AP settings were saved. Restart Direct AP Wi-Fi before the new password takes effect.";
+        }
+
+        return "Direct AP settings were saved.";
+    }
+
+    internal static IReadOnlyList<string> BuildWifiSecurityArguments(string? wifiPassword)
+    {
+        if (string.IsNullOrEmpty(wifiPassword))
+        {
+            return [];
+        }
+
+        return ShouldUseWpaPskSecurity(wifiPassword)
+            ? [
+                "802-11-wireless-security.key-mgmt",
+                "wpa-psk",
+                "802-11-wireless-security.psk",
+                wifiPassword
+            ]
+            : [
+                "802-11-wireless-security.key-mgmt",
+                "sae",
+                "802-11-wireless-security.psk",
+                wifiPassword
+            ];
+    }
+
+    private async Task ReconcileStartupStateAsync(CancellationToken cancellationToken)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return;
+        }
+
+        var toolCheck = await RunNmcliAsync(["--version"], cancellationToken);
+        if (!toolCheck.Succeeded)
+        {
+            logger.LogDebug(
+                "Skipping Direct AP startup reconciliation because nmcli is unavailable. StdOut={StandardOutput}. StdErr={ErrorOutput}.",
+                toolCheck.StandardOutput,
+                toolCheck.ErrorOutput);
+            return;
+        }
+
+        var settings = await directAccessStore.GetSettingsAsync(cancellationToken);
+        if (!string.Equals(
+            settings.AutoStartMode,
+            DirectAccessStore.AutoStartModeWhenWifiNotConnected,
+            StringComparison.Ordinal))
+        {
+            logger.LogDebug("Direct AP startup reconciliation skipped because auto-start mode is {AutoStartMode}.", settings.AutoStartMode);
+            return;
+        }
+
+        var network = await networkManagementService.GetSnapshotAsync(cancellationToken);
+        if (IsWifiConnected(network))
+        {
+            logger.LogInformation("Direct AP startup reconciliation skipped because Wi-Fi is already connected.");
+            return;
+        }
+
+        var activeConnections = await GetActiveConnectionsAsync(cancellationToken);
+
+        if (IsConnectionActive(activeConnections, WifiProfileName))
+        {
+            logger.LogInformation("Wi-Fi is not connected at startup, but Direct AP Wi-Fi is already active.");
+        }
+        else
+        {
+            logger.LogInformation("Wi-Fi is not connected at startup. Enabling Direct AP Wi-Fi.");
+
+            var wifiResult = await SetWifiEnabledAsync(enabled: true, cancellationToken);
+            if (!wifiResult.Success)
+            {
+                logger.LogWarning("Direct AP startup could not enable Wi-Fi. Message={Message}", wifiResult.Message);
+            }
+        }
+
+        if (IsConnectionActive(activeConnections, BluetoothProfileName))
+        {
+            logger.LogInformation("Wi-Fi is not connected at startup, but Direct AP Bluetooth is already active.");
+        }
+        else
+        {
+            logger.LogInformation("Wi-Fi is not connected at startup. Enabling Direct AP Bluetooth.");
+
+            var bluetoothResult = await SetBluetoothEnabledAsync(enabled: true, cancellationToken);
+            if (!bluetoothResult.Success)
+            {
+                logger.LogWarning("Direct AP startup could not enable Bluetooth. Message={Message}", bluetoothResult.Message);
+            }
+        }
+    }
+
+    private static DirectAccessSnapshot BuildUnsupportedSnapshot(
+        string message,
+        DirectAccessStore.DirectAccessSettings settings,
+        BluetoothRuntimeSnapshot bluetooth)
     {
         return new DirectAccessSnapshot
         {
+            Settings = ToSettingsSnapshot(settings),
             Wifi = new WifiDirectAccessSnapshot
             {
                 Supported = false,
                 Enabled = false,
-                StatusMessage = message
+                StatusMessage = message,
+                Ssid = BuildDefaultWifiSsid(Environment.MachineName)
             },
             Bluetooth = new BluetoothDirectAccessSnapshot
             {
@@ -393,13 +510,14 @@ public sealed class DirectAccessService(
     private async Task<WifiDirectAccessSnapshot> BuildWifiSnapshotAsync(
         NetworkConnectivitySnapshot network,
         IReadOnlyList<ActiveConnectionInfo> activeConnections,
+        DirectAccessStore.DirectAccessSettings settings,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var interfaceName = ResolveWifiInterfaceName(network);
         var enabled = IsConnectionActive(activeConnections, WifiProfileName);
         var currentWifi = network.WifiInterfaces.FirstOrDefault(wifiInterface => !string.IsNullOrWhiteSpace(wifiInterface.ConnectedSsid));
         var currentNetworkName = enabled ? null : currentWifi?.ConnectedSsid;
-        var settings = await GetWifiProfileSettingsAsync(cancellationToken);
 
         if (!network.Supported)
         {
@@ -407,9 +525,8 @@ public sealed class DirectAccessService(
             {
                 Supported = false,
                 Enabled = false,
-                StatusMessage = network.StatusMessage ?? "Wi-Fi direct access is unavailable on this host.",
-                Ssid = settings.Ssid,
-                Password = settings.Password
+                StatusMessage = network.StatusMessage ?? "Direct AP Wi-Fi is unavailable on this host.",
+                Ssid = BuildDefaultWifiSsid(Environment.MachineName)
             };
         }
 
@@ -419,9 +536,8 @@ public sealed class DirectAccessService(
             {
                 Supported = false,
                 Enabled = false,
-                StatusMessage = "No Wi-Fi interface is available for direct access.",
-                Ssid = settings.Ssid,
-                Password = settings.Password
+                StatusMessage = "No Wi-Fi interface is available for Direct AP.",
+                Ssid = BuildDefaultWifiSsid(Environment.MachineName)
             };
         }
 
@@ -430,17 +546,18 @@ public sealed class DirectAccessService(
             Supported = true,
             Enabled = enabled,
             StatusMessage = enabled
-                ? "Direct Wi-Fi is on. Devices can join the Raspberry Pi directly over its hotspot."
+                ? string.IsNullOrEmpty(settings.WifiPassword)
+                    ? "Direct AP Wi-Fi is on with no password."
+                    : "Direct AP Wi-Fi is on with a password."
                 : network.WifiPowered == false
-                    ? "Turning this on powers the Wi-Fi radio and starts a dedicated hotspot on the Raspberry Pi."
+                    ? "Turning this on powers the Wi-Fi radio and starts the Raspberry Pi hotspot."
                     : !string.IsNullOrWhiteSpace(currentNetworkName)
-                        ? $"Turning this on will disconnect '{currentNetworkName}' and move the Raspberry Pi onto its own hotspot."
+                        ? $"Turning this on will disconnect '{currentNetworkName}' and move Wi-Fi onto the Raspberry Pi hotspot."
                         : "Creates a local Wi-Fi hotspot directly on the Raspberry Pi.",
             InterfaceName = interfaceName,
             CurrentNetworkName = currentNetworkName,
             DisconnectsCurrentWifi = !enabled && !string.IsNullOrWhiteSpace(currentNetworkName),
-            Ssid = settings.Ssid,
-            Password = settings.Password,
+            Ssid = BuildDefaultWifiSsid(Environment.MachineName),
             Addresses = enabled ? GetInterfaceAddresses(interfaceName) : []
         };
     }
@@ -460,7 +577,7 @@ public sealed class DirectAccessService(
             {
                 Supported = false,
                 Enabled = false,
-                StatusMessage = adapterState.StatusMessage ?? bluetooth.StatusMessage ?? "Bluetooth direct access is unavailable on this host.",
+                StatusMessage = adapterState.StatusMessage ?? bluetooth.StatusMessage ?? "Direct AP Bluetooth is unavailable on this host.",
                 DeviceName = deviceName,
                 RequiresPairing = true,
                 Discoverable = false,
@@ -473,10 +590,10 @@ public sealed class DirectAccessService(
             Supported = true,
             Enabled = enabled,
             StatusMessage = enabled
-                ? "Bluetooth direct mode is on. Pair from your device settings and join the PAN connection."
+                ? "Direct AP Bluetooth is on. Pair from your device settings and join the PAN connection."
                 : !adapterState.Powered
                     ? "Turning this on powers Bluetooth, makes the Raspberry Pi discoverable, and starts a Bluetooth PAN."
-                    : "Keeps the Raspberry Pi on its current network while nearby devices connect over Bluetooth PAN. Your phone or laptop must support Bluetooth PAN.",
+                    : "Keeps the Raspberry Pi reachable over Bluetooth PAN when your phone or laptop supports it.",
             InterfaceName = BluetoothInterfaceName,
             DeviceName = deviceName,
             RequiresPairing = true,
@@ -492,7 +609,7 @@ public sealed class DirectAccessService(
         if (!result.Succeeded)
         {
             logger.LogDebug(
-                "Direct access could not list active NetworkManager connections. StdOut={StandardOutput}. StdErr={ErrorOutput}.",
+                "Direct AP could not list active NetworkManager connections. StdOut={StandardOutput}. StdErr={ErrorOutput}.",
                 result.StandardOutput,
                 result.ErrorOutput);
             return [];
@@ -507,72 +624,134 @@ public sealed class DirectAccessService(
             .ToArray();
     }
 
-    private async Task<bool> ConnectionProfileExistsAsync(string profileName, CancellationToken cancellationToken)
+    private async Task<bool> IsDirectWifiActiveAsync(CancellationToken cancellationToken)
     {
+        var activeConnections = await GetActiveConnectionsAsync(cancellationToken);
+        return IsConnectionActive(activeConnections, WifiProfileName);
+    }
+
+    private async Task<NetworkManagementService.ProcessResult> EnsureWifiProfileAsync(
+        string interfaceName,
+        DirectAccessStore.DirectAccessSettings settings,
+        CancellationToken cancellationToken)
+    {
+        var deleteResult = await DeleteConnectionProfileIfExistsAsync(WifiProfileName, cancellationToken);
+        if (!deleteResult.Succeeded)
+        {
+            return deleteResult;
+        }
+
+        var arguments = new List<string>
+        {
+            "connection",
+            "add",
+            "type",
+            "wifi",
+            "ifname",
+            interfaceName,
+            "con-name",
+            WifiProfileName,
+            "autoconnect",
+            "no",
+            "802-11-wireless.ssid",
+            BuildDefaultWifiSsid(Environment.MachineName),
+            "802-11-wireless.mode",
+            "ap",
+            "ipv4.method",
+            "shared",
+            "ipv6.method",
+            "shared"
+        };
+
+        arguments.AddRange(BuildWifiSecurityArguments(settings.WifiPassword));
+
+        return await RunNmcliAsync(arguments, cancellationToken);
+    }
+
+    private async Task<NetworkManagementService.ProcessResult> EnsureBluetoothProfileAsync(CancellationToken cancellationToken)
+    {
+        var deleteResult = await DeleteConnectionProfileIfExistsAsync(BluetoothProfileName, cancellationToken);
+        if (!deleteResult.Succeeded)
+        {
+            return deleteResult;
+        }
+
+        return await RunNmcliAsync(
+            [
+                "connection",
+                "add",
+                "type",
+                "bluetooth",
+                "con-name",
+                BluetoothProfileName,
+                "autoconnect",
+                "no",
+                "ifname",
+                BluetoothInterfaceName,
+                "bluetooth.type",
+                "nap",
+                "ipv4.method",
+                "shared",
+                "ipv6.method",
+                "shared"
+            ],
+            cancellationToken);
+    }
+
+    private async Task<NetworkManagementService.ProcessResult> DeleteConnectionProfileIfExistsAsync(
+        string profileName,
+        CancellationToken cancellationToken)
+    {
+        var activeConnections = await GetActiveConnectionsAsync(cancellationToken);
+        if (IsConnectionActive(activeConnections, profileName))
+        {
+            var downResult = await RunNmcliAsync(["connection", "down", "id", profileName], cancellationToken);
+            if (!downResult.Succeeded)
+            {
+                return downResult;
+            }
+        }
+
         var result = await RunNmcliAsync(["--terse", "--fields", "NAME", "connection", "show"], cancellationToken);
         if (!result.Succeeded)
         {
-            return false;
+            return result;
         }
 
-        return result.StandardOutput
+        var exists = result.StandardOutput
             .Replace("\r", string.Empty, StringComparison.Ordinal)
             .Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries)
             .Any(name => string.Equals(name, profileName, StringComparison.OrdinalIgnoreCase));
-    }
 
-    private async Task<WifiProfileSettings> GetWifiProfileSettingsAsync(CancellationToken cancellationToken)
-    {
-        var fallback = BuildDefaultWifiProfileSettings();
-        var result = await RunNmcliAsync(
-            ["--show-secrets", "--get-values", "802-11-wireless.ssid,802-11-wireless-security.psk", "connection", "show", WifiProfileName],
-            cancellationToken);
-
-        if (!result.Succeeded)
+        if (!exists)
         {
-            return fallback;
+            return new NetworkManagementService.ProcessResult(true, string.Empty, string.Empty, 0);
         }
 
-        var values = result.StandardOutput
-            .Replace("\r", string.Empty, StringComparison.Ordinal)
-            .Split('\n', StringSplitOptions.TrimEntries);
-
-        return new WifiProfileSettings(
-            Ssid: string.IsNullOrWhiteSpace(values.ElementAtOrDefault(0)) ? fallback.Ssid : values[0].Trim(),
-            Password: string.IsNullOrWhiteSpace(values.ElementAtOrDefault(1)) ? fallback.Password : values[1].Trim());
+        return await RunNmcliAsync(["connection", "delete", "id", profileName], cancellationToken);
     }
 
-    private static WifiProfileSettings BuildDefaultWifiProfileSettings()
+    private static DirectAccessSettingsSnapshot ToSettingsSnapshot(DirectAccessStore.DirectAccessSettings settings)
     {
-        var stableIdentity = ReadStableDeviceIdentity();
-        return new WifiProfileSettings(
-            Ssid: BuildDefaultWifiSsid(Environment.MachineName),
-            Password: BuildDefaultWifiPassword(stableIdentity));
-    }
-
-    private static string ReadStableDeviceIdentity()
-    {
-        foreach (var path in new[] { "/etc/machine-id", "/var/lib/dbus/machine-id" })
+        return new DirectAccessSettingsSnapshot
         {
-            if (!File.Exists(path))
-            {
-                continue;
-            }
+            StorageAvailable = settings.StorageAvailable,
+            AutoStartMode = settings.AutoStartMode,
+            WifiPassword = settings.WifiPassword
+        };
+    }
 
-            var value = File.ReadAllText(path).Trim();
-            if (!string.IsNullOrWhiteSpace(value))
-            {
-                return value;
-            }
-        }
+    private static string BuildWifiEnabledMessage(DirectAccessStore.DirectAccessSettings settings)
+    {
+        var ssid = BuildDefaultWifiSsid(Environment.MachineName);
+        return string.IsNullOrEmpty(settings.WifiPassword)
+            ? $"Direct AP Wi-Fi is on. Join '{ssid}' with no password."
+            : $"Direct AP Wi-Fi is on. Join '{ssid}' with the configured password.";
+    }
 
-        var macAddress = NetworkInterface.GetAllNetworkInterfaces()
-            .Select(networkInterface => networkInterface.GetPhysicalAddress()?.ToString())
-            .FirstOrDefault(address => !string.IsNullOrWhiteSpace(address));
-
-        return string.IsNullOrWhiteSpace(macAddress)
-            ? Environment.MachineName
-            : macAddress;
+    private static bool IsWifiConnected(NetworkConnectivitySnapshot network)
+    {
+        return network.WifiInterfaces.Any(wifiInterface => !string.IsNullOrWhiteSpace(wifiInterface.ConnectedSsid));
     }
 
     private static string? ResolveWifiInterfaceName(NetworkConnectivitySnapshot network)
@@ -585,6 +764,12 @@ public sealed class DirectAccessService(
     private static bool IsConnectionActive(IReadOnlyList<ActiveConnectionInfo> activeConnections, string profileName)
     {
         return activeConnections.Any(connection => string.Equals(connection.Name, profileName, StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool ShouldUseWpaPskSecurity(string wifiPassword)
+    {
+        return (wifiPassword.Length >= 8 && wifiPassword.Length <= 63)
+            || (wifiPassword.Length == 64 && wifiPassword.All(Uri.IsHexDigit));
     }
 
     private static IReadOnlyList<string> GetInterfaceAddresses(string interfaceName)
@@ -601,22 +786,6 @@ public sealed class DirectAccessService(
             .OrderBy(address => address.Contains(':') ? 1 : 0)
             .ThenBy(address => address, StringComparer.OrdinalIgnoreCase)
             .ToArray();
-    }
-
-    private async Task TrySetConnectionAutoconnectAsync(string profileName, bool enabled, CancellationToken cancellationToken)
-    {
-        var result = await RunNmcliAsync(
-            ["connection", "modify", profileName, "connection.autoconnect", enabled ? "yes" : "no"],
-            cancellationToken);
-
-        if (!result.Succeeded)
-        {
-            logger.LogDebug(
-                "Direct access profile autoconnect update failed. Profile={ProfileName}. StdOut={StandardOutput}. StdErr={ErrorOutput}.",
-                profileName,
-                result.StandardOutput,
-                result.ErrorOutput);
-        }
     }
 
     private async Task<NetworkManagementService.ProcessResult> RunNmcliAsync(IReadOnlyList<string> arguments, CancellationToken cancellationToken)
@@ -665,6 +834,4 @@ public sealed class DirectAccessService(
     }
 
     internal sealed record ActiveConnectionInfo(string Name, string Type, string Device);
-
-    private sealed record WifiProfileSettings(string Ssid, string Password);
 }

@@ -194,9 +194,20 @@ public sealed record class BluetoothDeviceSnapshot
 
 public sealed record class DirectAccessSnapshot
 {
+    public required DirectAccessSettingsSnapshot Settings { get; init; }
+
     public required WifiDirectAccessSnapshot Wifi { get; init; }
 
     public required BluetoothDirectAccessSnapshot Bluetooth { get; init; }
+}
+
+public sealed record class DirectAccessSettingsSnapshot
+{
+    public bool StorageAvailable { get; init; }
+
+    public required string AutoStartMode { get; init; }
+
+    public string? WifiPassword { get; init; }
 }
 
 public sealed record class WifiDirectAccessSnapshot
@@ -214,8 +225,6 @@ public sealed record class WifiDirectAccessSnapshot
     public bool DisconnectsCurrentWifi { get; init; }
 
     public string? Ssid { get; init; }
-
-    public string? Password { get; init; }
 
     public IReadOnlyList<string> Addresses { get; init; } = [];
 }
@@ -248,4 +257,13 @@ public sealed record class DirectAccessCommandResult
     public bool Enabled { get; init; }
 
     public required string Message { get; init; }
+}
+
+public sealed record class SaveDirectAccessSettingsResult
+{
+    public bool Success { get; init; }
+
+    public required string Message { get; init; }
+
+    public required DirectAccessSettingsSnapshot Settings { get; init; }
 }

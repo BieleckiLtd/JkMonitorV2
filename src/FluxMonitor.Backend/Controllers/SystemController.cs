@@ -95,6 +95,18 @@ public sealed class SystemController(
         return result.Success ? Ok(result) : BadRequest(result);
     }
 
+    [HttpPost("direct-access/settings")]
+    public async Task<ActionResult<SaveDirectAccessSettingsResult>> SaveDirectAccessSettings(
+        [FromBody] SaveDirectAccessSettingsRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await directAccessService.SaveSettingsAsync(
+            request.AutoStartMode,
+            request.WifiPassword,
+            cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
     [HttpGet("cloudflare-tunnel")]
     public async Task<ActionResult<CloudflareTunnelStatusSnapshot>> GetCloudflareTunnelStatus(CancellationToken cancellationToken)
     {
@@ -528,6 +540,7 @@ public sealed record EthernetDisconnectRequest(string InterfaceName);
 
 public sealed record BluetoothPowerRequest(bool Enabled);
 public sealed record DirectAccessToggleRequest(bool Enabled);
+public sealed record SaveDirectAccessSettingsRequest(string AutoStartMode, string? WifiPassword);
 public sealed record StopServiceRequest(string Name);
 
 file sealed class UpdateProgressStreamEnvelope
