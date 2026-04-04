@@ -12,7 +12,7 @@ export function MainMenuPage() {
     <div className='pb-8'>
 
       <div className='grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)] xl:gap-8 2xl:grid-cols-[19rem_minmax(0,1fr)]'>
-        <div className='bg-card border border-white/5'>
+        <div className='bg-card'>
           <div className='flex items-center justify-between px-4 pt-4 pb-3'>
             <span className='font-mono text-[10px] uppercase tracking-widest text-muted-foreground'>NAVIGATION</span>
             <span className='border border-primary/20 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] text-primary'>{primaryNavigationItems.length}_LIVE</span>
@@ -24,7 +24,7 @@ export function MainMenuPage() {
           </div>
         </div>
 
-        <div className='hidden border border-white/5 bg-card/75 p-5 xl:flex'>
+        <div className='hidden bg-card p-5 xl:flex'>
           <div className='flex min-h-64 flex-col justify-center space-y-3'>
             <div className='font-mono text-[10px] uppercase tracking-widest text-muted-foreground'>
               SYSTEM_NAV
