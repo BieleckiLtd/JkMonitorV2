@@ -54,18 +54,18 @@ function MainMenuLink({ item, isLast }: { item: PrimaryNavigationItem; isLast: b
             navigate(item.path);
           }, { direction: 'forward' });
         }}
-        className='flex w-full items-center justify-between px-4 py-3 text-left transition-all duration-100 hover:bg-white/5'
+        className='flex w-full items-center justify-between px-4 py-3.5 text-left transition-all duration-100 hover:bg-white/5'
       >
-        <div className='flex items-center gap-3'>
-          <div className='flex h-8 w-8 shrink-0 items-center justify-center bg-white/5'>
-            <Icon className='h-4 w-4 opacity-50' />
+        <div className='flex items-center gap-3.5'>
+          <div className='flex h-10 w-10 shrink-0 items-center justify-center bg-white/5'>
+            <Icon className='h-5 w-5 opacity-50' />
           </div>
           <div>
-            <div className='font-mono text-xs text-foreground'>{item.name.toLowerCase()}</div>
-            <div className='font-mono text-[9px] uppercase tracking-tighter text-muted-foreground'>{item.description}</div>
+            <div className='font-mono text-sm text-foreground'>{item.name.toLowerCase()}</div>
+            <div className='font-mono text-[10px] uppercase tracking-tight text-muted-foreground'>{item.description}</div>
           </div>
         </div>
-        <ChevronRight className='h-4 w-4 shrink-0 opacity-50' />
+        <ChevronRight className='h-5 w-5 shrink-0 opacity-50' />
       </button>
       {!isLast ? (
         <div aria-hidden='true' className='px-4'>
