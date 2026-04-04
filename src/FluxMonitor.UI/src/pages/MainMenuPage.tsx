@@ -1,22 +1,19 @@
-import { Activity, ChevronRight } from 'lucide-react';
+import { ChevronRight } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
-import { StackPageHeader } from '../components/StackPageHeader';
+import { useSetAppBar } from '../components/AppBar';
 import { primaryNavigationItems, type PrimaryNavigationItem } from '../lib/navigation';
 import { cn } from '../lib/utils';
 import { runWithViewTransition } from '../lib/viewTransitions';
 
 export function MainMenuPage() {
+  useSetAppBar({ title: 'FLUX_MONITOR', description: '' });
+
   return (
-    <div className='space-y-6 pb-8'>
-      <StackPageHeader
-        title='Main menu'
-        description='Choose an area to open'
-        icon={Activity}
-      />
+    <div className='pb-8'>
 
       <div className='grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)] xl:gap-8 2xl:grid-cols-[19rem_minmax(0,1fr)]'>
-        <div className='bg-card border border-white/5 p-4'>
-          <div className='mb-4 flex items-center justify-between'>
+        <div className='bg-card border border-white/5'>
+          <div className='flex items-center justify-between px-4 pt-4 pb-3'>
             <span className='font-mono text-[10px] uppercase tracking-widest text-muted-foreground'>NAVIGATION</span>
             <span className='border border-primary/20 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] text-primary'>{primaryNavigationItems.length}_LIVE</span>
           </div>
@@ -58,7 +55,7 @@ function MainMenuLink({ item, isLast }: { item: PrimaryNavigationItem; isLast: b
         }, { direction: 'forward' });
       }}
       className={cn(
-        'flex w-full items-center justify-between py-3 text-left transition-all duration-100 hover:bg-white/5',
+        'flex w-full items-center justify-between px-4 py-3 text-left transition-all duration-100 hover:bg-white/5',
         !isLast && 'border-b border-white/5'
       )}
     >

@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
+import { AppBarProvider } from '../components/AppBar';
 import { UpdateLockOverlay } from '../components/UpdateLockOverlay';
 import { useAppStore } from '../store/useAppStore';
 
@@ -81,11 +82,13 @@ export function MainLayout({ children }: { children: ReactNode }) {
     <div className='app-shell flex w-full flex-col font-sans text-foreground'>
       {!hasBlockingUpdateOverlay ? (
         <div className='flex min-w-0 flex-1 flex-col'>
-          <main className='app-main flex min-w-0 flex-1 w-full'>
-            <div className='mx-auto flex min-h-full w-full max-w-none flex-col'>
-              {children}
-            </div>
-          </main>
+          <AppBarProvider>
+            <main className='app-main flex min-w-0 flex-1 w-full'>
+              <div className='mx-auto flex min-h-full w-full max-w-none flex-col'>
+                {children}
+              </div>
+            </main>
+          </AppBarProvider>
         </div>
       ) : null}
       <UpdateLockOverlay />

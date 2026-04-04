@@ -4,7 +4,7 @@ import { faSignal, type IconDefinition } from '@fortawesome/free-solid-svg-icons
 import { Bell, Bluetooth, Cable, ChevronDown, ChevronRight, CircleAlert, Cloud, Cpu, Database, Download, ExternalLink, Gauge, Globe2, HardDrive, Leaf, List, LoaderCircle, Lock, MemoryStick, Palette, RefreshCcw, CheckCircle2, Thermometer, Upload, Usb, Wifi, XCircle } from 'lucide-react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
-import { StackPageHeader } from '../components/StackPageHeader';
+import { useSetAppBar } from '../components/AppBar';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Switch } from '../components/ui/switch';
@@ -536,6 +536,18 @@ export function SystemPage() {
   const cloudflareTunnelDirtyRef = useRef(false);
   const internetSpeedTestRequestInFlightRef = useRef(false);
   const systemPageRef = useRef<HTMLDivElement>(null);
+
+  const activeSystemSectionItem = activeSystemSection
+    ? systemSectionItems.find((item) => item.id === activeSystemSection) ?? null
+    : null;
+
+  useSetAppBar(
+    isSystemMenuPage
+      ? { title: 'System', description: 'Host status, updates, and logs', backTo: '/' }
+      : activeSystemSectionItem
+        ? { title: activeSystemSectionItem.label, description: activeSystemSectionItem.description, backTo: '/system' }
+        : { title: 'System', description: '', backTo: '/' }
+  );
 
   const loadInternetSpeedTest = useCallback(async () => {
     if (internetSpeedTestRequestInFlightRef.current) {
@@ -1536,9 +1548,6 @@ export function SystemPage() {
     : pendingConnectivityAction?.kind === 'disconnect-ethernet'
       ? 'Disconnect Ethernet'
       : null;
-  const activeSystemSectionItem = activeSystemSection
-    ? systemSectionItems.find((item) => item.id === activeSystemSection) ?? systemSectionItems[0]
-    : null;
   const isLogsSystemSection = activeSystemSection === 'logs';
   const systemMenuItems = [
     ...systemSectionItems.map((item) => ({ ...item, path: getSystemSectionPath(item.id), sectionId: item.id })),
@@ -1546,8 +1555,8 @@ export function SystemPage() {
   ];
 
   const renderSystemSectionMenu = () => (
-    <div className='bg-card border border-white/5 p-4'>
-      <div className='mb-4 flex items-center justify-between'>
+    <div className='bg-card border border-white/5'>
+      <div className='flex items-center justify-between px-4 pt-4 pb-3'>
         <span className='font-mono text-[10px] uppercase tracking-widest text-muted-foreground'>SYSTEM_SECTIONS</span>
         <span className='border border-primary/20 bg-primary/10 px-1.5 py-0.5 font-mono text-[9px] text-primary'>{systemMenuItems.length}_ITEMS</span>
       </div>
@@ -1566,7 +1575,7 @@ export function SystemPage() {
                 }, { direction: 'forward' });
               }}
               className={cn(
-                'flex w-full items-center justify-between py-3 text-left transition-all duration-100',
+                'flex w-full items-center justify-between px-4 py-3 text-left transition-all duration-100',
                 active
                   ? 'bg-primary/5'
                   : 'hover:bg-white/5',
@@ -1594,13 +1603,7 @@ export function SystemPage() {
   );
 
   const renderSystemMenuPage = () => (
-    <div className='space-y-6'>
-      <StackPageHeader
-        backTo='/'
-        title='System'
-        description='Host status, updates, and logs'
-      />
-
+    <div>
       <div className='grid gap-6 xl:grid-cols-[18rem_minmax(0,1fr)] xl:gap-8 2xl:grid-cols-[19rem_minmax(0,1fr)]'>
         {renderSystemSectionMenu()}
 
@@ -1622,15 +1625,7 @@ export function SystemPage() {
   );
 
   const renderLogsPage = () => (
-    <div className='flex min-h-full flex-1 flex-col gap-6 overflow-hidden'>
-      {activeSystemSectionItem ? (
-        <StackPageHeader
-          backTo='/system'
-          title={activeSystemSectionItem.label}
-          description={activeSystemSectionItem.description}
-        />
-      ) : null}
-
+    <div className='flex min-h-full flex-1 flex-col overflow-hidden'>
       <div className='flex min-h-0 flex-1 flex-col'>
         <LogsPanel />
       </div>
@@ -1653,14 +1648,6 @@ export function SystemPage() {
     >
       {isSystemMenuPage ? renderSystemMenuPage() : isLogsSystemSection ? renderLogsPage() : (
         <>
-          {activeSystemSectionItem ? (
-            <StackPageHeader
-              backTo='/system'
-              title={activeSystemSectionItem.label}
-              description={activeSystemSectionItem.description}
-            />
-          ) : null}
-
           {loadError ? (
             <div className='flex items-start gap-3 rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-4 text-sm text-destructive'>
               <CircleAlert className='mt-0.5 h-5 w-5 shrink-0' />

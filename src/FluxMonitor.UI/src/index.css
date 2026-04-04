@@ -197,18 +197,39 @@
 
   .app-main {
     padding: 1rem 0.5rem calc(0.75rem + 3.25rem);
+    padding-top: calc(3rem + var(--app-safe-top));
   }
 
   @media (min-width: 640px) {
     .app-main {
       padding: 1.25rem 1rem 1rem;
+      padding-top: calc(3rem + var(--app-safe-top));
     }
   }
 
   @media (min-width: 768px) {
     .app-main {
       padding: 1.5rem;
+      padding-top: calc(3rem + var(--app-safe-top));
     }
+  }
+
+  .app-bar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 50;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    height: 2.75rem;
+    padding: 0 0.75rem;
+    padding-top: var(--app-safe-top);
+    background-color: var(--background);
+    border-bottom: 1px solid rgb(255 255 255 / 5%);
+    transition: transform 200ms ease;
+    will-change: transform;
   }
 
   #root {
@@ -260,9 +281,10 @@
 }
 
 html[data-theme='tactical-slate'] {
-  --app-font-heading: 'Bahnschrift', 'Arial Narrow', 'Segoe UI', system-ui, sans-serif;
-  --app-font-sans: 'Aptos', 'Segoe UI Variable', 'Segoe UI', system-ui, sans-serif;
+  --app-font-heading: 'JetBrains Mono', 'Cascadia Code', monospace;
+  --app-font-sans: 'JetBrains Mono', 'Cascadia Code', monospace;
   --app-font-mono: 'JetBrains Mono', 'Cascadia Code', 'Cascadia Mono', 'Consolas', 'SFMono-Regular', monospace;
+  --radius: 0rem;
 }
 
 html[data-theme='tactical-slate'] body {
@@ -271,88 +293,31 @@ html[data-theme='tactical-slate'] body {
   background-size: 24px 24px;
 }
 
+html[data-theme='tactical-slate'] .app-bar {
+  background-color: #080b10;
+}
+
 html[data-theme='tactical-slate'] .app-shell {
   font-variant-numeric: tabular-nums;
 }
 
-html[data-theme='tactical-slate'] .app-shell::before {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    linear-gradient(180deg, rgb(197 255 65 / 5%), transparent 10rem),
-    repeating-linear-gradient(90deg, transparent 0 111px, rgb(141 147 123 / 7%) 111px 112px),
-    repeating-linear-gradient(180deg, transparent 0 111px, rgb(141 147 123 / 5%) 111px 112px);
-  opacity: 0.18;
-  pointer-events: none;
-}
-
-html[data-theme='tactical-slate'] .app-shell::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  background:
-    radial-gradient(circle at 82% 0%, rgb(197 255 65 / 10%), transparent 16rem),
-    linear-gradient(180deg, transparent, rgb(0 0 0 / 16%));
-  opacity: 0.72;
-  pointer-events: none;
-}
-
-html[data-theme='tactical-slate'] .app-shell > * {
-  position: relative;
-  z-index: 1;
-}
-
 html[data-theme='tactical-slate'] * {
   scrollbar-color: rgb(197 255 65 / 80%) rgb(10 13 18 / 85%);
+  border-radius: 0 !important;
 }
 
 html[data-theme='tactical-slate'] [data-slot='card'],
-html[data-theme='tactical-slate'] [data-slot='stack-page-header'],
-html[data-theme='tactical-slate'] [data-slot='theme-option'],
-html[data-theme='tactical-slate'] [data-slot='main-menu-link'],
-html[data-theme='tactical-slate'] [data-slot='page-hero-shell'],
 html[data-theme='tactical-slate'] [data-slot='data-tile'] {
-  position: relative;
-  overflow: hidden;
-  border-color: color-mix(in srgb, var(--border) 74%, var(--primary) 26%);
-  background:
-    linear-gradient(90deg, rgb(197 255 65 / 11%) 0, rgb(197 255 65 / 3%) 1.6rem, transparent 4rem),
-    linear-gradient(180deg, rgb(255 255 255 / 4%) 0, rgb(0 0 0 / 18%) 100%),
-    color-mix(in srgb, var(--card) 97%, black 3%);
-  box-shadow:
-    0 24px 48px -38px rgb(0 0 0 / 95%),
-    inset 0 1px 0 rgb(255 255 255 / 4%);
-}
-
-html[data-theme='tactical-slate'] [data-slot='card']::before,
-html[data-theme='tactical-slate'] [data-slot='stack-page-header']::before,
-html[data-theme='tactical-slate'] [data-slot='theme-option']::before,
-html[data-theme='tactical-slate'] [data-slot='main-menu-link']::before,
-html[data-theme='tactical-slate'] [data-slot='page-hero-shell']::before,
-html[data-theme='tactical-slate'] [data-slot='data-tile']::before {
-  content: '';
-  position: absolute;
-  inset: 0 auto auto 0;
-  height: 1px;
-  width: min(12rem, 72%);
-  background: linear-gradient(90deg, var(--primary), transparent);
-  opacity: 0.92;
-  pointer-events: none;
+  border-color: rgb(255 255 255 / 5%);
+  background: var(--card);
+  box-shadow: none;
 }
 
 html[data-theme='tactical-slate'] [data-slot='card-title'],
-html[data-theme='tactical-slate'] [data-slot='stack-page-header-title'],
 html[data-theme='tactical-slate'] [data-slot='page-hero-shell'] h2 {
-  font-family: var(--app-font-heading);
+  font-family: var(--app-font-mono);
   font-weight: 700;
-  letter-spacing: -0.04em;
-}
-
-html[data-theme='tactical-slate'] [data-slot='card-description'],
-html[data-theme='tactical-slate'] [data-slot='stack-page-header-description'],
-html[data-theme='tactical-slate'] [data-slot='page-hero-shell'] p {
-  color: color-mix(in srgb, var(--muted-foreground) 86%, white 14%);
+  letter-spacing: -0.02em;
 }
 
 html[data-theme='tactical-slate'] [data-slot='button'],
@@ -360,33 +325,26 @@ html[data-theme='tactical-slate'] [data-slot='badge'],
 html[data-theme='tactical-slate'] [data-slot='input'],
 html[data-theme='tactical-slate'] [data-slot='select-trigger'],
 html[data-theme='tactical-slate'] [data-slot='select-item'],
-html[data-theme='tactical-slate'] [data-slot='select-label'],
-html[data-theme='tactical-slate'] [data-slot='theme-option'],
-html[data-theme='tactical-slate'] [data-slot='main-menu-link'],
-html[data-theme='tactical-slate'] [data-slot='stack-page-header-back'] {
+html[data-theme='tactical-slate'] [data-slot='select-label'] {
   font-family: var(--app-font-mono);
 }
 
-html[data-theme='tactical-slate'] [data-slot='button'],
-html[data-theme='tactical-slate'] [data-slot='stack-page-header-back'] {
-  letter-spacing: 0.08em;
+html[data-theme='tactical-slate'] [data-slot='button'] {
+  letter-spacing: 0.06em;
   text-transform: uppercase;
 }
 
 html[data-theme='tactical-slate'] [data-slot='button'][data-variant='default'] {
-  border-color: rgb(197 255 65 / 28%);
-  background: linear-gradient(180deg, #ddff82 0%, #c5ff41 100%);
+  border-color: transparent;
+  background: #c5ff41;
   color: #090b10;
-  box-shadow:
-    0 0 0 1px rgb(0 0 0 / 36%),
-    0 0 30px rgb(197 255 65 / 18%);
+  box-shadow: none;
 }
 
 html[data-theme='tactical-slate'] [data-slot='button'][data-variant='outline'],
-html[data-theme='tactical-slate'] [data-slot='button'][data-variant='secondary'],
-html[data-theme='tactical-slate'] [data-slot='stack-page-header-back'] {
-  border-color: color-mix(in srgb, var(--border) 70%, var(--primary) 30%);
-  background: color-mix(in srgb, var(--background) 72%, transparent);
+html[data-theme='tactical-slate'] [data-slot='button'][data-variant='secondary'] {
+  border-color: rgb(255 255 255 / 10%);
+  background: transparent;
   color: var(--foreground);
 }
 
@@ -395,42 +353,19 @@ html[data-theme='tactical-slate'] [data-slot='button'][data-variant='link'] {
   color: var(--foreground);
 }
 
-html[data-theme='tactical-slate'] [data-slot='button']:hover,
-html[data-theme='tactical-slate'] [data-slot='stack-page-header-back']:hover,
-html[data-theme='tactical-slate'] [data-slot='theme-option']:hover,
-html[data-theme='tactical-slate'] [data-slot='main-menu-link']:hover {
-  transform: translateY(-1px);
-}
-
 html[data-theme='tactical-slate'] [data-slot='input'],
 html[data-theme='tactical-slate'] [data-slot='select-trigger'],
 html[data-theme='tactical-slate'] [data-slot='select-content'] {
-  border-color: color-mix(in srgb, var(--border) 72%, var(--primary) 28%);
-  background: color-mix(in srgb, var(--background) 82%, black 18%);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 3%);
+  border-color: rgb(255 255 255 / 10%);
+  background: var(--background);
+  box-shadow: none;
 }
 
 html[data-theme='tactical-slate'] [data-slot='select-item']:focus,
 html[data-theme='tactical-slate'] [data-slot='select-item'][data-highlighted],
 html[data-theme='tactical-slate'] [data-slot='select-item']:hover {
-  background: color-mix(in srgb, var(--accent) 72%, var(--primary) 28%);
+  background: rgb(255 255 255 / 5%);
   color: var(--foreground);
-}
-
-html[data-theme='tactical-slate'] [data-slot='theme-option'][data-active='true'],
-html[data-theme='tactical-slate'] [data-slot='main-menu-link']:hover {
-  border-color: color-mix(in srgb, var(--primary) 44%, var(--border) 56%);
-  box-shadow:
-    0 0 0 1px rgb(197 255 65 / 16%),
-    0 18px 36px -32px rgb(197 255 65 / 22%);
-}
-
-html[data-theme='tactical-slate'] [data-slot='page-hero-shell'] .inline-flex {
-  font-family: var(--app-font-mono);
-}
-
-html[data-theme='tactical-slate'] [data-slot='data-tile'] {
-  backdrop-filter: blur(18px);
 }
 
 @keyframes flux-page-out {

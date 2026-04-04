@@ -2,6 +2,7 @@ import { cleanup, render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MainMenuPage } from './MainMenuPage';
+import { AppBarProvider } from '../components/AppBar';
 
 describe('MainMenuPage', () => {
   afterEach(() => {
@@ -11,11 +12,13 @@ describe('MainMenuPage', () => {
   it('renders the main menu with top-level navigation actions', () => {
     render(
       <MemoryRouter>
-        <MainMenuPage />
+        <AppBarProvider>
+          <MainMenuPage />
+        </AppBarProvider>
       </MemoryRouter>
     );
 
-    expect(screen.getByText('Main menu')).toBeInTheDocument();
+    expect(screen.getByText('FLUX_MONITOR')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /system/i })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /monitor/i })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /notifications/i })).not.toBeInTheDocument();

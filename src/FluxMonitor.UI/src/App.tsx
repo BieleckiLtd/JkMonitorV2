@@ -2,7 +2,7 @@ import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-d
 import { useEffect, type ReactNode } from 'react';
 import { useAppStore } from './store/useAppStore';
 import { MainLayout } from './layouts/MainLayout';
-import { StackPageHeader } from './components/StackPageHeader';
+import { useSetAppBar } from './components/AppBar';
 import { getPrimaryNavigationItem } from './lib/navigation';
 import { MainMenuPage } from './pages/MainMenuPage';
 import { SystemPage } from './pages/SystemPage';
@@ -61,7 +61,7 @@ function App() {
           <Route path='/services' element={<PrimaryPage titlePath='/services'><ServicesPage /></PrimaryPage>} />
           <Route path='/notifications' element={<Navigate to='/system/notifications' replace />} />
           <Route path='/settings' element={<Navigate to='/system/theme' replace />} />
-          <Route path='*' element={<div className='text-zinc-500 font-mono p-8 text-center bg-zinc-900/50 rounded-xl border border-zinc-800 border-dashed'>Route not found or Extension not loaded</div>} />
+          <Route path='*' element={<div className='text-muted-foreground font-mono p-8 text-center bg-card border border-white/5'>Route not found or Extension not loaded</div>} />
         </Routes>
       </MainLayout>
     </Router>
@@ -77,26 +77,20 @@ function PrimaryPage({ titlePath, children }: { titlePath: string; children: Rea
     return <Navigate to='/' replace />;
   }
 
+  useSetAppBar({ title: item.name, description: item.description, backTo: '/' });
+
   return (
     <div className='space-y-6 pb-8'>
-      <StackPageHeader
-        backTo='/'
-        title={item.name}
-        description={item.description}
-      />
       {children}
     </div>
   );
 }
 
 function SystemSubpage({ title, description, children }: { title: string; description: string; children: ReactNode }) {
+  useSetAppBar({ title, description, backTo: '/system' });
+
   return (
     <div className='space-y-6 pb-8'>
-      <StackPageHeader
-        backTo='/system'
-        title={title}
-        description={description}
-      />
       {children}
     </div>
   );

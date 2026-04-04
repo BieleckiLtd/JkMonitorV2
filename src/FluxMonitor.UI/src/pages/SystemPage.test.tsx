@@ -2,6 +2,7 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SystemPage } from './SystemPage';
+import { AppBarProvider } from '../components/AppBar';
 
 type MatchMediaMock = MediaQueryList & {
   dispatchChange: (matches: boolean) => void;
@@ -49,13 +50,15 @@ function LocationDisplay() {
 function renderSystemPage(initialEntry = '/system') {
   return render(
     <MemoryRouter initialEntries={[initialEntry]}>
-      <Routes>
-        <Route path='/system' element={<SystemPage />} />
-        <Route path='/system/theme' element={<div>Theme page</div>} />
-        <Route path='/system/notifications' element={<div>Notifications page</div>} />
-        <Route path='/system/:sectionId' element={<SystemPage />} />
-      </Routes>
-      <LocationDisplay />
+      <AppBarProvider>
+        <Routes>
+          <Route path='/system' element={<SystemPage />} />
+          <Route path='/system/theme' element={<div>Theme page</div>} />
+          <Route path='/system/notifications' element={<div>Notifications page</div>} />
+          <Route path='/system/:sectionId' element={<SystemPage />} />
+        </Routes>
+        <LocationDisplay />
+      </AppBarProvider>
     </MemoryRouter>
   );
 }
@@ -270,12 +273,10 @@ describe('SystemPage', () => {
 
     expect(await screen.findByRole('button', { name: /^back$/i })).toBeInTheDocument();
 
-    const root = container.firstElementChild as HTMLElement | null;
+    const root = container.querySelector('.flex.min-h-full.flex-1.flex-col.overflow-hidden') as HTMLElement | null;
     if (!root) {
       throw new Error('Expected the system page root to render.');
     }
-
-    expect(root).toHaveClass('flex', 'min-h-full', 'flex-1', 'flex-col', 'overflow-hidden');
 
     const logsCard = container.querySelector('[data-slot="card"]');
     if (!logsCard) {
