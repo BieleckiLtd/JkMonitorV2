@@ -16,6 +16,7 @@ public sealed class SystemController(
     NetworkManagementService networkManagementService,
     WifiCredentialStore wifiCredentialStore,
     BluetoothManagementService bluetoothManagementService,
+    DirectAccessService directAccessService,
     HostServicesCatalogService hostServicesCatalogService,
     ILogger<SystemController> logger) : ControllerBase
 {
@@ -66,12 +67,32 @@ public sealed class SystemController(
     {
         var network = await networkManagementService.GetSnapshotAsync(cancellationToken);
         var bluetooth = await bluetoothManagementService.GetSnapshotAsync(cancellationToken);
+        var directAccess = await directAccessService.GetSnapshotAsync(network, bluetooth, cancellationToken);
 
         return Ok(new SystemConnectivitySnapshot
         {
             Network = network,
-            Bluetooth = bluetooth
+            Bluetooth = bluetooth,
+            DirectAccess = directAccess
         });
+    }
+
+    [HttpPost("direct-access/wifi")]
+    public async Task<ActionResult<DirectAccessCommandResult>> SetDirectWifiAccess(
+        [FromBody] DirectAccessToggleRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await directAccessService.SetWifiEnabledAsync(request.Enabled, cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpPost("direct-access/bluetooth")]
+    public async Task<ActionResult<DirectAccessCommandResult>> SetDirectBluetoothAccess(
+        [FromBody] DirectAccessToggleRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await directAccessService.SetBluetoothEnabledAsync(request.Enabled, cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
     }
 
     [HttpGet("cloudflare-tunnel")]
@@ -506,6 +527,7 @@ public sealed record WifiPowerRequest(bool Enabled);
 public sealed record EthernetDisconnectRequest(string InterfaceName);
 
 public sealed record BluetoothPowerRequest(bool Enabled);
+public sealed record DirectAccessToggleRequest(bool Enabled);
 public sealed record StopServiceRequest(string Name);
 
 file sealed class UpdateProgressStreamEnvelope

@@ -278,6 +278,42 @@ type BluetoothPowerResult = {
 type SystemConnectivitySnapshot = {
   network: NetworkConnectivitySnapshot;
   bluetooth: BluetoothRuntimeSnapshot;
+  directAccess: DirectAccessSnapshot;
+};
+
+type WifiDirectAccessSnapshot = {
+  supported: boolean;
+  enabled: boolean;
+  statusMessage?: string | null;
+  interfaceName?: string | null;
+  currentNetworkName?: string | null;
+  disconnectsCurrentWifi: boolean;
+  ssid?: string | null;
+  password?: string | null;
+  addresses: string[];
+};
+
+type BluetoothDirectAccessSnapshot = {
+  supported: boolean;
+  enabled: boolean;
+  statusMessage?: string | null;
+  interfaceName?: string | null;
+  deviceName?: string | null;
+  requiresPairing: boolean;
+  discoverable: boolean;
+  pairable: boolean;
+  addresses: string[];
+};
+
+type DirectAccessSnapshot = {
+  wifi: WifiDirectAccessSnapshot;
+  bluetooth: BluetoothDirectAccessSnapshot;
+};
+
+type DirectAccessCommandResult = {
+  success: boolean;
+  enabled: boolean;
+  message: string;
 };
 
 type CloudflareTunnelStatusSnapshot = {
@@ -372,6 +408,16 @@ type PendingConnectivityAction =
     kind: 'disconnect-ethernet';
     interfaceName: string;
     connectionName?: string | null;
+  }
+  | {
+    kind: 'enable-direct-wifi';
+    interfaceName?: string | null;
+    connectionName?: string | null;
+  }
+  | {
+    kind: 'disable-direct-wifi';
+    interfaceName?: string | null;
+    connectionName?: string | null;
   };
 
 type WifiConnectDialogState = {
@@ -463,6 +509,10 @@ export function SystemPage() {
   const [bluetoothScanLoading, setBluetoothScanLoading] = useState(false);
   const [bluetoothPowerLoading, setBluetoothPowerLoading] = useState(false);
   const [bluetoothFeedback, setBluetoothFeedback] = useState<InlineFeedback | null>(null);
+  const [directWifiLoading, setDirectWifiLoading] = useState(false);
+  const [directWifiFeedback, setDirectWifiFeedback] = useState<InlineFeedback | null>(null);
+  const [directBluetoothLoading, setDirectBluetoothLoading] = useState(false);
+  const [directBluetoothFeedback, setDirectBluetoothFeedback] = useState<InlineFeedback | null>(null);
   const [ethernetDisconnectLoading, setEthernetDisconnectLoading] = useState<string | null>(null);
   const [ethernetFeedback, setEthernetFeedback] = useState<InlineFeedback | null>(null);
   const [pendingConnectivityAction, setPendingConnectivityAction] = useState<PendingConnectivityAction | null>(null);
@@ -948,6 +998,60 @@ export function SystemPage() {
     }
   };
 
+  const toggleDirectWifi = async (enabled: boolean) => {
+    setDirectWifiLoading(true);
+    setDirectWifiFeedback(null);
+
+    try {
+      const response = await fetch('/api/system/direct-access/wifi', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+
+      const data = await response.json() as DirectAccessCommandResult;
+      setDirectWifiFeedback({ message: data.message, isError: !response.ok || !data.success });
+
+      if (response.ok && data.success) {
+        await loadConnectivity();
+      }
+    } catch (error) {
+      setDirectWifiFeedback({
+        message: error instanceof Error ? error.message : 'Unable to change direct Wi-Fi mode.',
+        isError: true,
+      });
+    } finally {
+      setDirectWifiLoading(false);
+    }
+  };
+
+  const toggleDirectBluetooth = async (enabled: boolean) => {
+    setDirectBluetoothLoading(true);
+    setDirectBluetoothFeedback(null);
+
+    try {
+      const response = await fetch('/api/system/direct-access/bluetooth', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+
+      const data = await response.json() as DirectAccessCommandResult;
+      setDirectBluetoothFeedback({ message: data.message, isError: !response.ok || !data.success });
+
+      if (response.ok && data.success) {
+        await loadConnectivity();
+      }
+    } catch (error) {
+      setDirectBluetoothFeedback({
+        message: error instanceof Error ? error.message : 'Unable to change direct Bluetooth mode.',
+        isError: true,
+      });
+    } finally {
+      setDirectBluetoothLoading(false);
+    }
+  };
+
   const disconnectEthernet = async (interfaceName: string) => {
     setEthernetDisconnectLoading(interfaceName);
     setEthernetFeedback(null);
@@ -987,6 +1091,33 @@ export function SystemPage() {
     }
 
     void toggleWifiPower();
+  };
+
+  const requestDirectWifiToggle = () => {
+    const directWifi = connectivity?.directAccess.wifi;
+    if (!directWifi?.supported) {
+      return;
+    }
+
+    if (directWifi.enabled) {
+      setPendingConnectivityAction({
+        kind: 'disable-direct-wifi',
+        interfaceName: directWifi.interfaceName,
+        connectionName: directWifi.ssid,
+      });
+      return;
+    }
+
+    if (directWifi.disconnectsCurrentWifi) {
+      setPendingConnectivityAction({
+        kind: 'enable-direct-wifi',
+        interfaceName: directWifi.interfaceName,
+        connectionName: directWifi.currentNetworkName,
+      });
+      return;
+    }
+
+    void toggleDirectWifi(true);
   };
 
   const openWifiConnectDialog = ({
@@ -1073,6 +1204,16 @@ export function SystemPage() {
 
     if (action.kind === 'disable-wifi') {
       await toggleWifiPower();
+      return;
+    }
+
+    if (action.kind === 'enable-direct-wifi') {
+      await toggleDirectWifi(true);
+      return;
+    }
+
+    if (action.kind === 'disable-direct-wifi') {
+      await toggleDirectWifi(false);
       return;
     }
 
@@ -1451,6 +1592,22 @@ export function SystemPage() {
     : connectivity.bluetooth.powered
       ? 'On'
       : 'Off';
+  const directWifi = connectivity?.directAccess.wifi ?? null;
+  const directBluetooth = connectivity?.directAccess.bluetooth ?? null;
+  const directWifiUrls = getDirectAccessUrls(directWifi?.addresses ?? []);
+  const directBluetoothUrls = getDirectAccessUrls(directBluetooth?.addresses ?? []);
+  const directWifiSummary = !directWifi?.supported
+    ? directWifi?.statusMessage ?? 'Unavailable'
+    : directWifi.enabled
+      ? `${directWifi.ssid ?? 'Direct hotspot'}${directWifiUrls[0] ? ` • ${directWifiUrls[0]}` : ''}`
+      : directWifi.currentNetworkName
+        ? `Takes over ${directWifi.currentNetworkName}`
+        : 'Creates a local hotspot on the Pi';
+  const directBluetoothSummary = !directBluetooth?.supported
+    ? directBluetooth?.statusMessage ?? 'Unavailable'
+    : directBluetooth.enabled
+      ? `${directBluetooth.deviceName ?? 'Raspberry Pi'}${directBluetoothUrls[0] ? ` • ${directBluetoothUrls[0]}` : ''}`
+      : 'Bluetooth PAN without leaving the home network';
   const ethernetSummary = activeEthernetInterface
     ? activeEthernetInterface.connectionName
       ? `${activeEthernetInterface.name} • ${activeEthernetInterface.connectionName}`
@@ -1459,16 +1616,28 @@ export function SystemPage() {
   const ethernetStatusLabel = activeEthernetInterface?.connectionState ?? activeEthernetInterface?.status ?? 'Unavailable';
   const pendingConnectivityDialogTitle = pendingConnectivityAction?.kind === 'disable-wifi'
     ? 'Turn off Wi-Fi?'
+    : pendingConnectivityAction?.kind === 'enable-direct-wifi'
+      ? 'Turn on direct Wi-Fi?'
+      : pendingConnectivityAction?.kind === 'disable-direct-wifi'
+        ? 'Turn off direct Wi-Fi?'
     : pendingConnectivityAction?.kind === 'disconnect-ethernet'
       ? 'Disconnect Ethernet?'
       : null;
   const pendingConnectivityDialogDescription = pendingConnectivityAction?.kind === 'disable-wifi'
     ? `You are currently using ${pendingConnectivityAction.connectionName ?? pendingConnectivityAction.interfaceName}. Turning Wi-Fi off will disconnect this device from that network.`
+    : pendingConnectivityAction?.kind === 'enable-direct-wifi'
+      ? `Turning on direct Wi-Fi will move ${pendingConnectivityAction.interfaceName ?? 'the Wi-Fi radio'} away from ${pendingConnectivityAction.connectionName ?? 'its current network'}. The Raspberry Pi will stop using that home network until direct Wi-Fi is turned off or you join another Wi-Fi network.`
+      : pendingConnectivityAction?.kind === 'disable-direct-wifi'
+        ? `If this page is currently reaching the Raspberry Pi through ${pendingConnectivityAction.connectionName ?? 'its direct hotspot'}, turning it off will interrupt this session immediately.`
     : pendingConnectivityAction?.kind === 'disconnect-ethernet'
       ? `Disconnect ${pendingConnectivityAction.interfaceName}${pendingConnectivityAction.connectionName ? ` from ${pendingConnectivityAction.connectionName}` : ''}? This can interrupt access to the device.`
       : null;
   const pendingConnectivityConfirmLabel = pendingConnectivityAction?.kind === 'disable-wifi'
     ? 'Turn off Wi-Fi'
+    : pendingConnectivityAction?.kind === 'enable-direct-wifi'
+      ? 'Turn on direct Wi-Fi'
+      : pendingConnectivityAction?.kind === 'disable-direct-wifi'
+        ? 'Turn off direct Wi-Fi'
     : pendingConnectivityAction?.kind === 'disconnect-ethernet'
       ? 'Disconnect Ethernet'
       : null;
@@ -2037,6 +2206,161 @@ export function SystemPage() {
                         {connectivityError}
                       </div>
                     ) : null}
+
+                    <div className='rounded-[28px] border border-border/70 bg-background/35 px-4 py-4'>
+                      <div className='flex flex-wrap items-start justify-between gap-3'>
+                        <div className='space-y-1'>
+                          <div className='text-sm font-semibold text-foreground'>Direct access</div>
+                          <div className='max-w-2xl text-xs leading-5 text-muted-foreground'>
+                            Bring the Raspberry Pi up as its own access point when the router is unavailable. Wi-Fi direct takes over the Wi-Fi radio. Bluetooth direct uses PAN, so the Pi can stay on the home network if your phone or laptop supports Bluetooth PAN.
+                          </div>
+                        </div>
+                        <div className='rounded-full border border-border/70 bg-background/70 px-3 py-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
+                          Router-free fallback
+                        </div>
+                      </div>
+
+                      <div className='mt-4 grid gap-3 lg:grid-cols-2'>
+                        <div className='rounded-3xl border border-border/70 bg-background/45 px-4 py-4'>
+                          <div className='flex items-start justify-between gap-3'>
+                            <div className='min-w-0'>
+                              <div className='flex items-center gap-2'>
+                                <Wifi className='h-4 w-4 text-muted-foreground' />
+                                <div className='text-sm font-semibold text-foreground'>Direct Wi-Fi</div>
+                              </div>
+                              <div className='mt-1 text-xs text-muted-foreground'>{directWifiSummary}</div>
+                            </div>
+                            <div className='flex items-center gap-2'>
+                              {directWifiLoading ? <LoaderCircle className='h-4 w-4 animate-spin text-primary' /> : null}
+                              <Switch
+                                checked={Boolean(directWifi?.supported) && Boolean(directWifi?.enabled)}
+                                disabled={directWifiLoading || !(directWifi?.supported ?? false)}
+                                onCheckedChange={() => requestDirectWifiToggle()}
+                                aria-label='Toggle direct Wi-Fi'
+                              />
+                            </div>
+                          </div>
+
+                          {directWifiFeedback ? (
+                            <div className={cn(
+                              'mt-4 rounded-2xl border px-3 py-2 text-xs',
+                              directWifiFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                            )}>
+                              {directWifiFeedback.message}
+                            </div>
+                          ) : null}
+
+                          {!directWifi?.supported ? (
+                            <div className='mt-4 rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
+                              {directWifi?.statusMessage ?? 'Direct Wi-Fi is unavailable on this host.'}
+                            </div>
+                          ) : (
+                            <div className='mt-4 space-y-3'>
+                              {directWifi.disconnectsCurrentWifi ? (
+                                <div className='rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-100'>
+                                  Turning this on disconnects the Pi from <span className='font-semibold'>{directWifi.currentNetworkName}</span> and moves Wi-Fi onto its own hotspot.
+                                </div>
+                              ) : null}
+
+                              <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-3'>
+                                <div className='grid gap-3 sm:grid-cols-2'>
+                                  <DetailTile label='SSID' value={directWifi.ssid ?? 'Pending'} />
+                                  <DetailTile label='Password' value={directWifi.password ?? 'Pending'} />
+                                </div>
+                              </div>
+
+                              {directWifiUrls.length > 0 ? (
+                                <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-3'>
+                                  <div className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Open After Joining</div>
+                                  <div className='mt-2 space-y-2'>
+                                    {directWifiUrls.map((url) => (
+                                      <div key={url} className='break-all text-xs font-mono text-foreground/90'>{url}</div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
+                                  {directWifi.enabled
+                                    ? 'Waiting for hotspot addresses from the Wi-Fi interface.'
+                                    : 'Turn this on, join the hotspot, then reopen the app at the address shown here.'}
+                                </div>
+                              )}
+
+                              <div className='text-xs leading-5 text-muted-foreground'>
+                                {directWifi.statusMessage ?? 'Creates a local Wi-Fi hotspot on the Raspberry Pi.'}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        <div className='rounded-3xl border border-border/70 bg-background/45 px-4 py-4'>
+                          <div className='flex items-start justify-between gap-3'>
+                            <div className='min-w-0'>
+                              <div className='flex items-center gap-2'>
+                                <Bluetooth className='h-4 w-4 text-muted-foreground' />
+                                <div className='text-sm font-semibold text-foreground'>Direct Bluetooth</div>
+                              </div>
+                              <div className='mt-1 text-xs text-muted-foreground'>{directBluetoothSummary}</div>
+                            </div>
+                            <div className='flex items-center gap-2'>
+                              {directBluetoothLoading ? <LoaderCircle className='h-4 w-4 animate-spin text-primary' /> : null}
+                              <Switch
+                                checked={Boolean(directBluetooth?.supported) && Boolean(directBluetooth?.enabled)}
+                                disabled={directBluetoothLoading || !(directBluetooth?.supported ?? false)}
+                                onCheckedChange={() => void toggleDirectBluetooth(!(directBluetooth?.enabled ?? false))}
+                                aria-label='Toggle direct Bluetooth'
+                              />
+                            </div>
+                          </div>
+
+                          {directBluetoothFeedback ? (
+                            <div className={cn(
+                              'mt-4 rounded-2xl border px-3 py-2 text-xs',
+                              directBluetoothFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                            )}>
+                              {directBluetoothFeedback.message}
+                            </div>
+                          ) : null}
+
+                          {!directBluetooth?.supported ? (
+                            <div className='mt-4 rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
+                              {directBluetooth?.statusMessage ?? 'Direct Bluetooth is unavailable on this host.'}
+                            </div>
+                          ) : (
+                            <div className='mt-4 space-y-3'>
+                              <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-3'>
+                                <div className='grid gap-3 sm:grid-cols-2'>
+                                  <DetailTile label='Pair As' value={directBluetooth.deviceName ?? 'Raspberry Pi'} />
+                                  <DetailTile
+                                    label='Pairing State'
+                                    value={directBluetooth.discoverable && directBluetooth.pairable ? 'Discoverable and pairable' : 'Hidden'}
+                                  />
+                                </div>
+                              </div>
+
+                              {directBluetoothUrls.length > 0 ? (
+                                <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-3'>
+                                  <div className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Open After Pairing</div>
+                                  <div className='mt-2 space-y-2'>
+                                    {directBluetoothUrls.map((url) => (
+                                      <div key={url} className='break-all text-xs font-mono text-foreground/90'>{url}</div>
+                                    ))}
+                                  </div>
+                                </div>
+                              ) : (
+                                <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
+                                  Turn this on, pair from your device Bluetooth settings, join the PAN connection, then reopen the app at the address shown here.
+                                </div>
+                              )}
+
+                              <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-3 text-xs leading-5 text-muted-foreground'>
+                                {directBluetooth.statusMessage ?? 'Bluetooth direct mode keeps the Pi on its existing network, but your client must support Bluetooth PAN.'}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    </div>
 
                     <div className='space-y-3'>
                       <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
@@ -3060,6 +3384,19 @@ function getWifiConnectRequestErrorMessage(error: unknown) {
   }
 
   return error instanceof Error ? error.message : 'Unable to connect to the selected Wi-Fi network.';
+}
+
+function getDirectAccessUrls(addresses: string[]) {
+  const protocol = window.location.protocol || 'http:';
+  const port = window.location.port || '5074';
+
+  return addresses
+    .map((address) => address.trim())
+    .filter(Boolean)
+    .filter((address) => !address.startsWith('fe80:'))
+    .map((address) => address.includes(':') ? `[${address}]` : address)
+    .map((host) => `${protocol}//${host}${port ? `:${port}` : ''}`)
+    .filter((url, index, all) => all.indexOf(url) === index);
 }
 
 function getWifiSignalState(percent: number | null, disabled: boolean) {

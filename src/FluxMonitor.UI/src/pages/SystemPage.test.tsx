@@ -145,7 +145,23 @@ describe('SystemPage', () => {
               wifiPowered: true,
               hasInternetAccess: true,
               ethernetInterfaces: [],
-              wifiInterfaces: [],
+              wifiInterfaces: [
+                {
+                  name: 'wlan0',
+                  description: 'Wireless adapter',
+                  status: 'up',
+                  macAddress: 'AA:BB:CC:DD:EE:FF',
+                  addresses: ['192.168.1.25'],
+                  speedMbps: 72,
+                  connectionName: 'Home Mesh',
+                  connectionState: 'connected',
+                  connectedSsid: 'Home Mesh',
+                  connectedBssid: 'AA:AA:AA:AA:AA:AA',
+                  signalPercent: 78,
+                  security: 'WPA2',
+                  signalBars: '▂▄▆█',
+                },
+              ],
             },
             bluetooth: {
               supported: true,
@@ -153,6 +169,52 @@ describe('SystemPage', () => {
               powered: true,
               devices: [],
             },
+            directAccess: {
+              wifi: {
+                supported: true,
+                enabled: false,
+                statusMessage: "Turning this on will disconnect 'Home Mesh' and move the Raspberry Pi onto its own hotspot.",
+                interfaceName: 'wlan0',
+                currentNetworkName: 'Home Mesh',
+                disconnectsCurrentWifi: true,
+                ssid: 'FluxMonitor-test',
+                password: 'FluxABC123456',
+                addresses: [],
+              },
+              bluetooth: {
+                supported: true,
+                enabled: false,
+                statusMessage: 'Keeps the Raspberry Pi on its current network while nearby devices connect over Bluetooth PAN.',
+                interfaceName: 'btnap0',
+                deviceName: 'FluxMonitor Pi',
+                requiresPairing: true,
+                discoverable: false,
+                pairable: false,
+                addresses: [],
+              },
+            },
+          }),
+        } as Response;
+      }
+
+      if (url === '/api/system/direct-access/wifi') {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            enabled: true,
+            message: 'Direct Wi-Fi is on.',
+          }),
+        } as Response;
+      }
+
+      if (url === '/api/system/direct-access/bluetooth') {
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            enabled: true,
+            message: 'Bluetooth direct mode is on.',
           }),
         } as Response;
       }
@@ -287,6 +349,19 @@ describe('SystemPage', () => {
     expect(screen.queryByText(/application logs/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/browse captured log entries filtered by severity and time range/i)).not.toBeInTheDocument();
     expect(screen.getByTestId('location-display')).toHaveTextContent('/system/logs');
+  });
+
+  it('warns before enabling direct wi-fi when that will disconnect the current home network', async () => {
+    renderSystemPage('/system/connectivity');
+
+    expect(await screen.findByText(/direct access/i)).toBeInTheDocument();
+    expect(screen.getByText(/takes over home mesh/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('switch', { name: /toggle direct wi-fi/i }));
+
+    expect(await screen.findByRole('button', { name: /^turn on direct wi-fi$/i })).toBeInTheDocument();
+    expect(screen.getByText(/will disconnect 'Home Mesh'/i)).toBeInTheDocument();
+    expect(screen.getByText(/stop using that home network until direct wi-fi is turned off/i)).toBeInTheDocument();
   });
 
   it('posts database retention changes from the database section', async () => {

@@ -5,6 +5,8 @@ public sealed record class SystemConnectivitySnapshot
     public required NetworkConnectivitySnapshot Network { get; init; }
 
     public required BluetoothRuntimeSnapshot Bluetooth { get; init; }
+
+    public required DirectAccessSnapshot DirectAccess { get; init; }
 }
 
 public sealed record class NetworkConnectivitySnapshot
@@ -188,4 +190,62 @@ public sealed record class BluetoothDeviceSnapshot
     public int? Rssi { get; init; }
 
     public IReadOnlyList<string> AdvertisedServiceUuids { get; init; } = [];
+}
+
+public sealed record class DirectAccessSnapshot
+{
+    public required WifiDirectAccessSnapshot Wifi { get; init; }
+
+    public required BluetoothDirectAccessSnapshot Bluetooth { get; init; }
+}
+
+public sealed record class WifiDirectAccessSnapshot
+{
+    public bool Supported { get; init; }
+
+    public bool Enabled { get; init; }
+
+    public string? StatusMessage { get; init; }
+
+    public string? InterfaceName { get; init; }
+
+    public string? CurrentNetworkName { get; init; }
+
+    public bool DisconnectsCurrentWifi { get; init; }
+
+    public string? Ssid { get; init; }
+
+    public string? Password { get; init; }
+
+    public IReadOnlyList<string> Addresses { get; init; } = [];
+}
+
+public sealed record class BluetoothDirectAccessSnapshot
+{
+    public bool Supported { get; init; }
+
+    public bool Enabled { get; init; }
+
+    public string? StatusMessage { get; init; }
+
+    public string? InterfaceName { get; init; }
+
+    public string? DeviceName { get; init; }
+
+    public bool RequiresPairing { get; init; }
+
+    public bool Discoverable { get; init; }
+
+    public bool Pairable { get; init; }
+
+    public IReadOnlyList<string> Addresses { get; init; } = [];
+}
+
+public sealed record class DirectAccessCommandResult
+{
+    public bool Success { get; init; }
+
+    public bool Enabled { get; init; }
+
+    public required string Message { get; init; }
 }

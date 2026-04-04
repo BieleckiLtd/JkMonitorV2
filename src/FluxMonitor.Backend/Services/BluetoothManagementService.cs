@@ -334,6 +334,132 @@ public sealed class BluetoothManagementService(ILogger<BluetoothManagementServic
         };
     }
 
+    internal async Task<BluetoothAdapterAccessState> GetDirectAccessStateAsync(CancellationToken cancellationToken = default)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return new BluetoothAdapterAccessState(
+                Supported: false,
+                Powered: false,
+                Discoverable: false,
+                Pairable: false,
+                Alias: null,
+                StatusMessage: "Bluetooth direct access is supported on Linux hosts with BlueZ.");
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var adapter = await TryGetAdapterAsync();
+        if (adapter is null)
+        {
+            return new BluetoothAdapterAccessState(
+                Supported: false,
+                Powered: false,
+                Discoverable: false,
+                Pairable: false,
+                Alias: null,
+                StatusMessage: "No Bluetooth adapter was detected.");
+        }
+
+        var powered = await SafeGetValueAsync(() => adapter.GetAsync<bool>("Powered"));
+        var discoverable = await SafeGetValueAsync(() => adapter.GetAsync<bool>("Discoverable"));
+        var pairable = await SafeGetValueAsync(() => adapter.GetAsync<bool>("Pairable"));
+        var alias = await SafeGetStringAsync(() => adapter.GetAsync<string>("Alias"));
+
+        return new BluetoothAdapterAccessState(
+            Supported: true,
+            Powered: powered,
+            Discoverable: discoverable,
+            Pairable: pairable,
+            Alias: alias,
+            StatusMessage: DescribeRfkillBlockState(
+                GetBluetoothRfkillState()?.SoftBlocked ?? false,
+                GetBluetoothRfkillState()?.HardBlocked ?? false));
+    }
+
+    internal async Task<BluetoothAdapterVisibilityResult> SetDirectAccessVisibilityAsync(
+        bool enabled,
+        CancellationToken cancellationToken = default)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return new BluetoothAdapterVisibilityResult(
+                Success: false,
+                Powered: false,
+                Discoverable: false,
+                Pairable: false,
+                Message: "Bluetooth direct access is supported on Linux hosts with BlueZ.");
+        }
+
+        var adapter = await TryGetAdapterAsync();
+        if (adapter is null)
+        {
+            return new BluetoothAdapterVisibilityResult(
+                Success: false,
+                Powered: false,
+                Discoverable: false,
+                Pairable: false,
+                Message: "No Bluetooth adapter was detected.");
+        }
+
+        try
+        {
+            var powered = await SafeGetValueAsync(() => adapter.GetAsync<bool>("Powered"));
+            if (!powered)
+            {
+                return new BluetoothAdapterVisibilityResult(
+                    Success: false,
+                    Powered: false,
+                    Discoverable: false,
+                    Pairable: false,
+                    Message: "Bluetooth is powered off.");
+            }
+
+            if (enabled)
+            {
+                await TrySetAdapterPropertyAsync(adapter, "DiscoverableTimeout", 0u);
+                await TrySetAdapterPropertyAsync(adapter, "PairableTimeout", 0u);
+            }
+
+            await adapter.SetAsync("Pairable", enabled);
+            await adapter.SetAsync("Discoverable", enabled);
+
+            var state = await GetDirectAccessStateAsync(cancellationToken);
+            var success = state.Supported
+                && state.Powered
+                && state.Discoverable == enabled
+                && state.Pairable == enabled;
+
+            return new BluetoothAdapterVisibilityResult(
+                Success: success,
+                Powered: state.Powered,
+                Discoverable: state.Discoverable,
+                Pairable: state.Pairable,
+                Message: success
+                    ? enabled
+                        ? "Bluetooth pairing mode is ready."
+                        : "Bluetooth pairing mode is off."
+                    : enabled
+                        ? "Bluetooth could not stay discoverable and pairable."
+                        : "Bluetooth pairing mode did not turn off cleanly.");
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(
+                exception,
+                "Failed to change Bluetooth direct-access visibility. Enabled={Enabled}. ErrorMessage={ErrorMessage}.",
+                enabled,
+                exception.Message);
+
+            var state = await GetDirectAccessStateAsync(cancellationToken);
+            return new BluetoothAdapterVisibilityResult(
+                Success: false,
+                Powered: state.Powered,
+                Discoverable: state.Discoverable,
+                Pairable: state.Pairable,
+                Message: exception.Message);
+        }
+    }
+
     private async Task<Adapter?> TryGetAdapterAsync()
     {
         try
@@ -639,6 +765,22 @@ if persist_root.exists():
         }
     }
 
+    private async Task TrySetAdapterPropertyAsync(Adapter adapter, string propertyName, object value)
+    {
+        try
+        {
+            await adapter.SetAsync(propertyName, value);
+        }
+        catch (Exception exception)
+        {
+            logger.LogDebug(
+                exception,
+                "Bluetooth adapter property update failed. Property={PropertyName}. ErrorMessage={ErrorMessage}.",
+                propertyName,
+                exception.Message);
+        }
+    }
+
     private static async Task<bool> SafeGetValueAsync(Func<Task<bool>> getter)
     {
         try
@@ -703,4 +845,19 @@ if persist_root.exists():
         string StandardOutput,
         string ErrorOutput,
         int? ExitCode);
+
+    internal sealed record BluetoothAdapterAccessState(
+        bool Supported,
+        bool Powered,
+        bool Discoverable,
+        bool Pairable,
+        string? Alias,
+        string? StatusMessage);
+
+    internal sealed record BluetoothAdapterVisibilityResult(
+        bool Success,
+        bool Powered,
+        bool Discoverable,
+        bool Pairable,
+        string Message);
 }
