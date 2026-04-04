@@ -1566,36 +1566,41 @@ export function SystemPage() {
           const active = 'sectionId' in item && activeSystemSection === item.sectionId;
 
           return (
-            <button
-              key={item.path}
-              type='button'
-              onClick={() => {
-                runWithViewTransition(() => {
-                  navigate(item.path);
-                }, { direction: 'forward' });
-              }}
-              className={cn(
-                'flex w-full items-center justify-between px-4 py-3 text-left transition-all duration-100',
-                active
-                  ? 'bg-primary/5'
-                  : 'hover:bg-white/5',
-                index < systemMenuItems.length - 1 && 'border-b border-white/5',
-              )}
-            >
-              <div className='flex items-center gap-3'>
-                <div className={cn(
-                  'flex h-8 w-8 shrink-0 items-center justify-center',
-                  active ? 'bg-primary/10' : 'bg-white/5',
-                )}>
-                  <Icon className={cn('h-4 w-4', active ? 'text-primary opacity-80' : 'opacity-50')} />
+            <div key={item.path}>
+              <button
+                type='button'
+                onClick={() => {
+                  runWithViewTransition(() => {
+                    navigate(item.path);
+                  }, { direction: 'forward' });
+                }}
+                className={cn(
+                  'flex w-full items-center justify-between px-4 py-3 text-left transition-all duration-100',
+                  active
+                    ? 'bg-primary/5'
+                    : 'hover:bg-white/5',
+                )}
+              >
+                <div className='flex items-center gap-3'>
+                  <div className={cn(
+                    'flex h-8 w-8 shrink-0 items-center justify-center',
+                    active ? 'bg-primary/10' : 'bg-white/5',
+                  )}>
+                    <Icon className={cn('h-4 w-4', active ? 'text-primary opacity-80' : 'opacity-50')} />
+                  </div>
+                  <div>
+                    <div className={cn('font-mono text-xs', active ? 'text-primary' : 'text-foreground')}>{item.label.toLowerCase()}</div>
+                    <div className='font-mono text-[9px] uppercase tracking-tighter text-muted-foreground'>{item.description}</div>
+                  </div>
                 </div>
-                <div>
-                  <div className={cn('font-mono text-xs', active ? 'text-primary' : 'text-foreground')}>{item.label.toLowerCase()}</div>
-                  <div className='font-mono text-[9px] uppercase tracking-tighter text-muted-foreground'>{item.description}</div>
+                <ChevronRight className={cn('h-4 w-4 shrink-0', active ? 'text-primary opacity-80' : 'opacity-50')} />
+              </button>
+              {index < systemMenuItems.length - 1 ? (
+                <div aria-hidden='true' className='px-4'>
+                  <div className='h-px bg-white/5' />
                 </div>
-              </div>
-              <ChevronRight className={cn('h-4 w-4 shrink-0', active ? 'text-primary opacity-80' : 'opacity-50')} />
-            </button>
+              ) : null}
+            </div>
           );
         })}
       </div>

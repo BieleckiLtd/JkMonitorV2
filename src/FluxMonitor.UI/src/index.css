@@ -196,21 +196,21 @@
   }
 
   .app-main {
-    padding: 1rem 0.5rem calc(0.75rem + 3.25rem);
-    padding-top: calc(3rem + var(--app-safe-top));
+    --app-page-gutter: 0.5rem;
+    padding: calc(2.75rem + var(--app-safe-top) + var(--app-page-gutter)) var(--app-page-gutter) calc(0.75rem + 3.25rem);
   }
 
   @media (min-width: 640px) {
     .app-main {
-      padding: 1.25rem 1rem 1rem;
-      padding-top: calc(3rem + var(--app-safe-top));
+      --app-page-gutter: 1rem;
+      padding: calc(2.75rem + var(--app-safe-top) + var(--app-page-gutter)) var(--app-page-gutter) 1rem;
     }
   }
 
   @media (min-width: 768px) {
     .app-main {
-      padding: 1.5rem;
-      padding-top: calc(3rem + var(--app-safe-top));
+      --app-page-gutter: 1.5rem;
+      padding: calc(2.75rem + var(--app-safe-top) + var(--app-page-gutter)) var(--app-page-gutter);
     }
   }
 
