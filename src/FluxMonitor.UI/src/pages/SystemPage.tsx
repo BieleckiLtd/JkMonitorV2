@@ -556,7 +556,6 @@ export function SystemPage() {
   const [bluetoothPowerLoading, setBluetoothPowerLoading] = useState(false);
   const [bluetoothFeedback, setBluetoothFeedback] = useState<InlineFeedback | null>(null);
   const [sshToggleLoading, setSshToggleLoading] = useState(false);
-  const [sshFeedback, setSshFeedback] = useState<InlineFeedback | null>(null);
   const [localAccessModeLoading, setLocalAccessModeLoading] = useState(false);
   const [localAccessModeFeedback, setLocalAccessModeFeedback] = useState<InlineFeedback | null>(null);
   const [localAccessWifiPassword, setLocalAccessWifiPassword] = useState('');
@@ -1356,7 +1355,6 @@ export function SystemPage() {
 
   const toggleSshAccess = async (enabled: boolean) => {
     setSshToggleLoading(true);
-    setSshFeedback(null);
 
     try {
       const response = await fetch('/api/system/ssh', {
@@ -1366,16 +1364,12 @@ export function SystemPage() {
       });
 
       const data = await response.json() as SshServiceCommandResult;
-      setSshFeedback({ message: data.message, isError: !response.ok || !data.success });
 
       if (response.ok && data.success) {
         await loadConnectivity();
       }
     } catch (error) {
-      setSshFeedback({
-        message: error instanceof Error ? error.message : 'Unable to change SSH access.',
-        isError: true,
-      });
+      console.error('Unable to change SSH access.', error);
     } finally {
       setSshToggleLoading(false);
     }
@@ -1669,22 +1663,6 @@ export function SystemPage() {
   const localAccessSectionOpen = expandedConnectivitySection === 'local-access';
   const sshAccess = connectivity?.ssh ?? null;
   const sshToggleChecked = Boolean(sshAccess?.enabled || sshAccess?.active);
-  const sshStateLabel = !sshAccess?.supported
-    ? 'Unavailable'
-    : sshAccess.active
-      ? sshAccess.enabled
-        ? 'Enabled and running'
-        : 'Running until reboot'
-      : sshAccess.enabled
-        ? 'Enabled'
-        : 'Disabled';
-  const sshStatusMessage = !sshAccess?.supported
-    ? sshAccess?.statusMessage ?? 'SSH controls are unavailable on this host.'
-    : !sshAccess.enabled && !sshAccess.active
-      ? sshAccess.statusMessage ?? 'SSH is off.'
-      : !sshAccess.enabled && sshAccess.active
-        ? sshAccess.statusMessage ?? 'SSH is running, but it will not start automatically after reboot.'
-        : null;
   const wifiSummary = connectedWifiInterface?.connectedSsid
     ? connectedWifiInterface.connectedSsid
     : wifiInterfaces.length > 0
@@ -2269,7 +2247,7 @@ export function SystemPage() {
 
                     <div className='space-y-3'>
                       <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
-                        <div className='flex flex-wrap items-center gap-3 px-4 py-4 sm:flex-nowrap'>
+                        <div className='flex items-center gap-3 px-4 py-4'>
                           <button
                             type='button'
                             onClick={() => void toggleConnectivitySection('wifi')}
@@ -2287,7 +2265,7 @@ export function SystemPage() {
                             </div>
                           </button>
 
-                          <div className='ml-auto flex w-full shrink-0 items-center justify-end gap-2 sm:ml-0 sm:w-auto'>
+                          <div className='flex shrink-0 items-center justify-end'>
                             <Switch
                               checked={Boolean(connectivity?.network.supported) && wifiPowered !== false}
                               disabled={wifiPowerLoading || !(connectivity?.network.supported ?? false)}
@@ -2434,7 +2412,7 @@ export function SystemPage() {
                       </div>
 
                       <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
-                        <div className='flex flex-wrap items-center gap-3 px-4 py-4 sm:flex-nowrap'>
+                        <div className='flex items-center gap-3 px-4 py-4'>
                           <button
                             type='button'
                             onClick={() => void toggleConnectivitySection('bluetooth')}
@@ -2452,7 +2430,7 @@ export function SystemPage() {
                             </div>
                           </button>
 
-                          <div className='ml-auto flex w-full shrink-0 items-center justify-end gap-2 sm:ml-0 sm:w-auto'>
+                          <div className='flex shrink-0 items-center justify-end'>
                             <Switch
                               checked={Boolean(connectivity?.bluetooth.supported) && Boolean(connectivity?.bluetooth.powered)}
                               disabled={bluetoothPowerLoading || !(connectivity?.bluetooth.supported ?? false)}
@@ -2519,7 +2497,7 @@ export function SystemPage() {
                       </div>
 
                       <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
-                        <div className='flex flex-wrap items-start gap-3 px-4 py-4 sm:flex-nowrap'>
+                        <div className='flex items-center gap-3 px-4 py-4'>
                           <div className='flex min-w-0 flex-1 items-center gap-3'>
                             <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
                               <Terminal className='h-4 w-4 text-muted-foreground' />
@@ -2527,11 +2505,10 @@ export function SystemPage() {
                             <div className='min-w-0 flex-1'>
                               <div className='text-sm font-semibold text-foreground'>SSH</div>
                               <div className='mt-0.5 text-xs text-muted-foreground'>Enable secure remote terminal access to this device.</div>
-                              <div className='mt-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>{sshStateLabel}</div>
                             </div>
                           </div>
 
-                          <div className='ml-auto flex w-full shrink-0 items-center justify-end gap-2 sm:ml-0 sm:w-auto'>
+                          <div className='flex shrink-0 items-center justify-end'>
                             <Switch
                               checked={sshToggleChecked}
                               disabled={sshToggleLoading || !(sshAccess?.supported ?? false)}
@@ -2540,25 +2517,6 @@ export function SystemPage() {
                             />
                           </div>
                         </div>
-
-                        {sshFeedback || sshStatusMessage ? (
-                          <div className='space-y-3 border-t border-border/60 px-4 py-4'>
-                            {sshFeedback ? (
-                              <div className={cn(
-                                'rounded-2xl border px-3 py-2 text-xs',
-                                sshFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-                              )}>
-                                {sshFeedback.message}
-                              </div>
-                            ) : null}
-
-                            {sshStatusMessage ? (
-                              <div className='rounded-2xl border border-border bg-muted/70 px-3 py-2 text-xs text-muted-foreground'>
-                                {sshStatusMessage}
-                              </div>
-                            ) : null}
-                          </div>
-                        ) : null}
                       </div>
 
                       <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
@@ -2641,7 +2599,7 @@ export function SystemPage() {
                       </div>
 
                       <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
-                        <div className='flex flex-wrap items-center gap-3 px-4 py-4 sm:flex-nowrap'>
+                        <div className='flex items-center gap-3 px-4 py-4'>
                           <button
                             type='button'
                             onClick={() => void toggleConnectivitySection('local-access')}
@@ -2659,7 +2617,7 @@ export function SystemPage() {
                             </div>
                           </button>
 
-                          <div className='ml-auto flex w-full shrink-0 items-center justify-end gap-2 sm:ml-0 sm:w-auto'>
+                          <div className='flex shrink-0 items-center justify-end'>
                             <Switch
                               checked={Boolean(localAccessMode?.supported) && Boolean(localAccessMode?.enabled)}
                               disabled={localAccessModeLoading || !(localAccessMode?.supported ?? false)}

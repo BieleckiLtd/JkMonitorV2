@@ -566,8 +566,9 @@ describe('SystemPage', () => {
       }));
     });
 
-    expect(await screen.findByText(/ssh was enabled/i)).toBeInTheDocument();
-    expect(screen.getByText(/enabled and running/i)).toBeInTheDocument();
+    expect(screen.queryByText(/ssh was enabled/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/enabled and running/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/ssh is off/i)).not.toBeInTheDocument();
   });
 
   it('saves local access advanced settings from the unified connectivity section', async () => {
