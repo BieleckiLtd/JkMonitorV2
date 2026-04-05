@@ -20,6 +20,7 @@ NETWORKMANAGER_POLKIT_RULE_PATH='/etc/polkit-1/rules.d/50-fluxmonitor-networkman
 SYSTEMD_POLKIT_RULE_PATH='/etc/polkit-1/rules.d/51-fluxmonitor-systemd.rules'
 TUNNEL_SERVICE_NAME='cloudflared.service'
 TUNNEL_SERVICE_PATH="/etc/systemd/system/$TUNNEL_SERVICE_NAME"
+SSH_SERVICE_NAME='ssh.service'
 ENV_PATH="$DESTINATION/fluxmonitor.env"
 TUNNEL_ENV_PATH="$DESTINATION/cloudflared.env"
 CLOUDFLARED_START_SCRIPT_PATH="$DESTINATION/cloudflared-run.sh"
@@ -1146,19 +1147,39 @@ write_cloudflared_start_script() {
   fi
 }
 
-build_cloudflared_polkit_rule() {
+build_systemd_polkit_rule() {
   local current_user="$1"
 
   cat <<EOF
 polkit.addRule(function(action, subject) {
-  if (subject.user === '$current_user'
-      && action.id === 'org.freedesktop.systemd1.manage-units') {
-    var unit = action.lookup('unit');
-    var verb = action.lookup('verb');
+  if (subject.user !== '$current_user') {
+    return;
+  }
+
+  var unit = action.lookup('unit');
+  var verb = action.lookup('verb');
+
+  if (action.id === 'org.freedesktop.systemd1.manage-units') {
     if (unit === '$TUNNEL_SERVICE_NAME'
         && ['start', 'stop', 'restart', 'reload-or-restart'].indexOf(verb) >= 0) {
       return polkit.Result.YES;
     }
+
+    if ((unit === '$SSH_SERVICE_NAME' || unit === 'ssh')
+        && ['start', 'stop', 'restart', 'reload-or-restart'].indexOf(verb) >= 0) {
+      return polkit.Result.YES;
+    }
+  }
+
+  if (action.id === 'org.freedesktop.systemd1.manage-unit-files') {
+    if ((unit === '$SSH_SERVICE_NAME' || unit === 'ssh')
+        && ['enable', 'disable', 'reenable'].indexOf(verb) >= 0) {
+      return polkit.Result.YES;
+    }
+  }
+
+  if (action.id === 'org.freedesktop.systemd1.reload-daemon') {
+    return polkit.Result.YES;
   }
 });
 EOF
@@ -1344,7 +1365,7 @@ install_cloudflared_service() {
   current_user="$(id -un)"
 
   if [ -d /etc/polkit-1/rules.d ]; then
-    build_cloudflared_polkit_rule "$current_user" > "$polkit_temp_path"
+    build_systemd_polkit_rule "$current_user" > "$polkit_temp_path"
     if write_elevated_file_if_changed "$polkit_temp_path" "$SYSTEMD_POLKIT_RULE_PATH" 0644; then
       polkit_changed='true'
     fi

@@ -5,6 +5,7 @@ DESTINATION="${1:-$HOME/fluxmonitor}"
 SERVICE_NAME='fluxmonitor.service'
 SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
 NETWORKMANAGER_POLKIT_RULE_PATH='/etc/polkit-1/rules.d/50-fluxmonitor-networkmanager.rules'
+SYSTEMD_POLKIT_RULE_PATH='/etc/polkit-1/rules.d/51-fluxmonitor-systemd.rules'
 
 run_elevated() {
   if [ "$(id -u)" -eq 0 ]; then
@@ -28,6 +29,7 @@ if command -v systemctl >/dev/null 2>&1; then
 fi
 
 run_elevated rm -f "$NETWORKMANAGER_POLKIT_RULE_PATH"
+run_elevated rm -f "$SYSTEMD_POLKIT_RULE_PATH"
 
 rm -rf "$DESTINATION"
 

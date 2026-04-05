@@ -36,8 +36,7 @@ public sealed class SshManagementService
             };
         }
 
-        var statusResult = await _commandRunner.RunAsync(
-            "systemctl",
+        var statusResult = await RunSystemctlAsync(
             [
                 "show",
                 ServiceName,
@@ -102,8 +101,7 @@ public sealed class SshManagementService
             };
         }
 
-        var commandResult = await _commandRunner.RunAsync(
-            "systemctl",
+        var commandResult = await RunSystemctlAsync(
             enabled
                 ? ["enable", "--now", ServiceName]
                 : ["disable", "--now", ServiceName],
@@ -154,6 +152,26 @@ public sealed class SshManagementService
     private static bool IsEnabledState(string? unitFileState)
     {
         return unitFileState?.StartsWith("enabled", StringComparison.OrdinalIgnoreCase) == true;
+    }
+
+    private async Task<CommandResult> RunSystemctlAsync(
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken)
+    {
+        var result = await _commandRunner.RunAsync("systemctl", arguments, cancellationToken);
+        if (result.Succeeded || !ShouldRetrySystemctlWithSudo(result))
+        {
+            return result;
+        }
+
+        _logger.LogInformation(
+            "Retrying systemctl command through sudo after authorization failure. Arguments={Arguments}",
+            string.Join(' ', arguments));
+
+        var elevatedResult = await _commandRunner.RunAsync("sudo", ["-n", "systemctl", .. arguments], cancellationToken);
+        return IsSudoPasswordPromptResult(elevatedResult)
+            ? result
+            : elevatedResult;
     }
 
     private static string BuildStatusMessage(
@@ -236,5 +254,45 @@ public sealed class SshManagementService
         }
 
         return fallback;
+    }
+
+    internal static bool ShouldRetrySystemctlWithSudo(CommandResult result)
+    {
+        if (result.Succeeded)
+        {
+            return false;
+        }
+
+        var message = BuildCommandFailureMessage(result, string.Empty);
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return false;
+        }
+
+        return message.Contains("interactive authentication required", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("authentication is required", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("access denied", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("permission denied", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("insufficient privileges", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("not authorized", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool IsSudoPasswordPromptResult(CommandResult result)
+    {
+        if (result.Succeeded)
+        {
+            return false;
+        }
+
+        var message = BuildCommandFailureMessage(result, string.Empty);
+        if (string.IsNullOrWhiteSpace(message))
+        {
+            return false;
+        }
+
+        return message.Contains("a password is required", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("password is required", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("a terminal is required", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("must have a tty", StringComparison.OrdinalIgnoreCase);
     }
 }
