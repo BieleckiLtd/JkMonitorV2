@@ -122,8 +122,11 @@ type UpdateCheckResult = {
   currentReleaseTag?: string | null;
   currentSourceRevision?: string | null;
   currentBuiltAt?: string | null;
+  currentWorkflowRunNumber?: string | null;
+  currentWorkflowRunAttempt?: string | null;
   currentReleasePublishedAt?: string | null;
   currentChannel?: string | null;
+  preferredChannel?: string | null;
   targetChannel?: string | null;
   targetReleaseTag?: string | null;
   checkedAt?: string | null;
@@ -525,6 +528,8 @@ export function SystemPage() {
   const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult | null>(() => getFluxMonitorWindow()?.__fluxMonitorSoftwareUpdateCheckResult ?? null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateActionError, setUpdateActionError] = useState<string | null>(null);
+  const [updateChannelSaving, setUpdateChannelSaving] = useState(false);
+  const [updateChannelError, setUpdateChannelError] = useState<string | null>(null);
   const [interfaces, setInterfaces] = useState<SystemInterfacesResponse | null>(null);
   const [connectivity, setConnectivity] = useState<SystemConnectivitySnapshot | null>(null);
   const [connectivityLoading, setConnectivityLoading] = useState(true);

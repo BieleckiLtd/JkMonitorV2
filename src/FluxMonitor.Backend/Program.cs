@@ -58,6 +58,7 @@ builder.Services.AddSingleton<FluxMonitor.Backend.Services.CloudflareTunnelStore
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.CloudflareTunnelService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.IInternetSpeedTestStore, FluxMonitor.Backend.Services.InternetSpeedTestStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.InternetSpeedTestService>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.ISoftwareUpdateStore, FluxMonitor.Backend.Services.SoftwareUpdateStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.UpdateProgressBroadcaster>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.SystemUpdateService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.PollTrigger>();
@@ -177,6 +178,10 @@ using (var scope = app.Services.CreateScope())
 
     var internetSpeedTestService = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.InternetSpeedTestService>();
     await internetSpeedTestService.InitializeAsync(CancellationToken.None);
+
+    var softwareUpdateStore = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.ISoftwareUpdateStore>();
+    await softwareUpdateStore.InitializeAsync(CancellationToken.None);
+    await softwareUpdateStore.SyncCurrentBuildAsync(CancellationToken.None);
 
     var directAccessStore = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.DirectAccessStore>();
     await directAccessStore.InitializeAsync(CancellationToken.None);

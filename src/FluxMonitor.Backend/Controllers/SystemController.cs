@@ -277,6 +277,22 @@ public sealed class SystemController(
         return Ok(result);
     }
 
+    [HttpPost("update/channel")]
+    public async Task<ActionResult<UpdateChannelPreferenceResult>> SaveUpdateChannel(
+        [FromBody] SaveUpdateChannelRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await updateService.SavePreferredChannelAsync(request.Channel, cancellationToken);
+            return Ok(result);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { error = exception.Message });
+        }
+    }
+
     [HttpPost("update/install")]
     public async Task<IActionResult> InstallUpdate(CancellationToken cancellationToken)
     {
@@ -581,6 +597,7 @@ public sealed record SaveDirectAccessSettingsRequest(string AutoStartMode, strin
 public sealed record LocalAccessModeToggleRequest(bool Enabled);
 public sealed record SaveLocalAccessAdvancedRequest(string? WifiPassword);
 public sealed record StopServiceRequest(string Name);
+public sealed record SaveUpdateChannelRequest(string Channel);
 
 file sealed class UpdateProgressStreamEnvelope
 {

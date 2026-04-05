@@ -7,15 +7,13 @@ namespace FluxMonitor.Backend.Services;
 public sealed class SystemUpdateService(
     IHttpClientFactory httpClientFactory,
     IBuildMetadataProvider buildMetadataProvider,
+    ISoftwareUpdateStore softwareUpdateStore,
     ManagedRestartService managedRestartService,
     IHostApplicationLifetime applicationLifetime,
     UpdateProgressBroadcaster updateProgressBroadcaster,
     ILogger<SystemUpdateService> logger)
 {
     private const string Repository = "BieleckiLtd/JkMonitorV2";
-    private const string DevChannel = "dev";
-    private const string MainChannel = "main";
-    private const string DevReleaseTag = "dev-latest";
     private const string AssetName = "fluxmonitor-backend-linux-arm64.tar.gz";
     private const string ChecksumAssetName = AssetName + ".sha256";
     private const string ReleaseApiBaseUrl = $"https://api.github.com/repos/{Repository}/releases";
@@ -185,40 +183,25 @@ public sealed class SystemUpdateService(
     private bool _cancelRequested;
     private readonly Lock _stateGate = new();
 
-    public UpdateCheckResult CheckForUpdate()
-    {
-        var build = buildMetadataProvider.GetBuildInfo();
-        var canUpdate = managedRestartService.IsManagedInstall && OperatingSystem.IsLinux();
-        var currentChannel = ResolveReleaseChannel(build.ReleaseTag);
-
-        return new UpdateCheckResult
-        {
-            CurrentReleaseTag = build.ReleaseTag,
-            CurrentSourceRevision = build.SourceRevisionId,
-            CurrentBuiltAt = build.BuiltAt,
-            CurrentChannel = currentChannel,
-            TargetChannel = currentChannel,
-            TargetReleaseTag = GetDefaultTargetReleaseTag(currentChannel, build.ReleaseTag),
-            CanUpdate = canUpdate,
-            Reason = canUpdate ? null : "In-app update is only available on managed Linux installs."
-        };
-    }
-
     public async Task<UpdateCheckResult> CheckForUpdateAsync(CancellationToken cancellationToken)
     {
-        var result = CheckForUpdate();
+        var result = await CreateBaseCheckResultAsync(cancellationToken);
 
         try
         {
             using var client = CreateGitHubClient();
-            var releaseResolution = await ResolveReleaseAsync(client, result.CurrentChannel, cancellationToken);
+            var releaseResolution = await ResolveReleaseAsync(client, result.PreferredChannel, cancellationToken);
             var release = releaseResolution.Release;
-            var currentInstalledRelease = await ResolveCurrentInstalledReleaseAsync(client, result.CurrentReleaseTag, release, cancellationToken);
 
             result.CheckedAt = DateTimeOffset.UtcNow;
-            result.CurrentReleasePublishedAt = currentInstalledRelease?.PublishedAt;
             result.TargetChannel = releaseResolution.Channel;
             result.TargetReleaseTag = release?.TagName ?? result.TargetReleaseTag;
+
+            if (string.IsNullOrWhiteSpace(result.CurrentReleasePublishedAt))
+            {
+                var currentInstalledRelease = await ResolveCurrentInstalledReleaseAsync(client, result.CurrentReleaseTag, release, cancellationToken);
+                result.CurrentReleasePublishedAt = currentInstalledRelease?.PublishedAt;
+            }
 
             if (release is not null)
             {
@@ -284,6 +267,17 @@ public sealed class SystemUpdateService(
         }
     }
 
+    public async Task<UpdateChannelPreferenceResult> SavePreferredChannelAsync(string channel, CancellationToken cancellationToken)
+    {
+        var normalizedChannel = SoftwareUpdateChannels.NormalizeSelection(channel);
+        await softwareUpdateStore.SavePreferredChannelAsync(normalizedChannel, cancellationToken);
+
+        return new UpdateChannelPreferenceResult
+        {
+            PreferredChannel = normalizedChannel
+        };
+    }
+
     public async Task<UpdateCommandResult> StartUpdateAsync(CancellationToken cancellationToken)
     {
         if (!managedRestartService.IsManagedInstall || !OperatingSystem.IsLinux())
@@ -342,6 +336,8 @@ public sealed class SystemUpdateService(
             updateTarget.ReleaseTag!,
             updateTarget.Channel!,
             updateTarget.InstallerScriptUrl!,
+            updateTarget.ReleasePublishedAt,
+            updateTarget.Checksum,
             updateCancellationToken));
 
         return UpdateCommandResult.Ok(progress);
@@ -416,6 +412,8 @@ public sealed class SystemUpdateService(
         string releaseTag,
         string releaseChannel,
         string installerScriptUrl,
+        string? releasePublishedAt,
+        string? releaseChecksum,
         CancellationToken cancellationToken)
     {
         var outputTail = new FixedLineBuffer(InstallerOutputTailCapacity);
@@ -513,6 +511,23 @@ public sealed class SystemUpdateService(
             }
 
             logger.LogInformation("Update session {SessionId} installed successfully. Restarting the service.", sessionId);
+
+            try
+            {
+                await softwareUpdateStore.RecordInstalledReleaseAsync(
+                    new InstalledSoftwareUpdate
+                    {
+                        Channel = releaseChannel,
+                        ReleaseTag = releaseTag,
+                        PublishedAt = TryParseTimestamp(releasePublishedAt),
+                        Checksum = releaseChecksum
+                    },
+                    CancellationToken.None);
+            }
+            catch (Exception exception)
+            {
+                logger.LogWarning(exception, "Failed to record installed update metadata after session {SessionId}.", sessionId);
+            }
 
             ApplyStageProgress(sessionId, RestartingStage, UpdateStatus.Restarting, isRunning: true, success: null);
             await Task.Delay(TimeSpan.FromSeconds(1), CancellationToken.None);
@@ -971,11 +986,40 @@ public sealed class SystemUpdateService(
         return client;
     }
 
+    private async Task<UpdateCheckResult> CreateBaseCheckResultAsync(CancellationToken cancellationToken)
+    {
+        var build = buildMetadataProvider.GetBuildInfo();
+        var storedState = await softwareUpdateStore.GetStateAsync(cancellationToken);
+        var installedState = storedState.Installed;
+        var currentChannel = ResolveReleaseChannel(installedState.Channel ?? build.ReleaseTag);
+        var preferredChannel = SoftwareUpdateChannels.NormalizeSelection(storedState.PreferredChannel);
+        var currentReleaseTag = installedState.ReleaseTag ?? build.ReleaseTag;
+        var currentBuiltAt = installedState.BuiltAt ?? build.BuiltAt;
+
+        return new UpdateCheckResult
+        {
+            CurrentReleaseTag = currentReleaseTag,
+            CurrentSourceRevision = installedState.SourceRevision ?? build.SourceRevisionId,
+            CurrentBuiltAt = currentBuiltAt,
+            CurrentWorkflowRunNumber = installedState.WorkflowRunNumber ?? build.WorkflowRunNumber,
+            CurrentWorkflowRunAttempt = installedState.WorkflowRunAttempt ?? build.WorkflowRunAttempt,
+            CurrentReleasePublishedAt = installedState.PublishedAt?.ToString("O") ?? currentBuiltAt,
+            CurrentChannel = currentChannel,
+            PreferredChannel = preferredChannel,
+            TargetChannel = preferredChannel,
+            TargetReleaseTag = GetDefaultTargetReleaseTag(preferredChannel, currentReleaseTag),
+            CanUpdate = managedRestartService.IsManagedInstall && OperatingSystem.IsLinux(),
+            Reason = managedRestartService.IsManagedInstall && OperatingSystem.IsLinux()
+                ? null
+                : "In-app update is only available on managed Linux installs."
+        };
+    }
+
     private async Task<ResolvedReleaseInfo> ResolveReleaseAsync(HttpClient client, string? channel, CancellationToken cancellationToken)
     {
         var normalizedChannel = ResolveReleaseChannel(channel);
-        var releaseApiUrl = string.Equals(normalizedChannel, DevChannel, StringComparison.OrdinalIgnoreCase)
-            ? $"{ReleaseApiBaseUrl}/tags/{DevReleaseTag}"
+        var releaseApiUrl = string.Equals(normalizedChannel, SoftwareUpdateChannels.Dev, StringComparison.OrdinalIgnoreCase)
+            ? $"{ReleaseApiBaseUrl}/tags/{SoftwareUpdateChannels.DevReleaseTag}"
             : $"{ReleaseApiBaseUrl}/latest";
 
         var release = await client.GetFromJsonAsync<GitHubRelease>(releaseApiUrl, cancellationToken);
@@ -1015,9 +1059,10 @@ public sealed class SystemUpdateService(
     {
         try
         {
-            var currentChannel = ResolveReleaseChannel(buildMetadataProvider.GetBuildInfo().ReleaseTag);
+            var storedState = await softwareUpdateStore.GetStateAsync(cancellationToken);
+            var preferredChannel = SoftwareUpdateChannels.NormalizeSelection(storedState.PreferredChannel);
             using var client = CreateGitHubClient();
-            var releaseResolution = await ResolveReleaseAsync(client, currentChannel, cancellationToken);
+            var releaseResolution = await ResolveReleaseAsync(client, preferredChannel, cancellationToken);
             var releaseTag = releaseResolution.Release?.TagName;
 
             if (string.IsNullOrWhiteSpace(releaseTag))
@@ -1025,10 +1070,21 @@ public sealed class SystemUpdateService(
                 return UpdateTargetResolution.Fail("Flux Monitor could not determine which published release to install.");
             }
 
+            var checksumAsset = releaseResolution.Release?.Assets?.FirstOrDefault(a =>
+                string.Equals(a.Name, ChecksumAssetName, StringComparison.OrdinalIgnoreCase));
+            string? checksum = null;
+            if (checksumAsset?.BrowserDownloadUrl is not null)
+            {
+                var checksumContent = await client.GetStringAsync(checksumAsset.BrowserDownloadUrl, cancellationToken);
+                checksum = checksumContent.Split(' ', 2)[0].Trim();
+            }
+
             return UpdateTargetResolution.Success(
                 releaseResolution.Channel,
                 releaseTag.Trim(),
-                GetInstallerScriptUrl(releaseResolution.Channel));
+                GetInstallerScriptUrl(releaseResolution.Channel),
+                checksumAsset?.UpdatedAt ?? releaseResolution.Release?.PublishedAt,
+                checksum);
         }
         catch (Exception exception)
         {
@@ -1039,41 +1095,42 @@ public sealed class SystemUpdateService(
 
     private static string ResolveReleaseChannel(string? releaseTagOrChannel)
     {
-        if (string.Equals(releaseTagOrChannel, DevChannel, StringComparison.OrdinalIgnoreCase)
-            || string.Equals(releaseTagOrChannel, DevReleaseTag, StringComparison.OrdinalIgnoreCase))
-        {
-            return DevChannel;
-        }
-
-        return MainChannel;
+        return SoftwareUpdateChannels.FromReleaseTag(releaseTagOrChannel);
     }
 
     private static string? GetDefaultTargetReleaseTag(string channel, string? currentReleaseTag)
     {
-        return string.Equals(channel, DevChannel, StringComparison.OrdinalIgnoreCase)
-            ? DevReleaseTag
+        return string.Equals(channel, SoftwareUpdateChannels.Dev, StringComparison.OrdinalIgnoreCase)
+            ? SoftwareUpdateChannels.DevReleaseTag
             : currentReleaseTag;
     }
 
     private static string ResolveCompareTarget(string channel, GitHubRelease release)
     {
-        if (string.Equals(channel, DevChannel, StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(channel, SoftwareUpdateChannels.Dev, StringComparison.OrdinalIgnoreCase))
         {
-            return DevChannel;
+            return SoftwareUpdateChannels.Dev;
         }
 
         return !string.IsNullOrWhiteSpace(release.TagName)
             ? release.TagName
-            : MainChannel;
+            : SoftwareUpdateChannels.Main;
     }
 
     private static string GetInstallerScriptUrl(string channel)
     {
-        var scriptRef = string.Equals(channel, DevChannel, StringComparison.OrdinalIgnoreCase)
-            ? DevChannel
-            : MainChannel;
+        var scriptRef = string.Equals(channel, SoftwareUpdateChannels.Dev, StringComparison.OrdinalIgnoreCase)
+            ? SoftwareUpdateChannels.Dev
+            : SoftwareUpdateChannels.Main;
 
         return $"https://raw.githubusercontent.com/{Repository}/{scriptRef}/scripts/install-from-release.sh";
+    }
+
+    private static DateTimeOffset? TryParseTimestamp(string? value)
+    {
+        return DateTimeOffset.TryParse(value, out var parsed)
+            ? parsed
+            : null;
     }
 }
 
@@ -1086,13 +1143,22 @@ internal sealed class UpdateTargetResolution
     public string? Channel { get; init; }
     public string? ReleaseTag { get; init; }
     public string? InstallerScriptUrl { get; init; }
+    public string? ReleasePublishedAt { get; init; }
+    public string? Checksum { get; init; }
 
-    public static UpdateTargetResolution Success(string channel, string releaseTag, string installerScriptUrl) => new()
+    public static UpdateTargetResolution Success(
+        string channel,
+        string releaseTag,
+        string installerScriptUrl,
+        string? releasePublishedAt,
+        string? checksum) => new()
     {
         Succeeded = true,
         Channel = channel,
         ReleaseTag = releaseTag,
-        InstallerScriptUrl = installerScriptUrl
+        InstallerScriptUrl = installerScriptUrl,
+        ReleasePublishedAt = releasePublishedAt,
+        Checksum = checksum
     };
 
     public static UpdateTargetResolution Fail(string error) => new()
@@ -1107,8 +1173,11 @@ public sealed class UpdateCheckResult
     public string? CurrentReleaseTag { get; set; }
     public string? CurrentSourceRevision { get; set; }
     public string? CurrentBuiltAt { get; set; }
+    public string? CurrentWorkflowRunNumber { get; set; }
+    public string? CurrentWorkflowRunAttempt { get; set; }
     public string? CurrentReleasePublishedAt { get; set; }
     public string? CurrentChannel { get; set; }
+    public string? PreferredChannel { get; set; }
     public string? TargetChannel { get; set; }
     public string? TargetReleaseTag { get; set; }
     public DateTimeOffset? CheckedAt { get; set; }
@@ -1120,6 +1189,11 @@ public sealed class UpdateCheckResult
     public string? LocalChecksum { get; set; }
     public string? CheckError { get; set; }
     public List<CommitInfo>? Commits { get; set; }
+}
+
+public sealed class UpdateChannelPreferenceResult
+{
+    public string PreferredChannel { get; set; } = SoftwareUpdateChannels.Dev;
 }
 
 public sealed class CommitInfo

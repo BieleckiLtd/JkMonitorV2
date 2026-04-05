@@ -53,6 +53,7 @@ public class SystemUpdateServiceTests
         Assert.True(result.UpdateAvailable);
         Assert.Null(result.CheckError);
         Assert.Equal("dev", result.CurrentChannel);
+        Assert.Equal("dev", result.PreferredChannel);
         Assert.Equal("dev-latest", result.TargetReleaseTag);
         Assert.NotNull(result.CheckedAt);
     }
@@ -101,9 +102,137 @@ public class SystemUpdateServiceTests
         var result = await service.CheckForUpdateAsync(CancellationToken.None);
 
         Assert.Equal("main", result.CurrentChannel);
+        Assert.Equal("main", result.PreferredChannel);
         Assert.Equal("main", result.TargetChannel);
         Assert.Equal("v1.2.3", result.TargetReleaseTag);
         Assert.True(result.UpdateAvailable);
+    }
+
+    [Fact]
+    public async Task CheckForUpdateAsync_UsesStoredInstalledPublishedDateForMutableDevReleaseTag()
+    {
+        using var releaseInfoScope = TemporaryReleaseInfoScope.Create(
+            "FLUXMONITOR_RELEASE_SHA256=cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc");
+
+        var service = CreateService(
+            new StubHttpClientFactory(new StubHttpMessageHandler(request =>
+            {
+                if (request.RequestUri?.AbsoluteUri == "https://api.github.com/repos/BieleckiLtd/JkMonitorV2/releases/tags/dev-latest")
+                {
+                    return CreateJsonResponse("""
+                        {
+                          "published_at": "2026-04-05T12:00:00Z",
+                          "assets": [
+                            {
+                              "name": "fluxmonitor-backend-linux-arm64.tar.gz.sha256",
+                              "browser_download_url": "https://example.test/dev.sha256"
+                            }
+                          ]
+                        }
+                        """);
+                }
+
+                if (request.RequestUri?.AbsoluteUri == "https://example.test/dev.sha256")
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd  fluxmonitor-backend-linux-arm64.tar.gz")
+                    };
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            })),
+            new BuildRuntimeInfo
+            {
+                ReleaseTag = "dev-latest",
+                SourceRevisionId = "dev-current-sha",
+                WorkflowRunNumber = "88",
+                WorkflowRunAttempt = "1",
+                BuiltAt = "2026-04-01T08:30:00Z"
+            },
+            new SoftwareUpdateState
+            {
+                StorageAvailable = true,
+                PreferredChannel = "dev",
+                Installed = new InstalledSoftwareUpdate
+                {
+                    Channel = "dev",
+                    ReleaseTag = "dev-latest",
+                    SourceRevision = "dev-current-sha",
+                    WorkflowRunNumber = "88",
+                    WorkflowRunAttempt = "1",
+                    BuiltAt = "2026-04-01T08:30:00Z",
+                    PublishedAt = DateTimeOffset.Parse("2026-04-01T08:30:00Z"),
+                    Checksum = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+                }
+            });
+
+        var result = await service.CheckForUpdateAsync(CancellationToken.None);
+
+        Assert.Equal("2026-04-01T08:30:00.0000000+00:00", result.CurrentReleasePublishedAt);
+        Assert.Equal("2026-04-05T12:00:00Z", result.RemoteReleasePublishedAt);
+    }
+
+    [Fact]
+    public async Task CheckForUpdateAsync_UsesStoredPreferredChannelWhenCheckingForUpdates()
+    {
+        using var releaseInfoScope = TemporaryReleaseInfoScope.Create(
+            "FLUXMONITOR_RELEASE_SHA256=eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee");
+
+        var service = CreateService(
+            new StubHttpClientFactory(new StubHttpMessageHandler(request =>
+            {
+                if (request.RequestUri?.AbsoluteUri == "https://api.github.com/repos/BieleckiLtd/JkMonitorV2/releases/latest")
+                {
+                    return CreateJsonResponse("""
+                        {
+                          "tag_name": "v1.2.3",
+                          "published_at": "2026-04-04T18:20:00Z",
+                          "assets": [
+                            {
+                              "name": "fluxmonitor-backend-linux-arm64.tar.gz.sha256",
+                              "browser_download_url": "https://example.test/stable.sha256"
+                            }
+                          ]
+                        }
+                        """);
+                }
+
+                if (request.RequestUri?.AbsoluteUri == "https://example.test/stable.sha256")
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff  fluxmonitor-backend-linux-arm64.tar.gz")
+                    };
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            })),
+            new BuildRuntimeInfo
+            {
+                ReleaseTag = "dev-latest",
+                SourceRevisionId = "dev-current-sha"
+            },
+            new SoftwareUpdateState
+            {
+                StorageAvailable = true,
+                PreferredChannel = "main",
+                Installed = new InstalledSoftwareUpdate
+                {
+                    Channel = "dev",
+                    ReleaseTag = "dev-latest",
+                    SourceRevision = "dev-current-sha",
+                    PublishedAt = DateTimeOffset.Parse("2026-04-01T08:30:00Z"),
+                    Checksum = "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+                }
+            });
+
+        var result = await service.CheckForUpdateAsync(CancellationToken.None);
+
+        Assert.Equal("dev", result.CurrentChannel);
+        Assert.Equal("main", result.PreferredChannel);
+        Assert.Equal("main", result.TargetChannel);
+        Assert.Equal("v1.2.3", result.TargetReleaseTag);
     }
 
     [Fact]
@@ -159,7 +288,10 @@ public class SystemUpdateServiceTests
         Assert.Equal("There is no update in progress.", result.Error);
     }
 
-    private static SystemUpdateService CreateService(IHttpClientFactory httpClientFactory, BuildRuntimeInfo? buildInfo = null)
+    private static SystemUpdateService CreateService(
+        IHttpClientFactory httpClientFactory,
+        BuildRuntimeInfo? buildInfo = null,
+        SoftwareUpdateState? softwareUpdateState = null)
     {
         var environment = new TestHostEnvironment();
         var lifetime = new TestHostApplicationLifetime();
@@ -167,14 +299,31 @@ public class SystemUpdateServiceTests
             environment,
             lifetime,
             NullLogger<ManagedRestartService>.Instance);
+        var resolvedBuildInfo = buildInfo ?? new BuildRuntimeInfo
+        {
+            ReleaseTag = "dev-latest",
+            SourceRevisionId = "local-sha"
+        };
+        var resolvedSoftwareUpdateState = softwareUpdateState ?? new SoftwareUpdateState
+        {
+            StorageAvailable = true,
+            PreferredChannel = SoftwareUpdateChannels.FromReleaseTag(resolvedBuildInfo.ReleaseTag),
+            Installed = new InstalledSoftwareUpdate
+            {
+                Channel = SoftwareUpdateChannels.FromReleaseTag(resolvedBuildInfo.ReleaseTag),
+                ReleaseTag = resolvedBuildInfo.ReleaseTag,
+                SourceRevision = resolvedBuildInfo.SourceRevisionId,
+                WorkflowRunNumber = resolvedBuildInfo.WorkflowRunNumber,
+                WorkflowRunAttempt = resolvedBuildInfo.WorkflowRunAttempt,
+                BuiltAt = resolvedBuildInfo.BuiltAt,
+                PublishedAt = DateTimeOffset.TryParse(resolvedBuildInfo.BuiltAt, out var publishedAt) ? publishedAt : null
+            }
+        };
 
         return new SystemUpdateService(
             httpClientFactory,
-            new FakeBuildMetadataProvider(buildInfo ?? new BuildRuntimeInfo
-            {
-                ReleaseTag = "dev-latest",
-                SourceRevisionId = "local-sha"
-            }),
+            new FakeBuildMetadataProvider(resolvedBuildInfo),
+            new FakeSoftwareUpdateStore(resolvedSoftwareUpdateState),
             managedRestartService,
             lifetime,
             new UpdateProgressBroadcaster(),
@@ -192,6 +341,30 @@ public class SystemUpdateServiceTests
     private sealed class FakeBuildMetadataProvider(BuildRuntimeInfo buildInfo) : IBuildMetadataProvider
     {
         public BuildRuntimeInfo GetBuildInfo() => buildInfo;
+    }
+
+    private sealed class FakeSoftwareUpdateStore(SoftwareUpdateState state) : ISoftwareUpdateStore
+    {
+        private SoftwareUpdateState _state = state;
+
+        public Task InitializeAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<SoftwareUpdateState> GetStateAsync(CancellationToken cancellationToken)
+            => Task.FromResult(_state);
+
+        public Task SavePreferredChannelAsync(string preferredChannel, CancellationToken cancellationToken)
+        {
+            _state = _state with { PreferredChannel = preferredChannel };
+            return Task.CompletedTask;
+        }
+
+        public Task RecordInstalledReleaseAsync(InstalledSoftwareUpdate installedRelease, CancellationToken cancellationToken)
+        {
+            _state = _state with { Installed = installedRelease };
+            return Task.CompletedTask;
+        }
+
+        public Task SyncCurrentBuildAsync(CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
     private sealed class TestHostEnvironment : IHostEnvironment
