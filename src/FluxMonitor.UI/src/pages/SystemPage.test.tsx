@@ -531,6 +531,16 @@ describe('SystemPage', () => {
     });
   });
 
+  it('shows hostname and LAN links at the top of the connectivity panel', async () => {
+    renderSystemPage('/system/connectivity');
+
+    const hostnameLink = await screen.findByRole('link', { name: 'http://fluxmonitor.local:5074' });
+    const lanLink = screen.getByRole('link', { name: 'http://192.168.1.25:5074' });
+
+    expect(hostnameLink).toHaveAttribute('href', 'http://fluxmonitor.local:5074');
+    expect(lanLink).toHaveAttribute('href', 'http://192.168.1.25:5074');
+  });
+
   it('toggles local access mode from the unified connectivity section', async () => {
     renderSystemPage('/system/connectivity');
 

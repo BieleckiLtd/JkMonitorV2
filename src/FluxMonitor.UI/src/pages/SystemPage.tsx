@@ -77,6 +77,7 @@ type MonitorRuntimeStatus = {
 
 const refreshIntervalMs = 5000;
 const updateCheckCooldownMs = 30000;
+const monitorHttpPort = 5074;
 const noDataLabel = 'N/D';
 
 type TableSizeInfo = {
@@ -1677,6 +1678,7 @@ export function SystemPage() {
   const localAccessAddresses = localAccessMode?.addresses ?? [];
   const localAccessPrimaryAddress = localAccessAddresses[0] ?? null;
   const localAccessHostname = formatLocalAccessHostName(localAccessMode?.hostName);
+  const connectivityPanelLinks = buildConnectivityPanelLinks(localAccessMode?.hostName, wifiInterfaces, ethernetInterfaces);
   const localAccessSummary = localAccessMode?.active
     ? localAccessHostname !== 'Waiting'
       ? localAccessHostname
@@ -2246,6 +2248,22 @@ export function SystemPage() {
                     ) : null}
 
                     <div className='space-y-3'>
+                      {connectivityPanelLinks.length > 0 ? (
+                        <div className='flex flex-wrap gap-x-4 gap-y-2 px-1'>
+                          {connectivityPanelLinks.map((link) => (
+                            <a
+                              key={link}
+                              href={link}
+                              target='_blank'
+                              rel='noreferrer'
+                              className='break-all text-sm text-primary underline-offset-4 hover:underline'
+                            >
+                              {link}
+                            </a>
+                          ))}
+                        </div>
+                      ) : null}
+
                       <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
                         <div className='flex items-center gap-3 px-4 py-4'>
                           <button
@@ -3403,6 +3421,43 @@ function formatLocalAccessHostName(hostName: string | null | undefined) {
   }
 
   return trimmed.includes('.') ? trimmed : `${trimmed}.local`;
+}
+
+function buildConnectivityPanelLinks(
+  hostName: string | null | undefined,
+  wifiInterfaces: WifiInterfaceSnapshot[],
+  ethernetInterfaces: EthernetInterfaceSnapshot[],
+) {
+  const links = new Set<string>();
+  const formattedHostName = formatLocalAccessHostName(hostName);
+
+  if (formattedHostName !== 'Waiting') {
+    links.add(`http://${formattedHostName}:${monitorHttpPort}`);
+  }
+
+  for (const address of [...wifiInterfaces.flatMap((wifiInterface) => wifiInterface.addresses), ...ethernetInterfaces.flatMap((ethernetInterface) => ethernetInterface.addresses)]) {
+    const normalizedAddress = normalizeConnectivityLinkAddress(address);
+    if (!normalizedAddress) {
+      continue;
+    }
+
+    links.add(`http://${normalizedAddress}:${monitorHttpPort}`);
+  }
+
+  return Array.from(links);
+}
+
+function normalizeConnectivityLinkAddress(address: string | null | undefined) {
+  const trimmed = address?.trim();
+  if (!trimmed) {
+    return null;
+  }
+
+  if (trimmed === '::1' || trimmed.startsWith('127.')) {
+    return null;
+  }
+
+  return /^(\d{1,3}\.){3}\d{1,3}$/.test(trimmed) ? trimmed : null;
 }
 
 function requiresSaeForLocalAccessPassword(password: string) {
