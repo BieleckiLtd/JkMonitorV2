@@ -114,6 +114,7 @@ describe('SystemPage', () => {
     let localAccessPassword: string | null = null;
     let sshEnabled = false;
     let sshActive = false;
+    let preferredUpdateChannel: 'dev' | 'main' = 'dev';
     const localAccessHostName = 'fluxmonitor';
     const localAccessHotspotName = 'FluxMonitor-test';
 
@@ -241,7 +242,7 @@ describe('SystemPage', () => {
                 enabled: localAccessEnabled,
                 active: localAccessActive,
                 hostName: localAccessHostName,
-                statusMessage: localAccessActive ? 'Local access mode is active.' : localAccessEnabled ? 'Local access mode is ready if Wi-Fi drops.' : 'Local access mode is off.',
+                statusMessage: localAccessEnabled ? 'Local access mode is on. Hostname: fluxmonitor.local. Bluetooth name: FluxMonitor Pi.' : 'Local access mode is off.',
                 hotspotName: localAccessHotspotName,
                 hotspotPassword: localAccessPassword,
                 addresses: localAccessActive ? ['192.168.42.1'] : [],
@@ -300,7 +301,7 @@ describe('SystemPage', () => {
             success: true,
             enabled: true,
             active: true,
-            message: 'Local access mode is on.',
+            message: 'Local access mode is on. Hostname: fluxmonitor.local. Bluetooth name: FluxMonitor Pi.',
           }),
         } as Response;
       }
@@ -365,19 +366,38 @@ describe('SystemPage', () => {
             currentReleaseTag: 'dev-latest',
             currentSourceRevision: 'abcdef1',
             currentBuiltAt: '2026-03-31T09:55:00Z',
+            currentWorkflowRunNumber: '42',
+            currentWorkflowRunAttempt: '1',
             currentReleasePublishedAt: '2026-03-31T09:55:00Z',
             currentChannel: 'dev',
-            targetChannel: 'dev',
-            targetReleaseTag: 'dev-latest',
+            preferredChannel: preferredUpdateChannel,
+            targetChannel: preferredUpdateChannel,
+            targetReleaseTag: preferredUpdateChannel === 'main' ? 'v1.2.3' : 'dev-latest',
             checkedAt: '2026-03-31T10:05:00Z',
             canUpdate: true,
             reason: null,
-            updateAvailable: false,
-            remoteReleasePublishedAt: '2026-03-31T09:55:00Z',
-            remoteChecksum: 'abc123',
+            updateAvailable: preferredUpdateChannel === 'main',
+            remoteReleasePublishedAt: preferredUpdateChannel === 'main' ? '2026-04-01T11:10:00Z' : '2026-03-31T09:55:00Z',
+            remoteChecksum: preferredUpdateChannel === 'main' ? 'def456' : 'abc123',
             localChecksum: 'abc123',
             checkError: null,
-            commits: [],
+            commits: preferredUpdateChannel === 'main'
+              ? [{ sha: '1234567', message: 'Stable release build', date: '2026-04-01T11:00:00Z' }]
+              : [],
+          }),
+        } as Response;
+      }
+
+      if (url === '/api/system/update/channel' && init?.method === 'POST') {
+        const body = typeof init.body === 'string'
+          ? JSON.parse(init.body) as { channel?: string }
+          : null;
+        preferredUpdateChannel = body?.channel === 'main' ? 'main' : 'dev';
+
+        return {
+          ok: true,
+          json: async () => ({
+            preferredChannel: preferredUpdateChannel,
           }),
         } as Response;
       }
@@ -425,8 +445,16 @@ describe('SystemPage', () => {
       expect(screen.getByRole('button', { name: /resource usage/i })).toBeInTheDocument();
     });
 
-    expect(screen.getByRole('button', { name: /notifications/i })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /theme/i })).toBeInTheDocument();
+    const notificationsButton = screen.getByRole('button', { name: /notifications/i });
+    const themeButton = screen.getByRole('button', { name: /theme/i });
+    const logsButton = screen.getByRole('button', { name: /logs/i });
+
+    expect(notificationsButton).toBeInTheDocument();
+    expect(themeButton).toBeInTheDocument();
+    expect(logsButton).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /internet speed/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^tunnel$/i })).not.toBeInTheDocument();
+    expect(Boolean(themeButton.compareDocumentPosition(logsButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(screen.getByRole('button', { name: /^back$/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /hardware interfaces/i }));
@@ -481,6 +509,26 @@ describe('SystemPage', () => {
     expect(screen.getByTestId('location-display')).toHaveTextContent('/system/logs');
   });
 
+  it('redirects legacy tunnel and internet speed routes to connectivity', async () => {
+    const tunnelRoute = renderSystemPage('/system/tunnel');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location-display')).toHaveTextContent('/system/connectivity');
+    });
+
+    expect(await screen.findByText(/^internet speed$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^tunnel$/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Flux Monitor stores the token in PostgreSQL/i)).not.toBeInTheDocument();
+
+    tunnelRoute.unmount();
+
+    renderSystemPage('/system/internet-speed');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('location-display')).toHaveTextContent('/system/connectivity');
+    });
+  });
+
   it('checks for updates automatically when opening the software update page', async () => {
     renderSystemPage('/system/software-update');
 
@@ -491,6 +539,7 @@ describe('SystemPage', () => {
     expect(screen.queryByText(/check for new releases and install updates from github/i)).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /check for updates/i })).not.toBeInTheDocument();
     expect(screen.getByText(/^channel$/i)).toBeInTheDocument();
+    expect(screen.getByLabelText(/software update channel/i)).toBeInTheDocument();
     expect(screen.getByText(/^commit$/i)).toBeInTheDocument();
     expect(screen.getByText(/^workflow$/i)).toBeInTheDocument();
     expect(screen.queryByText(/^workflow run$/i)).not.toBeInTheDocument();
@@ -552,9 +601,11 @@ describe('SystemPage', () => {
     fireEvent.click(screen.getByRole('switch', { name: /toggle local access mode/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/local access mode is on/i)).toBeInTheDocument();
+      expect(screen.getByText(/local access mode is on\. hostname: fluxmonitor\.local\. bluetooth name: fluxmonitor pi\./i)).toBeInTheDocument();
     });
 
+    expect(screen.getByText(/if wi-fi drops, the hostname will be fluxmonitor\.local and the bluetooth name will be fluxmonitor pi\./i)).toBeInTheDocument();
+    expect(screen.getByText(/hostname: fluxmonitor\.local \| bluetooth: fluxmonitor pi/i)).toBeInTheDocument();
     expect(screen.getByText(/^hostname$/i)).toBeInTheDocument();
     expect(screen.getAllByText(/fluxmonitor.local/i).length).toBeGreaterThan(0);
     expect(screen.getByText('192.168.42.1')).toBeInTheDocument();

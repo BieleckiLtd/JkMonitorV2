@@ -1,10 +1,8 @@
-import { Bell, Cloud, Cpu, Database, Globe2, List, Palette, RefreshCcw, Usb, Wifi, type LucideIcon } from 'lucide-react';
+import { Bell, Cpu, Database, List, Palette, RefreshCcw, Usb, Wifi, type LucideIcon } from 'lucide-react';
 
 export type SystemSection =
   | 'resource-usage'
   | 'software-update'
-  | 'internet-speed'
-  | 'tunnel'
   | 'connectivity'
   | 'hardware-interfaces'
   | 'database'
@@ -13,8 +11,6 @@ export type SystemSection =
 export const systemSectionRouteSegments: SystemSection[] = [
   'resource-usage',
   'software-update',
-  'internet-speed',
-  'tunnel',
   'connectivity',
   'hardware-interfaces',
   'database',
@@ -31,8 +27,6 @@ export type SystemSectionItem = {
 export const systemSectionItems: readonly SystemSectionItem[] = [
   { id: 'resource-usage', label: 'Resource usage', description: 'CPU, memory, and storage', icon: Cpu },
   { id: 'software-update', label: 'Software update', description: 'Check and install releases', icon: RefreshCcw },
-  { id: 'internet-speed', label: 'Internet speed', description: 'Run a live bandwidth check', icon: Globe2 },
-  { id: 'tunnel', label: 'Tunnel', description: 'Cloudflare Tunnel settings', icon: Cloud },
   { id: 'connectivity', label: 'Connectivity', description: 'Wi-Fi, Bluetooth, and Ethernet', icon: Wifi },
   { id: 'hardware-interfaces', label: 'Hardware interfaces', description: 'Serial ports and block devices', icon: Usb },
   { id: 'database', label: 'Database', description: 'Storage size, backup, and restore', icon: Database },
@@ -56,9 +50,13 @@ export type SystemMenuItem =
   | (SystemSectionItem & { path: string; sectionId: SystemSection })
   | SystemShortcutItem;
 
+const logsSystemSection = systemSectionItems.find((item) => item.id === 'logs');
+const mainSystemSectionItems = systemSectionItems.filter((item) => item.id !== 'logs');
+
 export const systemMenuItems: readonly SystemMenuItem[] = [
-  ...systemSectionItems.map((item) => ({ ...item, path: `/system/${item.id}`, sectionId: item.id })),
+  ...mainSystemSectionItems.map((item) => ({ ...item, path: `/system/${item.id}`, sectionId: item.id })),
   ...systemShortcutItems,
+  ...(logsSystemSection ? [{ ...logsSystemSection, path: `/system/${logsSystemSection.id}`, sectionId: logsSystemSection.id }] : []),
 ];
 
 export const defaultSystemSection: SystemSection = 'resource-usage';
@@ -79,6 +77,10 @@ export function getSystemSectionItem(sectionId: string): SystemSectionItem | nul
 }
 
 export function getSystemMenuItem(sectionId: string): { label: string; description: string } | null {
+  if (sectionId === 'internet-speed' || sectionId === 'tunnel') {
+    return systemSectionItems.find((item) => item.id === 'connectivity') ?? null;
+  }
+
   const section = systemSectionItems.find((item) => item.id === sectionId);
   if (section) return section;
   const shortcut = systemShortcutItems.find((item) => item.id === sectionId);

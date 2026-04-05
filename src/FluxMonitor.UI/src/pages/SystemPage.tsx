@@ -2,7 +2,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSignal, type IconDefinition } from '@fortawesome/free-solid-svg-icons';
 import { Bluetooth, Cable, ChevronDown, ChevronRight, CircleAlert, Cloud, Cpu, Database, Download, ExternalLink, HardDrive, Leaf, Link2, LoaderCircle, Lock, MemoryStick, RefreshCcw, CheckCircle2, Terminal, Thermometer, Upload, Wifi, XCircle } from 'lucide-react';
-import { Navigate, useNavigate, useParams } from 'react-router-dom';
+import { Navigate, useParams } from 'react-router-dom';
 import { PanelHeader } from '../components/PanelHeader';
 import { Card, CardContent } from '../components/ui/card';
 import { Input } from '../components/ui/input';
@@ -10,10 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Switch } from '../components/ui/switch';
 import { type UpdateProgress, getUpdateStateTone } from '../lib/systemUpdate';
 import { cn } from '../lib/utils';
-import { runWithViewTransition } from '../lib/viewTransitions';
 import { LogsPanel } from '../components/LogsPanel';
 import { useAppStore } from '../store/useAppStore';
-import { getSystemSectionFromRouteSegment, getSystemSectionPath, type SystemSection } from '../lib/systemNavigation';
+import { getSystemSectionFromRouteSegment, getSystemSectionPath } from '../lib/systemNavigation';
 
 type DeviceTelemetrySnapshot = {
   totalVoltageVolts?: number | null;
@@ -505,7 +504,6 @@ function getFluxMonitorWindow() {
 }
 
 export function SystemPage() {
-  const navigate = useNavigate();
   const { sectionId } = useParams<{ sectionId?: string }>();
   const routedSystemSection = getSystemSectionFromRouteSegment(sectionId);
   const activeSystemSection = routedSystemSection;
@@ -719,7 +717,7 @@ export function SystemPage() {
     void loadDbSettings();
   }, []);
 
-  const checkForUpdate = useCallback(async () => {
+  const checkForUpdate = useCallback(async (force = false) => {
     const fluxMonitorWindow = getFluxMonitorWindow();
     if (fluxMonitorWindow?.__fluxMonitorSoftwareUpdateCheckInFlight) {
       return;
@@ -727,7 +725,7 @@ export function SystemPage() {
 
     const now = Date.now();
     const lastCheckStartedAt = fluxMonitorWindow?.__fluxMonitorSoftwareUpdateCheckStartedAt ?? null;
-    if (lastCheckStartedAt != null && now - lastCheckStartedAt < updateCheckCooldownMs) {
+    if (!force && lastCheckStartedAt != null && now - lastCheckStartedAt < updateCheckCooldownMs) {
       if (fluxMonitorWindow?.__fluxMonitorSoftwareUpdateCheckResult) {
         setUpdateCheck((current) => current ?? fluxMonitorWindow.__fluxMonitorSoftwareUpdateCheckResult ?? null);
       }
@@ -779,6 +777,44 @@ export function SystemPage() {
       setUpdateChecking(false);
     }
   }, []);
+
+  const saveUpdateChannel = useCallback(async (nextChannel: string | null) => {
+    if (nextChannel == null) {
+      return;
+    }
+
+    const normalizedChannel = nextChannel === 'main' ? 'main' : 'dev';
+    const previousChannel = updateCheck?.preferredChannel ?? updateCheck?.targetChannel ?? updateCheck?.currentChannel ?? getReleaseChannel(status?.build?.releaseTag);
+    if (normalizedChannel === previousChannel) {
+      return;
+    }
+
+    setUpdateChannelError(null);
+    setUpdateChannelSaving(true);
+    setUpdateCheck((current) => current ? { ...current, preferredChannel: normalizedChannel, targetChannel: normalizedChannel } : current);
+
+    try {
+      const response = await fetch('/api/system/update/channel', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ channel: normalizedChannel }),
+      });
+      const body = await response.json().catch(() => null) as { preferredChannel?: string; error?: string } | null;
+
+      if (!response.ok) {
+        throw new Error(body?.error ?? 'Unable to save the update channel.');
+      }
+
+      const persistedChannel = body?.preferredChannel === 'main' ? 'main' : 'dev';
+      setUpdateCheck((current) => current ? { ...current, preferredChannel: persistedChannel, targetChannel: persistedChannel } : current);
+      await checkForUpdate(true);
+    } catch (error) {
+      setUpdateCheck((current) => current ? { ...current, preferredChannel: previousChannel, targetChannel: previousChannel } : current);
+      setUpdateChannelError(error instanceof Error ? error.message : 'Unable to save the update channel.');
+    } finally {
+      setUpdateChannelSaving(false);
+    }
+  }, [checkForUpdate, status?.build?.releaseTag, updateCheck]);
 
   useEffect(() => {
     if (!wifiConnectDialog?.requiresPassword) {
@@ -915,16 +951,9 @@ export function SystemPage() {
     }
   };
 
-  const openSystemSection = useCallback((section: SystemSection) => {
-    runWithViewTransition(() => {
-      navigate(getSystemSectionPath(section));
-    }, { direction: 'forward' });
-  }, [navigate]);
-
   const startInternetSpeedTest = async () => {
     setInternetSpeedTestStarting(true);
     setInternetSpeedTestError(null);
-    openSystemSection('internet-speed');
 
     try {
       const response = await fetch('/api/system/internet-speed/run', {
@@ -1541,8 +1570,12 @@ export function SystemPage() {
   const memoryUsagePercent = getUsagePercent(memoryUsed, memoryTotal);
   const storageUsagePercent = getUsagePercent(storageUsed, storageTotal);
   const applicationUptime = status ? formatDuration(status.startedAt, status.reportedAt) : noDataLabel;
-  const workflowRun = formatWorkflowRun(status?.build?.workflowRunNumber, status?.build?.workflowRunAttempt);
-  const updateChannel = updateCheck?.currentChannel ?? getReleaseChannel(status?.build?.releaseTag);
+  const workflowRun = formatWorkflowRun(
+    updateCheck?.currentWorkflowRunNumber ?? status?.build?.workflowRunNumber,
+    updateCheck?.currentWorkflowRunAttempt ?? status?.build?.workflowRunAttempt,
+  );
+  const installedChannel = updateCheck?.currentChannel ?? getReleaseChannel(status?.build?.releaseTag);
+  const preferredUpdateChannel = updateCheck?.preferredChannel ?? updateCheck?.targetChannel ?? installedChannel;
   const installedCommit = updateCheck?.currentSourceRevision ?? status?.build?.sourceRevisionId ?? null;
   const installedReleasePublishedAt = updateCheck?.currentReleasePublishedAt ?? null;
   const installedReleasePublishedLabel = installedReleasePublishedAt ? formatTimestamp(installedReleasePublishedAt) : 'Not checked yet';
@@ -1683,11 +1716,12 @@ export function SystemPage() {
   const localAccessAddresses = localAccessMode?.addresses ?? [];
   const localAccessPrimaryAddress = localAccessAddresses[0] ?? null;
   const localAccessHostname = formatLocalAccessHostName(localAccessMode?.hostName);
+  const localAccessBluetoothDeviceName = formatLocalAccessBluetoothDeviceName(connectivity?.directAccess.bluetooth.deviceName);
+  const localAccessEnabledSummary = buildLocalAccessIdentitySummary(localAccessHostname, localAccessBluetoothDeviceName);
+  const localAccessEnabledDescription = buildLocalAccessEnabledDescription(localAccessHostname, localAccessBluetoothDeviceName);
   const connectivityPanelLinks = buildConnectivityPanelLinks(localAccessMode?.hostName, wifiInterfaces, ethernetInterfaces);
-  const localAccessSummary = localAccessMode?.active
-    ? localAccessHostname !== 'Waiting'
-      ? localAccessHostname
-      : localAccessPrimaryAddress ?? 'Keeps nearby access available'
+  const localAccessSummary = localAccessMode?.enabled
+    ? localAccessEnabledSummary
     : 'Keeps nearby access available';
   const ethernetSummary = activeEthernetInterface
     ? activeEthernetInterface.connectionName
@@ -1718,6 +1752,329 @@ export function SystemPage() {
       </div>
     </div>
   );
+
+  const renderInternetSpeedCard = () => (
+    <Card className='border border-border/80 bg-card/85 shadow-sm'>
+      <PanelHeader
+        title='Internet speed'
+        description='Run a live bandwidth check on this device.'
+        aside={(
+          <div className='flex min-w-0 items-center gap-3 text-xs text-muted-foreground'>
+            {internetSpeedTest?.isRunning ? <LoaderCircle className='h-4 w-4 shrink-0 animate-spin text-primary' /> : null}
+            <span className='inline-flex min-w-0 items-center gap-2 truncate'>{internetSpeedSummary}</span>
+          </div>
+        )}
+      />
+      <CardContent className='space-y-4 pt-5'>
+        {internetSpeedTestLoading && !internetSpeedTest ? (
+          <div className='flex items-center justify-center py-8'>
+            <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
+          </div>
+        ) : (
+          <>
+            {internetSpeedTestError ? (
+              <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
+                {internetSpeedTestError}
+              </div>
+            ) : null}
+
+            {internetSpeedTest?.statusMessage && !internetSpeedTest.isRunning && (!internetSpeedTest.supported || internetSpeedTest.status === 'failed' || (!internetSpeedResult && internetSpeedTest.status !== 'succeeded')) ? (
+              <div className={cn(
+                'rounded-2xl border px-4 py-4',
+                internetSpeedTest.status === 'failed'
+                  ? 'border-rose-500/20 bg-rose-500/10 text-rose-200'
+                  : 'border-border/70 bg-background/40 text-foreground'
+              )}>
+                <div className='flex items-start gap-3'>
+                  {!internetSpeedTest.supported ? (
+                    <CircleAlert className='mt-0.5 h-4 w-4 shrink-0' />
+                  ) : internetSpeedTest.status === 'failed' ? (
+                    <CircleAlert className='mt-0.5 h-4 w-4 shrink-0' />
+                  ) : (
+                    <CheckCircle2 className='mt-0.5 h-4 w-4 shrink-0 text-emerald-400' />
+                  )}
+                  <div className='min-w-0'>
+                    <div className='text-sm font-semibold'>
+                      {!internetSpeedTest.supported
+                        ? 'Speed test unavailable'
+                        : internetSpeedTest.status === 'failed'
+                          ? 'Speed test did not finish'
+                          : 'Internet speed ready'}
+                    </div>
+                    <div className='mt-1 text-xs opacity-85'>
+                      {internetSpeedTest.statusMessage}
+                    </div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            <div className='grid gap-3 sm:grid-cols-3'>
+              <SpeedMetricCard
+                label='Ping'
+                value={internetSpeedPingValue}
+                dialValue={internetSpeedPingDialDisplay}
+                caption={internetSpeedPingCaption}
+                gaugePercent={internetSpeedPingDialGauge}
+                tone={internetSpeedPingTone}
+                isActive={internetSpeedPingIsActive}
+              />
+              <SpeedMetricCard
+                label='Download'
+                value={internetSpeedDownloadValue}
+                dialValue={internetSpeedDownloadDialDisplay}
+                caption={internetSpeedDownloadCaption}
+                gaugePercent={internetSpeedDownloadDialGauge}
+                tone='emerald'
+                isActive={internetSpeedDownloadIsActive}
+              />
+              <SpeedMetricCard
+                label='Upload'
+                value={internetSpeedUploadValue}
+                dialValue={internetSpeedUploadDialDisplay}
+                caption={internetSpeedUploadCaption}
+                gaugePercent={internetSpeedUploadDialGauge}
+                tone='sky'
+                isActive={internetSpeedUploadIsActive}
+              />
+            </div>
+
+            <div className='grid gap-3 sm:grid-cols-2'>
+              <DetailTile
+                label='Server'
+                value={formatInternetSpeedServer(
+                  internetSpeedResult?.server?.sponsor,
+                  internetSpeedResult?.server?.name,
+                  internetSpeedResult?.server?.country
+                )}
+              />
+              <DetailTile label='Distance' value={formatDistance(internetSpeedResult?.server?.distanceKilometers)} />
+              <DetailTile label='Provider' value={internetSpeedResult?.client?.internetServiceProvider ?? noDataLabel} />
+              <DetailTile label='IP address' value={internetSpeedResult?.client?.ipAddress ?? noDataLabel} />
+              <DetailTile label='Connections' value={internetSpeedConnectionMode} />
+              <DetailTile label='Measured at' value={formatTimestamp(internetSpeedResult?.testedAt ?? internetSpeedTest?.completedAt)} />
+            </div>
+
+            <div>
+              <button
+                type='button'
+                disabled={internetSpeedTestStarting || internetSpeedTest?.isRunning || !internetSpeedTest?.canStart}
+                onClick={() => void startInternetSpeedTest()}
+                className='inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
+              >
+                {internetSpeedTestStarting || internetSpeedTest?.isRunning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Wifi className='h-4 w-4' />}
+                {internetSpeedTest?.isRunning ? 'Speed test running… please wait' : 'Run internet speed test'}
+              </button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+
+  const renderTunnelCard = () => (
+    <Card className='border border-border/80 bg-card/85 shadow-sm'>
+      <PanelHeader
+        title='Tunnel'
+        description='Expose Flux Monitor over the internet through Cloudflare Tunnel.'
+        aside={(
+          <div className='flex items-center gap-2 text-xs text-muted-foreground'>
+            <span className='hidden sm:inline'>{cloudflareTunnelSummary}</span>
+            <span className='rounded-full border border-border/70 bg-background/70 px-3 py-1 font-medium uppercase tracking-[0.16em]'>
+              {cloudflareTunnelStateLabel}
+            </span>
+          </div>
+        )}
+      />
+      <CardContent className='space-y-4 pt-5'>
+        {cloudflareTunnelLoading && !cloudflareTunnelStatus ? (
+          <div className='flex items-center justify-center py-6'>
+            <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
+          </div>
+        ) : (
+          <>
+            {cloudflareTunnelError ? (
+              <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
+                {cloudflareTunnelError}
+              </div>
+            ) : null}
+
+            {cloudflareTunnelFeedback ? (
+              <div className={cn(
+                'rounded-xl border px-3 py-2 text-xs',
+                cloudflareTunnelFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+              )}>
+                {cloudflareTunnelFeedback.message}
+              </div>
+            ) : null}
+
+            {cloudflareTunnelStatus?.statusMessage ? (
+              <div className='rounded-xl border border-border/70 bg-background/50 px-4 py-3'>
+                <div className='text-sm font-medium text-foreground'>{cloudflareTunnelDetailSummary}</div>
+                <div className='mt-1 text-xs text-muted-foreground'>{cloudflareTunnelStatus.statusMessage}</div>
+              </div>
+            ) : null}
+
+            <div className='grid gap-3 sm:grid-cols-2'>
+              <DetailTile
+                label='Package'
+                value={cloudflareTunnelStatus?.packageInstalled
+                  ? cloudflareTunnelStatus.packageVersion ?? 'Installed'
+                  : 'Missing'}
+              />
+              <DetailTile
+                label='Service'
+                value={cloudflareTunnelStatus?.serviceInstalled
+                  ? formatCompactState(cloudflareTunnelStatus.serviceActiveState, cloudflareTunnelStatus.serviceSubState)
+                  : 'Missing'}
+              />
+              <DetailTile label='Stored token' value={cloudflareTunnelMaskedToken ?? 'Not saved'} />
+              <DetailTile label='Provider' value={cloudflareTunnelStatus?.tunnelProvider ?? 'none'} />
+            </div>
+
+            <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-4'>
+              <div className='text-sm font-semibold text-foreground'>How it works</div>
+              <div className='mt-3 space-y-1 font-mono text-sm text-muted-foreground'>
+                <div>Your browser eg. on the phone</div>
+                <div>↓</div>
+                <div>Cloudflare (login + protection)</div>
+                <div>↓</div>
+                <div>Tunnel (secure pipe)</div>
+                <div>↓</div>
+                <div>Flux Monitor app on Raspberry Pi</div>
+              </div>
+              <div className='mt-3 text-xs text-muted-foreground'>
+                This exposes Flux Monitor to the internet on your own hostname or on a Cloudflare URL such as
+                {' '}
+                <span className='font-mono text-foreground'>random-name.trycloudflare.com</span>
+                . Because it is reachable from outside your home network, add a Cloudflare login wall first.
+              </div>
+            </div>
+
+            <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-4'>
+              <div className='text-sm font-semibold text-foreground'>Cloudflare setup</div>
+              <div className='mt-3 space-y-2 text-sm text-muted-foreground'>
+                <div>1. In Cloudflare Tunnel, create a tunnel and copy the command or token shown on the connector page.</div>
+                <div>2. In Published applications, choose your hostname. Use your own domain if you have one. If you use a temporary Cloudflare URL, that is configured on the Cloudflare side, not here in Flux Monitor.</div>
+                <div>3. Leave Path empty unless you only want to expose part of the app.</div>
+                <div>4. Set Service Type to <span className='font-mono text-foreground'>HTTP</span>.</div>
+                <div>5. Set URL to <span className='font-mono text-foreground'>127.0.0.1:5074</span> or <span className='font-mono text-foreground'>localhost:5074</span>.</div>
+              </div>
+              <div className='mt-3 flex flex-wrap gap-3 text-sm'>
+                <a
+                  href='https://developers.cloudflare.com/tunnel/setup/'
+                  target='_blank'
+                  rel='noreferrer'
+                  className='inline-flex items-center gap-2 text-primary hover:underline'
+                >
+                  <ExternalLink className='h-4 w-4' />
+                  Open Tunnel hostname docs
+                </a>
+                <a
+                  href='https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/remote-tunnel-permissions/'
+                  target='_blank'
+                  rel='noreferrer'
+                  className='inline-flex items-center gap-2 text-primary hover:underline'
+                >
+                  <ExternalLink className='h-4 w-4' />
+                  Open connector setup docs
+                </a>
+              </div>
+            </div>
+
+            <div className='rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-4'>
+              <div className='text-sm font-semibold text-foreground'>Protect it with Cloudflare Access</div>
+              <div className='mt-3 space-y-2 text-sm text-amber-50/90'>
+                <div>Access → Applications</div>
+                <div>Add application</div>
+                <div>Enter your hostname</div>
+                <div>Add policy: Allow → Emails → your@email.com</div>
+                <div>Choose login method: OTP or Google</div>
+              </div>
+              <div className='mt-3 text-xs text-amber-100/80'>
+                OTP is the simplest option if you already use one-time email codes. This puts a login wall in front of the app before traffic reaches your Raspberry Pi.
+              </div>
+              <div className='mt-3'>
+                <a
+                  href='https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-apps/'
+                  target='_blank'
+                  rel='noreferrer'
+                  className='inline-flex items-center gap-2 text-sm text-amber-100 hover:underline'
+                >
+                  <ExternalLink className='h-4 w-4' />
+                  Open Access application docs
+                </a>
+              </div>
+            </div>
+
+            <div className='flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/70 bg-background/35 px-4 py-3'>
+              <div className='min-w-0'>
+                <div className='text-sm font-semibold text-foreground'>Enable Tunnel</div>
+              </div>
+              <Switch
+                checked={cloudflareTunnelEnabled}
+                disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
+                onCheckedChange={(checked) => {
+                  cloudflareTunnelDirtyRef.current = true;
+                  setCloudflareTunnelEnabled(checked);
+                  setCloudflareTunnelFeedback(null);
+                }}
+                aria-label='Toggle Tunnel'
+              />
+            </div>
+
+            <div className='space-y-2'>
+              <label className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground' htmlFor='cloudflare-token'>
+                Tunnel token or Cloudflare command
+              </label>
+              <textarea
+                id='cloudflare-token'
+                value={cloudflareTunnelTokenOrCommand}
+                onChange={(event) => {
+                  cloudflareTunnelDirtyRef.current = true;
+                  setCloudflareTunnelTokenOrCommand(event.target.value);
+                }}
+                placeholder={cloudflareTunnelMaskedToken
+                  ? `Leave blank to keep the saved token (${cloudflareTunnelMaskedToken}).`
+                  : 'Paste the cloudflared install command, run command, or the raw tunnel token.'}
+                disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
+                className='min-h-24 w-full rounded-xl border border-input bg-background/70 px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50'
+              />
+              <div className='text-xs text-muted-foreground'>
+                Flux Monitor extracts the token automatically if you paste a command copied from the Cloudflare page.
+              </div>
+            </div>
+
+            <div className='flex flex-col gap-2 sm:flex-row'>
+              <button
+                type='button'
+                disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
+                onClick={() => void saveCloudflareTunnel()}
+                className='inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
+              >
+                {cloudflareTunnelSaving ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Cloud className='h-4 w-4' />}
+                Save tunnel settings
+              </button>
+
+              <button
+                type='button'
+                disabled={cloudflareTunnelSaving}
+                onClick={() => void loadCloudflareTunnelStatus()}
+                className='inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
+              >
+                <RefreshCcw className='h-4 w-4' />
+                Refresh status
+              </button>
+            </div>
+          </>
+        )}
+      </CardContent>
+    </Card>
+  );
+
+  if (sectionId === 'internet-speed' || sectionId === 'tunnel') {
+    return <Navigate to={getSystemSectionPath('connectivity')} replace />;
+  }
 
   if (sectionId && routedSystemSection === null) {
     return <Navigate to='/system' replace />;
@@ -1801,11 +2158,21 @@ export function SystemPage() {
             <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'software-update' && 'hidden')}>
               <CardContent className='space-y-4 pt-6'>
                   <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
-                    <DetailTile label='Channel' value={formatReleaseChannel(updateChannel)} />
+                    <UpdateChannelTile
+                      value={preferredUpdateChannel}
+                      disabled={updateChannelSaving || updateChecking || (updateProgress?.isRunning ?? false)}
+                      pending={updateChannelSaving}
+                      onChange={saveUpdateChannel}
+                    />
                     <DetailTile label='Commit' value={formatCommit(installedCommit)} />
                     <DetailTile label='Workflow' value={workflowRun} />
                     <DetailTile label='Published' value={installedReleasePublishedLabel} />
                   </div>
+                  {updateCheck?.currentChannel && preferredUpdateChannel && updateCheck.currentChannel !== preferredUpdateChannel ? (
+                    <div className='rounded-xl border border-border bg-muted/70 px-3 py-2 text-xs text-muted-foreground'>
+                      Installed build is on the {formatReleaseChannel(updateCheck.currentChannel)} channel. New update checks use the {formatReleaseChannel(preferredUpdateChannel)} branch.
+                    </div>
+                  ) : null}
                   {updateChecking && !updateCheck ? (
                     <div className='flex items-center gap-2 rounded-xl border border-border bg-muted/60 px-3 py-2 text-sm text-muted-foreground'>
                       <LoaderCircle className='h-4 w-4 animate-spin' />
@@ -1859,6 +2226,12 @@ export function SystemPage() {
                       {updateActionError ? (
                         <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
                           {updateActionError}
+                        </div>
+                      ) : null}
+
+                      {updateChannelError ? (
+                        <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
+                          {updateChannelError}
                         </div>
                       ) : null}
 
@@ -1920,324 +2293,6 @@ export function SystemPage() {
                   ) : null}
               </CardContent>
             </Card>
-            <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'internet-speed' && 'hidden')}>
-              <PanelHeader
-                title='Internet speed'
-                description='Run a live bandwidth check on this device.'
-                aside={(
-                  <div className='flex min-w-0 items-center gap-3 text-xs text-muted-foreground'>
-                    {internetSpeedTest?.isRunning ? <LoaderCircle className='h-4 w-4 shrink-0 animate-spin text-primary' /> : null}
-                    <span className='inline-flex min-w-0 items-center gap-2 truncate'>{internetSpeedSummary}</span>
-                  </div>
-                )}
-              />
-              <CardContent className='space-y-4 pt-5'>
-                  {internetSpeedTestLoading && !internetSpeedTest ? (
-                    <div className='flex items-center justify-center py-8'>
-                      <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
-                    </div>
-                  ) : (
-                    <>
-                      {internetSpeedTestError ? (
-                        <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
-                          {internetSpeedTestError}
-                        </div>
-                      ) : null}
-
-                      {internetSpeedTest?.statusMessage && !internetSpeedTest.isRunning && (!internetSpeedTest.supported || internetSpeedTest.status === 'failed' || (!internetSpeedResult && internetSpeedTest.status !== 'succeeded')) ? (
-                        <div className={cn(
-                          'rounded-2xl border px-4 py-4',
-                          internetSpeedTest.status === 'failed'
-                            ? 'border-rose-500/20 bg-rose-500/10 text-rose-200'
-                            : 'border-border/70 bg-background/40 text-foreground'
-                        )}>
-                          <div className='flex items-start gap-3'>
-                            {!internetSpeedTest.supported ? (
-                              <CircleAlert className='mt-0.5 h-4 w-4 shrink-0' />
-                            ) : internetSpeedTest.status === 'failed' ? (
-                              <CircleAlert className='mt-0.5 h-4 w-4 shrink-0' />
-                            ) : (
-                              <CheckCircle2 className='mt-0.5 h-4 w-4 shrink-0 text-emerald-400' />
-                            )}
-                            <div className='min-w-0'>
-                              <div className='text-sm font-semibold'>
-                                {!internetSpeedTest.supported
-                                  ? 'Speed test unavailable'
-                                  : internetSpeedTest.status === 'failed'
-                                    ? 'Speed test did not finish'
-                                    : 'Internet speed ready'}
-                              </div>
-                              <div className='mt-1 text-xs opacity-85'>
-                                {internetSpeedTest.statusMessage}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      ) : null}
-
-                      <div className='grid gap-3 sm:grid-cols-3'>
-                        <SpeedMetricCard
-                          label='Ping'
-                          value={internetSpeedPingValue}
-                          dialValue={internetSpeedPingDialDisplay}
-                          caption={internetSpeedPingCaption}
-                          gaugePercent={internetSpeedPingDialGauge}
-                          tone={internetSpeedPingTone}
-                          isActive={internetSpeedPingIsActive}
-                        />
-                        <SpeedMetricCard
-                          label='Download'
-                          value={internetSpeedDownloadValue}
-                          dialValue={internetSpeedDownloadDialDisplay}
-                          caption={internetSpeedDownloadCaption}
-                          gaugePercent={internetSpeedDownloadDialGauge}
-                          tone='emerald'
-                          isActive={internetSpeedDownloadIsActive}
-                        />
-                        <SpeedMetricCard
-                          label='Upload'
-                          value={internetSpeedUploadValue}
-                          dialValue={internetSpeedUploadDialDisplay}
-                          caption={internetSpeedUploadCaption}
-                          gaugePercent={internetSpeedUploadDialGauge}
-                          tone='sky'
-                          isActive={internetSpeedUploadIsActive}
-                        />
-                      </div>
-
-                      <div className='grid gap-3 sm:grid-cols-2'>
-                        <DetailTile
-                          label='Server'
-                          value={formatInternetSpeedServer(
-                            internetSpeedResult?.server?.sponsor,
-                            internetSpeedResult?.server?.name,
-                            internetSpeedResult?.server?.country
-                          )}
-                        />
-                        <DetailTile label='Distance' value={formatDistance(internetSpeedResult?.server?.distanceKilometers)} />
-                        <DetailTile label='Provider' value={internetSpeedResult?.client?.internetServiceProvider ?? noDataLabel} />
-                        <DetailTile label='IP address' value={internetSpeedResult?.client?.ipAddress ?? noDataLabel} />
-                        <DetailTile label='Connections' value={internetSpeedConnectionMode} />
-                        <DetailTile label='Measured at' value={formatTimestamp(internetSpeedResult?.testedAt ?? internetSpeedTest?.completedAt)} />
-                      </div>
-
-                      <div>
-                        <button
-                          type='button'
-                          disabled={internetSpeedTestStarting || internetSpeedTest?.isRunning || !internetSpeedTest?.canStart}
-                          onClick={() => void startInternetSpeedTest()}
-                          className='inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
-                        >
-                          {internetSpeedTestStarting || internetSpeedTest?.isRunning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Wifi className='h-4 w-4' />}
-                          {internetSpeedTest?.isRunning ? 'Speed test running… please wait' : 'Run internet speed test'}
-                        </button>
-                      </div>
-                    </>
-                  )}
-              </CardContent>
-            </Card>
-
-            <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'tunnel' && 'hidden')}>
-              <PanelHeader
-                title='Tunnel'
-                description='Expose Flux Monitor over the internet through Cloudflare Tunnel.'
-                aside={(
-                  <div className='flex items-center gap-2 text-xs text-muted-foreground'>
-                    <span className='hidden sm:inline'>{cloudflareTunnelSummary}</span>
-                    <span className='rounded-full border border-border/70 bg-background/70 px-3 py-1 font-medium uppercase tracking-[0.16em]'>
-                      {cloudflareTunnelStateLabel}
-                    </span>
-                  </div>
-                )}
-              />
-              <CardContent className='space-y-4 pt-5'>
-                  {cloudflareTunnelLoading && !cloudflareTunnelStatus ? (
-                    <div className='flex items-center justify-center py-6'>
-                      <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
-                    </div>
-                  ) : (
-                    <>
-                      {cloudflareTunnelError ? (
-                        <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
-                          {cloudflareTunnelError}
-                        </div>
-                      ) : null}
-
-                      {cloudflareTunnelFeedback ? (
-                        <div className={cn(
-                          'rounded-xl border px-3 py-2 text-xs',
-                          cloudflareTunnelFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-                        )}>
-                          {cloudflareTunnelFeedback.message}
-                        </div>
-                      ) : null}
-
-                      {cloudflareTunnelStatus?.statusMessage ? (
-                        <div className='rounded-xl border border-border/70 bg-background/50 px-4 py-3'>
-                          <div className='text-sm font-medium text-foreground'>{cloudflareTunnelDetailSummary}</div>
-                          <div className='mt-1 text-xs text-muted-foreground'>{cloudflareTunnelStatus.statusMessage}</div>
-                        </div>
-                      ) : null}
-
-                      <div className='grid gap-3 sm:grid-cols-2'>
-                        <DetailTile
-                          label='Package'
-                          value={cloudflareTunnelStatus?.packageInstalled
-                            ? cloudflareTunnelStatus.packageVersion ?? 'Installed'
-                            : 'Missing'}
-                        />
-                        <DetailTile
-                          label='Service'
-                          value={cloudflareTunnelStatus?.serviceInstalled
-                            ? formatCompactState(cloudflareTunnelStatus.serviceActiveState, cloudflareTunnelStatus.serviceSubState)
-                            : 'Missing'}
-                        />
-                        <DetailTile label='Stored token' value={cloudflareTunnelMaskedToken ?? 'Not saved'} />
-                        <DetailTile label='Provider' value={cloudflareTunnelStatus?.tunnelProvider ?? 'none'} />
-                      </div>
-
-                      <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-4'>
-                        <div className='text-sm font-semibold text-foreground'>How it works</div>
-                        <div className='mt-3 space-y-1 font-mono text-sm text-muted-foreground'>
-                          <div>Your browser eg. on the phone</div>
-                          <div>↓</div>
-                          <div>Cloudflare (login + protection)</div>
-                          <div>↓</div>
-                          <div>Tunnel (secure pipe)</div>
-                          <div>↓</div>
-                          <div>Flux Monitor app on Raspberry Pi</div>
-                        </div>
-                        <div className='mt-3 text-xs text-muted-foreground'>
-                          This exposes Flux Monitor to the internet on your own hostname or on a Cloudflare URL such as
-                          {' '}
-                          <span className='font-mono text-foreground'>random-name.trycloudflare.com</span>
-                          . Because it is reachable from outside your home network, add a Cloudflare login wall first.
-                        </div>
-                      </div>
-
-                      <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-4'>
-                        <div className='text-sm font-semibold text-foreground'>Cloudflare setup</div>
-                        <div className='mt-3 space-y-2 text-sm text-muted-foreground'>
-                          <div>1. In Cloudflare Tunnel, create a tunnel and copy the command or token shown on the connector page.</div>
-                          <div>2. In Published applications, choose your hostname. Use your own domain if you have one. If you use a temporary Cloudflare URL, that is configured on the Cloudflare side, not here in Flux Monitor.</div>
-                          <div>3. Leave Path empty unless you only want to expose part of the app.</div>
-                          <div>4. Set Service Type to <span className='font-mono text-foreground'>HTTP</span>.</div>
-                          <div>5. Set URL to <span className='font-mono text-foreground'>127.0.0.1:5074</span> or <span className='font-mono text-foreground'>localhost:5074</span>.</div>
-                        </div>
-                        <div className='mt-3 flex flex-wrap gap-3 text-sm'>
-                          <a
-                            href='https://developers.cloudflare.com/tunnel/setup/'
-                            target='_blank'
-                            rel='noreferrer'
-                            className='inline-flex items-center gap-2 text-primary hover:underline'
-                          >
-                            <ExternalLink className='h-4 w-4' />
-                            Open Tunnel hostname docs
-                          </a>
-                          <a
-                            href='https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/remote-tunnel-permissions/'
-                            target='_blank'
-                            rel='noreferrer'
-                            className='inline-flex items-center gap-2 text-primary hover:underline'
-                          >
-                            <ExternalLink className='h-4 w-4' />
-                            Open connector setup docs
-                          </a>
-                        </div>
-                      </div>
-
-                      <div className='rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-4'>
-                        <div className='text-sm font-semibold text-foreground'>Protect it with Cloudflare Access</div>
-                        <div className='mt-3 space-y-2 text-sm text-amber-50/90'>
-                          <div>Access → Applications</div>
-                          <div>Add application</div>
-                          <div>Enter your hostname</div>
-                          <div>Add policy: Allow → Emails → your@email.com</div>
-                          <div>Choose login method: OTP or Google</div>
-                        </div>
-                        <div className='mt-3 text-xs text-amber-100/80'>
-                          OTP is the simplest option if you already use one-time email codes. This puts a login wall in front of the app before traffic reaches your Raspberry Pi.
-                        </div>
-                        <div className='mt-3'>
-                          <a
-                            href='https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-apps/'
-                            target='_blank'
-                            rel='noreferrer'
-                            className='inline-flex items-center gap-2 text-sm text-amber-100 hover:underline'
-                          >
-                            <ExternalLink className='h-4 w-4' />
-                            Open Access application docs
-                          </a>
-                        </div>
-                      </div>
-
-                      <div className='flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/70 bg-background/35 px-4 py-3'>
-                        <div className='min-w-0'>
-                          <div className='text-sm font-semibold text-foreground'>Enable Tunnel</div>
-                          <div className='mt-1 text-xs text-muted-foreground'>
-                            Flux Monitor stores the token in PostgreSQL. When you reopen this page you only see a shortened preview, not the full token.
-                          </div>
-                        </div>
-                        <Switch
-                          checked={cloudflareTunnelEnabled}
-                          disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
-                          onCheckedChange={(checked) => {
-                            cloudflareTunnelDirtyRef.current = true;
-                            setCloudflareTunnelEnabled(checked);
-                            setCloudflareTunnelFeedback(null);
-                          }}
-                          aria-label='Toggle Tunnel'
-                        />
-                      </div>
-
-                      <div className='space-y-2'>
-                        <label className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground' htmlFor='cloudflare-token'>
-                          Tunnel token or Cloudflare command
-                        </label>
-                        <textarea
-                          id='cloudflare-token'
-                          value={cloudflareTunnelTokenOrCommand}
-                          onChange={(event) => {
-                            cloudflareTunnelDirtyRef.current = true;
-                            setCloudflareTunnelTokenOrCommand(event.target.value);
-                          }}
-                          placeholder={cloudflareTunnelMaskedToken
-                            ? `Leave blank to keep the saved token (${cloudflareTunnelMaskedToken}).`
-                            : 'Paste the cloudflared install command, run command, or the raw tunnel token.'}
-                          disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
-                          className='min-h-24 w-full rounded-xl border border-input bg-background/70 px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50'
-                        />
-                        <div className='text-xs text-muted-foreground'>
-                          Flux Monitor extracts the token automatically if you paste a command copied from the Cloudflare page.
-                        </div>
-                      </div>
-
-                      <div className='flex flex-col gap-2 sm:flex-row'>
-                        <button
-                          type='button'
-                          disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
-                          onClick={() => void saveCloudflareTunnel()}
-                          className='inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
-                        >
-                          {cloudflareTunnelSaving ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Cloud className='h-4 w-4' />}
-                          Save tunnel settings
-                        </button>
-
-                        <button
-                          type='button'
-                          disabled={cloudflareTunnelSaving}
-                          onClick={() => void loadCloudflareTunnelStatus()}
-                          className='inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
-                        >
-                          <RefreshCcw className='h-4 w-4' />
-                          Refresh status
-                        </button>
-                      </div>
-                    </>
-                  )}
-              </CardContent>
-            </Card>
-
             <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'connectivity' && 'hidden')}>
               <CardContent className='space-y-4 pt-4'>
                 {connectivityLoading && !connectivity ? (
@@ -2627,6 +2682,7 @@ export function SystemPage() {
                             type='button'
                             onClick={() => void toggleConnectivitySection('local-access')}
                             className='flex min-w-0 flex-1 items-center gap-3 text-left'
+                            aria-expanded={localAccessSectionOpen}
                           >
                             <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
                               <Link2 className='h-4 w-4 text-muted-foreground' />
@@ -2634,9 +2690,6 @@ export function SystemPage() {
                             <div className='min-w-0 flex-1'>
                               <div className='text-sm font-semibold text-foreground'>Local access mode</div>
                               <div className='mt-0.5 truncate text-xs text-muted-foreground'>{localAccessSummary}</div>
-                            </div>
-                            <div className='pl-3 text-muted-foreground'>
-                              {localAccessSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
                             </div>
                           </button>
 
@@ -2648,12 +2701,24 @@ export function SystemPage() {
                               aria-label='Toggle local access mode'
                             />
                           </div>
+
+                          <button
+                            type='button'
+                            onClick={() => void toggleConnectivitySection('local-access')}
+                            className='flex shrink-0 items-center justify-center text-muted-foreground'
+                            aria-label={localAccessSectionOpen ? 'Collapse local access details' : 'Expand local access details'}
+                            aria-expanded={localAccessSectionOpen}
+                          >
+                            {localAccessSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
+                          </button>
                         </div>
 
                         {localAccessSectionOpen ? (
                           <div className='space-y-4 border-t border-border/60 px-4 py-4'>
                             <div className='text-xs leading-5 text-muted-foreground'>
-                              Lets you connect to the device if it loses connection to the Wi-Fi router.
+                              {localAccessMode?.enabled
+                                ? localAccessEnabledDescription
+                                : 'Lets you connect to the device if it loses connection to the Wi-Fi router.'}
                             </div>
 
                             {localAccessModeFeedback ? (
@@ -2770,6 +2835,10 @@ export function SystemPage() {
                 )}
               </CardContent>
             </Card>
+
+            {activeSystemSection === 'connectivity' ? renderInternetSpeedCard() : null}
+
+            {activeSystemSection === 'connectivity' ? renderTunnelCard() : null}
 
             <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'hardware-interfaces' && 'hidden')}>
               <PanelHeader
@@ -3161,6 +3230,36 @@ function DetailTile({ label, value }: { label: string; value: string }) {
   );
 }
 
+function UpdateChannelTile({
+  value,
+  disabled,
+  pending,
+  onChange,
+}: {
+  value: string;
+  disabled: boolean;
+  pending: boolean;
+  onChange: (value: string | null) => void;
+}) {
+  return (
+    <div className='rounded-2xl border border-border/70 bg-background/50 px-4 py-3'>
+      <div className='flex items-center justify-between gap-2 text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>
+        <span>Channel</span>
+        {pending ? <LoaderCircle className='h-3.5 w-3.5 animate-spin' /> : null}
+      </div>
+      <Select value={value} onValueChange={onChange} disabled={disabled}>
+        <SelectTrigger aria-label='Software update channel' className='mt-2 w-full'>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value='dev'>Dev</SelectItem>
+          <SelectItem value='main'>Main</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+  );
+}
+
 function SpeedMetricCard({
   label,
   value,
@@ -3426,6 +3525,23 @@ function formatLocalAccessHostName(hostName: string | null | undefined) {
   }
 
   return trimmed.includes('.') ? trimmed : `${trimmed}.local`;
+}
+
+function formatLocalAccessBluetoothDeviceName(deviceName: string | null | undefined) {
+  const trimmed = deviceName?.trim();
+  if (!trimmed) {
+    return 'Waiting';
+  }
+
+  return trimmed;
+}
+
+function buildLocalAccessIdentitySummary(hostName: string, bluetoothDeviceName: string) {
+  return `Hostname: ${hostName} | Bluetooth: ${bluetoothDeviceName}`;
+}
+
+function buildLocalAccessEnabledDescription(hostName: string, bluetoothDeviceName: string) {
+  return `If Wi-Fi drops, the hostname will be ${hostName} and the Bluetooth name will be ${bluetoothDeviceName}.`;
 }
 
 function buildConnectivityPanelLinks(

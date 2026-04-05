@@ -109,7 +109,7 @@ public sealed class DirectAccessService(
             Enabled = snapshot.Mode.Enabled,
             Active = snapshot.Mode.Active,
             Message = enabled
-                ? "Local access mode is on."
+                ? BuildLocalAccessModeEnabledMessage(snapshot.Mode.HostName, snapshot.Bluetooth.DeviceName)
                 : "Local access mode is off."
         };
     }
@@ -625,13 +625,51 @@ public sealed class DirectAccessService(
                 ? "Local access mode is unavailable on this host."
                 : !enabled
                     ? "Local access mode is off."
-                    : active
-                        ? "Local access mode is active."
-                        : "Local access mode is ready if Wi-Fi drops.",
+                    : BuildLocalAccessModeEnabledMessage(Environment.MachineName, bluetooth.DeviceName),
             HotspotName = wifi.Ssid,
             HotspotPassword = settings.WifiPassword,
             Addresses = addresses
         };
+    }
+
+    private static string BuildLocalAccessModeEnabledMessage(string hostName, string? bluetoothDeviceName)
+    {
+        var details = new List<string>();
+        var formattedHostName = FormatLocalAccessHostName(hostName);
+        var formattedBluetoothDeviceName = FormatLocalAccessBluetoothDeviceName(bluetoothDeviceName);
+
+        if (!string.IsNullOrWhiteSpace(formattedHostName))
+        {
+            details.Add($"Hostname: {formattedHostName}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(formattedBluetoothDeviceName))
+        {
+            details.Add($"Bluetooth name: {formattedBluetoothDeviceName}");
+        }
+
+        return details.Count switch
+        {
+            0 => "Local access mode is on.",
+            1 => $"Local access mode is on. {details[0]}.",
+            _ => $"Local access mode is on. {details[0]}. {details[1]}."
+        };
+    }
+
+    private static string FormatLocalAccessHostName(string hostName)
+    {
+        if (string.IsNullOrWhiteSpace(hostName))
+        {
+            return string.Empty;
+        }
+
+        var trimmed = hostName.Trim();
+        return trimmed.Contains('.', StringComparison.Ordinal) ? trimmed : $"{trimmed}.local";
+    }
+
+    private static string FormatLocalAccessBluetoothDeviceName(string? bluetoothDeviceName)
+    {
+        return string.IsNullOrWhiteSpace(bluetoothDeviceName) ? string.Empty : bluetoothDeviceName.Trim();
     }
 
     private async Task<WifiDirectAccessSnapshot> BuildWifiSnapshotAsync(
