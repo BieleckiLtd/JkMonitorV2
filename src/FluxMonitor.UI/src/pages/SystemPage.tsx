@@ -1,7 +1,7 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
 import { faSignal, type IconDefinition } from '@fortawesome/free-solid-svg-icons';
-import { Bluetooth, Cable, ChevronDown, ChevronRight, CircleAlert, Cloud, Cpu, Database, Download, ExternalLink, HardDrive, Leaf, LoaderCircle, Lock, MemoryStick, RefreshCcw, CheckCircle2, Thermometer, Upload, Wifi, XCircle } from 'lucide-react';
+import { Bluetooth, Cable, ChevronDown, ChevronRight, CircleAlert, Cloud, Cpu, Database, Download, ExternalLink, HardDrive, Leaf, Link2, LoaderCircle, Lock, MemoryStick, RefreshCcw, CheckCircle2, Terminal, Thermometer, Upload, Wifi, XCircle } from 'lucide-react';
 import { Navigate, useNavigate, useParams } from 'react-router-dom';
 import { PanelHeader } from '../components/PanelHeader';
 import { Card, CardContent } from '../components/ui/card';
@@ -275,9 +275,29 @@ type BluetoothPowerResult = {
   message: string;
 };
 
+type SshServiceSnapshot = {
+  supported: boolean;
+  enabled: boolean;
+  active: boolean;
+  statusMessage?: string | null;
+  serviceLoadState?: string | null;
+  serviceActiveState?: string | null;
+  serviceSubState?: string | null;
+  serviceUnitFileState?: string | null;
+  serviceResult?: string | null;
+};
+
+type SshServiceCommandResult = {
+  success: boolean;
+  enabled: boolean;
+  active: boolean;
+  message: string;
+};
+
 type SystemConnectivitySnapshot = {
   network: NetworkConnectivitySnapshot;
   bluetooth: BluetoothRuntimeSnapshot;
+  ssh: SshServiceSnapshot;
   directAccess: DirectAccessSnapshot;
 };
 
@@ -312,13 +332,26 @@ type BluetoothDirectAccessSnapshot = {
 
 type DirectAccessSnapshot = {
   settings: DirectAccessSettingsSnapshot;
+  mode: LocalAccessModeSnapshot;
   wifi: WifiDirectAccessSnapshot;
   bluetooth: BluetoothDirectAccessSnapshot;
 };
 
-type DirectAccessCommandResult = {
+type LocalAccessModeSnapshot = {
+  supported: boolean;
+  enabled: boolean;
+  active: boolean;
+  hostName: string;
+  statusMessage?: string | null;
+  hotspotName?: string | null;
+  hotspotPassword?: string | null;
+  addresses: string[];
+};
+
+type LocalAccessModeCommandResult = {
   success: boolean;
   enabled: boolean;
+  active: boolean;
   message: string;
 };
 
@@ -420,16 +453,6 @@ type PendingConnectivityAction =
     kind: 'disconnect-ethernet';
     interfaceName: string;
     connectionName?: string | null;
-  }
-  | {
-    kind: 'enable-direct-wifi';
-    interfaceName?: string | null;
-    connectionName?: string | null;
-  }
-  | {
-    kind: 'disable-direct-wifi';
-    interfaceName?: string | null;
-    connectionName?: string | null;
   };
 
 type WifiConnectDialogState = {
@@ -521,24 +544,24 @@ export function SystemPage() {
   const [bluetoothScanLoading, setBluetoothScanLoading] = useState(false);
   const [bluetoothPowerLoading, setBluetoothPowerLoading] = useState(false);
   const [bluetoothFeedback, setBluetoothFeedback] = useState<InlineFeedback | null>(null);
-  const [directWifiLoading, setDirectWifiLoading] = useState(false);
-  const [directWifiFeedback, setDirectWifiFeedback] = useState<InlineFeedback | null>(null);
-  const [directBluetoothLoading, setDirectBluetoothLoading] = useState(false);
-  const [directBluetoothFeedback, setDirectBluetoothFeedback] = useState<InlineFeedback | null>(null);
-  const [directApAutoStartMode, setDirectApAutoStartMode] = useState<'off' | 'when-wifi-not-connected'>('when-wifi-not-connected');
-  const [directApWifiPassword, setDirectApWifiPassword] = useState('');
-  const [directApShowPassword, setDirectApShowPassword] = useState(false);
-  const [directApSettingsSaving, setDirectApSettingsSaving] = useState(false);
-  const [directApSettingsFeedback, setDirectApSettingsFeedback] = useState<InlineFeedback | null>(null);
+  const [sshToggleLoading, setSshToggleLoading] = useState(false);
+  const [sshFeedback, setSshFeedback] = useState<InlineFeedback | null>(null);
+  const [localAccessModeLoading, setLocalAccessModeLoading] = useState(false);
+  const [localAccessModeFeedback, setLocalAccessModeFeedback] = useState<InlineFeedback | null>(null);
+  const [localAccessWifiPassword, setLocalAccessWifiPassword] = useState('');
+  const [localAccessShowPassword, setLocalAccessShowPassword] = useState(false);
+  const [localAccessAdvancedOpen, setLocalAccessAdvancedOpen] = useState(false);
+  const [localAccessSettingsSaving, setLocalAccessSettingsSaving] = useState(false);
+  const [localAccessSettingsFeedback, setLocalAccessSettingsFeedback] = useState<InlineFeedback | null>(null);
   const [ethernetDisconnectLoading, setEthernetDisconnectLoading] = useState<string | null>(null);
   const [ethernetFeedback, setEthernetFeedback] = useState<InlineFeedback | null>(null);
   const [pendingConnectivityAction, setPendingConnectivityAction] = useState<PendingConnectivityAction | null>(null);
-  const [expandedConnectivitySection, setExpandedConnectivitySection] = useState<'wifi' | 'bluetooth' | 'ethernet' | 'direct-ap' | null>(null);
+  const [expandedConnectivitySection, setExpandedConnectivitySection] = useState<'wifi' | 'bluetooth' | 'ethernet' | 'local-access' | null>(null);
   const previousUpdateStatusRef = useRef<UpdateProgress['status'] | null>(null);
   const wifiCredentialRequestRef = useRef(0);
   const cloudflareTunnelDirtyRef = useRef(false);
   const internetSpeedTestRequestInFlightRef = useRef(false);
-  const directApSettingsDirtyRef = useRef(false);
+  const localAccessSettingsDirtyRef = useRef(false);
   const systemPageRef = useRef<HTMLDivElement>(null);
 
   const loadInternetSpeedTest = useCallback(async () => {
@@ -814,16 +837,11 @@ export function SystemPage() {
 
   useEffect(() => {
     const settings = connectivity?.directAccess.settings;
-    if (!settings || directApSettingsDirtyRef.current) {
+    if (!settings || localAccessSettingsDirtyRef.current) {
       return;
     }
 
-    setDirectApAutoStartMode(
-      settings.autoStartMode === 'off'
-        ? 'off'
-        : 'when-wifi-not-connected'
-    );
-    setDirectApWifiPassword(settings.wifiPassword ?? '');
+    setLocalAccessWifiPassword(settings.wifiPassword ?? '');
   }, [connectivity]);
 
   const installUpdate = async () => {
@@ -1030,90 +1048,61 @@ export function SystemPage() {
     }
   };
 
-  const toggleDirectWifi = async (enabled: boolean) => {
-    setDirectWifiLoading(true);
-    setDirectWifiFeedback(null);
+  const toggleLocalAccessMode = async (enabled: boolean) => {
+    setLocalAccessModeLoading(true);
+    setLocalAccessModeFeedback(null);
 
     try {
-      const response = await fetch('/api/system/direct-access/wifi', {
+      const response = await fetch('/api/system/local-access-mode', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ enabled }),
       });
 
-      const data = await response.json() as DirectAccessCommandResult;
-      setDirectWifiFeedback({ message: data.message, isError: !response.ok || !data.success });
+      const data = await response.json() as LocalAccessModeCommandResult;
+      setLocalAccessModeFeedback({ message: data.message, isError: !response.ok || !data.success });
 
       if (response.ok && data.success) {
         await loadConnectivity();
       }
     } catch (error) {
-      setDirectWifiFeedback({
-        message: error instanceof Error ? error.message : 'Unable to change direct Wi-Fi mode.',
+      setLocalAccessModeFeedback({
+        message: error instanceof Error ? error.message : 'Unable to change local access mode.',
         isError: true,
       });
     } finally {
-      setDirectWifiLoading(false);
+      setLocalAccessModeLoading(false);
     }
   };
 
-  const toggleDirectBluetooth = async (enabled: boolean) => {
-    setDirectBluetoothLoading(true);
-    setDirectBluetoothFeedback(null);
+  const saveLocalAccessAdvancedSettings = async () => {
+    setLocalAccessSettingsSaving(true);
+    setLocalAccessSettingsFeedback(null);
 
     try {
-      const response = await fetch('/api/system/direct-access/bluetooth', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ enabled }),
-      });
-
-      const data = await response.json() as DirectAccessCommandResult;
-      setDirectBluetoothFeedback({ message: data.message, isError: !response.ok || !data.success });
-
-      if (response.ok && data.success) {
-        await loadConnectivity();
-      }
-    } catch (error) {
-      setDirectBluetoothFeedback({
-        message: error instanceof Error ? error.message : 'Unable to change direct Bluetooth mode.',
-        isError: true,
-      });
-    } finally {
-      setDirectBluetoothLoading(false);
-    }
-  };
-
-  const saveDirectApSettings = async () => {
-    setDirectApSettingsSaving(true);
-    setDirectApSettingsFeedback(null);
-
-    try {
-      const response = await fetch('/api/system/direct-access/settings', {
+      const response = await fetch('/api/system/local-access-mode/advanced', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          autoStartMode: directApAutoStartMode,
-          wifiPassword: directApWifiPassword,
+          wifiPassword: localAccessWifiPassword,
         }),
       });
 
       const data = await response.json() as SaveDirectAccessSettingsResult;
-      setDirectApSettingsFeedback({ message: data.message, isError: !response.ok || !data.success });
+      setLocalAccessSettingsFeedback({ message: data.message, isError: !response.ok || !data.success });
 
       if (response.ok && data.success) {
-        directApSettingsDirtyRef.current = false;
-        setDirectApAutoStartMode(data.settings.autoStartMode === 'off' ? 'off' : 'when-wifi-not-connected');
-        setDirectApWifiPassword(data.settings.wifiPassword ?? '');
+        localAccessSettingsDirtyRef.current = false;
+        setLocalAccessWifiPassword(data.settings.wifiPassword ?? '');
         await loadConnectivity();
       }
     } catch (error) {
-      setDirectApSettingsFeedback({
-        message: error instanceof Error ? error.message : 'Unable to save Direct AP settings.',
+      setLocalAccessSettingsFeedback({
+        message: error instanceof Error ? error.message : 'Unable to save local access settings.',
         isError: true,
       });
     } finally {
-      setDirectApSettingsSaving(false);
+      setLocalAccessSettingsSaving(false);
     }
   };
 
@@ -1156,33 +1145,6 @@ export function SystemPage() {
     }
 
     void toggleWifiPower();
-  };
-
-  const requestDirectWifiToggle = () => {
-    const directWifi = connectivity?.directAccess.wifi;
-    if (!directWifi?.supported) {
-      return;
-    }
-
-    if (directWifi.enabled) {
-      setPendingConnectivityAction({
-        kind: 'disable-direct-wifi',
-        interfaceName: directWifi.interfaceName,
-        connectionName: directWifi.ssid,
-      });
-      return;
-    }
-
-    if (directWifi.disconnectsCurrentWifi) {
-      setPendingConnectivityAction({
-        kind: 'enable-direct-wifi',
-        interfaceName: directWifi.interfaceName,
-        connectionName: directWifi.currentNetworkName,
-      });
-      return;
-    }
-
-    void toggleDirectWifi(true);
   };
 
   const openWifiConnectDialog = ({
@@ -1272,16 +1234,6 @@ export function SystemPage() {
       return;
     }
 
-    if (action.kind === 'enable-direct-wifi') {
-      await toggleDirectWifi(true);
-      return;
-    }
-
-    if (action.kind === 'disable-direct-wifi') {
-      await toggleDirectWifi(false);
-      return;
-    }
-
     await disconnectEthernet(action.interfaceName);
   };
 
@@ -1292,7 +1244,7 @@ export function SystemPage() {
     await scanWifi(wifiInterface.name);
   };
 
-  const toggleConnectivitySection = async (section: 'wifi' | 'bluetooth' | 'ethernet' | 'direct-ap') => {
+  const toggleConnectivitySection = async (section: 'wifi' | 'bluetooth' | 'ethernet' | 'local-access') => {
     const isOpen = expandedConnectivitySection === section;
     const nextSection = isOpen ? null : section;
     setExpandedConnectivitySection(nextSection);
@@ -1341,6 +1293,33 @@ export function SystemPage() {
       });
     } finally {
       setBluetoothPowerLoading(false);
+    }
+  };
+
+  const toggleSshAccess = async (enabled: boolean) => {
+    setSshToggleLoading(true);
+    setSshFeedback(null);
+
+    try {
+      const response = await fetch('/api/system/ssh', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+
+      const data = await response.json() as SshServiceCommandResult;
+      setSshFeedback({ message: data.message, isError: !response.ok || !data.success });
+
+      if (response.ok && data.success) {
+        await loadConnectivity();
+      }
+    } catch (error) {
+      setSshFeedback({
+        message: error instanceof Error ? error.message : 'Unable to change SSH access.',
+        isError: true,
+      });
+    } finally {
+      setSshToggleLoading(false);
     }
   };
 
@@ -1629,107 +1608,61 @@ export function SystemPage() {
   const wifiSectionOpen = expandedConnectivitySection === 'wifi';
   const bluetoothSectionOpen = expandedConnectivitySection === 'bluetooth';
   const ethernetSectionOpen = expandedConnectivitySection === 'ethernet';
-  const directApSectionOpen = expandedConnectivitySection === 'direct-ap';
-  const wifiSummary = !connectivity?.network.supported
-    ? connectivity?.network.statusMessage ?? 'Wi-Fi unavailable'
-    : wifiPowered === false
-      ? 'Off'
-      : connectedWifiInterface?.connectedSsid
-        ? `${connectedWifiInterface.connectedSsid} on ${connectedWifiInterface.name}${hasInternetAccess === false ? ' • No internet' : ''}`
-        : wifiInterfaces.length > 0
-          ? `Not connected${selectedWifiInterface ? ` • ${selectedWifiInterface.name}` : ''}`
-          : 'No Wi-Fi interface detected';
-  const wifiStatusLabel = !connectivity?.network.supported
+  const localAccessSectionOpen = expandedConnectivitySection === 'local-access';
+  const sshAccess = connectivity?.ssh ?? null;
+  const sshToggleChecked = Boolean(sshAccess?.enabled || sshAccess?.active);
+  const sshStateLabel = !sshAccess?.supported
     ? 'Unavailable'
-    : wifiPowered === false
-      ? 'Off'
-      : connectedWifiInterface?.connectedSsid
-        ? 'Connected'
-        : 'On';
-  const bluetoothSummary = !connectivity?.bluetooth.supported
-    ? connectivity?.bluetooth.statusMessage ?? 'Bluetooth unavailable'
-    : connectivity.bluetooth.powered
-      ? activeBluetoothDevice
-        ? `${activeBluetoothDevice.displayName} • ${activeBluetoothDevice.address}`
-        : 'Ready to scan nearby devices'
-      : connectivity.bluetooth.statusMessage ?? 'Off';
-  const bluetoothStatusLabel = !connectivity?.bluetooth.supported
-    ? 'Unavailable'
-    : connectivity.bluetooth.powered
-      ? 'On'
-      : 'Off';
-  const directAccessSettings = connectivity?.directAccess.settings ?? null;
-  const savedDirectApAutoStartMode = directAccessSettings?.autoStartMode === 'off'
-    ? 'off'
-    : 'when-wifi-not-connected';
-  const savedDirectApWifiPassword = directAccessSettings?.wifiPassword ?? '';
-  const directApSettingsDirty = directApAutoStartMode !== savedDirectApAutoStartMode
-    || directApWifiPassword !== savedDirectApWifiPassword;
-  const directApUsesWpa3Only = requiresSaeForDirectApPassword(directApWifiPassword);
-  const directWifi = connectivity?.directAccess.wifi ?? null;
-  const directBluetooth = connectivity?.directAccess.bluetooth ?? null;
-  const directWifiUrls = getDirectAccessUrls(directWifi?.addresses ?? []);
-  const directBluetoothUrls = getDirectAccessUrls(directBluetooth?.addresses ?? []);
-  const directWifiSummary = !directWifi?.supported
-    ? directWifi?.statusMessage ?? 'Unavailable'
-    : directWifi.enabled
-      ? `${directWifi.ssid ?? 'Direct hotspot'}${directWifiUrls[0] ? ` • ${directWifiUrls[0]}` : ''}`
-      : directWifi.currentNetworkName
-        ? `Takes over ${directWifi.currentNetworkName}`
-        : 'Creates a local hotspot on the Pi';
-  const directBluetoothSummary = !directBluetooth?.supported
-    ? directBluetooth?.statusMessage ?? 'Unavailable'
-    : directBluetooth.enabled
-      ? `${directBluetooth.deviceName ?? 'Raspberry Pi'}${directBluetoothUrls[0] ? ` • ${directBluetoothUrls[0]}` : ''}`
-      : 'Bluetooth PAN without leaving the home network';
-  const directApSummary = !(directWifi?.supported ?? false) && !(directBluetooth?.supported ?? false)
-    ? directWifi?.statusMessage ?? directBluetooth?.statusMessage ?? 'Unavailable'
-    : `${formatDirectApAutoStartMode(savedDirectApAutoStartMode)} • ${directWifi?.enabled && directBluetooth?.enabled
-      ? 'Wi-Fi hotspot and Bluetooth PAN active'
-      : directWifi?.enabled
-        ? 'Wi-Fi hotspot active'
-        : directBluetooth?.enabled
-          ? 'Bluetooth PAN active'
-          : directWifi?.currentNetworkName
-            ? `Ready to take over ${directWifi.currentNetworkName}`
-            : 'Ready when Wi-Fi is not connected'}`;
-  const directApStatusLabel = !(directWifi?.supported ?? false) && !(directBluetooth?.supported ?? false)
-    ? 'Unavailable'
-    : directWifi?.enabled || directBluetooth?.enabled
-      ? 'Active'
-      : savedDirectApAutoStartMode === 'off'
-        ? 'Off'
-        : 'Auto';
+    : sshAccess.active
+      ? sshAccess.enabled
+        ? 'Enabled and running'
+        : 'Running until reboot'
+      : sshAccess.enabled
+        ? 'Enabled'
+        : 'Disabled';
+  const sshStatusMessage = !sshAccess?.supported
+    ? sshAccess?.statusMessage ?? 'SSH controls are unavailable on this host.'
+    : !sshAccess.enabled && !sshAccess.active
+      ? sshAccess.statusMessage ?? 'SSH is off.'
+      : !sshAccess.enabled && sshAccess.active
+        ? sshAccess.statusMessage ?? 'SSH is running, but it will not start automatically after reboot.'
+        : null;
+  const wifiSummary = connectedWifiInterface?.connectedSsid
+    ? connectedWifiInterface.connectedSsid
+    : wifiInterfaces.length > 0
+      ? 'Manage nearby networks'
+      : 'Wireless networking';
+  const bluetoothSummary = activeBluetoothDevice?.displayName ?? 'Nearby devices';
+  const localAccessSettings = connectivity?.directAccess.settings ?? null;
+  const localAccessMode = connectivity?.directAccess.mode ?? null;
+  const savedLocalAccessWifiPassword = localAccessSettings?.wifiPassword ?? '';
+  const localAccessSettingsDirty = localAccessWifiPassword !== savedLocalAccessWifiPassword;
+  const localAccessUsesWpa3Only = requiresSaeForLocalAccessPassword(localAccessWifiPassword);
+  const localAccessAddresses = localAccessMode?.addresses ?? [];
+  const localAccessPrimaryAddress = localAccessAddresses[0] ?? null;
+  const localAccessHostname = formatLocalAccessHostName(localAccessMode?.hostName);
+  const localAccessSummary = localAccessMode?.active
+    ? localAccessHostname !== 'Waiting'
+      ? localAccessHostname
+      : localAccessPrimaryAddress ?? 'Keeps nearby access available'
+    : 'Keeps nearby access available';
   const ethernetSummary = activeEthernetInterface
     ? activeEthernetInterface.connectionName
-      ? `${activeEthernetInterface.name} • ${activeEthernetInterface.connectionName}`
+      ? activeEthernetInterface.connectionName
       : activeEthernetInterface.description || activeEthernetInterface.name
-    : 'No wired connection';
-  const ethernetStatusLabel = activeEthernetInterface?.connectionState ?? activeEthernetInterface?.status ?? 'Unavailable';
+    : 'Wired network';
   const pendingConnectivityDialogTitle = pendingConnectivityAction?.kind === 'disable-wifi'
     ? 'Turn off Wi-Fi?'
-    : pendingConnectivityAction?.kind === 'enable-direct-wifi'
-      ? 'Turn on Direct AP Wi-Fi?'
-      : pendingConnectivityAction?.kind === 'disable-direct-wifi'
-        ? 'Turn off Direct AP Wi-Fi?'
     : pendingConnectivityAction?.kind === 'disconnect-ethernet'
       ? 'Disconnect Ethernet?'
       : null;
   const pendingConnectivityDialogDescription = pendingConnectivityAction?.kind === 'disable-wifi'
     ? `You are currently using ${pendingConnectivityAction.connectionName ?? pendingConnectivityAction.interfaceName}. Turning Wi-Fi off will disconnect this device from that network.`
-    : pendingConnectivityAction?.kind === 'enable-direct-wifi'
-      ? `Turning on Direct AP Wi-Fi will move ${pendingConnectivityAction.interfaceName ?? 'the Wi-Fi radio'} away from ${pendingConnectivityAction.connectionName ?? 'its current network'}. The Raspberry Pi will stop using that home network until Direct AP Wi-Fi is turned off or you join another Wi-Fi network.`
-      : pendingConnectivityAction?.kind === 'disable-direct-wifi'
-        ? `If this page is currently reaching the Raspberry Pi through ${pendingConnectivityAction.connectionName ?? 'its direct hotspot'}, turning Direct AP Wi-Fi off will interrupt this session immediately.`
     : pendingConnectivityAction?.kind === 'disconnect-ethernet'
       ? `Disconnect ${pendingConnectivityAction.interfaceName}${pendingConnectivityAction.connectionName ? ` from ${pendingConnectivityAction.connectionName}` : ''}? This can interrupt access to the device.`
       : null;
   const pendingConnectivityConfirmLabel = pendingConnectivityAction?.kind === 'disable-wifi'
     ? 'Turn off Wi-Fi'
-    : pendingConnectivityAction?.kind === 'enable-direct-wifi'
-      ? 'Turn on Direct AP Wi-Fi'
-      : pendingConnectivityAction?.kind === 'disable-direct-wifi'
-        ? 'Turn off Direct AP Wi-Fi'
     : pendingConnectivityAction?.kind === 'disconnect-ethernet'
       ? 'Disconnect Ethernet'
       : null;
@@ -2282,11 +2215,7 @@ export function SystemPage() {
             </Card>
 
             <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'connectivity' && 'hidden')}>
-              <PanelHeader
-                title='Connectivity'
-                description='Wi-Fi, Bluetooth, Ethernet, and Direct AP state on this device.'
-              />
-              <CardContent className='space-y-4 pt-5'>
+              <CardContent className='space-y-4 pt-4'>
                 {connectivityLoading && !connectivity ? (
                   <div className='flex items-center justify-center py-6'>
                     <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
@@ -2305,7 +2234,7 @@ export function SystemPage() {
                           <button
                             type='button'
                             onClick={() => void toggleConnectivitySection('wifi')}
-                            className='group flex min-w-0 flex-1 items-center gap-3 text-left'
+                            className='flex min-w-0 flex-1 items-center gap-3 text-left'
                           >
                             <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
                               <Wifi className='h-4 w-4 text-muted-foreground' />
@@ -2314,25 +2243,12 @@ export function SystemPage() {
                               <div className='text-sm font-semibold text-foreground'>Wi-Fi</div>
                               <div className='mt-0.5 truncate text-xs text-muted-foreground'>{wifiSummary}</div>
                             </div>
-                            <div className='flex items-center gap-2 pl-3 text-xs text-muted-foreground'>
-                              {hasInternetAccess === false && wifiPowered !== false ? (
-                                <span title='Connected to Wi-Fi but internet access is unavailable'>
-                                  <NoInternetIcon className='h-4 w-4 text-amber-300' />
-                                </span>
-                              ) : null}
-                              <SignalStrengthIndicator
-                                kind='wifi'
-                                percent={connectedWifiInterface?.signalPercent}
-                                disabled={wifiPowered === false}
-                                unavailableLabel={wifiStatusLabel}
-                                revealOnParentInteraction
-                              />
+                            <div className='pl-3 text-muted-foreground'>
                               {wifiSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
                             </div>
                           </button>
 
-                          <div className='ml-auto flex w-full items-center justify-end gap-2 sm:ml-0 sm:w-auto'>
-                            {wifiPowerLoading ? <LoaderCircle className='h-4 w-4 animate-spin text-primary' /> : null}
+                          <div className='ml-auto flex w-full shrink-0 items-center justify-end gap-2 sm:ml-0 sm:w-auto'>
                             <Switch
                               checked={Boolean(connectivity?.network.supported) && wifiPowered !== false}
                               disabled={wifiPowerLoading || !(connectivity?.network.supported ?? false)}
@@ -2475,13 +2391,6 @@ export function SystemPage() {
                               </>
                             )}
                           </div>
-                        ) : wifiFeedback ? (
-                          <div className={cn(
-                            'border-t border-border/60 px-4 py-3 text-xs',
-                            wifiFeedback.isError ? 'text-rose-200' : 'text-emerald-200'
-                          )}>
-                            {wifiFeedback.message}
-                          </div>
                         ) : null}
                       </div>
 
@@ -2499,16 +2408,12 @@ export function SystemPage() {
                               <div className='text-sm font-semibold text-foreground'>Bluetooth</div>
                               <div className='mt-0.5 truncate text-xs text-muted-foreground'>{bluetoothSummary}</div>
                             </div>
-                            <div className='flex items-center gap-2 pl-3 text-xs text-muted-foreground'>
-                              <span>{bluetoothStatusLabel}</span>
-                              {connectivity?.bluetooth.powered ? (
-                                bluetoothSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />
-                              ) : null}
+                            <div className='pl-3 text-muted-foreground'>
+                              {bluetoothSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
                             </div>
                           </button>
 
-                          <div className='ml-auto flex w-full items-center justify-end gap-2 sm:ml-0 sm:w-auto'>
-                            {bluetoothPowerLoading ? <LoaderCircle className='h-4 w-4 animate-spin text-primary' /> : null}
+                          <div className='ml-auto flex w-full shrink-0 items-center justify-end gap-2 sm:ml-0 sm:w-auto'>
                             <Switch
                               checked={Boolean(connectivity?.bluetooth.supported) && Boolean(connectivity?.bluetooth.powered)}
                               disabled={bluetoothPowerLoading || !(connectivity?.bluetooth.supported ?? false)}
@@ -2571,12 +2476,48 @@ export function SystemPage() {
                               </>
                             )}
                           </div>
-                        ) : bluetoothFeedback ? (
-                          <div className={cn(
-                            'border-t border-border/60 px-4 py-3 text-xs',
-                            bluetoothFeedback.isError ? 'text-rose-200' : 'text-emerald-200'
-                          )}>
-                            {bluetoothFeedback.message}
+                        ) : null}
+                      </div>
+
+                      <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
+                        <div className='flex flex-wrap items-start gap-3 px-4 py-4 sm:flex-nowrap'>
+                          <div className='flex min-w-0 flex-1 items-center gap-3'>
+                            <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
+                              <Terminal className='h-4 w-4 text-muted-foreground' />
+                            </div>
+                            <div className='min-w-0 flex-1'>
+                              <div className='text-sm font-semibold text-foreground'>SSH</div>
+                              <div className='mt-0.5 text-xs text-muted-foreground'>Enable secure remote terminal access to this device.</div>
+                              <div className='mt-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>{sshStateLabel}</div>
+                            </div>
+                          </div>
+
+                          <div className='ml-auto flex w-full shrink-0 items-center justify-end gap-2 sm:ml-0 sm:w-auto'>
+                            <Switch
+                              checked={sshToggleChecked}
+                              disabled={sshToggleLoading || !(sshAccess?.supported ?? false)}
+                              onCheckedChange={() => void toggleSshAccess(!sshToggleChecked)}
+                              aria-label='Toggle SSH access'
+                            />
+                          </div>
+                        </div>
+
+                        {sshFeedback || sshStatusMessage ? (
+                          <div className='space-y-3 border-t border-border/60 px-4 py-4'>
+                            {sshFeedback ? (
+                              <div className={cn(
+                                'rounded-2xl border px-3 py-2 text-xs',
+                                sshFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                              )}>
+                                {sshFeedback.message}
+                              </div>
+                            ) : null}
+
+                            {sshStatusMessage ? (
+                              <div className='rounded-2xl border border-border bg-muted/70 px-3 py-2 text-xs text-muted-foreground'>
+                                {sshStatusMessage}
+                              </div>
+                            ) : null}
                           </div>
                         ) : null}
                       </div>
@@ -2594,8 +2535,7 @@ export function SystemPage() {
                             <div className='text-sm font-semibold text-foreground'>Ethernet</div>
                             <div className='mt-0.5 truncate text-xs text-muted-foreground'>{ethernetSummary}</div>
                           </div>
-                          <div className='flex items-center gap-2 pl-3 text-xs text-muted-foreground'>
-                            <span>{ethernetStatusLabel}</span>
+                          <div className='pl-3 text-muted-foreground'>
                             {ethernetSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
                           </div>
                         </button>
@@ -2662,261 +2602,145 @@ export function SystemPage() {
                       </div>
 
                       <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
-                        <button
-                          type='button'
-                          onClick={() => void toggleConnectivitySection('direct-ap')}
-                          className='flex w-full min-w-0 items-center gap-3 px-4 py-4 text-left'
-                        >
-                          <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
-                            <Wifi className='h-4 w-4 text-muted-foreground' />
-                          </div>
-                          <div className='min-w-0 flex-1'>
-                            <div className='text-sm font-semibold text-foreground'>Direct AP</div>
-                            <div className='mt-0.5 truncate text-xs text-muted-foreground'>{directApSummary}</div>
-                          </div>
-                          <div className='flex items-center gap-2 pl-3 text-xs text-muted-foreground'>
-                            <span>{directApStatusLabel}</span>
-                            {directApSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
-                          </div>
-                        </button>
+                        <div className='flex flex-wrap items-center gap-3 px-4 py-4 sm:flex-nowrap'>
+                          <button
+                            type='button'
+                            onClick={() => void toggleConnectivitySection('local-access')}
+                            className='flex min-w-0 flex-1 items-center gap-3 text-left'
+                          >
+                            <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
+                              <Link2 className='h-4 w-4 text-muted-foreground' />
+                            </div>
+                            <div className='min-w-0 flex-1'>
+                              <div className='text-sm font-semibold text-foreground'>Local access mode</div>
+                              <div className='mt-0.5 truncate text-xs text-muted-foreground'>{localAccessSummary}</div>
+                            </div>
+                            <div className='pl-3 text-muted-foreground'>
+                              {localAccessSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
+                            </div>
+                          </button>
 
-                        {directApSectionOpen ? (
+                          <div className='ml-auto flex w-full shrink-0 items-center justify-end gap-2 sm:ml-0 sm:w-auto'>
+                            <Switch
+                              checked={Boolean(localAccessMode?.supported) && Boolean(localAccessMode?.enabled)}
+                              disabled={localAccessModeLoading || !(localAccessMode?.supported ?? false)}
+                              onCheckedChange={() => void toggleLocalAccessMode(!(localAccessMode?.enabled ?? false))}
+                              aria-label='Toggle local access mode'
+                            />
+                          </div>
+                        </div>
+
+                        {localAccessSectionOpen ? (
                           <div className='space-y-4 border-t border-border/60 px-4 py-4'>
-                            <div className='rounded-2xl border border-border/70 bg-background/45 px-4 py-4'>
-                              <div className='text-sm font-semibold text-foreground'>Startup behavior</div>
-                              <div className='mt-1 text-xs leading-5 text-muted-foreground'>
-                                When enabled, startup checks whether the Raspberry Pi is connected to Wi-Fi. If Wi-Fi is not connected, Direct AP turns on the local Wi-Fi hotspot and Bluetooth PAN automatically.
-                              </div>
-
-                              {!directAccessSettings?.storageAvailable ? (
-                                <div className='mt-4 rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-100'>
-                                  Direct AP settings cannot be saved until PostgreSQL storage is configured.
-                                </div>
-                              ) : null}
-
-                              {directApSettingsFeedback ? (
-                                <div className={cn(
-                                  'mt-4 rounded-2xl border px-3 py-2 text-xs',
-                                  directApSettingsFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-                                )}>
-                                  {directApSettingsFeedback.message}
-                                </div>
-                              ) : null}
-
-                              <div className='mt-4 grid gap-4 lg:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]'>
-                                <div className='space-y-2'>
-                                  <label className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
-                                    Startup mode
-                                  </label>
-                                  <Select
-                                    value={directApAutoStartMode}
-                                    onValueChange={(value) => {
-                                      const nextValue = value === 'off' ? 'off' : 'when-wifi-not-connected';
-                                      directApSettingsDirtyRef.current = true;
-                                      setDirectApSettingsFeedback(null);
-                                      setDirectApAutoStartMode(nextValue);
-                                    }}
-                                  >
-                                    <SelectTrigger aria-label='Direct AP startup mode'>
-                                      <SelectValue />
-                                    </SelectTrigger>
-                                    <SelectContent>
-                                      <SelectItem value='off'>Off</SelectItem>
-                                      <SelectItem value='when-wifi-not-connected'>On when Wi-Fi not connected</SelectItem>
-                                    </SelectContent>
-                                  </Select>
-                                </div>
-
-                                <div className='space-y-2'>
-                                  <label className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
-                                    Wi-Fi password
-                                  </label>
-                                  <Input
-                                    aria-label='Direct AP Wi-Fi password'
-                                    type={directApShowPassword ? 'text' : 'password'}
-                                    value={directApWifiPassword}
-                                    onChange={(event) => {
-                                      directApSettingsDirtyRef.current = true;
-                                      setDirectApSettingsFeedback(null);
-                                      setDirectApWifiPassword(event.target.value);
-                                    }}
-                                    placeholder='No password'
-                                  />
-                                  <label className='flex items-center gap-2 text-xs text-muted-foreground'>
-                                    <input
-                                      type='checkbox'
-                                      checked={directApShowPassword}
-                                      onChange={(event) => setDirectApShowPassword(event.target.checked)}
-                                      className='h-4 w-4 rounded border border-input bg-background/70'
-                                    />
-                                    <span>Show password</span>
-                                  </label>
-                                  <div className='text-xs leading-5 text-muted-foreground'>
-                                    {directApWifiPassword.length === 0
-                                      ? 'Leave this blank to create an open hotspot with no password.'
-                                      : directApUsesWpa3Only
-                                        ? 'This password uses WPA3-only Direct AP Wi-Fi. Older devices may need an 8-63 character password instead.'
-                                        : 'This password works with the standard Direct AP Wi-Fi hotspot.'}
-                                  </div>
-                                </div>
-                              </div>
-
-                              <div className='mt-4 flex flex-wrap items-center justify-between gap-3'>
-                                <div className='text-xs text-muted-foreground'>
-                                  Saved mode: {formatDirectApAutoStartMode(savedDirectApAutoStartMode)}
-                                </div>
-                                <button
-                                  type='button'
-                                  aria-label='Save Direct AP settings'
-                                  disabled={directApSettingsSaving || !directAccessSettings?.storageAvailable || !directApSettingsDirty}
-                                  onClick={() => void saveDirectApSettings()}
-                                  className='inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
-                                >
-                                  {directApSettingsSaving ? <LoaderCircle className='h-4 w-4 animate-spin' /> : null}
-                                  Save
-                                </button>
-                              </div>
+                            <div className='text-xs leading-5 text-muted-foreground'>
+                              Lets you connect to the device if it loses connection to the Wi-Fi router.
                             </div>
 
-                            {directWifi?.disconnectsCurrentWifi ? (
-                              <div className='rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-100'>
-                                Turning on Direct AP Wi-Fi disconnects the Pi from <span className='font-semibold'>{directWifi.currentNetworkName}</span> and moves the Wi-Fi radio onto its own hotspot until Direct AP Wi-Fi is turned off or the Pi rejoins another network.
+                            {localAccessModeFeedback ? (
+                              <div className={cn(
+                                'rounded-2xl border px-3 py-2 text-xs',
+                                localAccessModeFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                              )}>
+                                {localAccessModeFeedback.message}
                               </div>
                             ) : null}
 
-                            <div className='grid gap-3 lg:grid-cols-2'>
-                              <div className='rounded-3xl border border-border/70 bg-background/45 px-4 py-4'>
-                                <div className='flex items-start justify-between gap-3'>
-                                  <div className='min-w-0'>
-                                    <div className='flex items-center gap-2'>
-                                      <Wifi className='h-4 w-4 text-muted-foreground' />
-                                      <div className='text-sm font-semibold text-foreground'>Direct AP Wi-Fi</div>
-                                    </div>
-                                    <div className='mt-1 text-xs text-muted-foreground'>{directWifiSummary}</div>
-                                  </div>
-                                  <div className='flex items-center gap-2'>
-                                    {directWifiLoading ? <LoaderCircle className='h-4 w-4 animate-spin text-primary' /> : null}
-                                    <Switch
-                                      checked={Boolean(directWifi?.supported) && Boolean(directWifi?.enabled)}
-                                      disabled={directWifiLoading || !(directWifi?.supported ?? false)}
-                                      onCheckedChange={() => requestDirectWifiToggle()}
-                                      aria-label='Toggle Direct AP Wi-Fi'
-                                    />
-                                  </div>
-                                </div>
+                            {!localAccessMode?.supported ? (
+                              <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
+                                {localAccessMode?.statusMessage ?? 'Local access mode is unavailable on this host.'}
+                              </div>
+                            ) : null}
 
-                                {directWifiFeedback ? (
-                                  <div className={cn(
-                                    'mt-4 rounded-2xl border px-3 py-2 text-xs',
-                                    directWifiFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-                                  )}>
-                                    {directWifiFeedback.message}
+                            {localAccessMode?.active ? (
+                              <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-4'>
+                                <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
+                                  <DetailTile label='Hostname' value={localAccessHostname} />
+                                  <DetailTile label='IP address' value={localAccessPrimaryAddress ?? 'Waiting'} />
+                                  <DetailTile label='Hotspot name' value={localAccessMode.hotspotName ?? 'Waiting'} />
+                                  <DetailTile label='Password' value={localAccessMode.hotspotPassword || 'No password'} />
+                                </div>
+                                {localAccessAddresses.length > 1 ? (
+                                  <div className='mt-3 break-all text-[11px] font-mono text-muted-foreground'>
+                                    {localAccessAddresses.join(' • ')}
                                   </div>
                                 ) : null}
+                              </div>
+                            ) : null}
 
-                                {!directWifi?.supported ? (
-                                  <div className='mt-4 rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
-                                    {directWifi?.statusMessage ?? 'Direct AP Wi-Fi is unavailable on this host.'}
-                                  </div>
-                                ) : (
-                                  <div className='mt-4 space-y-3'>
-                                    <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-3'>
-                                      <div className='grid gap-3 sm:grid-cols-2'>
-                                        <DetailTile label='SSID' value={directWifi.ssid ?? 'Pending'} />
-                                        <DetailTile label='Password' value={savedDirectApWifiPassword || 'No password'} />
-                                      </div>
+                            <div className='overflow-hidden rounded-2xl border border-border/70 bg-background/30'>
+                              <button
+                                type='button'
+                                onClick={() => setLocalAccessAdvancedOpen((current) => !current)}
+                                className='flex w-full items-center justify-between gap-3 px-4 py-3 text-left'
+                              >
+                                <div className='text-sm font-medium text-foreground'>Advanced</div>
+                                {localAccessAdvancedOpen ? <ChevronDown className='h-4 w-4 text-muted-foreground' /> : <ChevronRight className='h-4 w-4 text-muted-foreground' />}
+                              </button>
+
+                              {localAccessAdvancedOpen ? (
+                                <div className='space-y-4 border-t border-border/60 px-4 py-4'>
+                                  {!localAccessSettings?.storageAvailable ? (
+                                    <div className='rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-100'>
+                                      Local access settings cannot be saved until PostgreSQL storage is configured.
                                     </div>
+                                  ) : null}
 
-                                    {directWifiUrls.length > 0 ? (
-                                      <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-3'>
-                                        <div className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Open After Joining</div>
-                                        <div className='mt-2 space-y-2'>
-                                          {directWifiUrls.map((url) => (
-                                            <div key={url} className='break-all text-xs font-mono text-foreground/90'>{url}</div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
-                                        {directWifi.enabled
-                                          ? 'Waiting for hotspot addresses from the Wi-Fi interface.'
-                                          : 'Turn this on, join the hotspot, then reopen the app at the address shown here.'}
-                                      </div>
-                                    )}
+                                  {localAccessSettingsFeedback ? (
+                                    <div className={cn(
+                                      'rounded-2xl border px-3 py-2 text-xs',
+                                      localAccessSettingsFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                                    )}>
+                                      {localAccessSettingsFeedback.message}
+                                    </div>
+                                  ) : null}
 
+                                  <div className='space-y-2'>
+                                    <label className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
+                                      Hotspot password
+                                    </label>
+                                    <Input
+                                      aria-label='Local access hotspot password'
+                                      type={localAccessShowPassword ? 'text' : 'password'}
+                                      value={localAccessWifiPassword}
+                                      onChange={(event) => {
+                                        localAccessSettingsDirtyRef.current = true;
+                                        setLocalAccessSettingsFeedback(null);
+                                        setLocalAccessWifiPassword(event.target.value);
+                                      }}
+                                      placeholder='No password'
+                                    />
+                                    <label className='flex items-center gap-2 text-xs text-muted-foreground'>
+                                      <input
+                                        type='checkbox'
+                                        checked={localAccessShowPassword}
+                                        onChange={(event) => setLocalAccessShowPassword(event.target.checked)}
+                                        className='h-4 w-4 rounded border border-input bg-background/70'
+                                      />
+                                      <span>Show password</span>
+                                    </label>
                                     <div className='text-xs leading-5 text-muted-foreground'>
-                                      {directWifi.statusMessage ?? 'Creates a local Wi-Fi hotspot on the Raspberry Pi.'}
+                                      {localAccessWifiPassword.length === 0
+                                        ? 'Leave this blank if you want local access to start without a password.'
+                                        : localAccessUsesWpa3Only
+                                          ? 'This password uses WPA3-only hotspot security.'
+                                          : 'This password uses the standard hotspot security mode.'}
                                     </div>
                                   </div>
-                                )}
-                              </div>
 
-                              <div className='rounded-3xl border border-border/70 bg-background/45 px-4 py-4'>
-                                <div className='flex items-start justify-between gap-3'>
-                                  <div className='min-w-0'>
-                                    <div className='flex items-center gap-2'>
-                                      <Bluetooth className='h-4 w-4 text-muted-foreground' />
-                                      <div className='text-sm font-semibold text-foreground'>Direct AP Bluetooth</div>
-                                    </div>
-                                    <div className='mt-1 text-xs text-muted-foreground'>{directBluetoothSummary}</div>
-                                  </div>
-                                  <div className='flex items-center gap-2'>
-                                    {directBluetoothLoading ? <LoaderCircle className='h-4 w-4 animate-spin text-primary' /> : null}
-                                    <Switch
-                                      checked={Boolean(directBluetooth?.supported) && Boolean(directBluetooth?.enabled)}
-                                      disabled={directBluetoothLoading || !(directBluetooth?.supported ?? false)}
-                                      onCheckedChange={() => void toggleDirectBluetooth(!(directBluetooth?.enabled ?? false))}
-                                      aria-label='Toggle Direct AP Bluetooth'
-                                    />
+                                  <div className='flex justify-end'>
+                                    <button
+                                      type='button'
+                                      aria-label='Save local access settings'
+                                      disabled={localAccessSettingsSaving || !localAccessSettings?.storageAvailable || !localAccessSettingsDirty}
+                                      onClick={() => void saveLocalAccessAdvancedSettings()}
+                                      className='inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
+                                    >
+                                      {localAccessSettingsSaving ? <LoaderCircle className='h-4 w-4 animate-spin' /> : null}
+                                      Save
+                                    </button>
                                   </div>
                                 </div>
-
-                                {directBluetoothFeedback ? (
-                                  <div className={cn(
-                                    'mt-4 rounded-2xl border px-3 py-2 text-xs',
-                                    directBluetoothFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-                                  )}>
-                                    {directBluetoothFeedback.message}
-                                  </div>
-                                ) : null}
-
-                                {!directBluetooth?.supported ? (
-                                  <div className='mt-4 rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
-                                    {directBluetooth?.statusMessage ?? 'Direct AP Bluetooth is unavailable on this host.'}
-                                  </div>
-                                ) : (
-                                  <div className='mt-4 space-y-3'>
-                                    <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-3'>
-                                      <div className='grid gap-3 sm:grid-cols-2'>
-                                        <DetailTile label='Pair As' value={directBluetooth.deviceName ?? 'Raspberry Pi'} />
-                                        <DetailTile
-                                          label='Pairing State'
-                                          value={directBluetooth.discoverable && directBluetooth.pairable ? 'Discoverable and pairable' : 'Hidden'}
-                                        />
-                                      </div>
-                                    </div>
-
-                                    {directBluetoothUrls.length > 0 ? (
-                                      <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-3'>
-                                        <div className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Open After Pairing</div>
-                                        <div className='mt-2 space-y-2'>
-                                          {directBluetoothUrls.map((url) => (
-                                            <div key={url} className='break-all text-xs font-mono text-foreground/90'>{url}</div>
-                                          ))}
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
-                                        Turn this on, pair from your device Bluetooth settings, join the PAN connection, then reopen the app at the address shown here.
-                                      </div>
-                                    )}
-
-                                    <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-3 text-xs leading-5 text-muted-foreground'>
-                                      {directBluetooth.statusMessage ?? 'Bluetooth direct mode keeps the Pi reachable over Bluetooth PAN when your client supports it.'}
-                                    </div>
-                                  </div>
-                                )}
-                              </div>
+                              ) : null}
                             </div>
                           </div>
                         ) : null}
@@ -3396,15 +3220,6 @@ function BluetoothDeviceCard({ device }: { device: BluetoothDeviceSnapshot }) {
   );
 }
 
-function NoInternetIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox='0 0 640 512' className={cn('fill-current', className)} aria-hidden='true'>
-      <path opacity='.4' d='M0 336c0 79.5 64.5 144 144 144l368 0c70.7 0 128-57.3 128-128c0-61.9-44-113.6-102.4-125.4c4.1-10.7 6.4-22.4 6.4-34.6c0-53-43-96-96-96c-19.7 0-38.1 6-53.3 16.2C367 64.2 315.3 32 256 32C167.6 32 96 103.6 96 192c0 2.7 .1 5.4 .2 8.1C40.2 219.8 0 273.2 0 336zM233.4 198.5c.1-.4 .3-.8 .4-1.2c7.9-22.3 29.1-37.3 52.8-37.3l58.3 0c34.9 0 63.1 28.3 63.1 63.1c0 22.6-12.1 43.5-31.7 54.8L344 296.4c-.2 13-10.9 23.6-24 23.6c-6.6 0-12.6-2.7-17-7c-2.2-2.2-3.9-4.8-5.1-7.6c-.6-1.4-1.1-2.9-1.4-4.5c-.2-.8-.3-1.6-.4-2.4s-.1-1.6-.1-2.5c0-4.5 0-9 0-13.6c0-.4 0-.9 .1-1.4s.1-1.1 .2-1.6c.1-1 .3-2.1 .6-3.1c.5-2 1.4-3.9 2.4-5.7c2.1-3.6 5.1-6.6 8.8-8.8c14.8-8.5 29.6-17 44.3-25.4c4.7-2.7 7.6-7.7 7.6-13.1c0-8.4-6.8-15.1-15.1-15.1l-58.3 0c-3.4 0-6.4 2.1-7.5 5.3c-.1 .4-.3 .8-.4 1.2c-4.4 12.5-18.2 19-30.6 14.6s-19-18.2-14.6-30.6zm54.8 182.2c.1-1.1 .3-2.1 .5-3.2c.4-2.1 1.1-4.1 1.9-6c1.6-3.8 4-7.3 6.9-10.2c5.8-5.8 13.8-9.4 22.6-9.4c17.7 0 32 14.3 32 32s-14.3 32-32 32c-8.8 0-16.8-3.6-22.6-9.4c-2.9-2.9-5.2-6.3-6.9-10.2c-.8-1.9-1.4-3.9-1.9-6c-.2-1-.4-2.1-.5-3.2c-.1-.5-.1-1.1-.1-1.6s0-1.1 0-1.8c0-.4 0-1 0-1.5s.1-1.1 .1-1.6z' />
-      <path d='M286.6 160c-23.7 0-44.8 14.9-52.8 37.3l-.4 1.2c-4.4 12.5 2.1 26.2 14.6 30.6s26.2-2.1 30.6-14.6l.4-1.2c1.1-3.2 4.2-5.3 7.5-5.3l58.3 0c8.4 0 15.1 6.8 15.1 15.1c0 5.4-2.9 10.4-7.6 13.1l-44.3 25.4c-7.5 4.3-12.1 12.2-12.1 20.8l0 13.5c0 13.3 10.7 24 24 24c13.1 0 23.8-10.5 24-23.6l32.3-18.5c19.6-11.3 31.7-32.2 31.7-54.8c0-34.9-28.3-63.1-63.1-63.1l-58.3 0zM320 416a32 32 0 1 0 0-64 32 32 0 1 0 0 64z' />
-    </svg>
-  );
-}
-
 function SignalStrengthIndicator({
   kind,
   percent,
@@ -3584,26 +3399,16 @@ function getWifiConnectRequestErrorMessage(error: unknown) {
   return error instanceof Error ? error.message : 'Unable to connect to the selected Wi-Fi network.';
 }
 
-function getDirectAccessUrls(addresses: string[]) {
-  const protocol = window.location.protocol || 'http:';
-  const port = window.location.port || '5074';
+function formatLocalAccessHostName(hostName: string | null | undefined) {
+  const trimmed = hostName?.trim();
+  if (!trimmed) {
+    return 'Waiting';
+  }
 
-  return addresses
-    .map((address) => address.trim())
-    .filter(Boolean)
-    .filter((address) => !address.startsWith('fe80:'))
-    .map((address) => address.includes(':') ? `[${address}]` : address)
-    .map((host) => `${protocol}//${host}${port ? `:${port}` : ''}`)
-    .filter((url, index, all) => all.indexOf(url) === index);
+  return trimmed.includes('.') ? trimmed : `${trimmed}.local`;
 }
 
-function formatDirectApAutoStartMode(mode: 'off' | 'when-wifi-not-connected' | string) {
-  return mode === 'off'
-    ? 'Startup off'
-    : 'Auto when Wi-Fi is not connected';
-}
-
-function requiresSaeForDirectApPassword(password: string) {
+function requiresSaeForLocalAccessPassword(password: string) {
   if (password.length === 0) {
     return false;
   }

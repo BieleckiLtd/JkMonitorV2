@@ -24,7 +24,7 @@ public sealed class DirectAccessService(
     public async Task InitializeAsync(CancellationToken cancellationToken = default)
     {
         await directAccessStore.InitializeAsync(cancellationToken);
-        await ReconcileStartupStateAsync(cancellationToken);
+        await ReconcileDesiredStateAsync(cancellationToken);
     }
 
     public async Task<DirectAccessSnapshot> GetSnapshotAsync(
@@ -37,7 +37,7 @@ public sealed class DirectAccessService(
         if (!OperatingSystem.IsLinux())
         {
             return BuildUnsupportedSnapshot(
-                "Direct AP is supported on Linux hosts with NetworkManager.",
+                "Local access mode is supported on Linux hosts with NetworkManager.",
                 settings,
                 bluetooth);
         }
@@ -46,11 +46,11 @@ public sealed class DirectAccessService(
         if (!toolCheck.Succeeded)
         {
             logger.LogDebug(
-                "Direct AP snapshot could not check nmcli availability. StdOut={StandardOutput}. StdErr={ErrorOutput}.",
+                "Local access snapshot could not check nmcli availability. StdOut={StandardOutput}. StdErr={ErrorOutput}.",
                 toolCheck.StandardOutput,
                 toolCheck.ErrorOutput);
             return BuildUnsupportedSnapshot(
-                "NetworkManager command-line tools are not available on this host.",
+                "Local access mode is unavailable because NetworkManager tools are not available on this host.",
                 settings,
                 bluetooth);
         }
@@ -61,12 +61,65 @@ public sealed class DirectAccessService(
 
         await Task.WhenAll(wifiTask, bluetoothTask);
 
+        var wifi = await wifiTask;
+        var bluetoothAccess = await bluetoothTask;
+
         return new DirectAccessSnapshot
         {
             Settings = ToSettingsSnapshot(settings),
-            Wifi = await wifiTask,
-            Bluetooth = await bluetoothTask
+            Mode = BuildLocalAccessModeSnapshot(settings, wifi, bluetoothAccess),
+            Wifi = wifi,
+            Bluetooth = bluetoothAccess
         };
+    }
+
+    public async Task<LocalAccessModeCommandResult> SetLocalAccessModeEnabledAsync(
+        bool enabled,
+        CancellationToken cancellationToken = default)
+    {
+        var currentSettings = await directAccessStore.GetSettingsAsync(cancellationToken);
+
+        try
+        {
+            await directAccessStore.SaveSettingsAsync(
+                enabled ? DirectAccessStore.AutoStartModeWhenWifiNotConnected : DirectAccessStore.AutoStartModeOff,
+                currentSettings.WifiPassword,
+                cancellationToken);
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
+        {
+            return new LocalAccessModeCommandResult
+            {
+                Success = false,
+                Enabled = currentSettings.AutoStartMode != DirectAccessStore.AutoStartModeOff,
+                Active = await IsLocalAccessActiveAsync(cancellationToken),
+                Message = exception.Message
+            };
+        }
+
+        await ReconcileDesiredStateAsync(cancellationToken);
+
+        var network = await networkManagementService.GetSnapshotAsync(cancellationToken);
+        var bluetooth = await bluetoothManagementService.GetSnapshotAsync(cancellationToken);
+        var snapshot = await GetSnapshotAsync(network, bluetooth, cancellationToken);
+
+        return new LocalAccessModeCommandResult
+        {
+            Success = true,
+            Enabled = snapshot.Mode.Enabled,
+            Active = snapshot.Mode.Active,
+            Message = enabled
+                ? "Local access mode is on."
+                : "Local access mode is off."
+        };
+    }
+
+    public async Task<SaveDirectAccessSettingsResult> SaveLocalAccessAdvancedSettingsAsync(
+        string? wifiPassword,
+        CancellationToken cancellationToken = default)
+    {
+        var currentSettings = await directAccessStore.GetSettingsAsync(cancellationToken);
+        return await SaveSettingsAsync(currentSettings.AutoStartMode, wifiPassword, cancellationToken);
     }
 
     public async Task<SaveDirectAccessSettingsResult> SaveSettingsAsync(
@@ -109,7 +162,7 @@ public sealed class DirectAccessService(
             {
                 Success = false,
                 Enabled = false,
-                Message = "Direct AP Wi-Fi is supported on Linux hosts with NetworkManager."
+                Message = "Local access hotspot is supported on Linux hosts with NetworkManager."
             };
         }
 
@@ -132,12 +185,24 @@ public sealed class DirectAccessService(
             {
                 Success = false,
                 Enabled = false,
-                Message = "No Wi-Fi interface is available for Direct AP."
+                Message = "No Wi-Fi interface is available for local access."
             };
         }
 
+        var activeConnections = await GetActiveConnectionsAsync(cancellationToken);
+
         if (enabled)
         {
+            if (IsConnectionActive(activeConnections, WifiProfileName))
+            {
+                return new DirectAccessCommandResult
+                {
+                    Success = true,
+                    Enabled = true,
+                    Message = "Local access hotspot is already on."
+                };
+            }
+
             if (network.WifiPowered == false)
             {
                 var powerResult = await networkManagementService.SetWifiPowerAsync(enabled: true, cancellationToken);
@@ -160,7 +225,7 @@ public sealed class DirectAccessService(
                 {
                     Success = false,
                     Enabled = false,
-                    Message = BuildCommandFailureMessage(configureResult, "Direct AP Wi-Fi could not be configured.")
+                    Message = BuildCommandFailureMessage(configureResult, "Local access hotspot could not be configured.")
                 };
             }
 
@@ -171,7 +236,7 @@ public sealed class DirectAccessService(
                 {
                     Success = false,
                     Enabled = false,
-                    Message = BuildCommandFailureMessage(upResult, "Direct AP Wi-Fi could not be turned on.")
+                    Message = BuildCommandFailureMessage(upResult, "Local access hotspot could not be turned on.")
                 };
             }
 
@@ -183,14 +248,13 @@ public sealed class DirectAccessService(
             };
         }
 
-        var activeConnections = await GetActiveConnectionsAsync(cancellationToken);
         if (!IsConnectionActive(activeConnections, WifiProfileName))
         {
             return new DirectAccessCommandResult
             {
                 Success = true,
                 Enabled = false,
-                Message = "Direct AP Wi-Fi is already off."
+                Message = "Local access hotspot is already off."
             };
         }
 
@@ -201,7 +265,7 @@ public sealed class DirectAccessService(
             {
                 Success = false,
                 Enabled = true,
-                Message = BuildCommandFailureMessage(downResult, "Direct AP Wi-Fi could not be turned off.")
+                Message = BuildCommandFailureMessage(downResult, "Local access hotspot could not be turned off.")
             };
         }
 
@@ -209,7 +273,7 @@ public sealed class DirectAccessService(
         {
             Success = true,
             Enabled = false,
-            Message = "Direct AP Wi-Fi is off."
+            Message = "Local access hotspot is off."
         };
     }
 
@@ -221,7 +285,7 @@ public sealed class DirectAccessService(
             {
                 Success = false,
                 Enabled = false,
-                Message = "Direct AP Bluetooth is supported on Linux hosts with BlueZ and NetworkManager."
+                Message = "Local access Bluetooth is supported on Linux hosts with BlueZ and NetworkManager."
             };
         }
 
@@ -243,12 +307,24 @@ public sealed class DirectAccessService(
             {
                 Success = false,
                 Enabled = false,
-                Message = bluetoothState.StatusMessage ?? "No Bluetooth adapter is available for Direct AP."
+                Message = bluetoothState.StatusMessage ?? "No Bluetooth adapter is available for local access."
             };
         }
 
+        var activeConnections = await GetActiveConnectionsAsync(cancellationToken);
+
         if (enabled)
         {
+            if (IsConnectionActive(activeConnections, BluetoothProfileName))
+            {
+                return new DirectAccessCommandResult
+                {
+                    Success = true,
+                    Enabled = true,
+                    Message = "Local access Bluetooth is already on."
+                };
+            }
+
             if (!bluetoothState.Powered)
             {
                 var powerResult = await bluetoothManagementService.SetPowerAsync(enabled: true, cancellationToken);
@@ -270,7 +346,7 @@ public sealed class DirectAccessService(
                 {
                     Success = false,
                     Enabled = false,
-                    Message = BuildCommandFailureMessage(configureResult, "Direct AP Bluetooth could not be configured.")
+                    Message = BuildCommandFailureMessage(configureResult, "Local access Bluetooth could not be configured.")
                 };
             }
 
@@ -292,7 +368,7 @@ public sealed class DirectAccessService(
                 {
                     Success = false,
                     Enabled = false,
-                    Message = BuildCommandFailureMessage(upResult, "Direct AP Bluetooth could not be turned on.")
+                    Message = BuildCommandFailureMessage(upResult, "Local access Bluetooth could not be turned on.")
                 };
             }
 
@@ -301,11 +377,10 @@ public sealed class DirectAccessService(
             {
                 Success = true,
                 Enabled = true,
-                Message = $"Direct AP Bluetooth is on. Pair with '{adapterState.Alias ?? Environment.MachineName}' and join the PAN connection."
+                Message = $"Local access Bluetooth is on. Pair with '{adapterState.Alias ?? Environment.MachineName}' and join the PAN connection."
             };
         }
 
-        var activeConnections = await GetActiveConnectionsAsync(cancellationToken);
         var downResult = IsConnectionActive(activeConnections, BluetoothProfileName)
             ? await RunNmcliAsync(["connection", "down", "id", BluetoothProfileName], cancellationToken)
             : new NetworkManagementService.ProcessResult(true, string.Empty, string.Empty, 0);
@@ -317,7 +392,7 @@ public sealed class DirectAccessService(
             {
                 Success = false,
                 Enabled = true,
-                Message = BuildCommandFailureMessage(downResult, "Direct AP Bluetooth could not be turned off.")
+                Message = BuildCommandFailureMessage(downResult, "Local access Bluetooth could not be turned off.")
             };
         }
 
@@ -335,7 +410,7 @@ public sealed class DirectAccessService(
         {
             Success = true,
             Enabled = false,
-            Message = "Direct AP Bluetooth is off."
+            Message = "Local access Bluetooth is off."
         };
     }
 
@@ -386,10 +461,10 @@ public sealed class DirectAccessService(
 
         if (passwordChanged && directWifiActive)
         {
-            return "Direct AP settings were saved. Restart Direct AP Wi-Fi before the new password takes effect.";
+            return "Local access settings were saved. Changes apply the next time local access starts.";
         }
 
-        return "Direct AP settings were saved.";
+        return "Local access settings were saved.";
     }
 
     internal static IReadOnlyList<string> BuildWifiSecurityArguments(string? wifiPassword)
@@ -414,7 +489,7 @@ public sealed class DirectAccessService(
             ];
     }
 
-    private async Task ReconcileStartupStateAsync(CancellationToken cancellationToken)
+    public async Task ReconcileDesiredStateAsync(CancellationToken cancellationToken = default)
     {
         if (!OperatingSystem.IsLinux())
         {
@@ -425,58 +500,58 @@ public sealed class DirectAccessService(
         if (!toolCheck.Succeeded)
         {
             logger.LogDebug(
-                "Skipping Direct AP startup reconciliation because nmcli is unavailable. StdOut={StandardOutput}. StdErr={ErrorOutput}.",
+                "Skipping local access reconciliation because nmcli is unavailable. StdOut={StandardOutput}. StdErr={ErrorOutput}.",
                 toolCheck.StandardOutput,
                 toolCheck.ErrorOutput);
             return;
         }
 
         var settings = await directAccessStore.GetSettingsAsync(cancellationToken);
-        if (!string.Equals(
+        var activeConnections = await GetActiveConnectionsAsync(cancellationToken);
+
+        if (string.Equals(
             settings.AutoStartMode,
-            DirectAccessStore.AutoStartModeWhenWifiNotConnected,
+            DirectAccessStore.AutoStartModeOff,
             StringComparison.Ordinal))
         {
-            logger.LogDebug("Direct AP startup reconciliation skipped because auto-start mode is {AutoStartMode}.", settings.AutoStartMode);
+            await DisableLocalAccessIfActiveAsync(activeConnections, cancellationToken);
             return;
         }
 
         var network = await networkManagementService.GetSnapshotAsync(cancellationToken);
         if (IsWifiConnected(network))
         {
-            logger.LogInformation("Direct AP startup reconciliation skipped because Wi-Fi is already connected.");
+            await DisableLocalAccessIfActiveAsync(activeConnections, cancellationToken);
             return;
         }
 
-        var activeConnections = await GetActiveConnectionsAsync(cancellationToken);
-
         if (IsConnectionActive(activeConnections, WifiProfileName))
         {
-            logger.LogInformation("Wi-Fi is not connected at startup, but Direct AP Wi-Fi is already active.");
+            logger.LogDebug("Wi-Fi is not connected and local access hotspot is already active.");
         }
         else
         {
-            logger.LogInformation("Wi-Fi is not connected at startup. Enabling Direct AP Wi-Fi.");
+            logger.LogInformation("Wi-Fi is not connected. Enabling local access hotspot.");
 
             var wifiResult = await SetWifiEnabledAsync(enabled: true, cancellationToken);
             if (!wifiResult.Success)
             {
-                logger.LogWarning("Direct AP startup could not enable Wi-Fi. Message={Message}", wifiResult.Message);
+                logger.LogWarning("Local access could not enable hotspot Wi-Fi. Message={Message}", wifiResult.Message);
             }
         }
 
         if (IsConnectionActive(activeConnections, BluetoothProfileName))
         {
-            logger.LogInformation("Wi-Fi is not connected at startup, but Direct AP Bluetooth is already active.");
+            logger.LogDebug("Wi-Fi is not connected and local access Bluetooth is already active.");
         }
         else
         {
-            logger.LogInformation("Wi-Fi is not connected at startup. Enabling Direct AP Bluetooth.");
+            logger.LogInformation("Wi-Fi is not connected. Enabling local access Bluetooth.");
 
             var bluetoothResult = await SetBluetoothEnabledAsync(enabled: true, cancellationToken);
             if (!bluetoothResult.Success)
             {
-                logger.LogWarning("Direct AP startup could not enable Bluetooth. Message={Message}", bluetoothResult.Message);
+                logger.LogWarning("Local access could not enable Bluetooth fallback. Message={Message}", bluetoothResult.Message);
             }
         }
     }
@@ -489,6 +564,23 @@ public sealed class DirectAccessService(
         return new DirectAccessSnapshot
         {
             Settings = ToSettingsSnapshot(settings),
+            Mode = BuildLocalAccessModeSnapshot(
+                settings,
+                new WifiDirectAccessSnapshot
+                {
+                    Supported = false,
+                    Enabled = false,
+                    StatusMessage = message,
+                    Ssid = BuildDefaultWifiSsid(Environment.MachineName)
+                },
+                new BluetoothDirectAccessSnapshot
+                {
+                    Supported = false,
+                    Enabled = false,
+                    DeviceName = bluetooth.Supported ? Environment.MachineName : null,
+                    RequiresPairing = true,
+                    StatusMessage = message
+                }),
             Wifi = new WifiDirectAccessSnapshot
             {
                 Supported = false,
@@ -504,6 +596,41 @@ public sealed class DirectAccessService(
                 RequiresPairing = true,
                 StatusMessage = message
             }
+        };
+    }
+
+    private static LocalAccessModeSnapshot BuildLocalAccessModeSnapshot(
+        DirectAccessStore.DirectAccessSettings settings,
+        WifiDirectAccessSnapshot wifi,
+        BluetoothDirectAccessSnapshot bluetooth)
+    {
+        var enabled = !string.Equals(settings.AutoStartMode, DirectAccessStore.AutoStartModeOff, StringComparison.Ordinal);
+        var supported = wifi.Supported || bluetooth.Supported;
+        var active = wifi.Enabled || bluetooth.Enabled;
+
+        var addresses = wifi.Addresses
+            .Concat(bluetooth.Addresses)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(address => address.Contains(':') ? 1 : 0)
+            .ThenBy(address => address, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        return new LocalAccessModeSnapshot
+        {
+            Supported = supported,
+            Enabled = enabled,
+            Active = active,
+            HostName = Environment.MachineName,
+            StatusMessage = !supported
+                ? "Local access mode is unavailable on this host."
+                : !enabled
+                    ? "Local access mode is off."
+                    : active
+                        ? "Local access mode is active."
+                        : "Local access mode is ready if Wi-Fi drops.",
+            HotspotName = wifi.Ssid,
+            HotspotPassword = settings.WifiPassword,
+            Addresses = addresses
         };
     }
 
@@ -525,7 +652,7 @@ public sealed class DirectAccessService(
             {
                 Supported = false,
                 Enabled = false,
-                StatusMessage = network.StatusMessage ?? "Direct AP Wi-Fi is unavailable on this host.",
+                StatusMessage = network.StatusMessage ?? "Local access hotspot is unavailable on this host.",
                 Ssid = BuildDefaultWifiSsid(Environment.MachineName)
             };
         }
@@ -536,7 +663,7 @@ public sealed class DirectAccessService(
             {
                 Supported = false,
                 Enabled = false,
-                StatusMessage = "No Wi-Fi interface is available for Direct AP.",
+                StatusMessage = "No Wi-Fi interface is available for local access.",
                 Ssid = BuildDefaultWifiSsid(Environment.MachineName)
             };
         }
@@ -547,13 +674,13 @@ public sealed class DirectAccessService(
             Enabled = enabled,
             StatusMessage = enabled
                 ? string.IsNullOrEmpty(settings.WifiPassword)
-                    ? "Direct AP Wi-Fi is on with no password."
-                    : "Direct AP Wi-Fi is on with a password."
+                    ? "Local access hotspot is on with no password."
+                    : "Local access hotspot is on with a password."
                 : network.WifiPowered == false
-                    ? "Turning this on powers the Wi-Fi radio and starts the Raspberry Pi hotspot."
+                    ? "Turning this on powers the Wi-Fi radio and starts the local access hotspot."
                     : !string.IsNullOrWhiteSpace(currentNetworkName)
-                        ? $"Turning this on will disconnect '{currentNetworkName}' and move Wi-Fi onto the Raspberry Pi hotspot."
-                        : "Creates a local Wi-Fi hotspot directly on the Raspberry Pi.",
+                        ? $"Turning this on will disconnect '{currentNetworkName}' and move Wi-Fi onto the local access hotspot."
+                        : "Creates a local Wi-Fi hotspot directly on the device.",
             InterfaceName = interfaceName,
             CurrentNetworkName = currentNetworkName,
             DisconnectsCurrentWifi = !enabled && !string.IsNullOrWhiteSpace(currentNetworkName),
@@ -577,7 +704,7 @@ public sealed class DirectAccessService(
             {
                 Supported = false,
                 Enabled = false,
-                StatusMessage = adapterState.StatusMessage ?? bluetooth.StatusMessage ?? "Direct AP Bluetooth is unavailable on this host.",
+                StatusMessage = adapterState.StatusMessage ?? bluetooth.StatusMessage ?? "Local access Bluetooth is unavailable on this host.",
                 DeviceName = deviceName,
                 RequiresPairing = true,
                 Discoverable = false,
@@ -590,10 +717,10 @@ public sealed class DirectAccessService(
             Supported = true,
             Enabled = enabled,
             StatusMessage = enabled
-                ? "Direct AP Bluetooth is on. Pair from your device settings and join the PAN connection."
+                ? "Local access Bluetooth is on. Pair from your device settings and join the PAN connection."
                 : !adapterState.Powered
-                    ? "Turning this on powers Bluetooth, makes the Raspberry Pi discoverable, and starts a Bluetooth PAN."
-                    : "Keeps the Raspberry Pi reachable over Bluetooth PAN when your phone or laptop supports it.",
+                    ? "Turning this on powers Bluetooth, makes the device discoverable, and starts a Bluetooth PAN."
+                    : "Keeps the device reachable over Bluetooth PAN when your phone or laptop supports it.",
             InterfaceName = BluetoothInterfaceName,
             DeviceName = deviceName,
             RequiresPairing = true,
@@ -609,7 +736,7 @@ public sealed class DirectAccessService(
         if (!result.Succeeded)
         {
             logger.LogDebug(
-                "Direct AP could not list active NetworkManager connections. StdOut={StandardOutput}. StdErr={ErrorOutput}.",
+                "Local access could not list active NetworkManager connections. StdOut={StandardOutput}. StdErr={ErrorOutput}.",
                 result.StandardOutput,
                 result.ErrorOutput);
             return [];
@@ -628,6 +755,36 @@ public sealed class DirectAccessService(
     {
         var activeConnections = await GetActiveConnectionsAsync(cancellationToken);
         return IsConnectionActive(activeConnections, WifiProfileName);
+    }
+
+    private async Task<bool> IsLocalAccessActiveAsync(CancellationToken cancellationToken)
+    {
+        var activeConnections = await GetActiveConnectionsAsync(cancellationToken);
+        return IsConnectionActive(activeConnections, WifiProfileName)
+            || IsConnectionActive(activeConnections, BluetoothProfileName);
+    }
+
+    private async Task DisableLocalAccessIfActiveAsync(
+        IReadOnlyList<ActiveConnectionInfo> activeConnections,
+        CancellationToken cancellationToken)
+    {
+        if (IsConnectionActive(activeConnections, WifiProfileName))
+        {
+            var wifiResult = await SetWifiEnabledAsync(enabled: false, cancellationToken);
+            if (!wifiResult.Success)
+            {
+                logger.LogWarning("Local access could not disable hotspot Wi-Fi. Message={Message}", wifiResult.Message);
+            }
+        }
+
+        if (IsConnectionActive(activeConnections, BluetoothProfileName))
+        {
+            var bluetoothResult = await SetBluetoothEnabledAsync(enabled: false, cancellationToken);
+            if (!bluetoothResult.Success)
+            {
+                logger.LogWarning("Local access could not disable Bluetooth fallback. Message={Message}", bluetoothResult.Message);
+            }
+        }
     }
 
     private async Task<NetworkManagementService.ProcessResult> EnsureWifiProfileAsync(
@@ -745,8 +902,8 @@ public sealed class DirectAccessService(
     {
         var ssid = BuildDefaultWifiSsid(Environment.MachineName);
         return string.IsNullOrEmpty(settings.WifiPassword)
-            ? $"Direct AP Wi-Fi is on. Join '{ssid}' with no password."
-            : $"Direct AP Wi-Fi is on. Join '{ssid}' with the configured password.";
+            ? $"Local access hotspot is on. Join '{ssid}' with no password."
+            : $"Local access hotspot is on. Join '{ssid}' with the configured password.";
     }
 
     private static bool IsWifiConnected(NetworkConnectivitySnapshot network)

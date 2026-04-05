@@ -6,6 +6,8 @@ public sealed record class SystemConnectivitySnapshot
 
     public required BluetoothRuntimeSnapshot Bluetooth { get; init; }
 
+    public required SshServiceSnapshot Ssh { get; init; }
+
     public required DirectAccessSnapshot DirectAccess { get; init; }
 }
 
@@ -173,6 +175,38 @@ public sealed record class BluetoothPowerResult
     public required string Message { get; init; }
 }
 
+public sealed record class SshServiceSnapshot
+{
+    public bool Supported { get; init; }
+
+    public bool Enabled { get; init; }
+
+    public bool Active { get; init; }
+
+    public string? StatusMessage { get; init; }
+
+    public string? ServiceLoadState { get; init; }
+
+    public string? ServiceActiveState { get; init; }
+
+    public string? ServiceSubState { get; init; }
+
+    public string? ServiceUnitFileState { get; init; }
+
+    public string? ServiceResult { get; init; }
+}
+
+public sealed record class SshServiceCommandResult
+{
+    public bool Success { get; init; }
+
+    public bool Enabled { get; init; }
+
+    public bool Active { get; init; }
+
+    public required string Message { get; init; }
+}
+
 public sealed record class BluetoothDeviceSnapshot
 {
     public required string Address { get; init; }
@@ -196,9 +230,30 @@ public sealed record class DirectAccessSnapshot
 {
     public required DirectAccessSettingsSnapshot Settings { get; init; }
 
+    public required LocalAccessModeSnapshot Mode { get; init; }
+
     public required WifiDirectAccessSnapshot Wifi { get; init; }
 
     public required BluetoothDirectAccessSnapshot Bluetooth { get; init; }
+}
+
+public sealed record class LocalAccessModeSnapshot
+{
+    public bool Supported { get; init; }
+
+    public bool Enabled { get; init; }
+
+    public bool Active { get; init; }
+
+    public required string HostName { get; init; }
+
+    public string? StatusMessage { get; init; }
+
+    public string? HotspotName { get; init; }
+
+    public string? HotspotPassword { get; init; }
+
+    public IReadOnlyList<string> Addresses { get; init; } = [];
 }
 
 public sealed record class DirectAccessSettingsSnapshot
@@ -255,6 +310,17 @@ public sealed record class DirectAccessCommandResult
     public bool Success { get; init; }
 
     public bool Enabled { get; init; }
+
+    public required string Message { get; init; }
+}
+
+public sealed record class LocalAccessModeCommandResult
+{
+    public bool Success { get; init; }
+
+    public bool Enabled { get; init; }
+
+    public bool Active { get; init; }
 
     public required string Message { get; init; }
 }

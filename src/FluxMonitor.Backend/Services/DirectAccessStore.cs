@@ -56,7 +56,7 @@ public sealed class DirectAccessStore(
 
             _initialized = true;
             logger.LogInformation(
-                "Direct AP settings loaded from PostgreSQL. AutoStartMode={AutoStartMode}, HasWifiPassword={HasWifiPassword}.",
+                "Local access settings loaded from PostgreSQL. AutoStartMode={AutoStartMode}, HasWifiPassword={HasWifiPassword}.",
                 loadedSettings.AutoStartMode,
                 !string.IsNullOrEmpty(loadedSettings.WifiPassword));
         }
@@ -82,7 +82,7 @@ public sealed class DirectAccessStore(
 
         if (!HasDatabase)
         {
-            throw new InvalidOperationException("Direct AP settings cannot be saved until PostgreSQL storage is configured.");
+            throw new InvalidOperationException("Local access settings cannot be saved until PostgreSQL storage is configured.");
         }
 
         var normalizedSettings = new DirectAccessSettings(
@@ -143,7 +143,7 @@ public sealed class DirectAccessStore(
         }
 
         throw new InvalidOperationException(
-            $"Unsupported Direct AP auto-start mode '{normalized}'. Use '{AutoStartModeOff}' or '{AutoStartModeWhenWifiNotConnected}'.");
+            $"Unsupported local access mode '{normalized}'. Use '{AutoStartModeOff}' or '{AutoStartModeWhenWifiNotConnected}'.");
     }
 
     internal static string? NormalizeWifiPassword(string? value)

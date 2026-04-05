@@ -1,4 +1,4 @@
-﻿using System.IO.Ports;
+using System.IO.Ports;
 using FluxMonitor.Backend.Models;
 using FluxMonitor.Backend.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -16,6 +16,7 @@ public sealed class SystemController(
     NetworkManagementService networkManagementService,
     WifiCredentialStore wifiCredentialStore,
     BluetoothManagementService bluetoothManagementService,
+    SshManagementService sshManagementService,
     DirectAccessService directAccessService,
     HostServicesCatalogService hostServicesCatalogService,
     ILogger<SystemController> logger) : ControllerBase
@@ -65,16 +66,33 @@ public sealed class SystemController(
     [HttpGet("connectivity")]
     public async Task<ActionResult<SystemConnectivitySnapshot>> GetConnectivity(CancellationToken cancellationToken)
     {
-        var network = await networkManagementService.GetSnapshotAsync(cancellationToken);
-        var bluetooth = await bluetoothManagementService.GetSnapshotAsync(cancellationToken);
+        var networkTask = networkManagementService.GetSnapshotAsync(cancellationToken);
+        var bluetoothTask = bluetoothManagementService.GetSnapshotAsync(cancellationToken);
+        var sshTask = sshManagementService.GetSnapshotAsync(cancellationToken);
+
+        await Task.WhenAll(networkTask, bluetoothTask, sshTask);
+
+        var network = await networkTask;
+        var bluetooth = await bluetoothTask;
+        var ssh = await sshTask;
         var directAccess = await directAccessService.GetSnapshotAsync(network, bluetooth, cancellationToken);
 
         return Ok(new SystemConnectivitySnapshot
         {
             Network = network,
             Bluetooth = bluetooth,
+            Ssh = ssh,
             DirectAccess = directAccess
         });
+    }
+
+    [HttpPost("ssh")]
+    public async Task<ActionResult<SshServiceCommandResult>> SetSshEnabled(
+        [FromBody] SshToggleRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await sshManagementService.SetEnabledAsync(request.Enabled, cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
     }
 
     [HttpPost("direct-access/wifi")]
@@ -104,6 +122,24 @@ public sealed class SystemController(
             request.AutoStartMode,
             request.WifiPassword,
             cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpPost("local-access-mode")]
+    public async Task<ActionResult<LocalAccessModeCommandResult>> SetLocalAccessMode(
+        [FromBody] LocalAccessModeToggleRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await directAccessService.SetLocalAccessModeEnabledAsync(request.Enabled, cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpPost("local-access-mode/advanced")]
+    public async Task<ActionResult<SaveDirectAccessSettingsResult>> SaveLocalAccessAdvancedSettings(
+        [FromBody] SaveLocalAccessAdvancedRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await directAccessService.SaveLocalAccessAdvancedSettingsAsync(request.WifiPassword, cancellationToken);
         return result.Success ? Ok(result) : BadRequest(result);
     }
 
@@ -539,8 +575,11 @@ public sealed record WifiPowerRequest(bool Enabled);
 public sealed record EthernetDisconnectRequest(string InterfaceName);
 
 public sealed record BluetoothPowerRequest(bool Enabled);
+public sealed record SshToggleRequest(bool Enabled);
 public sealed record DirectAccessToggleRequest(bool Enabled);
 public sealed record SaveDirectAccessSettingsRequest(string AutoStartMode, string? WifiPassword);
+public sealed record LocalAccessModeToggleRequest(bool Enabled);
+public sealed record SaveLocalAccessAdvancedRequest(string? WifiPassword);
 public sealed record StopServiceRequest(string Name);
 
 file sealed class UpdateProgressStreamEnvelope

@@ -1,4 +1,4 @@
-﻿using FluxMonitor.Backend.Configuration;
+using FluxMonitor.Backend.Configuration;
 using FluxMonitor.Backend.Services;
 using Serilog;
 
@@ -47,8 +47,10 @@ builder.Services.AddSingleton<FluxMonitor.Backend.Services.DeviceStateStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.NetworkManagementService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.WifiCredentialStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.BluetoothManagementService>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.SshManagementService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.DirectAccessStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.DirectAccessService>();
+builder.Services.AddHostedService<FluxMonitor.Backend.Services.DirectAccessBackgroundService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.HostServicesCatalogService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.ICommandRunner, FluxMonitor.Backend.Services.ProcessCommandRunner>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.ManagedRestartService>();

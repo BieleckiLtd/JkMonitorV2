@@ -77,6 +77,6 @@ public sealed class DirectAccessServiceTests
             new DirectAccessStore.DirectAccessSettings(true, DirectAccessStore.AutoStartModeWhenWifiNotConnected, "abc"),
             directWifiActive: true);
 
-        Assert.Equal("Direct AP settings were saved. Restart Direct AP Wi-Fi before the new password takes effect.", message);
+        Assert.Equal("Local access settings were saved. Changes apply the next time local access starts.", message);
     }
 }

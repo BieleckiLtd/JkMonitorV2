@@ -71,7 +71,15 @@ describe('SystemPage', () => {
     matchMediaMock = createMatchMediaMock(true);
     window.matchMedia = vi.fn().mockImplementation(() => matchMediaMock);
 
-    globalThis.fetch = vi.fn(async (input: RequestInfo | URL) => {
+    let localAccessEnabled = false;
+    let localAccessActive = false;
+    let localAccessPassword: string | null = null;
+    let sshEnabled = false;
+    let sshActive = false;
+    const localAccessHostName = 'fluxmonitor';
+    const localAccessHotspotName = 'FluxMonitor-test';
+
+    globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
 
       if (url === '/api/health') {
@@ -151,15 +159,15 @@ describe('SystemPage', () => {
                   description: 'Wireless adapter',
                   status: 'up',
                   macAddress: 'AA:BB:CC:DD:EE:FF',
-                  addresses: ['192.168.1.25'],
+                  addresses: localAccessActive ? ['192.168.42.1'] : ['192.168.1.25'],
                   speedMbps: 72,
-                  connectionName: 'Home Mesh',
-                  connectionState: 'connected',
-                  connectedSsid: 'Home Mesh',
-                  connectedBssid: 'AA:AA:AA:AA:AA:AA',
-                  signalPercent: 78,
-                  security: 'WPA2',
-                  signalBars: '▂▄▆█',
+                  connectionName: localAccessActive ? 'fluxmonitor-direct-wifi' : 'Home Mesh',
+                  connectionState: localAccessActive ? 'activated' : 'connected',
+                  connectedSsid: localAccessActive ? null : 'Home Mesh',
+                  connectedBssid: localAccessActive ? null : 'AA:AA:AA:AA:AA:AA',
+                  signalPercent: localAccessActive ? null : 78,
+                  security: localAccessActive ? null : 'WPA2',
+                  signalBars: localAccessActive ? null : '▂▄▆█',
                 },
               ],
             },
@@ -169,70 +177,106 @@ describe('SystemPage', () => {
               powered: true,
               devices: [],
             },
+            ssh: {
+              supported: true,
+              enabled: sshEnabled,
+              active: sshActive,
+              statusMessage: sshActive
+                ? sshEnabled
+                  ? 'SSH is enabled and accepting remote terminal connections.'
+                  : 'SSH is running, but it will not start automatically after reboot.'
+                : 'SSH is off.',
+              serviceLoadState: 'loaded',
+              serviceActiveState: sshActive ? 'active' : 'inactive',
+              serviceSubState: sshActive ? 'running' : 'dead',
+              serviceUnitFileState: sshEnabled ? 'enabled' : 'disabled',
+              serviceResult: 'success',
+            },
             directAccess: {
               settings: {
                 storageAvailable: true,
-                autoStartMode: 'when-wifi-not-connected',
-                wifiPassword: null,
+                autoStartMode: localAccessEnabled ? 'when-wifi-not-connected' : 'off',
+                wifiPassword: localAccessPassword,
+              },
+              mode: {
+                supported: true,
+                enabled: localAccessEnabled,
+                active: localAccessActive,
+                hostName: localAccessHostName,
+                statusMessage: localAccessActive ? 'Local access mode is active.' : localAccessEnabled ? 'Local access mode is ready if Wi-Fi drops.' : 'Local access mode is off.',
+                hotspotName: localAccessHotspotName,
+                hotspotPassword: localAccessPassword,
+                addresses: localAccessActive ? ['192.168.42.1'] : [],
               },
               wifi: {
                 supported: true,
-                enabled: false,
-                statusMessage: "Turning this on will disconnect 'Home Mesh' and move Wi-Fi onto the Raspberry Pi hotspot.",
+                enabled: localAccessActive,
+                statusMessage: localAccessActive ? 'Local access hotspot is active.' : "Turning this on will disconnect 'Home Mesh' and move Wi-Fi onto the Raspberry Pi hotspot.",
                 interfaceName: 'wlan0',
-                currentNetworkName: 'Home Mesh',
-                disconnectsCurrentWifi: true,
-                ssid: 'FluxMonitor-test',
-                addresses: [],
+                currentNetworkName: localAccessActive ? null : 'Home Mesh',
+                disconnectsCurrentWifi: !localAccessActive,
+                ssid: localAccessHotspotName,
+                addresses: localAccessActive ? ['192.168.42.1'] : [],
               },
               bluetooth: {
                 supported: true,
-                enabled: false,
-                statusMessage: 'Keeps the Raspberry Pi on its current network while nearby devices connect over Bluetooth PAN.',
+                enabled: localAccessActive,
+                statusMessage: localAccessActive ? 'Local access Bluetooth is active.' : 'Keeps the Raspberry Pi on its current network while nearby devices connect over Bluetooth PAN.',
                 interfaceName: 'btnap0',
                 deviceName: 'FluxMonitor Pi',
                 requiresPairing: true,
-                discoverable: false,
-                pairable: false,
-                addresses: [],
+                discoverable: localAccessActive,
+                pairable: localAccessActive,
+                addresses: localAccessActive ? ['192.168.42.2'] : [],
               },
             },
           }),
         } as Response;
       }
 
-      if (url === '/api/system/direct-access/wifi') {
+      if (url === '/api/system/ssh') {
+        const body = typeof init?.body === 'string'
+          ? JSON.parse(init.body) as { enabled?: boolean }
+          : null;
+
+        sshEnabled = Boolean(body?.enabled);
+        sshActive = Boolean(body?.enabled);
+
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            enabled: sshEnabled,
+            active: sshActive,
+            message: sshEnabled ? 'SSH was enabled.' : 'SSH was disabled.',
+          }),
+        } as Response;
+      }
+
+      if (url === '/api/system/local-access-mode') {
+        localAccessEnabled = true;
+        localAccessActive = true;
         return {
           ok: true,
           json: async () => ({
             success: true,
             enabled: true,
-            message: 'Direct Wi-Fi is on.',
+            active: true,
+            message: 'Local access mode is on.',
           }),
         } as Response;
       }
 
-      if (url === '/api/system/direct-access/bluetooth') {
+      if (url === '/api/system/local-access-mode/advanced') {
         return {
           ok: true,
           json: async () => ({
             success: true,
-            enabled: true,
-            message: 'Bluetooth direct mode is on.',
-          }),
-        } as Response;
-      }
-
-      if (url === '/api/system/direct-access/settings') {
-        return {
-          ok: true,
-          json: async () => ({
-            success: true,
-            message: 'Direct AP settings were saved.',
+            message: 'Local access settings were saved.',
             settings: {
               storageAvailable: true,
-              autoStartMode: 'when-wifi-not-connected',
-              wifiPassword: null,
+              autoStartMode: localAccessEnabled ? 'when-wifi-not-connected' : 'off',
+              wifiPassword: localAccessPassword,
             },
           }),
         } as Response;
@@ -370,28 +414,48 @@ describe('SystemPage', () => {
     expect(screen.getByTestId('location-display')).toHaveTextContent('/system/logs');
   });
 
-  it('warns before enabling direct wi-fi when that will disconnect the current home network', async () => {
+  it('toggles local access mode from the unified connectivity section', async () => {
     renderSystemPage('/system/connectivity');
 
-    fireEvent.click(await screen.findByRole('button', { name: /direct ap/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /local access mode/i }));
 
-    expect(await screen.findByText(/startup behavior/i)).toBeInTheDocument();
-    expect(screen.getByText(/disconnects the pi from/i)).toBeInTheDocument();
+    expect(await screen.findByText(/lets you connect to the device if it loses connection to the wi-fi router/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^hostname$/i)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('switch', { name: /toggle direct ap wi-fi/i }));
+    fireEvent.click(screen.getByRole('switch', { name: /toggle local access mode/i }));
 
-    expect(await screen.findByRole('button', { name: /^turn on direct ap wi-fi$/i })).toBeInTheDocument();
-    expect(screen.getByText(/move wlan0 away from home mesh/i)).toBeInTheDocument();
-    expect(screen.getByText(/stop using that home network until direct ap wi-fi is turned off/i)).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText(/local access mode is on/i)).toBeInTheDocument();
+    });
+
+    expect(screen.getByText(/^hostname$/i)).toBeInTheDocument();
+    expect(screen.getAllByText(/fluxmonitor.local/i).length).toBeGreaterThan(0);
+    expect(screen.getByText('192.168.42.1')).toBeInTheDocument();
+    expect(screen.getByText('FluxMonitor-test')).toBeInTheDocument();
+    expect(screen.getByText(/no password/i)).toBeInTheDocument();
   });
 
-  it('saves direct ap startup settings from the collapsible connectivity section', async () => {
+  it('toggles ssh access from the unified connectivity section', async () => {
+    renderSystemPage('/system/connectivity');
+
+    expect(await screen.findByText(/enable secure remote terminal access to this device/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('switch', { name: /toggle ssh access/i }));
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith('/api/system/ssh', expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }));
+    });
+
+    expect(await screen.findByText(/ssh was enabled/i)).toBeInTheDocument();
+    expect(screen.getByText(/enabled and running/i)).toBeInTheDocument();
+  });
+
+  it('saves local access advanced settings from the unified connectivity section', async () => {
     const baseFetch = globalThis.fetch;
-    let directApSettings = {
-      storageAvailable: true,
-      autoStartMode: 'when-wifi-not-connected',
-      wifiPassword: null as string | null,
-    };
+    let localAccessPassword: string | null = null;
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
 
@@ -399,6 +463,8 @@ describe('SystemPage', () => {
         const response = await baseFetch(input, init);
         const data = await response.json() as Record<string, unknown>;
         const directAccess = data.directAccess as Record<string, unknown>;
+        const settings = directAccess.settings as Record<string, unknown>;
+        const mode = directAccess.mode as Record<string, unknown>;
 
         return {
           ok: true,
@@ -406,25 +472,32 @@ describe('SystemPage', () => {
             ...data,
             directAccess: {
               ...directAccess,
-              settings: directApSettings,
+              settings: {
+                ...settings,
+                wifiPassword: localAccessPassword,
+              },
+              mode: {
+                ...mode,
+                hotspotPassword: localAccessPassword,
+              },
             },
           }),
         } as Response;
       }
 
-      if (url === '/api/system/direct-access/settings' && init?.method === 'POST') {
-        directApSettings = {
-          storageAvailable: true,
-          autoStartMode: 'when-wifi-not-connected',
-          wifiPassword: 'abc',
-        };
+      if (url === '/api/system/local-access-mode/advanced' && init?.method === 'POST') {
+        localAccessPassword = 'abc';
 
         return {
           ok: true,
           json: async () => ({
             success: true,
-            message: 'Direct AP settings were saved.',
-            settings: directApSettings,
+            message: 'Local access settings were saved.',
+            settings: {
+              storageAvailable: true,
+              autoStartMode: 'off',
+              wifiPassword: localAccessPassword,
+            },
           }),
         } as Response;
       }
@@ -436,36 +509,31 @@ describe('SystemPage', () => {
 
     renderSystemPage('/system/connectivity');
 
-    fireEvent.click(await screen.findByRole('button', { name: /direct ap/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /local access mode/i }));
 
-    const modeSelect = await screen.findByRole('combobox', { name: /direct ap startup mode/i });
-    fireEvent.click(modeSelect);
-    expect(await screen.findByRole('option', { name: /^off$/i })).toBeInTheDocument();
-    expect(screen.getByRole('option', { name: /on when wi-fi not connected/i })).toBeInTheDocument();
+    fireEvent.click(await screen.findByRole('button', { name: /^advanced$/i }));
 
-    const passwordInput = screen.getByLabelText(/direct ap wi-fi password/i);
+    const passwordInput = screen.getByLabelText(/local access hotspot password/i);
     fireEvent.change(passwordInput, { target: { value: 'abc' } });
 
-    fireEvent.click(screen.getByRole('button', { name: /save direct ap settings/i }));
+    fireEvent.click(screen.getByRole('button', { name: /save local access settings/i }));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledWith('/api/system/direct-access/settings', expect.objectContaining({
+      expect(fetchMock).toHaveBeenCalledWith('/api/system/local-access-mode/advanced', expect.objectContaining({
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
       }));
     });
 
     const postCall = fetchMock.mock.calls.find(([input, init]) =>
-      input === '/api/system/direct-access/settings' && init && typeof init === 'object' && init.method === 'POST');
+      input === '/api/system/local-access-mode/advanced' && init && typeof init === 'object' && init.method === 'POST');
 
     expect(postCall).toBeTruthy();
     expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
-      autoStartMode: 'when-wifi-not-connected',
       wifiPassword: 'abc',
     });
 
-    expect(await screen.findByText(/direct ap settings were saved/i)).toBeInTheDocument();
-    expect(screen.getByText(/saved mode: auto when wi-fi is not connected/i)).toBeInTheDocument();
+    expect(await screen.findByText(/local access settings were saved/i)).toBeInTheDocument();
   });
 
   it('posts database retention changes from the database section', async () => {
