@@ -570,7 +570,7 @@ export function SystemPage() {
   const [ethernetDisconnectLoading, setEthernetDisconnectLoading] = useState<string | null>(null);
   const [ethernetFeedback, setEthernetFeedback] = useState<InlineFeedback | null>(null);
   const [pendingConnectivityAction, setPendingConnectivityAction] = useState<PendingConnectivityAction | null>(null);
-  const [expandedConnectivitySection, setExpandedConnectivitySection] = useState<'wifi' | 'bluetooth' | 'ethernet' | 'local-access' | null>(null);
+  const [expandedConnectivitySection, setExpandedConnectivitySection] = useState<'wifi' | 'bluetooth' | 'ethernet' | 'local-access' | 'internet-speed' | 'tunnel' | null>(null);
   const previousUpdateStatusRef = useRef<UpdateProgress['status'] | null>(null);
   const wifiCredentialRequestRef = useRef(0);
   const cloudflareTunnelDirtyRef = useRef(false);
@@ -1336,7 +1336,7 @@ export function SystemPage() {
     await scanWifi(wifiInterface.name);
   };
 
-  const toggleConnectivitySection = async (section: 'wifi' | 'bluetooth' | 'ethernet' | 'local-access') => {
+  const toggleConnectivitySection = async (section: 'wifi' | 'bluetooth' | 'ethernet' | 'local-access' | 'internet-speed' | 'tunnel') => {
     const isOpen = expandedConnectivitySection === section;
     const nextSection = isOpen ? null : section;
     setExpandedConnectivitySection(nextSection);
@@ -1659,47 +1659,14 @@ export function SystemPage() {
     : internetSpeedPingGauge;
   const internetSpeedPingTone = internetSpeedPingIsActive ? 'amber' : getLatencyTone(internetSpeedPing);
   const internetSpeedConnectionMode = formatInternetSpeedConnectionMode(internetSpeedResult?.connectionMode);
-  const internetSpeedSummary = !internetSpeedTest?.supported
-    ? internetSpeedTest?.statusMessage ?? 'Unavailable'
-    : internetSpeedTest.isRunning
-      ? getInternetSpeedRunningSummary(internetSpeedStage, internetSpeedStagePercent)
-      : internetSpeedTest.status === 'failed'
-        ? 'Last test failed'
-        : internetSpeedResult
-          ? 'Latest saved result'
-          : 'No stored result';
-  const cloudflareTunnelRunning = cloudflareTunnelStatus?.serviceRunning ?? false;
   const cloudflareTunnelSupported = cloudflareTunnelStatus?.supported ?? false;
   const cloudflareTunnelMaskedToken = cloudflareTunnelStatus?.maskedToken ?? null;
-  const cloudflareTunnelSummary = !cloudflareTunnelSupported
-    ? cloudflareTunnelStatus?.statusMessage ?? 'Unavailable'
-    : cloudflareTunnelRunning
-      ? 'Connected through Cloudflare'
-      : cloudflareTunnelStatus?.hasStoredToken
-        ? 'Token saved'
-        : 'Not configured';
-  const cloudflareTunnelDetailSummary = !cloudflareTunnelSupported
-    ? cloudflareTunnelStatus?.statusMessage ?? 'Unavailable'
-    : cloudflareTunnelRunning
-      ? 'Tunnel is live'
-      : cloudflareTunnelStatus?.configured
-        ? 'Configured but not connected'
-        : cloudflareTunnelStatus?.hasStoredToken
-          ? 'Token saved, switch is off'
-          : 'Not configured';
-  const cloudflareTunnelStateLabel = !cloudflareTunnelSupported
-    ? 'Unavailable'
-    : cloudflareTunnelRunning
-      ? 'Online'
-      : cloudflareTunnelStatus?.configured
-        ? 'Configured'
-        : cloudflareTunnelStatus?.hasStoredToken
-          ? 'Saved'
-        : 'Off';
   const wifiSectionOpen = expandedConnectivitySection === 'wifi';
   const bluetoothSectionOpen = expandedConnectivitySection === 'bluetooth';
   const ethernetSectionOpen = expandedConnectivitySection === 'ethernet';
   const localAccessSectionOpen = expandedConnectivitySection === 'local-access';
+  const internetSpeedSectionOpen = expandedConnectivitySection === 'internet-speed';
+  const tunnelSectionOpen = expandedConnectivitySection === 'tunnel';
   const sshAccess = connectivity?.ssh ?? null;
   const sshToggleChecked = Boolean(sshAccess?.enabled || sshAccess?.active);
   const wifiSummary = connectedWifiInterface?.connectedSsid
@@ -1753,323 +1720,338 @@ export function SystemPage() {
     </div>
   );
 
-  const renderInternetSpeedCard = () => (
-    <Card className='border border-border/80 bg-card/85 shadow-sm'>
-      <PanelHeader
-        title='Internet speed'
-        description='Run a live bandwidth check on this device.'
-        aside={(
-          <div className='flex min-w-0 items-center gap-3 text-xs text-muted-foreground'>
-            {internetSpeedTest?.isRunning ? <LoaderCircle className='h-4 w-4 shrink-0 animate-spin text-primary' /> : null}
-            <span className='inline-flex min-w-0 items-center gap-2 truncate'>{internetSpeedSummary}</span>
-          </div>
-        )}
-      />
-      <CardContent className='space-y-4 pt-5'>
-        {internetSpeedTestLoading && !internetSpeedTest ? (
-          <div className='flex items-center justify-center py-8'>
-            <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
-          </div>
-        ) : (
-          <>
-            {internetSpeedTestError ? (
-              <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
-                {internetSpeedTestError}
-              </div>
-            ) : null}
+  const renderInternetSpeedSection = () => {
+    const hasMeasuredInternetSpeed = internetSpeedDownloadMbps != null || internetSpeedUploadMbps != null;
 
-            {internetSpeedTest?.statusMessage && !internetSpeedTest.isRunning && (!internetSpeedTest.supported || internetSpeedTest.status === 'failed' || (!internetSpeedResult && internetSpeedTest.status !== 'succeeded')) ? (
-              <div className={cn(
-                'rounded-2xl border px-4 py-4',
-                internetSpeedTest.status === 'failed'
-                  ? 'border-rose-500/20 bg-rose-500/10 text-rose-200'
-                  : 'border-border/70 bg-background/40 text-foreground'
-              )}>
-                <div className='flex items-start gap-3'>
-                  {!internetSpeedTest.supported ? (
-                    <CircleAlert className='mt-0.5 h-4 w-4 shrink-0' />
-                  ) : internetSpeedTest.status === 'failed' ? (
-                    <CircleAlert className='mt-0.5 h-4 w-4 shrink-0' />
-                  ) : (
-                    <CheckCircle2 className='mt-0.5 h-4 w-4 shrink-0 text-emerald-400' />
-                  )}
-                  <div className='min-w-0'>
-                    <div className='text-sm font-semibold'>
-                      {!internetSpeedTest.supported
-                        ? 'Speed test unavailable'
-                        : internetSpeedTest.status === 'failed'
-                          ? 'Speed test did not finish'
-                          : 'Internet speed ready'}
-                    </div>
-                    <div className='mt-1 text-xs opacity-85'>
-                      {internetSpeedTest.statusMessage}
+    return (
+      <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
+        <button
+          type='button'
+          onClick={() => void toggleConnectivitySection('internet-speed')}
+          className='flex w-full min-w-0 items-center gap-3 px-4 py-4 text-left'
+          aria-expanded={internetSpeedSectionOpen}
+        >
+          <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
+            <Wifi className='h-4 w-4 text-muted-foreground' />
+          </div>
+          <div className='min-w-0 flex-1'>
+            <div className='text-sm font-semibold text-foreground'>Internet speed</div>
+            {hasMeasuredInternetSpeed ? (
+              <div className='mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground'>
+                <span className='inline-flex items-center gap-1'>
+                  <Download className='h-3 w-3' />
+                  {formatSpeedMbps(internetSpeedResult?.downloadBitsPerSecond)}
+                </span>
+                <span className='inline-flex items-center gap-1'>
+                  <Upload className='h-3 w-3' />
+                  {formatSpeedMbps(internetSpeedResult?.uploadBitsPerSecond)}
+                </span>
+              </div>
+            ) : (
+              <div className='mt-0.5 truncate text-xs text-muted-foreground'>Never measured</div>
+            )}
+          </div>
+          <div className='pl-3 text-muted-foreground'>
+            {internetSpeedSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
+          </div>
+        </button>
+
+        {internetSpeedSectionOpen ? (
+          <div className='space-y-4 border-t border-border/60 px-4 py-4'>
+            {internetSpeedTestLoading && !internetSpeedTest ? (
+              <div className='flex items-center justify-center py-8'>
+                <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
+              </div>
+            ) : (
+              <>
+                {internetSpeedTestError ? (
+                  <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
+                    {internetSpeedTestError}
+                  </div>
+                ) : null}
+
+                {internetSpeedTest?.statusMessage && !internetSpeedTest.isRunning && (!internetSpeedTest.supported || internetSpeedTest.status === 'failed' || (!internetSpeedResult && internetSpeedTest.status !== 'succeeded')) ? (
+                  <div className={cn(
+                    'rounded-2xl border px-4 py-4',
+                    internetSpeedTest.status === 'failed'
+                      ? 'border-rose-500/20 bg-rose-500/10 text-rose-200'
+                      : 'border-border/70 bg-background/40 text-foreground'
+                  )}>
+                    <div className='flex items-start gap-3'>
+                      {!internetSpeedTest.supported ? (
+                        <CircleAlert className='mt-0.5 h-4 w-4 shrink-0' />
+                      ) : internetSpeedTest.status === 'failed' ? (
+                        <CircleAlert className='mt-0.5 h-4 w-4 shrink-0' />
+                      ) : (
+                        <CheckCircle2 className='mt-0.5 h-4 w-4 shrink-0 text-emerald-400' />
+                      )}
+                      <div className='min-w-0'>
+                        <div className='text-sm font-semibold'>
+                          {!internetSpeedTest.supported
+                            ? 'Speed test unavailable'
+                            : internetSpeedTest.status === 'failed'
+                              ? 'Speed test did not finish'
+                              : 'Internet speed ready'}
+                        </div>
+                        <div className='mt-1 text-xs opacity-85'>
+                          {internetSpeedTest.statusMessage}
+                        </div>
+                      </div>
                     </div>
                   </div>
+                ) : null}
+
+                <div className='grid gap-3 sm:grid-cols-3'>
+                  <SpeedMetricCard
+                    label='Ping'
+                    value={internetSpeedPingValue}
+                    dialValue={internetSpeedPingDialDisplay}
+                    caption={internetSpeedPingCaption}
+                    gaugePercent={internetSpeedPingDialGauge}
+                    tone={internetSpeedPingTone}
+                    isActive={internetSpeedPingIsActive}
+                  />
+                  <SpeedMetricCard
+                    label='Download'
+                    value={internetSpeedDownloadValue}
+                    dialValue={internetSpeedDownloadDialDisplay}
+                    caption={internetSpeedDownloadCaption}
+                    gaugePercent={internetSpeedDownloadDialGauge}
+                    tone='emerald'
+                    isActive={internetSpeedDownloadIsActive}
+                  />
+                  <SpeedMetricCard
+                    label='Upload'
+                    value={internetSpeedUploadValue}
+                    dialValue={internetSpeedUploadDialDisplay}
+                    caption={internetSpeedUploadCaption}
+                    gaugePercent={internetSpeedUploadDialGauge}
+                    tone='sky'
+                    isActive={internetSpeedUploadIsActive}
+                  />
                 </div>
-              </div>
-            ) : null}
 
-            <div className='grid gap-3 sm:grid-cols-3'>
-              <SpeedMetricCard
-                label='Ping'
-                value={internetSpeedPingValue}
-                dialValue={internetSpeedPingDialDisplay}
-                caption={internetSpeedPingCaption}
-                gaugePercent={internetSpeedPingDialGauge}
-                tone={internetSpeedPingTone}
-                isActive={internetSpeedPingIsActive}
-              />
-              <SpeedMetricCard
-                label='Download'
-                value={internetSpeedDownloadValue}
-                dialValue={internetSpeedDownloadDialDisplay}
-                caption={internetSpeedDownloadCaption}
-                gaugePercent={internetSpeedDownloadDialGauge}
-                tone='emerald'
-                isActive={internetSpeedDownloadIsActive}
-              />
-              <SpeedMetricCard
-                label='Upload'
-                value={internetSpeedUploadValue}
-                dialValue={internetSpeedUploadDialDisplay}
-                caption={internetSpeedUploadCaption}
-                gaugePercent={internetSpeedUploadDialGauge}
-                tone='sky'
-                isActive={internetSpeedUploadIsActive}
-              />
-            </div>
+                <div className='grid gap-3 sm:grid-cols-2'>
+                  <DetailTile
+                    label='Server'
+                    value={formatInternetSpeedServer(
+                      internetSpeedResult?.server?.sponsor,
+                      internetSpeedResult?.server?.name,
+                      internetSpeedResult?.server?.country
+                    )}
+                  />
+                  <DetailTile label='Distance' value={formatDistance(internetSpeedResult?.server?.distanceKilometers)} />
+                  <DetailTile label='Provider' value={internetSpeedResult?.client?.internetServiceProvider ?? noDataLabel} />
+                  <DetailTile label='IP address' value={internetSpeedResult?.client?.ipAddress ?? noDataLabel} />
+                  <DetailTile label='Connections' value={internetSpeedConnectionMode} />
+                  <DetailTile label='Measured at' value={formatTimestamp(internetSpeedResult?.testedAt ?? internetSpeedTest?.completedAt)} />
+                </div>
 
-            <div className='grid gap-3 sm:grid-cols-2'>
-              <DetailTile
-                label='Server'
-                value={formatInternetSpeedServer(
-                  internetSpeedResult?.server?.sponsor,
-                  internetSpeedResult?.server?.name,
-                  internetSpeedResult?.server?.country
-                )}
-              />
-              <DetailTile label='Distance' value={formatDistance(internetSpeedResult?.server?.distanceKilometers)} />
-              <DetailTile label='Provider' value={internetSpeedResult?.client?.internetServiceProvider ?? noDataLabel} />
-              <DetailTile label='IP address' value={internetSpeedResult?.client?.ipAddress ?? noDataLabel} />
-              <DetailTile label='Connections' value={internetSpeedConnectionMode} />
-              <DetailTile label='Measured at' value={formatTimestamp(internetSpeedResult?.testedAt ?? internetSpeedTest?.completedAt)} />
-            </div>
-
-            <div>
-              <button
-                type='button'
-                disabled={internetSpeedTestStarting || internetSpeedTest?.isRunning || !internetSpeedTest?.canStart}
-                onClick={() => void startInternetSpeedTest()}
-                className='inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
-              >
-                {internetSpeedTestStarting || internetSpeedTest?.isRunning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Wifi className='h-4 w-4' />}
-                {internetSpeedTest?.isRunning ? 'Speed test running… please wait' : 'Run internet speed test'}
-              </button>
-            </div>
-          </>
-        )}
-      </CardContent>
-    </Card>
-  );
-
-  const renderTunnelCard = () => (
-    <Card className='border border-border/80 bg-card/85 shadow-sm'>
-      <PanelHeader
-        title='Tunnel'
-        description='Expose Flux Monitor over the internet through Cloudflare Tunnel.'
-        aside={(
-          <div className='flex items-center gap-2 text-xs text-muted-foreground'>
-            <span className='hidden sm:inline'>{cloudflareTunnelSummary}</span>
-            <span className='rounded-full border border-border/70 bg-background/70 px-3 py-1 font-medium uppercase tracking-[0.16em]'>
-              {cloudflareTunnelStateLabel}
-            </span>
+                <div>
+                  <button
+                    type='button'
+                    disabled={internetSpeedTestStarting || internetSpeedTest?.isRunning || !internetSpeedTest?.canStart}
+                    onClick={() => void startInternetSpeedTest()}
+                    className='inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
+                  >
+                    {internetSpeedTestStarting || internetSpeedTest?.isRunning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Wifi className='h-4 w-4' />}
+                    {internetSpeedTest?.isRunning ? 'Speed test running… please wait' : 'Run internet speed test'}
+                  </button>
+                </div>
+              </>
+            )}
           </div>
-        )}
-      />
-      <CardContent className='space-y-4 pt-5'>
-        {cloudflareTunnelLoading && !cloudflareTunnelStatus ? (
-          <div className='flex items-center justify-center py-6'>
-            <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
+        ) : null}
+      </div>
+    );
+  };
+
+  const renderTunnelSection = () => (
+    <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
+      <div className='flex items-center gap-3 px-4 py-4'>
+        <button
+          type='button'
+          onClick={() => void toggleConnectivitySection('tunnel')}
+          className='flex min-w-0 flex-1 items-center gap-3 text-left'
+          aria-expanded={tunnelSectionOpen}
+        >
+          <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
+            <Cloud className='h-4 w-4 text-muted-foreground' />
           </div>
-        ) : (
-          <>
-            {cloudflareTunnelError ? (
-              <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
-                {cloudflareTunnelError}
-              </div>
-            ) : null}
+          <div className='min-w-0 flex-1'>
+            <div className='text-sm font-semibold text-foreground'>Tunnel</div>
+            <div className='mt-0.5 truncate text-xs text-muted-foreground'>Access over the internet</div>
+          </div>
+        </button>
 
-            {cloudflareTunnelFeedback ? (
-              <div className={cn(
-                'rounded-xl border px-3 py-2 text-xs',
-                cloudflareTunnelFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-              )}>
-                {cloudflareTunnelFeedback.message}
-              </div>
-            ) : null}
+        <div className='flex shrink-0 items-center justify-end'>
+          <Switch
+            checked={cloudflareTunnelEnabled}
+            disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
+            onCheckedChange={(checked) => {
+              cloudflareTunnelDirtyRef.current = true;
+              setCloudflareTunnelEnabled(checked);
+              setCloudflareTunnelFeedback(null);
+            }}
+            aria-label='Toggle Tunnel'
+          />
+        </div>
 
-            {cloudflareTunnelStatus?.statusMessage ? (
-              <div className='rounded-xl border border-border/70 bg-background/50 px-4 py-3'>
-                <div className='text-sm font-medium text-foreground'>{cloudflareTunnelDetailSummary}</div>
-                <div className='mt-1 text-xs text-muted-foreground'>{cloudflareTunnelStatus.statusMessage}</div>
-              </div>
-            ) : null}
+        <button
+          type='button'
+          onClick={() => void toggleConnectivitySection('tunnel')}
+          className='flex shrink-0 items-center justify-center text-muted-foreground'
+          aria-label={tunnelSectionOpen ? 'Collapse tunnel details' : 'Expand tunnel details'}
+          aria-expanded={tunnelSectionOpen}
+        >
+          {tunnelSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
+        </button>
+      </div>
 
-            <div className='grid gap-3 sm:grid-cols-2'>
-              <DetailTile
-                label='Package'
-                value={cloudflareTunnelStatus?.packageInstalled
-                  ? cloudflareTunnelStatus.packageVersion ?? 'Installed'
-                  : 'Missing'}
-              />
-              <DetailTile
-                label='Service'
-                value={cloudflareTunnelStatus?.serviceInstalled
-                  ? formatCompactState(cloudflareTunnelStatus.serviceActiveState, cloudflareTunnelStatus.serviceSubState)
-                  : 'Missing'}
-              />
-              <DetailTile label='Stored token' value={cloudflareTunnelMaskedToken ?? 'Not saved'} />
-              <DetailTile label='Provider' value={cloudflareTunnelStatus?.tunnelProvider ?? 'none'} />
+      {tunnelSectionOpen ? (
+        <div className='space-y-4 border-t border-border/60 px-4 py-4'>
+          {cloudflareTunnelLoading && !cloudflareTunnelStatus ? (
+            <div className='flex items-center justify-center py-6'>
+              <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
             </div>
+          ) : (
+            <>
+              {cloudflareTunnelError ? (
+                <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
+                  {cloudflareTunnelError}
+                </div>
+              ) : null}
 
-            <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-4'>
-              <div className='text-sm font-semibold text-foreground'>How it works</div>
-              <div className='mt-3 space-y-1 font-mono text-sm text-muted-foreground'>
-                <div>Your browser eg. on the phone</div>
-                <div>↓</div>
-                <div>Cloudflare (login + protection)</div>
-                <div>↓</div>
-                <div>Tunnel (secure pipe)</div>
-                <div>↓</div>
-                <div>Flux Monitor app on Raspberry Pi</div>
-              </div>
-              <div className='mt-3 text-xs text-muted-foreground'>
-                This exposes Flux Monitor to the internet on your own hostname or on a Cloudflare URL such as
-                {' '}
-                <span className='font-mono text-foreground'>random-name.trycloudflare.com</span>
-                . Because it is reachable from outside your home network, add a Cloudflare login wall first.
-              </div>
-            </div>
+              {cloudflareTunnelFeedback ? (
+                <div className={cn(
+                  'rounded-xl border px-3 py-2 text-xs',
+                  cloudflareTunnelFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
+                )}>
+                  {cloudflareTunnelFeedback.message}
+                </div>
+              ) : null}
 
-            <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-4'>
-              <div className='text-sm font-semibold text-foreground'>Cloudflare setup</div>
-              <div className='mt-3 space-y-2 text-sm text-muted-foreground'>
-                <div>1. In Cloudflare Tunnel, create a tunnel and copy the command or token shown on the connector page.</div>
-                <div>2. In Published applications, choose your hostname. Use your own domain if you have one. If you use a temporary Cloudflare URL, that is configured on the Cloudflare side, not here in Flux Monitor.</div>
-                <div>3. Leave Path empty unless you only want to expose part of the app.</div>
-                <div>4. Set Service Type to <span className='font-mono text-foreground'>HTTP</span>.</div>
-                <div>5. Set URL to <span className='font-mono text-foreground'>127.0.0.1:5074</span> or <span className='font-mono text-foreground'>localhost:5074</span>.</div>
-              </div>
-              <div className='mt-3 flex flex-wrap gap-3 text-sm'>
-                <a
-                  href='https://developers.cloudflare.com/tunnel/setup/'
-                  target='_blank'
-                  rel='noreferrer'
-                  className='inline-flex items-center gap-2 text-primary hover:underline'
-                >
-                  <ExternalLink className='h-4 w-4' />
-                  Open Tunnel hostname docs
-                </a>
-                <a
-                  href='https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/remote-tunnel-permissions/'
-                  target='_blank'
-                  rel='noreferrer'
-                  className='inline-flex items-center gap-2 text-primary hover:underline'
-                >
-                  <ExternalLink className='h-4 w-4' />
-                  Open connector setup docs
-                </a>
-              </div>
-            </div>
+              {!cloudflareTunnelSupported ? (
+                <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
+                  {cloudflareTunnelStatus?.statusMessage ?? 'Cloudflare Tunnel is unavailable on this host.'}
+                </div>
+              ) : (
+                <>
+                  <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-4'>
+                    <div className='text-sm font-semibold text-foreground'>How it works</div>
+                    <div className='mt-3 space-y-1 font-mono text-sm text-muted-foreground'>
+                      <div>Your browser eg. on the phone</div>
+                      <div>↓</div>
+                      <div>Cloudflare (login + protection)</div>
+                      <div>↓</div>
+                      <div>Tunnel (secure pipe)</div>
+                      <div>↓</div>
+                      <div>Flux Monitor app on Raspberry Pi</div>
+                    </div>
+                    <div className='mt-3 text-xs text-muted-foreground'>
+                      This exposes Flux Monitor to the internet on your own hostname or on a Cloudflare URL such as
+                      {' '}
+                      <span className='font-mono text-foreground'>random-name.trycloudflare.com</span>
+                      . Because it is reachable from outside your home network, add a Cloudflare login wall first.
+                    </div>
+                  </div>
 
-            <div className='rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-4'>
-              <div className='text-sm font-semibold text-foreground'>Protect it with Cloudflare Access</div>
-              <div className='mt-3 space-y-2 text-sm text-amber-50/90'>
-                <div>Access → Applications</div>
-                <div>Add application</div>
-                <div>Enter your hostname</div>
-                <div>Add policy: Allow → Emails → your@email.com</div>
-                <div>Choose login method: OTP or Google</div>
-              </div>
-              <div className='mt-3 text-xs text-amber-100/80'>
-                OTP is the simplest option if you already use one-time email codes. This puts a login wall in front of the app before traffic reaches your Raspberry Pi.
-              </div>
-              <div className='mt-3'>
-                <a
-                  href='https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-apps/'
-                  target='_blank'
-                  rel='noreferrer'
-                  className='inline-flex items-center gap-2 text-sm text-amber-100 hover:underline'
-                >
-                  <ExternalLink className='h-4 w-4' />
-                  Open Access application docs
-                </a>
-              </div>
-            </div>
+                  <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-4'>
+                    <div className='text-sm font-semibold text-foreground'>Cloudflare setup</div>
+                    <div className='mt-3 space-y-2 text-sm text-muted-foreground'>
+                      <div>1. In Cloudflare Tunnel, create a tunnel and copy the command or token shown on the connector page.</div>
+                      <div>2. In Published applications, choose your hostname. Use your own domain if you have one. If you use a temporary Cloudflare URL, that is configured on the Cloudflare side, not here in Flux Monitor.</div>
+                      <div>3. Leave Path empty unless you only want to expose part of the app.</div>
+                      <div>4. Set Service Type to <span className='font-mono text-foreground'>HTTP</span>.</div>
+                      <div>5. Set URL to <span className='font-mono text-foreground'>127.0.0.1:5074</span> or <span className='font-mono text-foreground'>localhost:5074</span>.</div>
+                    </div>
+                    <div className='mt-3 flex flex-wrap gap-3 text-sm'>
+                      <a
+                        href='https://developers.cloudflare.com/tunnel/setup/'
+                        target='_blank'
+                        rel='noreferrer'
+                        className='inline-flex items-center gap-2 text-primary hover:underline'
+                      >
+                        <ExternalLink className='h-4 w-4' />
+                        Open Tunnel hostname docs
+                      </a>
+                      <a
+                        href='https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/remote-tunnel-permissions/'
+                        target='_blank'
+                        rel='noreferrer'
+                        className='inline-flex items-center gap-2 text-primary hover:underline'
+                      >
+                        <ExternalLink className='h-4 w-4' />
+                        Open connector setup docs
+                      </a>
+                    </div>
+                  </div>
 
-            <div className='flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-border/70 bg-background/35 px-4 py-3'>
-              <div className='min-w-0'>
-                <div className='text-sm font-semibold text-foreground'>Enable Tunnel</div>
-              </div>
-              <Switch
-                checked={cloudflareTunnelEnabled}
-                disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
-                onCheckedChange={(checked) => {
-                  cloudflareTunnelDirtyRef.current = true;
-                  setCloudflareTunnelEnabled(checked);
-                  setCloudflareTunnelFeedback(null);
-                }}
-                aria-label='Toggle Tunnel'
-              />
-            </div>
+                  <div className='rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-4'>
+                    <div className='text-sm font-semibold text-foreground'>Protect it with Cloudflare Access</div>
+                    <div className='mt-3 space-y-2 text-sm text-amber-50/90'>
+                      <div>Access → Applications</div>
+                      <div>Add application</div>
+                      <div>Enter your hostname</div>
+                      <div>Add policy: Allow → Emails → your@email.com</div>
+                      <div>Choose login method: OTP or Google</div>
+                    </div>
+                    <div className='mt-3 text-xs text-amber-100/80'>
+                      OTP is the simplest option if you already use one-time email codes. This puts a login wall in front of the app before traffic reaches your Raspberry Pi.
+                    </div>
+                    <div className='mt-3'>
+                      <a
+                        href='https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-apps/'
+                        target='_blank'
+                        rel='noreferrer'
+                        className='inline-flex items-center gap-2 text-sm text-amber-100 hover:underline'
+                      >
+                        <ExternalLink className='h-4 w-4' />
+                        Open Access application docs
+                      </a>
+                    </div>
+                  </div>
 
-            <div className='space-y-2'>
-              <label className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground' htmlFor='cloudflare-token'>
-                Tunnel token or Cloudflare command
-              </label>
-              <textarea
-                id='cloudflare-token'
-                value={cloudflareTunnelTokenOrCommand}
-                onChange={(event) => {
-                  cloudflareTunnelDirtyRef.current = true;
-                  setCloudflareTunnelTokenOrCommand(event.target.value);
-                }}
-                placeholder={cloudflareTunnelMaskedToken
-                  ? `Leave blank to keep the saved token (${cloudflareTunnelMaskedToken}).`
-                  : 'Paste the cloudflared install command, run command, or the raw tunnel token.'}
-                disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
-                className='min-h-24 w-full rounded-xl border border-input bg-background/70 px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50'
-              />
-              <div className='text-xs text-muted-foreground'>
-                Flux Monitor extracts the token automatically if you paste a command copied from the Cloudflare page.
-              </div>
-            </div>
+                  <div className='space-y-2'>
+                    <label className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground' htmlFor='cloudflare-token'>
+                      Tunnel token or Cloudflare command
+                    </label>
+                    <textarea
+                      id='cloudflare-token'
+                      value={cloudflareTunnelTokenOrCommand}
+                      onChange={(event) => {
+                        cloudflareTunnelDirtyRef.current = true;
+                        setCloudflareTunnelTokenOrCommand(event.target.value);
+                      }}
+                      placeholder={cloudflareTunnelMaskedToken
+                        ? `Leave blank to keep the saved token (${cloudflareTunnelMaskedToken}).`
+                        : 'Paste the cloudflared install command, run command, or the raw tunnel token.'}
+                      disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
+                      className='min-h-24 w-full rounded-xl border border-input bg-background/70 px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50'
+                    />
+                    <div className='text-xs text-muted-foreground'>
+                      Flux Monitor extracts the token automatically if you paste a command copied from the Cloudflare page.
+                    </div>
+                  </div>
 
-            <div className='flex flex-col gap-2 sm:flex-row'>
-              <button
-                type='button'
-                disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
-                onClick={() => void saveCloudflareTunnel()}
-                className='inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
-              >
-                {cloudflareTunnelSaving ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Cloud className='h-4 w-4' />}
-                Save tunnel settings
-              </button>
-
-              <button
-                type='button'
-                disabled={cloudflareTunnelSaving}
-                onClick={() => void loadCloudflareTunnelStatus()}
-                className='inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
-              >
-                <RefreshCcw className='h-4 w-4' />
-                Refresh status
-              </button>
-            </div>
-          </>
-        )}
-      </CardContent>
-    </Card>
+                  <div className='flex justify-end'>
+                    <button
+                      type='button'
+                      disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
+                      onClick={() => void saveCloudflareTunnel()}
+                      className='inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
+                    >
+                      {cloudflareTunnelSaving ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Cloud className='h-4 w-4' />}
+                      Save tunnel settings
+                    </button>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      ) : null}
+    </div>
   );
 
   if (sectionId === 'internet-speed' || sectionId === 'tunnel') {
@@ -2330,6 +2312,7 @@ export function SystemPage() {
                             type='button'
                             onClick={() => void toggleConnectivitySection('wifi')}
                             className='flex min-w-0 flex-1 items-center gap-3 text-left'
+                            aria-expanded={wifiSectionOpen}
                           >
                             <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
                               <Wifi className='h-4 w-4 text-muted-foreground' />
@@ -2337,9 +2320,6 @@ export function SystemPage() {
                             <div className='min-w-0 flex-1'>
                               <div className='text-sm font-semibold text-foreground'>Wi-Fi</div>
                               <div className='mt-0.5 truncate text-xs text-muted-foreground'>{wifiSummary}</div>
-                            </div>
-                            <div className='pl-3 text-muted-foreground'>
-                              {wifiSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
                             </div>
                           </button>
 
@@ -2351,6 +2331,16 @@ export function SystemPage() {
                               aria-label='Toggle Wi-Fi power'
                             />
                           </div>
+
+                          <button
+                            type='button'
+                            onClick={() => void toggleConnectivitySection('wifi')}
+                            className='flex shrink-0 items-center justify-center text-muted-foreground'
+                            aria-label={wifiSectionOpen ? 'Collapse Wi-Fi details' : 'Expand Wi-Fi details'}
+                            aria-expanded={wifiSectionOpen}
+                          >
+                            {wifiSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
+                          </button>
                         </div>
 
                         {wifiSectionOpen ? (
@@ -2495,6 +2485,7 @@ export function SystemPage() {
                             type='button'
                             onClick={() => void toggleConnectivitySection('bluetooth')}
                             className='flex min-w-0 flex-1 items-center gap-3 text-left'
+                            aria-expanded={bluetoothSectionOpen}
                           >
                             <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
                               <Bluetooth className='h-4 w-4 text-muted-foreground' />
@@ -2502,9 +2493,6 @@ export function SystemPage() {
                             <div className='min-w-0 flex-1'>
                               <div className='text-sm font-semibold text-foreground'>Bluetooth</div>
                               <div className='mt-0.5 truncate text-xs text-muted-foreground'>{bluetoothSummary}</div>
-                            </div>
-                            <div className='pl-3 text-muted-foreground'>
-                              {bluetoothSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
                             </div>
                           </button>
 
@@ -2516,6 +2504,16 @@ export function SystemPage() {
                               aria-label='Toggle Bluetooth power'
                             />
                           </div>
+
+                          <button
+                            type='button'
+                            onClick={() => void toggleConnectivitySection('bluetooth')}
+                            className='flex shrink-0 items-center justify-center text-muted-foreground'
+                            aria-label={bluetoothSectionOpen ? 'Collapse Bluetooth details' : 'Expand Bluetooth details'}
+                            aria-expanded={bluetoothSectionOpen}
+                          >
+                            {bluetoothSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
+                          </button>
                         </div>
 
                         {bluetoothSectionOpen ? (
@@ -2830,15 +2828,15 @@ export function SystemPage() {
                           </div>
                         ) : null}
                       </div>
+
+                      {renderInternetSpeedSection()}
+
+                      {renderTunnelSection()}
                     </div>
                   </>
                 )}
               </CardContent>
             </Card>
-
-            {activeSystemSection === 'connectivity' ? renderInternetSpeedCard() : null}
-
-            {activeSystemSection === 'connectivity' ? renderTunnelCard() : null}
 
             <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'hardware-interfaces' && 'hidden')}>
               <PanelHeader
@@ -3878,10 +3876,6 @@ function getInternetSpeedStageLabel(stage: string | null | undefined) {
       : 'Ping';
 }
 
-function getInternetSpeedRunningSummary(stage: string | null | undefined, stagePercentComplete: number | null | undefined) {
-  return `${getInternetSpeedStageLabel(stage)} ${clampPercent(stagePercentComplete)}%`;
-}
-
 function getInternetSpeedActiveCaption(stage: 'download' | 'upload' | 'ping', statusMessage: string | null | undefined) {
   if (!statusMessage) {
     return undefined;
@@ -3962,18 +3956,6 @@ function formatWorkflowRun(runNumber: string | null | undefined, runAttempt: str
   }
 
   return `#${runNumber} · attempt ${runAttempt}`;
-}
-
-function formatCompactState(primary: string | null | undefined, secondary: string | null | undefined) {
-  const segments = [primary, secondary]
-    .filter((value): value is string => Boolean(value))
-    .map((value) => value
-      .split('-')
-      .filter(Boolean)
-      .map((segment) => segment.charAt(0).toUpperCase() + segment.slice(1))
-      .join(' '));
-
-  return segments.length > 0 ? segments.join(' • ') : noDataLabel;
 }
 
 function formatDuration(startedAt: string, reportedAt: string) {

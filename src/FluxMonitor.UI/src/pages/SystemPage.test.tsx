@@ -529,6 +529,22 @@ describe('SystemPage', () => {
     });
   });
 
+  it('shows collapsed internet speed and tunnel sections inside connectivity', async () => {
+    renderSystemPage('/system/connectivity');
+
+    expect(await screen.findByText(/never measured/i)).toBeInTheDocument();
+    expect(screen.getByText(/access over the internet/i)).toBeInTheDocument();
+    expect(screen.queryByText(/latest saved result/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /expand tunnel details/i }));
+
+    expect(await screen.findByLabelText(/tunnel token or cloudflare command/i)).toBeInTheDocument();
+    expect(screen.queryByText(/tunnel is live/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^enable tunnel$/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/^service$/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /refresh status/i })).not.toBeInTheDocument();
+  });
+
   it('checks for updates automatically when opening the software update page', async () => {
     renderSystemPage('/system/software-update');
 
