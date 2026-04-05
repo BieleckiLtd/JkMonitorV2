@@ -76,6 +76,7 @@ type MonitorRuntimeStatus = {
 };
 
 const refreshIntervalMs = 5000;
+const updateCheckCooldownMs = 30000;
 const noDataLabel = 'N/D';
 
 type TableSizeInfo = {
@@ -464,6 +465,12 @@ type WifiConnectDialogState = {
   title: string;
 };
 
+type FluxMonitorWindow = Window & typeof globalThis & {
+  __fluxMonitorSoftwareUpdateCheckInFlight?: boolean;
+  __fluxMonitorSoftwareUpdateCheckStartedAt?: number;
+  __fluxMonitorSoftwareUpdateCheckResult?: UpdateCheckResult | null;
+};
+
 function createDatabaseSettingsFormState(settings: DatabaseSettingsState): DatabaseSettingsFormState {
   return {
     rawSecondsWindowMinutes: String(settings.rawSecondsWindowMinutes),
@@ -489,6 +496,10 @@ function parseSupportedMinutes(value: string, label: string, supportedValues: nu
   return minutes;
 }
 
+function getFluxMonitorWindow() {
+  return typeof window === 'undefined' ? null : window as FluxMonitorWindow;
+}
+
 export function SystemPage() {
   const navigate = useNavigate();
   const { sectionId } = useParams<{ sectionId?: string }>();
@@ -510,7 +521,7 @@ export function SystemPage() {
   const [importing, setImporting] = useState(false);
   const [importResult, setImportResult] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult | null>(null);
+  const [updateCheck, setUpdateCheck] = useState<UpdateCheckResult | null>(() => getFluxMonitorWindow()?.__fluxMonitorSoftwareUpdateCheckResult ?? null);
   const [updateChecking, setUpdateChecking] = useState(false);
   const [updateActionError, setUpdateActionError] = useState<string | null>(null);
   const [interfaces, setInterfaces] = useState<SystemInterfacesResponse | null>(null);
@@ -704,15 +715,62 @@ export function SystemPage() {
   }, []);
 
   const checkForUpdate = useCallback(async () => {
+    const fluxMonitorWindow = getFluxMonitorWindow();
+    if (fluxMonitorWindow?.__fluxMonitorSoftwareUpdateCheckInFlight) {
+      return;
+    }
+
+    const now = Date.now();
+    const lastCheckStartedAt = fluxMonitorWindow?.__fluxMonitorSoftwareUpdateCheckStartedAt ?? null;
+    if (lastCheckStartedAt != null && now - lastCheckStartedAt < updateCheckCooldownMs) {
+      if (fluxMonitorWindow?.__fluxMonitorSoftwareUpdateCheckResult) {
+        setUpdateCheck((current) => current ?? fluxMonitorWindow.__fluxMonitorSoftwareUpdateCheckResult ?? null);
+      }
+
+      return;
+    }
+
+    if (fluxMonitorWindow) {
+      fluxMonitorWindow.__fluxMonitorSoftwareUpdateCheckInFlight = true;
+      fluxMonitorWindow.__fluxMonitorSoftwareUpdateCheckStartedAt = now;
+    }
+
     setUpdateChecking(true);
+
     try {
       const response = await fetch('/api/system/update/check', { cache: 'no-store' });
-      if (response.ok) {
-        setUpdateCheck(await response.json() as UpdateCheckResult);
+      if (!response.ok) {
+        throw new Error('Unable to check for updates.');
       }
-    } catch {
-      // Silently ignore.
+
+      const result = await response.json() as UpdateCheckResult;
+      if (fluxMonitorWindow) {
+        fluxMonitorWindow.__fluxMonitorSoftwareUpdateCheckResult = result;
+      }
+
+      setUpdateCheck(result);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unable to check for updates.';
+      setUpdateCheck((current) => {
+        const nextResult = current
+          ? { ...current, checkError: message }
+          : {
+            canUpdate: false,
+            updateAvailable: false,
+            checkError: message,
+          };
+
+        if (fluxMonitorWindow) {
+          fluxMonitorWindow.__fluxMonitorSoftwareUpdateCheckResult = nextResult;
+        }
+
+        return nextResult;
+      });
     } finally {
+      if (fluxMonitorWindow) {
+        fluxMonitorWindow.__fluxMonitorSoftwareUpdateCheckInFlight = false;
+      }
+
       setUpdateChecking(false);
     }
   }, []);
@@ -1756,23 +1814,19 @@ export function SystemPage() {
             ) : null}
 
             <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'software-update' && 'hidden')}>
-              <PanelHeader
-                title='Software update'
-                description='Check for new releases and install updates from GitHub.'
-                aside={(
-                  <div className='space-y-1 text-right'>
-                    <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>Published</div>
-                    <div className='text-sm font-semibold text-foreground'>{installedReleasePublishedLabel}</div>
-                  </div>
-                )}
-              />
-              <CardContent className='space-y-4 pt-5'>
+              <CardContent className='space-y-4 pt-6'>
                   <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
                     <DetailTile label='Channel' value={formatReleaseChannel(updateChannel)} />
                     <DetailTile label='Commit' value={formatCommit(installedCommit)} />
-                    <DetailTile label='Workflow run' value={workflowRun} />
+                    <DetailTile label='Workflow' value={workflowRun} />
                     <DetailTile label='Published' value={installedReleasePublishedLabel} />
                   </div>
+                  {updateChecking && !updateCheck ? (
+                    <div className='flex items-center gap-2 rounded-xl border border-border bg-muted/60 px-3 py-2 text-sm text-muted-foreground'>
+                      <LoaderCircle className='h-4 w-4 animate-spin' />
+                      Checking the current release channel…
+                    </div>
+                  ) : null}
                   {updateCheck ? (
                     <>
                       {updateCheck.checkError ? (
@@ -1790,9 +1844,6 @@ export function SystemPage() {
                               {updateCheck.targetReleaseTag} on the {formatReleaseChannel(updateCheck.targetChannel)} channel
                             </div>
                           ) : null}
-                          {updateCheck.remoteReleasePublishedAt ? (
-                            <div className='mt-1 text-xs text-primary/80'>Published {formatTimestamp(updateCheck.remoteReleasePublishedAt)}</div>
-                          ) : null}
                           {updateCheck.commits && updateCheck.commits.length > 0 ? (
                             <div className='mt-2 space-y-1'>
                               <div className='text-[10px] font-medium uppercase tracking-[0.16em] text-primary/60'>Changes</div>
@@ -1807,10 +1858,10 @@ export function SystemPage() {
                             </div>
                           ) : null}
                         </div>
-                      ) : updateCheck.localChecksum && updateCheck.remoteChecksum ? (
+                      ) : !updateCheck.updateAvailable ? (
                         <div className='flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200'>
                           <CheckCircle2 className='h-4 w-4' />
-                          You are running the latest version.
+                          Installed version is current.
                         </div>
                       ) : null}
 
@@ -1867,22 +1918,10 @@ export function SystemPage() {
                         </div>
                       ) : null}
                     </>
-                  ) : (
-                    <div className='text-sm text-muted-foreground'>Use the button below to check the current release channel for updates.</div>
-                  )}
+                  ) : null}
 
-                  <div className='flex flex-col gap-2 pt-2'>
-                    <button
-                      type='button'
-                      disabled={updateChecking}
-                      onClick={() => void checkForUpdate()}
-                      className='inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
-                    >
-                      {updateChecking ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <RefreshCcw className='h-4 w-4' />}
-                      Check for updates
-                    </button>
-
-                    {updateCheck?.canUpdate && updateCheck?.updateAvailable ? (
+                  {updateCheck?.canUpdate && updateCheck?.updateAvailable ? (
+                    <div className='pt-2'>
                       <button
                         type='button'
                         disabled={updateActionPending === 'starting' || (updateProgress?.isRunning ?? false)}
@@ -1892,8 +1931,8 @@ export function SystemPage() {
                         {updateActionPending === 'starting' || updateProgress?.isRunning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Download className='h-4 w-4' />}
                         Install update
                       </button>
-                    ) : null}
-                  </div>
+                    </div>
+                  ) : null}
               </CardContent>
             </Card>
             <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'internet-speed' && 'hidden')}>

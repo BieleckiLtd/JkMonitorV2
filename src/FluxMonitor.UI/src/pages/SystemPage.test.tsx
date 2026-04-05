@@ -3,12 +3,19 @@ import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SystemPage } from './SystemPage';
 import { AppBarProvider } from '../components/AppBar';
+import { PrimaryNavigationLayout } from '../layouts/PrimaryNavigationLayout';
 
 type MatchMediaMock = MediaQueryList & {
   dispatchChange: (matches: boolean) => void;
 };
 
-function createMatchMediaMock(initialMatches: boolean): MatchMediaMock {
+type FluxMonitorWindow = Window & typeof globalThis & {
+  __fluxMonitorSoftwareUpdateCheckInFlight?: boolean;
+  __fluxMonitorSoftwareUpdateCheckStartedAt?: number;
+  __fluxMonitorSoftwareUpdateCheckResult?: unknown;
+};
+
+function createMatchMediaMock(media: string, initialMatches: boolean): MatchMediaMock {
   let matches = initialMatches;
   const listeners = new Set<(event: MediaQueryListEvent) => void>();
 
@@ -16,7 +23,7 @@ function createMatchMediaMock(initialMatches: boolean): MatchMediaMock {
     get matches() {
       return matches;
     },
-    media: '(max-width: 1023px)',
+    media,
     onchange: null,
     addEventListener: (_type: string, listener: EventListenerOrEventListenerObject) => {
       listeners.add(listener as (event: MediaQueryListEvent) => void);
@@ -33,7 +40,7 @@ function createMatchMediaMock(initialMatches: boolean): MatchMediaMock {
     dispatchEvent: () => true,
     dispatchChange: (nextMatches: boolean) => {
       matches = nextMatches;
-      const event = { matches, media: '(max-width: 1023px)' } as MediaQueryListEvent;
+      const event = { matches, media } as MediaQueryListEvent;
 
       for (const listener of listeners) {
         listener(event);
@@ -45,6 +52,25 @@ function createMatchMediaMock(initialMatches: boolean): MatchMediaMock {
 function LocationDisplay() {
   const location = useLocation();
   return <div data-testid='location-display'>{location.pathname}</div>;
+}
+
+function renderSystemRoute(initialEntry = '/system') {
+  return render(
+    <MemoryRouter initialEntries={[initialEntry]}>
+      <AppBarProvider>
+        <Routes>
+          <Route element={<PrimaryNavigationLayout />}>
+            <Route path='/' element={<div>Home page</div>} />
+            <Route path='/system' element={null} />
+            <Route path='/system/theme' element={<div>Theme page</div>} />
+            <Route path='/system/notifications' element={<div>Notifications page</div>} />
+            <Route path='/system/:sectionId' element={<SystemPage />} />
+          </Route>
+        </Routes>
+        <LocationDisplay />
+      </AppBarProvider>
+    </MemoryRouter>
+  );
 }
 
 function renderSystemPage(initialEntry = '/system') {
@@ -64,12 +90,24 @@ function renderSystemPage(initialEntry = '/system') {
 }
 
 describe('SystemPage', () => {
-  let matchMediaMock: MatchMediaMock;
-
   beforeEach(() => {
     vi.stubGlobal('ResizeObserver', undefined);
-    matchMediaMock = createMatchMediaMock(true);
-    window.matchMedia = vi.fn().mockImplementation(() => matchMediaMock);
+    const fluxMonitorWindow = window as FluxMonitorWindow;
+    delete fluxMonitorWindow.__fluxMonitorSoftwareUpdateCheckInFlight;
+    delete fluxMonitorWindow.__fluxMonitorSoftwareUpdateCheckStartedAt;
+    delete fluxMonitorWindow.__fluxMonitorSoftwareUpdateCheckResult;
+
+    const matchMediaMocks = new Map<string, MatchMediaMock>();
+    window.matchMedia = vi.fn().mockImplementation((query: string) => {
+      const existing = matchMediaMocks.get(query);
+      if (existing) {
+        return existing;
+      }
+
+      const mock = createMatchMediaMock(query, false);
+      matchMediaMocks.set(query, mock);
+      return mock;
+    });
 
     let localAccessEnabled = false;
     let localAccessActive = false;
@@ -320,6 +358,30 @@ describe('SystemPage', () => {
         } as Response;
       }
 
+      if (url === '/api/system/update/check') {
+        return {
+          ok: true,
+          json: async () => ({
+            currentReleaseTag: 'dev-latest',
+            currentSourceRevision: 'abcdef1',
+            currentBuiltAt: '2026-03-31T09:55:00Z',
+            currentReleasePublishedAt: '2026-03-31T09:55:00Z',
+            currentChannel: 'dev',
+            targetChannel: 'dev',
+            targetReleaseTag: 'dev-latest',
+            checkedAt: '2026-03-31T10:05:00Z',
+            canUpdate: true,
+            reason: null,
+            updateAvailable: false,
+            remoteReleasePublishedAt: '2026-03-31T09:55:00Z',
+            remoteChecksum: 'abc123',
+            localChecksum: 'abc123',
+            checkError: null,
+            commits: [],
+          }),
+        } as Response;
+      }
+
       if (url === '/api/system/interfaces') {
         return {
           ok: true,
@@ -346,13 +408,18 @@ describe('SystemPage', () => {
   });
 
   afterEach(() => {
+    const fluxMonitorWindow = window as FluxMonitorWindow;
+    delete fluxMonitorWindow.__fluxMonitorSoftwareUpdateCheckInFlight;
+    delete fluxMonitorWindow.__fluxMonitorSoftwareUpdateCheckStartedAt;
+    delete fluxMonitorWindow.__fluxMonitorSoftwareUpdateCheckResult;
+    vi.useRealTimers();
     cleanup();
     vi.unstubAllGlobals();
     vi.restoreAllMocks();
   });
 
   it('treats the system menu as its own page and navigates back from a section detail', async () => {
-    renderSystemPage();
+    renderSystemRoute();
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /resource usage/i })).toBeInTheDocument();
@@ -379,7 +446,7 @@ describe('SystemPage', () => {
   });
 
   it('opens system subpages from the system menu', async () => {
-    renderSystemPage();
+    renderSystemRoute();
 
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /theme/i })).toBeInTheDocument();
@@ -394,7 +461,7 @@ describe('SystemPage', () => {
   });
 
   it('loads the matching section from a direct system child route', async () => {
-    const { container } = renderSystemPage('/system/logs');
+    const { container } = renderSystemRoute('/system/logs');
 
     expect(await screen.findByRole('button', { name: /^back$/i })).toBeInTheDocument();
 
@@ -412,6 +479,56 @@ describe('SystemPage', () => {
     expect(screen.queryByText(/application logs/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/browse captured log entries filtered by severity and time range/i)).not.toBeInTheDocument();
     expect(screen.getByTestId('location-display')).toHaveTextContent('/system/logs');
+  });
+
+  it('checks for updates automatically when opening the software update page', async () => {
+    renderSystemPage('/system/software-update');
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith('/api/system/update/check', { cache: 'no-store' });
+    });
+
+    expect(screen.queryByText(/check for new releases and install updates from github/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /check for updates/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/^channel$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^commit$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^workflow$/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^workflow run$/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/^published$/i)).toBeInTheDocument();
+    expect(await screen.findByText(/installed version is current/i)).toBeInTheDocument();
+  });
+
+  it('does not recheck software updates within 30 seconds when the page is reopened', async () => {
+    const baseFetch = globalThis.fetch;
+    const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => baseFetch(input, init));
+    const dateNowSpy = vi.spyOn(Date, 'now');
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    const getUpdateCheckCallCount = () => fetchMock.mock.calls.filter(([input]) => input === '/api/system/update/check').length;
+
+    dateNowSpy.mockReturnValue(1_000_000);
+    const firstRender = renderSystemPage('/system/software-update');
+
+    await waitFor(() => {
+      expect(getUpdateCheckCallCount()).toBe(1);
+    });
+
+    firstRender.unmount();
+
+    dateNowSpy.mockReturnValue(1_029_000);
+    const secondRender = renderSystemPage('/system/software-update');
+
+    expect(await screen.findByText(/installed version is current/i)).toBeInTheDocument();
+    expect(getUpdateCheckCallCount()).toBe(1);
+
+    secondRender.unmount();
+
+    dateNowSpy.mockReturnValue(1_030_001);
+    renderSystemPage('/system/software-update');
+
+    await waitFor(() => {
+      expect(getUpdateCheckCallCount()).toBe(2);
+    });
   });
 
   it('toggles local access mode from the unified connectivity section', async () => {
