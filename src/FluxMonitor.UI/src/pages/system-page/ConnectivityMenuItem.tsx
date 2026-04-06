@@ -28,6 +28,21 @@ export function ConnectivityMenuItem({
   fullWidthHeaderButton = false,
 }: ConnectivityMenuItemProps) {
   const isCollapsible = typeof onToggleExpanded === 'function';
+  const chevronControl = toggleControl ? (
+    isCollapsible ? (
+      <button
+        type='button'
+        onClick={onToggleExpanded}
+        className='system-menu-card-chevron'
+        aria-label={expanded ? expandButtonLabel?.expanded : expandButtonLabel?.collapsed}
+        aria-expanded={expanded}
+      >
+        {expanded ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
+      </button>
+    ) : (
+      <div className='system-menu-card-chevron' aria-hidden='true' />
+    )
+  ) : null;
 
   return (
     <div className='system-menu-card'>
@@ -66,17 +81,7 @@ export function ConnectivityMenuItem({
 
         {toggleControl ? <div className='system-menu-card-action'>{toggleControl}</div> : null}
 
-        {isCollapsible && toggleControl ? (
-          <button
-            type='button'
-            onClick={onToggleExpanded}
-            className='system-menu-card-chevron'
-            aria-label={expanded ? expandButtonLabel?.expanded : expandButtonLabel?.collapsed}
-            aria-expanded={expanded}
-          >
-            {expanded ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
-          </button>
-        ) : null}
+        {chevronControl}
       </div>
 
       {isCollapsible && expanded ? (
