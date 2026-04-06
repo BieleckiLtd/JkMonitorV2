@@ -62,6 +62,19 @@ public sealed class DeviceStateStore
         _states.TryRemove(deviceId, out _);
     }
 
+    public void UnregisterMissingDevices(IEnumerable<string> deviceIdsToKeep)
+    {
+        var keep = new HashSet<string>(deviceIdsToKeep, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var deviceId in _states.Keys)
+        {
+            if (!keep.Contains(deviceId))
+            {
+                _states.TryRemove(deviceId, out _);
+            }
+        }
+    }
+
     public DeviceRuntimeState? GetDeviceState(string deviceId)
     {
         return _states.TryGetValue(deviceId, out var state) ? state : null;

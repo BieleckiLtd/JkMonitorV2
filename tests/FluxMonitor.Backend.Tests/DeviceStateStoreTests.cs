@@ -55,6 +55,36 @@ public class DeviceStateStoreTests
         Assert.Equal("Hardware", status.StartupMode);
     }
 
+    [Fact]
+    public void UnregisterMissingDevices_RemovesOnlyMissingEntries()
+    {
+        var store = CreateStore(
+            new BuildRuntimeInfo(),
+            CreateDefaultConfiguration(),
+            [
+                new DeviceConfiguration
+                {
+                    DeviceId = "device-1",
+                    DisplayName = "Device 1",
+                    DefinitionId = "jk-inverter-bms"
+                },
+                new DeviceConfiguration
+                {
+                    DeviceId = "device-2",
+                    DisplayName = "Device 2",
+                    DefinitionId = "jk-inverter-bms"
+                }
+            ]);
+
+        store.UnregisterMissingDevices(["device-2"]);
+
+        var status = store.GetStatus("Production");
+
+        Assert.Collection(
+            status.Devices,
+            device => Assert.Equal("device-2", device.DeviceId));
+    }
+
     private static DeviceStateStore CreateStore(
         BuildRuntimeInfo buildInfo,
         MonitorConfiguration? configuration = null,

@@ -33,6 +33,10 @@ public sealed class DeviceOrchestrator(
     /// </summary>
     public async Task ApplyConfigurationAsync(IReadOnlyList<DeviceConfiguration> devices, CancellationToken cancellationToken = default)
     {
+        var configuredDeviceIds = new HashSet<string>(
+            devices.Select(device => device.DeviceId),
+            StringComparer.OrdinalIgnoreCase);
+
         var desired = devices
             .Where(d => d.Enabled)
             .ToDictionary(d => d.DeviceId, StringComparer.OrdinalIgnoreCase);
@@ -48,6 +52,8 @@ public sealed class DeviceOrchestrator(
             stateStore.UnregisterDevice(id);
             logger.LogInformation("Removed device {DeviceId} (live).", id);
         }
+
+        stateStore.UnregisterMissingDevices(configuredDeviceIds);
 
         // Also register disabled devices in the state store (so they appear in the UI)
         foreach (var device in devices.Where(d => !d.Enabled))
@@ -247,13 +253,23 @@ public sealed class DeviceOrchestrator(
 
             try
             {
-                await Task.WhenAny(
-                    timer.WaitForNextTickAsync(cancellationToken).AsTask(),
-                    Task.Delay(Timeout.Infinite, pollTrigger.GetToken()));
+                using var waitCts = CancellationTokenSource.CreateLinkedTokenSource(
+                    cancellationToken,
+                    pollTrigger.GetToken());
+
+                var hasNextTick = await timer.WaitForNextTickAsync(waitCts.Token);
+                if (!hasNextTick)
+                {
+                    break;
+                }
             }
             catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
             {
                 // PollTrigger signalled – run next poll immediately.
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
             }
         }
     }
