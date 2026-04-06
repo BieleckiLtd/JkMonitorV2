@@ -1,18 +1,24 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { FontAwesomeIcon } from '@fortawesome/react-fontawesome';
-import { faSignal, type IconDefinition } from '@fortawesome/free-solid-svg-icons';
-import { Bluetooth, Cable, ChevronDown, ChevronRight, CircleAlert, Cloud, Cpu, Database, Download, ExternalLink, HardDrive, Leaf, Link2, LoaderCircle, Lock, MemoryStick, RefreshCcw, CheckCircle2, Terminal, Thermometer, Upload, Wifi, XCircle } from 'lucide-react';
+import { CircleAlert, LoaderCircle, Wifi } from 'lucide-react';
 import { Navigate, useParams } from 'react-router-dom';
-import { PanelHeader } from '../components/PanelHeader';
 import { Card, CardContent } from '../components/ui/card';
 import { Input } from '../components/ui/input';
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
-import { Switch } from '../components/ui/switch';
-import { type UpdateProgress, getUpdateCancellationMessage, getUpdateProgressDetail, getUpdateProgressLabel, getUpdateStateTone } from '../lib/systemUpdate';
+import { type UpdateProgress } from '../lib/systemUpdate';
 import { cn } from '../lib/utils';
-import { LogsPanel } from '../components/LogsPanel';
 import { useAppStore } from '../store/useAppStore';
 import { getSystemSectionFromRouteSegment, getSystemSectionPath } from '../lib/systemNavigation';
+import { LogsSection } from './system-page/LogsSection';
+import { ResourceUsageSection } from './system-page/ResourceUsageSection';
+import { SoftwareUpdateSection } from './system-page/SoftwareUpdateSection';
+import { WifiMenuItem } from './system-page/WifiMenuItem';
+import { BluetoothMenuItem } from './system-page/BluetoothMenuItem';
+import { SshMenuItem } from './system-page/SshMenuItem';
+import { EthernetMenuItem } from './system-page/EthernetMenuItem';
+import { LocalAccessMenuItem } from './system-page/LocalAccessMenuItem';
+import { InternetSpeedMenuItem } from './system-page/InternetSpeedMenuItem';
+import { TunnelMenuItem } from './system-page/TunnelMenuItem';
+import { HardwareInterfacesSection } from './system-page/HardwareInterfacesSection';
+import { DatabaseSection } from './system-page/DatabaseSection';
 
 type DeviceTelemetrySnapshot = {
   totalVoltageVolts?: number | null;
@@ -1552,24 +1558,6 @@ export function SystemPage() {
     dbSettingsForm.rawSecondsWindowMinutes !== String(dbSettings.rawSecondsWindowMinutes) ||
     dbSettingsForm.persistedBucketMinutes !== String(dbSettings.persistedBucketMinutes)
   ));
-  const cpuUsage = metrics?.cpuUtilizationPercent ?? null;
-  const cpuBaseClockSpeed = metrics?.cpuMaxClockSpeedMegahertz ?? null;
-  const cpuCurrentClockSpeed = metrics?.cpuCurrentClockSpeedMegahertz ?? null;
-  const isCpuThrottled = metrics?.cpuIsThrottled ?? false;
-  const isCpuBelowBaseSpeed =
-    cpuBaseClockSpeed != null &&
-    cpuCurrentClockSpeed != null &&
-    Number.isFinite(cpuBaseClockSpeed) &&
-    Number.isFinite(cpuCurrentClockSpeed) &&
-    cpuCurrentClockSpeed < cpuBaseClockSpeed;
-  const cpuStatusIcon = isCpuThrottled ? Thermometer : isCpuBelowBaseSpeed ? Leaf : undefined;
-  const cpuStatusIconClassName = isCpuThrottled ? 'text-rose-400' : 'text-emerald-400';
-  const memoryUsed = metrics?.memoryUsedBytes ?? getDerivedUsedBytes(metrics?.memoryTotalBytes, metrics?.memoryAvailableBytes);
-  const memoryTotal = metrics?.memoryTotalBytes ?? null;
-  const storageUsed = metrics?.storageUsedBytes ?? null;
-  const storageTotal = metrics?.storageTotalBytes ?? null;
-  const memoryUsagePercent = getUsagePercent(memoryUsed, memoryTotal);
-  const storageUsagePercent = getUsagePercent(storageUsed, storageTotal);
   const applicationUptime = status ? formatDuration(status.startedAt, status.reportedAt) : noDataLabel;
   const workflowRun = formatWorkflowRun(
     updateCheck?.currentWorkflowRunNumber ?? status?.build?.workflowRunNumber,
@@ -1693,8 +1681,6 @@ export function SystemPage() {
   const connectivityPanelLinks = buildConnectivityPanelLinks(localAccessMode?.hostName, wifiInterfaces, ethernetInterfaces);
   const localAccessSummary = 'Starts a local hotspot if the router is unavailable.';
   const ethernetSummary = 'Wired network connection';
-  const ethernetToggleChecked = isEthernetInterfaceEnabled(activeEthernetInterface);
-  const ethernetPrimaryStatus = buildEthernetStatusMessage(activeEthernetInterface);
   const pendingConnectivityDialogTitle = pendingConnectivityAction?.kind === 'disable-wifi'
     ? 'Turn off Wi-Fi?'
     : null;
@@ -1705,348 +1691,6 @@ export function SystemPage() {
     ? 'Turn off Wi-Fi'
     : null;
   const isLogsSystemSection = activeSystemSection === 'logs';
-
-  const renderLogsPage = () => (
-    <div className='flex min-h-full flex-1 flex-col overflow-hidden'>
-      <div className='flex min-h-0 flex-1 flex-col'>
-        <LogsPanel />
-      </div>
-    </div>
-  );
-
-  const renderInternetSpeedSection = () => {
-    const hasMeasuredInternetSpeed = internetSpeedDownloadMbps != null || internetSpeedUploadMbps != null;
-
-    return (
-      <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
-        <button
-          type='button'
-          onClick={() => void toggleConnectivitySection('internet-speed')}
-          className='flex w-full min-w-0 items-center gap-3 px-4 py-4 text-left'
-          aria-expanded={internetSpeedSectionOpen}
-        >
-          <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
-            <Wifi className='h-4 w-4 text-muted-foreground' />
-          </div>
-          <div className='min-w-0 flex-1'>
-            <div className='text-sm font-semibold text-foreground'>Internet speed</div>
-            {hasMeasuredInternetSpeed ? (
-              <div className='mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground'>
-                <span className='inline-flex items-center gap-1'>
-                  <Download className='h-3 w-3' />
-                  {formatSpeedMbps(internetSpeedResult?.downloadBitsPerSecond)}
-                </span>
-                <span className='inline-flex items-center gap-1'>
-                  <Upload className='h-3 w-3' />
-                  {formatSpeedMbps(internetSpeedResult?.uploadBitsPerSecond)}
-                </span>
-              </div>
-            ) : (
-              <div className='mt-0.5 truncate text-xs text-muted-foreground'>Never measured</div>
-            )}
-          </div>
-          <div className='pl-3 text-muted-foreground'>
-            {internetSpeedSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
-          </div>
-        </button>
-
-        {internetSpeedSectionOpen ? (
-          <div className='space-y-4 border-t border-border/60 px-4 py-4'>
-            {internetSpeedTestLoading && !internetSpeedTest ? (
-              <div className='flex items-center justify-center py-8'>
-                <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
-              </div>
-            ) : (
-              <>
-                {internetSpeedTestError ? (
-                  <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
-                    {internetSpeedTestError}
-                  </div>
-                ) : null}
-
-                {internetSpeedTest?.statusMessage && !internetSpeedTest.isRunning && (!internetSpeedTest.supported || internetSpeedTest.status === 'failed' || (!internetSpeedResult && internetSpeedTest.status !== 'succeeded')) ? (
-                  <div className={cn(
-                    'rounded-2xl border px-4 py-4',
-                    internetSpeedTest.status === 'failed'
-                      ? 'border-rose-500/20 bg-rose-500/10 text-rose-200'
-                      : 'border-border/70 bg-background/40 text-foreground'
-                  )}>
-                    <div className='flex items-start gap-3'>
-                      {!internetSpeedTest.supported ? (
-                        <CircleAlert className='mt-0.5 h-4 w-4 shrink-0' />
-                      ) : internetSpeedTest.status === 'failed' ? (
-                        <CircleAlert className='mt-0.5 h-4 w-4 shrink-0' />
-                      ) : (
-                        <CheckCircle2 className='mt-0.5 h-4 w-4 shrink-0 text-emerald-400' />
-                      )}
-                      <div className='min-w-0'>
-                        <div className='text-sm font-semibold'>
-                          {!internetSpeedTest.supported
-                            ? 'Speed test unavailable'
-                            : internetSpeedTest.status === 'failed'
-                              ? 'Speed test did not finish'
-                              : 'Internet speed ready'}
-                        </div>
-                        <div className='mt-1 text-xs opacity-85'>
-                          {internetSpeedTest.statusMessage}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ) : null}
-
-                <div className='grid gap-3 sm:grid-cols-3'>
-                  <SpeedMetricCard
-                    label='Ping'
-                    value={internetSpeedPingValue}
-                    dialValue={internetSpeedPingDialDisplay}
-                    caption={internetSpeedPingCaption}
-                    gaugePercent={internetSpeedPingDialGauge}
-                    tone={internetSpeedPingTone}
-                    isActive={internetSpeedPingIsActive}
-                  />
-                  <SpeedMetricCard
-                    label='Download'
-                    value={internetSpeedDownloadValue}
-                    dialValue={internetSpeedDownloadDialDisplay}
-                    caption={internetSpeedDownloadCaption}
-                    gaugePercent={internetSpeedDownloadDialGauge}
-                    tone='emerald'
-                    isActive={internetSpeedDownloadIsActive}
-                  />
-                  <SpeedMetricCard
-                    label='Upload'
-                    value={internetSpeedUploadValue}
-                    dialValue={internetSpeedUploadDialDisplay}
-                    caption={internetSpeedUploadCaption}
-                    gaugePercent={internetSpeedUploadDialGauge}
-                    tone='sky'
-                    isActive={internetSpeedUploadIsActive}
-                  />
-                </div>
-
-                <div className='grid gap-3 sm:grid-cols-2'>
-                  <DetailTile
-                    label='Server'
-                    value={formatInternetSpeedServer(
-                      internetSpeedResult?.server?.sponsor,
-                      internetSpeedResult?.server?.name,
-                      internetSpeedResult?.server?.country
-                    )}
-                  />
-                  <DetailTile label='Distance' value={formatDistance(internetSpeedResult?.server?.distanceKilometers)} />
-                  <DetailTile label='Provider' value={internetSpeedResult?.client?.internetServiceProvider ?? noDataLabel} />
-                  <DetailTile label='IP address' value={internetSpeedResult?.client?.ipAddress ?? noDataLabel} />
-                  <DetailTile label='Connections' value={internetSpeedConnectionMode} />
-                  <DetailTile label='Measured at' value={formatTimestamp(internetSpeedResult?.testedAt ?? internetSpeedTest?.completedAt)} />
-                </div>
-
-                <div>
-                  <button
-                    type='button'
-                    disabled={internetSpeedTestStarting || internetSpeedTest?.isRunning || !internetSpeedTest?.canStart}
-                    onClick={() => void startInternetSpeedTest()}
-                    className='inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
-                  >
-                    {internetSpeedTestStarting || internetSpeedTest?.isRunning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Wifi className='h-4 w-4' />}
-                    {internetSpeedTest?.isRunning ? 'Speed test running… please wait' : 'Run internet speed test'}
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        ) : null}
-      </div>
-    );
-  };
-
-  const renderTunnelSection = () => (
-    <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
-      <div className='flex items-center gap-3 px-4 py-4'>
-        <button
-          type='button'
-          onClick={() => void toggleConnectivitySection('tunnel')}
-          className='flex min-w-0 flex-1 items-center gap-3 text-left'
-          aria-expanded={tunnelSectionOpen}
-        >
-          <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
-            <Cloud className='h-4 w-4 text-muted-foreground' />
-          </div>
-          <div className='min-w-0 flex-1'>
-            <div className='text-sm font-semibold text-foreground'>Tunnel</div>
-            <div className='mt-0.5 truncate text-xs text-muted-foreground'>Access over the internet</div>
-          </div>
-        </button>
-
-        <div className='flex shrink-0 items-center justify-end'>
-          <Switch
-            checked={cloudflareTunnelEnabled}
-            disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
-            onCheckedChange={(checked) => {
-              cloudflareTunnelDirtyRef.current = true;
-              setCloudflareTunnelEnabled(checked);
-              setCloudflareTunnelFeedback(null);
-            }}
-            aria-label='Toggle Tunnel'
-          />
-        </div>
-
-        <button
-          type='button'
-          onClick={() => void toggleConnectivitySection('tunnel')}
-          className='flex shrink-0 items-center justify-center text-muted-foreground'
-          aria-label={tunnelSectionOpen ? 'Collapse tunnel details' : 'Expand tunnel details'}
-          aria-expanded={tunnelSectionOpen}
-        >
-          {tunnelSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
-        </button>
-      </div>
-
-      {tunnelSectionOpen ? (
-        <div className='space-y-4 border-t border-border/60 px-4 py-4'>
-          {cloudflareTunnelLoading && !cloudflareTunnelStatus ? (
-            <div className='flex items-center justify-center py-6'>
-              <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
-            </div>
-          ) : (
-            <>
-              {cloudflareTunnelError ? (
-                <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
-                  {cloudflareTunnelError}
-                </div>
-              ) : null}
-
-              {cloudflareTunnelFeedback ? (
-                <div className={cn(
-                  'rounded-xl border px-3 py-2 text-xs',
-                  cloudflareTunnelFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-                )}>
-                  {cloudflareTunnelFeedback.message}
-                </div>
-              ) : null}
-
-              {!cloudflareTunnelSupported ? (
-                <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
-                  {cloudflareTunnelStatus?.statusMessage ?? 'Cloudflare Tunnel is unavailable on this host.'}
-                </div>
-              ) : (
-                <>
-                  <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-4'>
-                    <div className='text-sm font-semibold text-foreground'>How it works</div>
-                    <div className='mt-3 space-y-1 font-mono text-sm text-muted-foreground'>
-                      <div>Your browser eg. on the phone</div>
-                      <div>↓</div>
-                      <div>Cloudflare (login + protection)</div>
-                      <div>↓</div>
-                      <div>Tunnel (secure pipe)</div>
-                      <div>↓</div>
-                      <div>Flux Monitor app on Raspberry Pi</div>
-                    </div>
-                    <div className='mt-3 text-xs text-muted-foreground'>
-                      This exposes Flux Monitor to the internet on your own hostname or on a Cloudflare URL such as
-                      {' '}
-                      <span className='font-mono text-foreground'>random-name.trycloudflare.com</span>
-                      . Because it is reachable from outside your home network, add a Cloudflare login wall first.
-                    </div>
-                  </div>
-
-                  <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-4'>
-                    <div className='text-sm font-semibold text-foreground'>Cloudflare setup</div>
-                    <div className='mt-3 space-y-2 text-sm text-muted-foreground'>
-                      <div>1. In Cloudflare Tunnel, create a tunnel and copy the command or token shown on the connector page.</div>
-                      <div>2. In Published applications, choose your hostname. Use your own domain if you have one. If you use a temporary Cloudflare URL, that is configured on the Cloudflare side, not here in Flux Monitor.</div>
-                      <div>3. Leave Path empty unless you only want to expose part of the app.</div>
-                      <div>4. Set Service Type to <span className='font-mono text-foreground'>HTTP</span>.</div>
-                      <div>5. Set URL to <span className='font-mono text-foreground'>127.0.0.1:5074</span> or <span className='font-mono text-foreground'>localhost:5074</span>.</div>
-                    </div>
-                    <div className='mt-3 flex flex-wrap gap-3 text-sm'>
-                      <a
-                        href='https://developers.cloudflare.com/tunnel/setup/'
-                        target='_blank'
-                        rel='noreferrer'
-                        className='inline-flex items-center gap-2 text-primary hover:underline'
-                      >
-                        <ExternalLink className='h-4 w-4' />
-                        Open Tunnel hostname docs
-                      </a>
-                      <a
-                        href='https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/configure-tunnels/remote-tunnel-permissions/'
-                        target='_blank'
-                        rel='noreferrer'
-                        className='inline-flex items-center gap-2 text-primary hover:underline'
-                      >
-                        <ExternalLink className='h-4 w-4' />
-                        Open connector setup docs
-                      </a>
-                    </div>
-                  </div>
-
-                  <div className='rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-4'>
-                    <div className='text-sm font-semibold text-foreground'>Protect it with Cloudflare Access</div>
-                    <div className='mt-3 space-y-2 text-sm text-amber-50/90'>
-                      <div>Access → Applications</div>
-                      <div>Add application</div>
-                      <div>Enter your hostname</div>
-                      <div>Add policy: Allow → Emails → your@email.com</div>
-                      <div>Choose login method: OTP or Google</div>
-                    </div>
-                    <div className='mt-3 text-xs text-amber-100/80'>
-                      OTP is the simplest option if you already use one-time email codes. This puts a login wall in front of the app before traffic reaches your Raspberry Pi.
-                    </div>
-                    <div className='mt-3'>
-                      <a
-                        href='https://developers.cloudflare.com/cloudflare-one/applications/configure-apps/self-hosted-apps/'
-                        target='_blank'
-                        rel='noreferrer'
-                        className='inline-flex items-center gap-2 text-sm text-amber-100 hover:underline'
-                      >
-                        <ExternalLink className='h-4 w-4' />
-                        Open Access application docs
-                      </a>
-                    </div>
-                  </div>
-
-                  <div className='space-y-2'>
-                    <label className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground' htmlFor='cloudflare-token'>
-                      Tunnel token or Cloudflare command
-                    </label>
-                    <textarea
-                      id='cloudflare-token'
-                      value={cloudflareTunnelTokenOrCommand}
-                      onChange={(event) => {
-                        cloudflareTunnelDirtyRef.current = true;
-                        setCloudflareTunnelTokenOrCommand(event.target.value);
-                      }}
-                      placeholder={cloudflareTunnelMaskedToken
-                        ? `Leave blank to keep the saved token (${cloudflareTunnelMaskedToken}).`
-                        : 'Paste the cloudflared install command, run command, or the raw tunnel token.'}
-                      disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
-                      className='min-h-24 w-full rounded-xl border border-input bg-background/70 px-3 py-2 text-sm text-foreground outline-none transition-colors placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-50'
-                    />
-                    <div className='text-xs text-muted-foreground'>
-                      Flux Monitor extracts the token automatically if you paste a command copied from the Cloudflare page.
-                    </div>
-                  </div>
-
-                  <div className='flex justify-end'>
-                    <button
-                      type='button'
-                      disabled={cloudflareTunnelSaving || !cloudflareTunnelSupported}
-                      onClick={() => void saveCloudflareTunnel()}
-                      className='inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
-                    >
-                      {cloudflareTunnelSaving ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Cloud className='h-4 w-4' />}
-                      Save tunnel settings
-                    </button>
-                  </div>
-                </>
-              )}
-            </>
-          )}
-        </div>
-      ) : null}
-    </div>
-  );
 
   if (sectionId === 'internet-speed' || sectionId === 'tunnel') {
     return <Navigate to={getSystemSectionPath('connectivity')} replace />;
@@ -2066,7 +1710,7 @@ export function SystemPage() {
           : 'space-y-6 pb-8'
       )}
     >
-      {isLogsSystemSection ? renderLogsPage() : (
+      {isLogsSystemSection ? <LogsSection /> : (
         <>
           {loadError ? (
             <div className='flex items-start gap-3 rounded-2xl border border-destructive/30 bg-destructive/10 px-4 py-4 text-sm text-destructive'>
@@ -2086,185 +1730,30 @@ export function SystemPage() {
 
           {status ? (
             <div className='min-w-0 space-y-6'>
-            {activeSystemSection === 'resource-usage' ? (
-              <Card className='border border-border/80 bg-card/85 shadow-sm'>
-                <PanelHeader
-                  title='Resource usage'
-                  description='CPU, memory, and storage capacity on the host running the monitor service.'
-                  aside={(
-                    <div className='space-y-1 text-right text-xs text-muted-foreground'>
-                      <div>Host uptime {formatElapsedDuration(metrics?.systemUptimeSeconds)}</div>
-                      <div>App uptime {applicationUptime}</div>
-                    </div>
-                  )}
+              {activeSystemSection === 'resource-usage' ? (
+                <ResourceUsageSection
+                  metrics={metrics}
+                  applicationUptime={applicationUptime}
                 />
-                <CardContent className='grid gap-5 pt-5'>
-                  <UsagePanel
-                    icon={Cpu}
-                    label='CPU'
-                    percent={cpuUsage}
-                    summary={`Current ${formatFrequency(metrics?.cpuCurrentClockSpeedMegahertz)}`}
-                    secondary={`Base ${formatFrequency(metrics?.cpuMaxClockSpeedMegahertz)} • ${formatWholeNumber(metrics?.cpuCoreCount)} cores`}
-                    details={[
-                      `${formatWholeNumber(metrics?.processCount)} processes`,
-                      `System temperature ${formatDecimalValue(metrics?.systemTemperatureCelsius, '°C')}`,
-                      `Fan speed ${formatRpm(metrics?.mainFanSpeedRpm)}`,
-                    ]}
-                    labelIcon={cpuStatusIcon}
-                    labelIconClassName={cpuStatusIconClassName}
-                  />
-                  <UsagePanel
-                    icon={MemoryStick}
-                    label='Memory'
-                    percent={memoryUsagePercent}
-                    summary={formatUsage(memoryUsed, memoryTotal)}
-                    secondary={metrics?.memoryAvailableBytes != null ? `${formatBytes(metrics.memoryAvailableBytes)} free` : noDataLabel}
-                  />
-                  <UsagePanel
-                    icon={HardDrive}
-                    label='Storage'
-                    percent={storageUsagePercent}
-                    summary={formatUsage(storageUsed, storageTotal)}
-                    secondary={storageTotal != null && storageUsed != null ? `${formatBytes(Math.max(storageTotal - storageUsed, 0))} free` : noDataLabel}
-                  />
-                </CardContent>
-              </Card>
-            ) : null}
+              ) : null}
 
-            <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'software-update' && 'hidden')}>
-              <CardContent className='space-y-4 pt-6'>
-                  <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
-                    <UpdateChannelTile
-                      value={preferredUpdateChannel}
-                      disabled={updateChannelSaving || updateChecking || (updateProgress?.isRunning ?? false)}
-                      pending={updateChannelSaving}
-                      onChange={saveUpdateChannel}
-                    />
-                    <DetailTile label='Commit' value={formatCommit(installedCommit)} />
-                    <DetailTile label='Workflow' value={workflowRun} />
-                    <DetailTile label='Published' value={installedReleasePublishedLabel} />
-                  </div>
-                  {updateCheck?.currentChannel && preferredUpdateChannel && updateCheck.currentChannel !== preferredUpdateChannel ? (
-                    <div className='rounded-xl border border-border bg-muted/70 px-3 py-2 text-xs text-muted-foreground'>
-                      Installed build is on the {formatReleaseChannel(updateCheck.currentChannel)} channel. New update checks use the {formatReleaseChannel(preferredUpdateChannel)} branch.
-                    </div>
-                  ) : null}
-                  {updateChecking && !updateCheck ? (
-                    <div className='flex items-center gap-2 rounded-xl border border-border bg-muted/60 px-3 py-2 text-sm text-muted-foreground'>
-                      <LoaderCircle className='h-4 w-4 animate-spin' />
-                      Checking the current release channel…
-                    </div>
-                  ) : null}
-                  {updateCheck ? (
-                    <>
-                      {updateCheck.checkError ? (
-                        <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
-                          Update check failed: {updateCheck.checkError}
-                        </div>
-                      ) : updateCheck.updateAvailable && updateProgress?.success !== true ? (
-                        <div className='rounded-xl border border-primary/20 bg-primary/10 px-3 py-2 text-sm text-primary'>
-                          <div className='flex items-center gap-2'>
-                            <Download className='h-4 w-4' />
-                            A new version is available.
-                          </div>
-                          {updateCheck.targetReleaseTag ? (
-                            <div className='mt-1 text-xs text-primary/80'>
-                              {updateCheck.targetReleaseTag} on the {formatReleaseChannel(updateCheck.targetChannel)} channel
-                            </div>
-                          ) : null}
-                          {updateCheck.commits && updateCheck.commits.length > 0 ? (
-                            <div className='mt-2 space-y-1'>
-                              <div className='text-[10px] font-medium uppercase tracking-[0.16em] text-primary/60'>Changes</div>
-                              <ul className='space-y-0.5 text-xs text-primary/80'>
-                                {updateCheck.commits.map((c, i) => (
-                                  <li key={i} className='flex gap-1.5'>
-                                    <span className='shrink-0 font-mono text-[10px] text-primary/50'>{c.sha ?? ''}</span>
-                                    <span>{c.message ?? ''}</span>
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : !updateCheck.updateAvailable ? (
-                        <div className='flex items-center gap-2 rounded-xl border border-emerald-500/20 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-200'>
-                          <CheckCircle2 className='h-4 w-4' />
-                          Installed version is current.
-                        </div>
-                      ) : null}
-
-                      {!updateCheck.canUpdate ? (
-                        <div className='rounded-xl border border-border bg-muted/70 px-3 py-2 text-xs text-muted-foreground'>
-                          {updateCheck.reason}
-                        </div>
-                      ) : null}
-
-                      {updateActionError ? (
-                        <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
-                          {updateActionError}
-                        </div>
-                      ) : null}
-
-                      {updateChannelError ? (
-                        <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-3 py-2 text-xs text-rose-200'>
-                          {updateChannelError}
-                        </div>
-                      ) : null}
-
-                      {updateProgress ? (
-                        <div className={cn(
-                          'rounded-xl border px-3 py-2 text-xs',
-                          getUpdateStateTone(updateProgress.status) === 'success'
-                            ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-                            : getUpdateStateTone(updateProgress.status) === 'error'
-                              ? 'border-rose-500/20 bg-rose-500/10 text-rose-200'
-                              : getUpdateStateTone(updateProgress.status) === 'warning'
-                                ? 'border-amber-500/20 bg-amber-500/10 text-amber-200'
-                                : 'border-primary/20 bg-primary/10 text-primary'
-                        )}>
-                          <div className='flex items-center gap-2'>
-                            {updateProgress.isRunning ? <LoaderCircle className='h-3.5 w-3.5 animate-spin shrink-0' /> : updateProgress.status === 'succeeded' ? <CheckCircle2 className='h-3.5 w-3.5 shrink-0' /> : updateProgress.status === 'cancelled' ? <CircleAlert className='h-3.5 w-3.5 shrink-0' /> : <XCircle className='h-3.5 w-3.5 shrink-0' />}
-                            {updateProgress.stage}
-                          </div>
-                          <div className='mt-1.5 opacity-90'>
-                            {getUpdateProgressDetail(updateProgress)}
-                          </div>
-                          {updateProgress.percentComplete != null ? (
-                            <div className='mt-3'>
-                              <div className='mb-1 flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.16em] opacity-70'>
-                                <span>{getUpdateProgressLabel(updateProgress)}</span>
-                                <span>{updateProgress.percentComplete}%</span>
-                              </div>
-                              <div className='h-1.5 overflow-hidden rounded-full bg-background/40'>
-                                <div className='h-full rounded-full bg-current transition-[width] duration-500 ease-out' style={{ width: `${Math.max(updateProgress.percentComplete, 4)}%` }} />
-                              </div>
-                            </div>
-                          ) : null}
-                          {updateProgress.isRunning && getUpdateCancellationMessage(updateProgress) ? (
-                            <div className='mt-2 opacity-80'>
-                              {getUpdateCancellationMessage(updateProgress)}
-                            </div>
-                          ) : null}
-                        </div>
-                      ) : null}
-                    </>
-                  ) : null}
-
-                  {updateCheck?.canUpdate && updateCheck?.updateAvailable ? (
-                    <div className='pt-2'>
-                      <button
-                        type='button'
-                        disabled={updateActionPending === 'starting' || (updateProgress?.isRunning ?? false)}
-                        onClick={() => void installUpdate()}
-                        className='inline-flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2.5 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
-                      >
-                        {updateActionPending === 'starting' || updateProgress?.isRunning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Download className='h-4 w-4' />}
-                        Install update
-                      </button>
-                    </div>
-                  ) : null}
-              </CardContent>
-            </Card>
+              {activeSystemSection === 'software-update' ? (
+                <SoftwareUpdateSection
+                  preferredUpdateChannel={preferredUpdateChannel}
+                  updateChannelSaving={updateChannelSaving}
+                  updateChecking={updateChecking}
+                  updateProgress={updateProgress}
+                  updateCheck={updateCheck}
+                  installedCommit={formatCommit(installedCommit)}
+                  workflowRun={workflowRun}
+                  installedReleasePublishedLabel={installedReleasePublishedLabel}
+                  updateActionError={updateActionError}
+                  updateChannelError={updateChannelError}
+                  updateActionPending={updateActionPending}
+                  onSaveUpdateChannel={saveUpdateChannel}
+                  onInstallUpdate={installUpdate}
+                />
+              ) : null}
             <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'connectivity' && 'hidden')}>
               <CardContent className='space-y-4 pt-4'>
                 {connectivityLoading && !connectivity ? (
@@ -2296,803 +1785,197 @@ export function SystemPage() {
                         </div>
                       ) : null}
 
-                      <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
-                        <div className='flex items-center gap-3 px-4 py-4'>
-                          <button
-                            type='button'
-                            onClick={() => void toggleConnectivitySection('wifi')}
-                            className='flex min-w-0 flex-1 items-center gap-3 text-left'
-                            aria-expanded={wifiSectionOpen}
-                          >
-                            <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
-                              <Wifi className='h-4 w-4 text-muted-foreground' />
-                            </div>
-                            <div className='min-w-0 flex-1'>
-                              <div className='text-sm font-semibold text-foreground'>Wi-Fi</div>
-                              <div className='mt-0.5 truncate text-xs text-muted-foreground'>{wifiSummary}</div>
-                            </div>
-                          </button>
+                      <WifiMenuItem
+                        connectivity={connectivity}
+                        wifiPowered={wifiPowered}
+                        wifiSummary={wifiSummary}
+                        wifiSectionOpen={wifiSectionOpen}
+                        wifiPowerLoading={wifiPowerLoading}
+                        wifiFeedback={wifiFeedback}
+                        wifiInterfaces={wifiInterfaces}
+                        selectedWifiInterface={selectedWifiInterface}
+                        selectedWifiAccessPoints={selectedWifiAccessPoints}
+                        hasInternetAccess={hasInternetAccess}
+                        wifiScanLoading={wifiScanLoading}
+                        onToggleExpanded={() => { void toggleConnectivitySection('wifi'); }}
+                        onTogglePower={requestWifiPowerToggle}
+                        onSelectInterface={selectWifiInterface}
+                        onSelectAccessPoint={selectWifiAccessPoint}
+                        onOpenOtherDialog={openOtherWifiDialog}
+                        onScan={scanWifi}
+                      />
 
-                          <div className='flex shrink-0 items-center justify-end'>
-                            <Switch
-                              checked={Boolean(connectivity?.network.supported) && wifiPowered !== false}
-                              disabled={wifiPowerLoading || !(connectivity?.network.supported ?? false)}
-                              onCheckedChange={() => requestWifiPowerToggle()}
-                              aria-label='Toggle Wi-Fi power'
-                            />
-                          </div>
+                      <BluetoothMenuItem
+                        connectivity={connectivity}
+                        bluetoothSummary={bluetoothSummary}
+                        bluetoothSectionOpen={bluetoothSectionOpen}
+                        bluetoothPowerLoading={bluetoothPowerLoading}
+                        bluetoothScanLoading={bluetoothScanLoading}
+                        bluetoothFeedback={bluetoothFeedback}
+                        visibleBluetoothDevices={visibleBluetoothDevices}
+                        onToggleExpanded={() => { void toggleConnectivitySection('bluetooth'); }}
+                        onTogglePower={toggleBluetoothPower}
+                        onScan={scanBluetooth}
+                      />
 
-                          <button
-                            type='button'
-                            onClick={() => void toggleConnectivitySection('wifi')}
-                            className='flex shrink-0 items-center justify-center text-muted-foreground'
-                            aria-label={wifiSectionOpen ? 'Collapse Wi-Fi details' : 'Expand Wi-Fi details'}
-                            aria-expanded={wifiSectionOpen}
-                          >
-                            {wifiSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
-                          </button>
-                        </div>
+                      <SshMenuItem
+                        sshAccess={sshAccess}
+                        sshToggleChecked={sshToggleChecked}
+                        sshToggleLoading={sshToggleLoading}
+                        onToggle={() => toggleSshAccess(!sshToggleChecked)}
+                      />
 
-                        {wifiSectionOpen ? (
-                          <div className='space-y-4 border-t border-border/60 px-4 py-4'>
-                            {wifiFeedback ? (
-                              <div className={cn(
-                                'rounded-2xl border px-3 py-2 text-xs',
-                                wifiFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-                              )}>
-                                {wifiFeedback.message}
-                              </div>
-                            ) : null}
+                      <EthernetMenuItem
+                        ethernetSummary={ethernetSummary}
+                        ethernetSectionOpen={ethernetSectionOpen}
+                        ethernetPowerLoading={ethernetPowerLoading}
+                        ethernetFeedback={ethernetFeedback}
+                        ethernetInterfaces={ethernetInterfaces}
+                        activeEthernetInterface={activeEthernetInterface}
+                        onToggleExpanded={() => { void toggleConnectivitySection('ethernet'); }}
+                        onTogglePower={() => toggleEthernetPower(!isEthernetInterfaceEnabled(activeEthernetInterface))}
+                      />
 
-                            {!connectivity?.network.supported ? (
-                              <div className='rounded-2xl border border-border bg-muted/70 px-3 py-3 text-xs text-muted-foreground'>
-                                {connectivity?.network.statusMessage ?? 'Wi-Fi controls are unavailable on this host.'}
-                              </div>
-                            ) : wifiPowered === false ? (
-                              <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
-                                Turn Wi-Fi on to scan nearby networks and switch access points.
-                              </div>
-                            ) : wifiInterfaces.length === 0 || !selectedWifiInterface ? (
-                              <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
-                                No Wi-Fi interfaces detected.
-                              </div>
-                            ) : (
-                              <>
-                                {wifiInterfaces.length > 1 ? (
-                                  <div className='flex flex-wrap gap-2'>
-                                    {wifiInterfaces.map((wifiInterface) => (
-                                      <button
-                                        key={wifiInterface.name}
-                                        type='button'
-                                        disabled={wifiScanLoading === wifiInterface.name}
-                                        onClick={() => void selectWifiInterface(wifiInterface)}
-                                        className={cn(
-                                          'rounded-full border px-3 py-1.5 text-xs font-medium transition-colors',
-                                          selectedWifiInterface.name === wifiInterface.name
-                                            ? 'border-primary/40 bg-primary/10 text-foreground'
-                                            : 'border-border bg-background/60 text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-                                        )}
-                                      >
-                                        {wifiInterface.name}
-                                      </button>
-                                    ))}
-                                  </div>
-                                ) : null}
+                      <LocalAccessMenuItem
+                        localAccessSummary={localAccessSummary}
+                        localAccessSectionOpen={localAccessSectionOpen}
+                        localAccessModeLoading={localAccessModeLoading}
+                        localAccessModeFeedback={localAccessModeFeedback}
+                        localAccessMode={localAccessMode}
+                        localAccessSettings={localAccessSettings}
+                        localAccessBluetoothDeviceName={localAccessBluetoothDeviceName}
+                        localAccessHotspotSsid={localAccessHotspotSsid}
+                        localAccessStatus={localAccessStatus}
+                        localAccessAddresses={localAccessAddresses}
+                        localAccessAdvancedOpen={localAccessAdvancedOpen}
+                        localAccessSettingsFeedback={localAccessSettingsFeedback}
+                        localAccessBluetoothName={localAccessBluetoothName}
+                        localAccessHotspotName={localAccessHotspotName}
+                        localAccessWifiPassword={localAccessWifiPassword}
+                        localAccessShowPassword={localAccessShowPassword}
+                        localAccessSettingsSaving={localAccessSettingsSaving}
+                        localAccessSettingsDirty={localAccessSettingsDirty}
+                        localAccessUsesWpa3Only={localAccessUsesWpa3Only}
+                        onToggleExpanded={() => { void toggleConnectivitySection('local-access'); }}
+                        onToggleMode={() => toggleLocalAccessMode(!(localAccessMode?.enabled ?? false))}
+                        onToggleAdvanced={() => setLocalAccessAdvancedOpen((current) => !current)}
+                        onBluetoothNameChange={(value) => {
+                          localAccessSettingsDirtyRef.current = true;
+                          setLocalAccessSettingsFeedback(null);
+                          setLocalAccessBluetoothName(value);
+                        }}
+                        onHotspotNameChange={(value) => {
+                          localAccessSettingsDirtyRef.current = true;
+                          setLocalAccessSettingsFeedback(null);
+                          setLocalAccessHotspotName(value);
+                        }}
+                        onWifiPasswordChange={(value) => {
+                          localAccessSettingsDirtyRef.current = true;
+                          setLocalAccessSettingsFeedback(null);
+                          setLocalAccessWifiPassword(value);
+                        }}
+                        onShowPasswordChange={setLocalAccessShowPassword}
+                        onSaveSettings={saveLocalAccessAdvancedSettings}
+                      />
 
-                                <div className='rounded-2xl border border-border/70 bg-background/30 px-4 py-3'>
-                                  <div className='min-w-0'>
-                                    <div className='text-sm font-semibold text-foreground font-mono'>{selectedWifiInterface.name}</div>
-                                    {selectedWifiInterface.connectedSsid ? (
-                                      <div className='mt-1 flex items-center gap-2 text-xs text-muted-foreground'>
-                                        <span>{selectedWifiInterface.connectedSsid}</span>
-                                        <SignalStrengthIndicator
-                                          kind='wifi'
-                                          percent={selectedWifiInterface.signalPercent}
-                                        />
-                                      </div>
-                                    ) : (
-                                      <div className='mt-1 text-xs text-muted-foreground'>Not connected</div>
-                                    )}
-                                    {selectedWifiInterface.addresses.length > 0 ? (
-                                      <div className='mt-1 break-all text-[11px] font-mono text-muted-foreground'>
-                                        {selectedWifiInterface.addresses.join(' • ')}
-                                      </div>
-                                    ) : null}
-                                  </div>
-                                </div>
+                      <InternetSpeedMenuItem
+                        internetSpeedSectionOpen={internetSpeedSectionOpen}
+                        hasMeasuredInternetSpeed={internetSpeedDownloadMbps != null || internetSpeedUploadMbps != null}
+                        downloadSummary={formatSpeedMbps(internetSpeedResult?.downloadBitsPerSecond)}
+                        uploadSummary={formatSpeedMbps(internetSpeedResult?.uploadBitsPerSecond)}
+                        internetSpeedTestLoading={internetSpeedTestLoading}
+                        internetSpeedTest={internetSpeedTest}
+                        internetSpeedTestError={internetSpeedTestError}
+                        internetSpeedPingValue={internetSpeedPingValue}
+                        internetSpeedPingDialDisplay={internetSpeedPingDialDisplay}
+                        internetSpeedPingCaption={internetSpeedPingCaption}
+                        internetSpeedPingDialGauge={internetSpeedPingDialGauge}
+                        internetSpeedPingTone={internetSpeedPingTone}
+                        internetSpeedPingIsActive={internetSpeedPingIsActive}
+                        internetSpeedDownloadValue={internetSpeedDownloadValue}
+                        internetSpeedDownloadDialDisplay={internetSpeedDownloadDialDisplay}
+                        internetSpeedDownloadCaption={internetSpeedDownloadCaption}
+                        internetSpeedDownloadDialGauge={internetSpeedDownloadDialGauge}
+                        internetSpeedDownloadIsActive={internetSpeedDownloadIsActive}
+                        internetSpeedUploadValue={internetSpeedUploadValue}
+                        internetSpeedUploadDialDisplay={internetSpeedUploadDialDisplay}
+                        internetSpeedUploadCaption={internetSpeedUploadCaption}
+                        internetSpeedUploadDialGauge={internetSpeedUploadDialGauge}
+                        internetSpeedUploadIsActive={internetSpeedUploadIsActive}
+                        internetSpeedServer={formatInternetSpeedServer(
+                          internetSpeedResult?.server?.sponsor,
+                          internetSpeedResult?.server?.name,
+                          internetSpeedResult?.server?.country
+                        )}
+                        internetSpeedDistance={formatDistance(internetSpeedResult?.server?.distanceKilometers)}
+                        internetSpeedProvider={internetSpeedResult?.client?.internetServiceProvider ?? noDataLabel}
+                        internetSpeedIpAddress={internetSpeedResult?.client?.ipAddress ?? noDataLabel}
+                        internetSpeedConnectionMode={internetSpeedConnectionMode}
+                        internetSpeedMeasuredAt={formatTimestamp(internetSpeedResult?.testedAt ?? internetSpeedTest?.completedAt)}
+                        internetSpeedTestStarting={internetSpeedTestStarting}
+                        onToggleExpanded={() => { void toggleConnectivitySection('internet-speed'); }}
+                        onStartTest={startInternetSpeedTest}
+                      />
 
-                                <div className='space-y-2'>
-                                  <div className='flex items-center justify-between gap-3'>
-                                    <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>Nearby networks</div>
-                                    {hasInternetAccess === false ? (
-                                      <div className='text-[11px] text-amber-300'>No internet. Scanning nearby networks.</div>
-                                    ) : null}
-                                  </div>
-                                  {selectedWifiAccessPoints.length > 0 ? (
-                                    <div className='overflow-hidden rounded-2xl border border-border/70 bg-background/20'>
-                                      {selectedWifiAccessPoints.map((accessPoint, index) => (
-                                        <button
-                                          key={`${accessPoint.bssid ?? accessPoint.ssid}-${accessPoint.interfaceName}`}
-                                          type='button'
-                                          onClick={() => void selectWifiAccessPoint(accessPoint)}
-                                          className={cn(
-                                            'group flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-background/70',
-                                            index > 0 ? 'border-t border-border/60' : '',
-                                            accessPoint.isActive ? 'bg-primary/8' : ''
-                                          )}
-                                        >
-                                          <div className='flex min-w-0 items-center gap-2'>
-                                            {isWifiNetworkSecured(accessPoint) ? <Lock className='h-3.5 w-3.5 shrink-0 text-muted-foreground' /> : null}
-                                            <div className='truncate text-sm font-medium text-foreground'>{accessPoint.ssid}</div>
-                                          </div>
-                                          <SignalStrengthIndicator
-                                            kind='wifi'
-                                            percent={accessPoint.signalPercent}
-                                            revealOnParentInteraction
-                                            className='shrink-0'
-                                          />
-                                        </button>
-                                      ))}
-                                    </div>
-                                  ) : wifiScanLoading === selectedWifiInterface.name ? (
-                                    <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
-                                      Scanning nearby networks...
-                                    </div>
-                                  ) : wifiScanLoading !== selectedWifiInterface.name ? (
-                                    <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
-                                      No scan results yet. Click scan to refresh nearby networks.
-                                    </div>
-                                  ) : null}
-
-                                  <button
-                                    type='button'
-                                    onClick={openOtherWifiDialog}
-                                    className='flex w-full items-center justify-between gap-3 rounded-2xl border border-border/70 bg-background/20 px-4 py-3 text-left transition-colors hover:bg-background/70'
-                                  >
-                                    <div className='text-sm font-medium text-foreground'>Other</div>
-                                    <ChevronRight className='h-4 w-4 text-muted-foreground' />
-                                  </button>
-                                </div>
-
-                                <button
-                                  type='button'
-                                  disabled={wifiScanLoading === selectedWifiInterface.name}
-                                  onClick={() => void scanWifi(selectedWifiInterface.name)}
-                                  className='inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
-                                >
-                                  {wifiScanLoading === selectedWifiInterface.name ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <RefreshCcw className='h-4 w-4' />}
-                                  Scan networks
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        ) : null}
-                      </div>
-
-                      <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
-                        <div className='flex items-center gap-3 px-4 py-4'>
-                          <button
-                            type='button'
-                            onClick={() => void toggleConnectivitySection('bluetooth')}
-                            className='flex min-w-0 flex-1 items-center gap-3 text-left'
-                            aria-expanded={bluetoothSectionOpen}
-                          >
-                            <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
-                              <Bluetooth className='h-4 w-4 text-muted-foreground' />
-                            </div>
-                            <div className='min-w-0 flex-1'>
-                              <div className='text-sm font-semibold text-foreground'>Bluetooth</div>
-                              <div className='mt-0.5 truncate text-xs text-muted-foreground'>{bluetoothSummary}</div>
-                            </div>
-                          </button>
-
-                          <div className='flex shrink-0 items-center justify-end'>
-                            <Switch
-                              checked={Boolean(connectivity?.bluetooth.supported) && Boolean(connectivity?.bluetooth.powered)}
-                              disabled={bluetoothPowerLoading || !(connectivity?.bluetooth.supported ?? false)}
-                              onCheckedChange={() => void toggleBluetoothPower()}
-                              aria-label='Toggle Bluetooth power'
-                            />
-                          </div>
-
-                          <button
-                            type='button'
-                            onClick={() => void toggleConnectivitySection('bluetooth')}
-                            className='flex shrink-0 items-center justify-center text-muted-foreground'
-                            aria-label={bluetoothSectionOpen ? 'Collapse Bluetooth details' : 'Expand Bluetooth details'}
-                            aria-expanded={bluetoothSectionOpen}
-                          >
-                            {bluetoothSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
-                          </button>
-                        </div>
-
-                        {bluetoothSectionOpen ? (
-                          <div className='space-y-4 border-t border-border/60 px-4 py-4'>
-                            {connectivity?.bluetooth.statusMessage ? (
-                              <div className='rounded-2xl border border-border bg-muted/70 px-3 py-2 text-xs text-muted-foreground'>
-                                {connectivity.bluetooth.statusMessage}
-                              </div>
-                            ) : null}
-
-                            {bluetoothFeedback ? (
-                              <div className={cn(
-                                'rounded-2xl border px-3 py-2 text-xs',
-                                bluetoothFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-                              )}>
-                                {bluetoothFeedback.message}
-                              </div>
-                            ) : null}
-
-                            {!connectivity?.bluetooth.supported ? (
-                              <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
-                                Bluetooth controls are unavailable on this host.
-                              </div>
-                            ) : !connectivity.bluetooth.powered ? (
-                              <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
-                                Turn Bluetooth on to scan nearby devices.
-                              </div>
-                            ) : (
-                              <>
-                                {visibleBluetoothDevices.length > 0 ? (
-                                  <div className='overflow-hidden rounded-2xl border border-border/70 bg-background/20'>
-                                    {visibleBluetoothDevices.map((device, index) => (
-                                      <div key={device.address} className={index > 0 ? 'border-t border-border/60' : undefined}>
-                                        <BluetoothDeviceCard device={device} />
-                                      </div>
-                                    ))}
-                                  </div>
-                                ) : (
-                                  <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
-                                    No Bluetooth devices found.
-                                  </div>
-                                )}
-
-                                <button
-                                  type='button'
-                                  disabled={bluetoothScanLoading}
-                                  onClick={() => void scanBluetooth()}
-                                  className='inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
-                                >
-                                  {bluetoothScanLoading ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <RefreshCcw className='h-4 w-4' />}
-                                  Scan networks
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        ) : null}
-                      </div>
-
-                      <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
-                        <div className='flex items-center gap-3 px-4 py-4'>
-                          <div className='flex min-w-0 flex-1 items-center gap-3'>
-                            <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
-                              <Terminal className='h-4 w-4 text-muted-foreground' />
-                            </div>
-                            <div className='min-w-0 flex-1'>
-                              <div className='text-sm font-semibold text-foreground'>SSH</div>
-                              <div className='mt-0.5 text-xs text-muted-foreground'>Remote terminal access.</div>
-                            </div>
-                          </div>
-
-                          <div className='flex shrink-0 items-center justify-end'>
-                            <Switch
-                              checked={sshToggleChecked}
-                              disabled={sshToggleLoading || !(sshAccess?.supported ?? false)}
-                              onCheckedChange={() => void toggleSshAccess(!sshToggleChecked)}
-                              aria-label='Toggle SSH access'
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
-                        <div className='flex items-center gap-3 px-4 py-4'>
-                          <button
-                            type='button'
-                            onClick={() => void toggleConnectivitySection('ethernet')}
-                            className='flex min-w-0 flex-1 items-center gap-3 text-left'
-                            aria-expanded={ethernetSectionOpen}
-                          >
-                            <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
-                              <Cable className='h-4 w-4 text-muted-foreground' />
-                            </div>
-                            <div className='min-w-0 flex-1'>
-                              <div className='text-sm font-semibold text-foreground'>Ethernet</div>
-                              <div className='mt-0.5 truncate text-xs text-muted-foreground'>{ethernetSummary}</div>
-                            </div>
-                          </button>
-
-                          <div className='flex shrink-0 items-center justify-end'>
-                            <Switch
-                              checked={ethernetToggleChecked}
-                              disabled={ethernetPowerLoading || !activeEthernetInterface}
-                              onCheckedChange={() => void toggleEthernetPower(!ethernetToggleChecked)}
-                              aria-label='Toggle Ethernet interface'
-                            />
-                          </div>
-
-                          <button
-                            type='button'
-                            onClick={() => void toggleConnectivitySection('ethernet')}
-                            className='flex shrink-0 items-center justify-center text-muted-foreground'
-                            aria-label={ethernetSectionOpen ? 'Collapse Ethernet details' : 'Expand Ethernet details'}
-                            aria-expanded={ethernetSectionOpen}
-                          >
-                            {ethernetSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
-                          </button>
-                        </div>
-
-                        {ethernetSectionOpen ? (
-                          <div className='space-y-4 border-t border-border/60 px-4 py-4'>
-                            <div className='rounded-2xl border border-border bg-muted/70 px-3 py-2 text-xs text-muted-foreground'>
-                              {ethernetPrimaryStatus}
-                            </div>
-
-                            {ethernetFeedback ? (
-                              <div className={cn(
-                                'rounded-2xl border px-3 py-2 text-xs',
-                                ethernetFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-                              )}>
-                                {ethernetFeedback.message}
-                              </div>
-                            ) : null}
-
-                            {ethernetInterfaces.length > 0 ? (
-                              <div className='overflow-hidden rounded-2xl border border-border/70 bg-background/20'>
-                                {ethernetInterfaces.map((ethernetInterface, index) => (
-                                  <div
-                                    key={ethernetInterface.name}
-                                    className={cn(
-                                      'flex flex-col items-start gap-3 px-4 py-3 sm:flex-row sm:justify-between',
-                                      index > 0 ? 'border-t border-border/60' : ''
-                                    )}
-                                  >
-                                    <div className='min-w-0 flex-1'>
-                                      <div className='text-sm font-semibold text-foreground font-mono'>{ethernetInterface.name}</div>
-                                      <div className='mt-1 text-xs text-muted-foreground'>
-                                        {ethernetInterface.connectionName
-                                          ? `${ethernetInterface.connectionName}${ethernetInterface.speedMbps ? ` • ${ethernetInterface.speedMbps} Mbps` : ''}`
-                                          : ethernetInterface.description || 'Wired interface'}
-                                      </div>
-                                      <div className='mt-2 text-xs leading-5 text-muted-foreground'>
-                                        {buildEthernetStatusMessage(ethernetInterface)}
-                                      </div>
-                                      {ethernetInterface.addresses.length > 0 ? (
-                                        <div className='mt-1 break-all text-[11px] font-mono text-muted-foreground'>
-                                          {ethernetInterface.addresses.join(' • ')}
-                                        </div>
-                                      ) : null}
-                                    </div>
-                                    <div className='flex w-full flex-col items-start gap-2 sm:w-auto sm:shrink-0 sm:items-end'>
-                                      <div className='text-xs text-muted-foreground sm:text-right'>
-                                        {formatEthernetStateLabel(ethernetInterface)}
-                                      </div>
-                                      <div className='text-[11px] uppercase tracking-[0.16em] text-muted-foreground/80'>
-                                        {isEthernetInterfaceEnabled(ethernetInterface) ? 'On' : 'Off'}
-                                      </div>
-                                    </div>
-                                  </div>
-                                ))}
-                              </div>
-                            ) : (
-                              <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
-                                No Ethernet interfaces detected.
-                              </div>
-                            )}
-                          </div>
-                        ) : null}
-                      </div>
-
-                      <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
-                        <div className='flex items-center gap-3 px-4 py-4'>
-                          <button
-                            type='button'
-                            onClick={() => void toggleConnectivitySection('local-access')}
-                            className='flex min-w-0 flex-1 items-center gap-3 text-left'
-                            aria-expanded={localAccessSectionOpen}
-                          >
-                            <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
-                              <Link2 className='h-4 w-4 text-muted-foreground' />
-                            </div>
-                            <div className='min-w-0 flex-1'>
-                              <div className='text-sm font-semibold text-foreground'>Fallback local access</div>
-                              <div className='mt-0.5 truncate text-xs text-muted-foreground'>{localAccessSummary}</div>
-                            </div>
-                          </button>
-
-                          <div className='flex shrink-0 items-center justify-end'>
-                            <Switch
-                              checked={Boolean(localAccessMode?.supported) && Boolean(localAccessMode?.enabled)}
-                              disabled={localAccessModeLoading || !(localAccessMode?.supported ?? false)}
-                              onCheckedChange={() => void toggleLocalAccessMode(!(localAccessMode?.enabled ?? false))}
-                              aria-label='Toggle fallback local access'
-                            />
-                          </div>
-
-                          <button
-                            type='button'
-                            onClick={() => void toggleConnectivitySection('local-access')}
-                            className='flex shrink-0 items-center justify-center text-muted-foreground'
-                            aria-label={localAccessSectionOpen ? 'Collapse fallback local access details' : 'Expand fallback local access details'}
-                            aria-expanded={localAccessSectionOpen}
-                          >
-                            {localAccessSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
-                          </button>
-                        </div>
-
-                        {localAccessSectionOpen ? (
-                          <div className='space-y-4 border-t border-border/60 px-4 py-4'>
-                            <div className='text-xs leading-5 text-muted-foreground'>
-                              {localAccessSummary}
-                            </div>
-
-                            {localAccessModeFeedback ? (
-                              <div className={cn(
-                                'rounded-2xl border px-3 py-2 text-xs',
-                                localAccessModeFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-                              )}>
-                                {localAccessModeFeedback.message}
-                              </div>
-                            ) : null}
-
-                            {!localAccessMode?.supported ? (
-                              <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
-                                {localAccessMode?.statusMessage ?? 'Fallback local access is unavailable on this host.'}
-                              </div>
-                            ) : null}
-
-                            <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-4'>
-                              <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
-                                <DetailTile label='Bluetooth name' value={localAccessBluetoothDeviceName} />
-                                <DetailTile label='Hotspot SSID' value={localAccessHotspotSsid} />
-                                <DetailTile label='Password' value={localAccessMode?.hotspotPassword || 'No password'} />
-                                <DetailTile label='Status' value={localAccessStatus} />
-                              </div>
-                              {localAccessAddresses.length > 1 ? (
-                                <div className='mt-3 break-all text-[11px] font-mono text-muted-foreground'>
-                                  {localAccessAddresses.join(' • ')}
-                                </div>
-                              ) : null}
-                            </div>
-
-                            <div className='overflow-hidden rounded-2xl border border-border/70 bg-background/30'>
-                              <button
-                                type='button'
-                                onClick={() => setLocalAccessAdvancedOpen((current) => !current)}
-                                className='flex w-full items-center justify-between gap-3 px-4 py-3 text-left'
-                              >
-                                <div className='text-sm font-medium text-foreground'>Advanced</div>
-                                {localAccessAdvancedOpen ? <ChevronDown className='h-4 w-4 text-muted-foreground' /> : <ChevronRight className='h-4 w-4 text-muted-foreground' />}
-                              </button>
-
-                              {localAccessAdvancedOpen ? (
-                                <div className='space-y-4 border-t border-border/60 px-4 py-4'>
-                                  {!localAccessSettings?.storageAvailable ? (
-                                    <div className='rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-100'>
-                                      Fallback local access settings cannot be saved until PostgreSQL storage is configured.
-                                    </div>
-                                  ) : null}
-
-                                  {localAccessSettingsFeedback ? (
-                                    <div className={cn(
-                                      'rounded-2xl border px-3 py-2 text-xs',
-                                      localAccessSettingsFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-                                    )}>
-                                      {localAccessSettingsFeedback.message}
-                                    </div>
-                                  ) : null}
-
-                                  <div className='space-y-2'>
-                                    <label className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
-                                      Bluetooth name
-                                    </label>
-                                    <Input
-                                      aria-label='Fallback Bluetooth name'
-                                      value={localAccessBluetoothName}
-                                      onChange={(event) => {
-                                        localAccessSettingsDirtyRef.current = true;
-                                        setLocalAccessSettingsFeedback(null);
-                                        setLocalAccessBluetoothName(event.target.value);
-                                      }}
-                                      placeholder='Flux Monitor'
-                                    />
-                                    <div className='text-xs leading-5 text-muted-foreground'>
-                                      Shown when a phone or laptop pairs with the fallback Bluetooth connection.
-                                    </div>
-                                  </div>
-
-                                  <div className='space-y-2'>
-                                    <label className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
-                                      Hotspot SSID
-                                    </label>
-                                    <Input
-                                      aria-label='Fallback hotspot SSID'
-                                      value={localAccessHotspotName}
-                                      onChange={(event) => {
-                                        localAccessSettingsDirtyRef.current = true;
-                                        setLocalAccessSettingsFeedback(null);
-                                        setLocalAccessHotspotName(event.target.value);
-                                      }}
-                                      placeholder='FluxMonitor-Pi'
-                                    />
-                                    <div className='text-xs leading-5 text-muted-foreground'>
-                                      Broadcast if fallback local access starts a hotspot because the router is unavailable.
-                                    </div>
-                                  </div>
-
-                                  <div className='space-y-2'>
-                                    <label className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
-                                      Hotspot password
-                                    </label>
-                                    <Input
-                                      aria-label='Fallback hotspot password'
-                                      type={localAccessShowPassword ? 'text' : 'password'}
-                                      value={localAccessWifiPassword}
-                                      onChange={(event) => {
-                                        localAccessSettingsDirtyRef.current = true;
-                                        setLocalAccessSettingsFeedback(null);
-                                        setLocalAccessWifiPassword(event.target.value);
-                                      }}
-                                      placeholder='No password'
-                                    />
-                                    <label className='flex items-center gap-2 text-xs text-muted-foreground'>
-                                      <input
-                                        type='checkbox'
-                                        checked={localAccessShowPassword}
-                                        onChange={(event) => setLocalAccessShowPassword(event.target.checked)}
-                                        className='h-4 w-4 rounded border border-input bg-background/70'
-                                      />
-                                      <span>Show password</span>
-                                    </label>
-                                    <div className='text-xs leading-5 text-muted-foreground'>
-                                      {localAccessWifiPassword.length === 0
-                                        ? 'Leave this blank if you want local access to start without a password.'
-                                        : localAccessUsesWpa3Only
-                                          ? 'This password uses WPA3-only hotspot security.'
-                                          : 'This password uses the standard hotspot security mode.'}
-                                    </div>
-                                  </div>
-
-                                  <div className='flex justify-end'>
-                                    <button
-                                      type='button'
-                                      aria-label='Save fallback local access settings'
-                                      disabled={localAccessSettingsSaving || !localAccessSettings?.storageAvailable || !localAccessSettingsDirty}
-                                      onClick={() => void saveLocalAccessAdvancedSettings()}
-                                      className='inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
-                                    >
-                                      {localAccessSettingsSaving ? <LoaderCircle className='h-4 w-4 animate-spin' /> : null}
-                                      Save
-                                    </button>
-                                  </div>
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
-
-                      {renderInternetSpeedSection()}
-
-                      {renderTunnelSection()}
+                      <TunnelMenuItem
+                        tunnelSectionOpen={tunnelSectionOpen}
+                        cloudflareTunnelLoading={cloudflareTunnelLoading}
+                        cloudflareTunnelStatus={cloudflareTunnelStatus}
+                        cloudflareTunnelError={cloudflareTunnelError}
+                        cloudflareTunnelFeedback={cloudflareTunnelFeedback}
+                        cloudflareTunnelEnabled={cloudflareTunnelEnabled}
+                        cloudflareTunnelSaving={cloudflareTunnelSaving}
+                        cloudflareTunnelSupported={cloudflareTunnelSupported}
+                        cloudflareTunnelMaskedToken={cloudflareTunnelMaskedToken}
+                        cloudflareTunnelTokenOrCommand={cloudflareTunnelTokenOrCommand}
+                        onToggleExpanded={() => { void toggleConnectivitySection('tunnel'); }}
+                        onEnabledChange={(checked) => {
+                          cloudflareTunnelDirtyRef.current = true;
+                          setCloudflareTunnelEnabled(checked);
+                          setCloudflareTunnelFeedback(null);
+                        }}
+                        onTokenChange={(value) => {
+                          cloudflareTunnelDirtyRef.current = true;
+                          setCloudflareTunnelTokenOrCommand(value);
+                        }}
+                        onSave={saveCloudflareTunnel}
+                      />
                     </div>
                   </>
                 )}
               </CardContent>
             </Card>
 
-            <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'hardware-interfaces' && 'hidden')}>
-              <PanelHeader
-                title='Hardware interfaces'
-                description='Serial ports and block devices detected on this host.'
-              />
-              <CardContent className='space-y-4 pt-5'>
-                {interfaces ? (
-                  <>
-                    {interfaces.serialPorts.length > 0 ? (
-                      <div className='space-y-2'>
-                        <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>Serial ports</div>
-                        {interfaces.serialPorts.map((port) => (
-                          <div key={port.name} className='rounded-2xl border border-border/70 bg-background/50 px-4 py-3'>
-                            <div className='text-sm font-semibold text-foreground font-mono'>{port.name}</div>
-                            {port.description ? <div className='mt-1 text-xs text-muted-foreground'>{port.description}</div> : null}
-                          </div>
-                        ))}
-                      </div>
-                    ) : (
-                      <div className='rounded-2xl border border-dashed border-border bg-background/40 px-4 py-3 text-center text-xs text-muted-foreground'>
-                        No serial ports detected.
-                      </div>
-                    )}
+              {activeSystemSection === 'hardware-interfaces' ? (
+                <HardwareInterfacesSection interfaces={interfaces} />
+              ) : null}
 
-                    {interfaces.blockDevices.length > 0 ? (
-                      <div className='space-y-2'>
-                        <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>Block devices</div>
-                        {interfaces.blockDevices.map((dev) => (
-                          <div key={dev.name} className='rounded-2xl border border-border/70 bg-background/50 px-4 py-3'>
-                            <div className='flex flex-wrap items-center justify-between gap-2'>
-                              <div className='min-w-0 break-all text-sm font-semibold text-foreground font-mono'>{dev.name}</div>
-                              <div className='text-xs text-muted-foreground'>{dev.sizeFormatted}</div>
-                            </div>
-                            {dev.model ? <div className='mt-1 text-xs text-muted-foreground'>{dev.model}</div> : null}
-                            {dev.readOnly ? <div className='mt-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-amber-400'>Read-only</div> : null}
-                          </div>
-                        ))}
-                      </div>
-                    ) : null}
-
-                  </>
-                ) : (
-                  <div className='flex items-center justify-center py-6'>
-                    <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card className={cn('border border-border/80 bg-card/85 shadow-sm', activeSystemSection !== 'database' && 'hidden')}>
-              <PanelHeader
-                title='Database'
-                description='TimescaleDB storage size, backup, and restore.'
-              />
-              <CardContent className='space-y-4 pt-5'>
-                {dbLoading && !dbSize ? (
-                  <div className='flex items-center justify-center py-6'>
-                    <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
-                  </div>
-                ) : dbSize ? (
-                  <>
-                    <DetailTile label='Total database size' value={dbSize.totalSizeFormatted} />
-                    <div className='space-y-2'>
-                      {dbSize.tables.map((t) => (
-                        <div key={t.tableName} className='rounded-2xl border border-border/70 bg-background/50 px-4 py-3'>
-                          <div className='flex flex-wrap items-center justify-between gap-2'>
-                            <div className='min-w-0 break-all text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground font-mono'>{t.tableName}</div>
-                            <div className='text-xs text-muted-foreground'>{t.rowCount.toLocaleString()} rows</div>
-                          </div>
-                          <div className='mt-1 text-sm font-semibold text-foreground'>{t.sizeFormatted}</div>
-                        </div>
-                      ))}
-                    </div>
-                  </>
-                ) : (
-                  <div className='text-sm text-muted-foreground'>Unable to load database info.</div>
-                )}
-
-                <div className='rounded-2xl border border-border/70 bg-background/50 px-4 py-4'>
-                  <div className='space-y-1'>
-                    <div className='text-sm font-semibold text-foreground'>Storage policy</div>
-                    <div className='max-w-2xl text-xs leading-5 text-muted-foreground'>
-                      Temporary history stays in memory at the device&apos;s raw poll cadence, so faster polling can keep sub-second samples. Persisted buckets are written to the database forever.
-                    </div>
-                  </div>
-
-                  {dbSettingsLoading && !dbSettingsForm ? (
-                    <div className='flex items-center justify-center py-8'>
-                      <LoaderCircle className='h-5 w-5 animate-spin text-primary' />
-                    </div>
-                  ) : dbSettings && dbSettingsForm ? (
-                    <div className='space-y-4 pt-4'>
-                      <div className='grid gap-4 sm:grid-cols-2'>
-                        <label className='space-y-2'>
-                          <span className='block text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Temporary memory history</span>
-                          <Select
-                            value={dbSettingsForm.rawSecondsWindowMinutes}
-                            onValueChange={(value) => {
-                              if (value === null) {
-                                return;
-                              }
-
-                              setDbSettingsForm((current) => current ? { ...current, rawSecondsWindowMinutes: value } : current);
-                              setDbSettingsFeedback(null);
-                            }}
-                          >
-                            <SelectTrigger aria-label='Temporary memory history minutes' className='w-full'>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {supportedTemporaryHistoryMinutes.map((minutes) => (
-                                <SelectItem key={minutes} value={String(minutes)}>{minutes} min</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <span className='block text-[11px] leading-5 text-muted-foreground'>Larger temporary memory windows use more RAM, especially when devices poll faster than once per second.</span>
-                        </label>
-
-                        <label className='space-y-2'>
-                          <span className='block text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Persisted bucket size</span>
-                          <Select
-                            value={dbSettingsForm.persistedBucketMinutes}
-                            onValueChange={(value) => {
-                              if (value === null) {
-                                return;
-                              }
-
-                              setDbSettingsForm((current) => current ? { ...current, persistedBucketMinutes: value } : current);
-                              setDbSettingsFeedback(null);
-                            }}
-                          >
-                            <SelectTrigger aria-label='Persisted bucket minutes' className='w-full'>
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {supportedPersistedBucketMinutes.map((minutes) => (
-                                <SelectItem key={minutes} value={String(minutes)}>{minutes} min</SelectItem>
-                              ))}
-                            </SelectContent>
-                          </Select>
-                          <span className='block text-[11px] leading-5 text-muted-foreground'>Smaller persisted buckets capture more detail, but they also grow the database faster.</span>
-                        </label>
-                      </div>
-
-                      {dbSettingsFeedback ? (
-                        <div className={cn(
-                          'rounded-xl border px-3 py-2 text-xs',
-                          dbSettingsFeedback.isError ? 'border-rose-500/20 bg-rose-500/10 text-rose-200' : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200'
-                        )}>
-                          {dbSettingsFeedback.message}
-                        </div>
-                      ) : null}
-
-                      <div className='flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between'>
-                        <div className='text-[11px] leading-5 text-muted-foreground'>
-                          Current policy: {dbSettings.rawSecondsWindowMinutes}m of temporary in-memory history, {dbSettings.persistedBucketMinutes}m persisted buckets stored forever in the database.
-                        </div>
-                        <button
-                          type='button'
-                          disabled={dbSettingsSaving || !dbSettingsDirty}
-                          onClick={() => { void saveDatabaseSettings(); }}
-                          className='inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:cursor-not-allowed disabled:opacity-50'
-                        >
-                          {dbSettingsSaving ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Database className='h-4 w-4' />}
-                          {dbSettingsSaving ? 'Saving…' : 'Save'}
-                        </button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className='pt-4 text-sm text-muted-foreground'>Unable to load database retention settings.</div>
-                  )}
-                </div>
-
-                <div className='flex flex-col gap-2 pt-2'>
-                  <button
-                    type='button'
-                    onClick={handleExport}
-                    className='inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
-                  >
-                    <Download className='h-4 w-4' />
-                    Export database
-                  </button>
-
-                  <input
-                    ref={fileInputRef}
-                    type='file'
-                    accept='.csv,.sql'
-                    className='hidden'
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) void handleImport(file);
-                      e.target.value = '';
-                    }}
-                  />
-                  <button
-                    type='button'
-                    disabled={importing}
-                    onClick={() => fileInputRef.current?.click()}
-                    className='inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
-                  >
-                    {importing ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Upload className='h-4 w-4' />}
-                    {importing ? 'Importing…' : 'Import database'}
-                  </button>
-
-                  {importResult ? (
-                    <div className={cn('rounded-xl border px-3 py-2 text-xs', importResult.includes('successfully') ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-200' : 'border-rose-500/20 bg-rose-500/10 text-rose-200')}>
-                      {importResult}
-                    </div>
-                  ) : null}
-                </div>
-              </CardContent>
-            </Card>
+              {activeSystemSection === 'database' ? (
+                <DatabaseSection
+                  dbLoading={dbLoading}
+                  dbSize={dbSize}
+                  dbSettingsLoading={dbSettingsLoading}
+                  dbSettings={dbSettings}
+                  dbSettingsForm={dbSettingsForm}
+                  dbSettingsSaving={dbSettingsSaving}
+                  dbSettingsDirty={dbSettingsDirty}
+                  dbSettingsFeedback={dbSettingsFeedback}
+                  importing={importing}
+                  importResult={importResult}
+                  fileInputRef={fileInputRef}
+                  onRawWindowChange={(value) => {
+                    setDbSettingsForm((current) => current ? { ...current, rawSecondsWindowMinutes: value } : current);
+                    setDbSettingsFeedback(null);
+                  }}
+                  onPersistedBucketChange={(value) => {
+                    setDbSettingsForm((current) => current ? { ...current, persistedBucketMinutes: value } : current);
+                    setDbSettingsFeedback(null);
+                  }}
+                  onSaveSettings={saveDatabaseSettings}
+                  onExport={handleExport}
+                  onImportFile={handleImport}
+                />
+              ) : null}
 
             </div>
           ) : null}
@@ -3211,291 +2094,6 @@ export function SystemPage() {
   );
 }
 
-function UsagePanel({
-  icon: Icon,
-  label,
-  percent,
-  summary,
-  secondary,
-  details,
-  labelIcon: LabelIcon,
-  labelIconClassName,
-}: {
-  icon: typeof Cpu;
-  label: string;
-  percent: number | null;
-  summary: string;
-  secondary: string;
-  details?: string[];
-  labelIcon?: typeof Cpu;
-  labelIconClassName?: string;
-}) {
-  const footerSegments = [secondary, ...(details ?? [])];
-
-  return (
-    <div className='space-y-3'>
-      <div className='flex items-center justify-between gap-3'>
-        <div className='min-w-0'>
-          <div className='flex items-center gap-2'>
-            <Icon className='h-4 w-4 shrink-0 text-muted-foreground' />
-            <div className='flex items-center gap-1.5 text-sm font-semibold text-foreground'>
-              <span>{label}</span>
-              {LabelIcon ? <LabelIcon className={cn('h-3.5 w-3.5 shrink-0', labelIconClassName)} /> : null}
-            </div>
-          </div>
-          <div className='text-sm text-muted-foreground'>{summary}</div>
-        </div>
-        <div className='shrink-0 text-sm font-semibold text-foreground'>{formatPercent(percent)}</div>
-      </div>
-      <div className='h-2 overflow-hidden rounded-full bg-muted'>
-        <div className='h-full rounded-full bg-primary transition-[width] duration-500 ease-out' style={{ width: `${Math.max(percent ?? 0, 4)}%` }} />
-      </div>
-      <div className='flex flex-wrap items-center gap-y-1 text-xs text-muted-foreground'>
-        {footerSegments.map((segment, index) => (
-          <span key={`${index}-${segment}`} className='whitespace-nowrap'>
-            {index > 0 ? <span className='px-1 text-muted-foreground/70'>•</span> : null}
-            {segment}
-          </span>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-function DetailTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className='rounded-2xl border border-border/70 bg-background/50 px-4 py-3'>
-      <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>{label}</div>
-      <div className='mt-2 text-sm font-semibold text-foreground'>{value}</div>
-    </div>
-  );
-}
-
-function UpdateChannelTile({
-  value,
-  disabled,
-  pending,
-  onChange,
-}: {
-  value: string;
-  disabled: boolean;
-  pending: boolean;
-  onChange: (value: string | null) => void;
-}) {
-  return (
-    <div className='rounded-2xl border border-border/70 bg-background/50 px-4 py-3'>
-      <div className='flex items-center justify-between gap-2 text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>
-        <span>Channel</span>
-        {pending ? <LoaderCircle className='h-3.5 w-3.5 animate-spin' /> : null}
-      </div>
-      <Select value={value} onValueChange={onChange} disabled={disabled}>
-        <SelectTrigger aria-label='Software update channel' className='mt-2 w-full'>
-          <SelectValue />
-        </SelectTrigger>
-        <SelectContent>
-          <SelectItem value='dev'>Dev</SelectItem>
-          <SelectItem value='main'>Main</SelectItem>
-        </SelectContent>
-      </Select>
-    </div>
-  );
-}
-
-function SpeedMetricCard({
-  label,
-  value,
-  dialValue,
-  caption,
-  gaugePercent,
-  tone,
-  isActive = false,
-}: {
-  label: string;
-  value: string;
-  dialValue: string;
-  caption?: string;
-  gaugePercent: number;
-  tone: 'emerald' | 'sky' | 'emerald-soft' | 'amber' | 'rose';
-  isActive?: boolean;
-}) {
-  const toneClassName = tone === 'emerald'
-    ? 'text-emerald-400'
-    : tone === 'sky'
-      ? 'text-sky-400'
-      : tone === 'amber'
-        ? 'text-amber-400'
-        : tone === 'rose'
-          ? 'text-rose-400'
-          : 'text-emerald-300';
-  const toneBarClassName = tone === 'emerald'
-    ? 'bg-emerald-400'
-    : tone === 'sky'
-      ? 'bg-sky-400'
-      : tone === 'amber'
-        ? 'bg-amber-400'
-        : tone === 'rose'
-          ? 'bg-rose-400'
-          : 'bg-emerald-300';
-
-  return (
-    <div className={cn(
-      'rounded-2xl border border-border/70 bg-background/50 px-4 py-4 transition-colors duration-300',
-      isActive && 'border-primary/35 bg-primary/5'
-    )}>
-      <div className='flex items-start justify-between gap-4'>
-        <div className='min-w-0 space-y-1'>
-          <div className='text-[11px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>{label}</div>
-          <div className='text-sm font-semibold text-foreground'>{value}</div>
-          {caption ? <div className='text-xs leading-5 text-muted-foreground'>{caption}</div> : null}
-        </div>
-        <div className='shrink-0 text-right'>
-          <div className={cn('text-xl font-semibold tracking-tight', toneClassName)}>{dialValue}</div>
-          <div className='mt-1 text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Current</div>
-        </div>
-      </div>
-      <div className='mt-4 h-1.5 overflow-hidden rounded-full bg-background/70'>
-        <div
-          className={cn('h-full rounded-full transition-[width] duration-700 ease-out', toneBarClassName)}
-          style={{ width: `${Math.max(8, Math.min(100, gaugePercent))}%` }}
-        />
-      </div>
-    </div>
-  );
-}
-
-function BluetoothDeviceCard({ device }: { device: BluetoothDeviceSnapshot }) {
-  return (
-    <div className='flex items-center justify-between gap-3 px-4 py-3'>
-      <div className='min-w-0'>
-        <div className='truncate text-sm font-semibold text-foreground'>{device.displayName}</div>
-        <div className='mt-1 text-[11px] font-mono text-muted-foreground'>{device.address}</div>
-      </div>
-      <SignalStrengthIndicator
-        kind='signal'
-        percent={normalizeBluetoothSignalPercent(device.rssi)}
-        unavailableLabel='Signal unavailable'
-        className='shrink-0'
-      />
-    </div>
-  );
-}
-
-function SignalStrengthIndicator({
-  kind,
-  percent,
-  disabled = false,
-  unavailableLabel = 'Unavailable',
-  revealOnParentInteraction = false,
-  className,
-}: {
-  kind: 'wifi' | 'signal';
-  percent: number | null | undefined;
-  disabled?: boolean;
-  unavailableLabel?: string;
-  revealOnParentInteraction?: boolean;
-  className?: string;
-}) {
-  const [revealed, setRevealed] = useState(false);
-  const normalizedPercent = normalizeSignalPercent(percent);
-  const label = normalizedPercent != null ? `${normalizedPercent}%` : unavailableLabel;
-
-  return (
-    <span
-      role='button'
-      tabIndex={0}
-      onClick={(event) => {
-        event.preventDefault();
-        event.stopPropagation();
-        setRevealed((current) => !current);
-      }}
-      onMouseEnter={() => setRevealed(true)}
-      onMouseLeave={() => setRevealed(false)}
-      onBlur={() => setRevealed(false)}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter' || event.key === ' ') {
-          event.preventDefault();
-          event.stopPropagation();
-          setRevealed((current) => !current);
-        }
-      }}
-      className={cn(
-        'inline-flex items-center gap-1.5 rounded-md px-1 py-0.5 text-xs text-muted-foreground transition-colors hover:bg-background/60',
-        revealOnParentInteraction ? 'group-hover:bg-background/60 group-focus:bg-background/60 group-active:bg-background/60' : '',
-        className
-      )}
-    >
-      <SignalStrengthGlyph kind={kind} percent={normalizedPercent} disabled={disabled} />
-      <span className={cn(
-        'overflow-hidden whitespace-nowrap transition-all duration-150',
-        revealed
-          ? 'max-w-16 opacity-100'
-          : revealOnParentInteraction
-            ? 'max-w-0 opacity-0 group-hover:max-w-16 group-hover:opacity-100 group-focus:max-w-16 group-focus:opacity-100 group-active:max-w-16 group-active:opacity-100'
-            : 'max-w-0 opacity-0'
-      )}>
-        {label}
-      </span>
-    </span>
-  );
-}
-
-function SignalStrengthGlyph({
-  kind,
-  percent,
-  disabled,
-}: {
-  kind: 'wifi' | 'signal';
-  percent: number | null;
-  disabled: boolean;
-}) {
-  if (kind === 'wifi') {
-    return <WifiSignalGlyph percent={percent} disabled={disabled} />;
-  }
-
-  const toneClassName = getSignalToneClassName(percent, disabled);
-
-  return (
-    <span className='inline-flex items-center justify-center' aria-hidden='true'>
-      <FontAwesomeIcon icon={faSignal as IconDefinition} className={cn('h-3.5 w-3.5 transition-opacity', toneClassName)} />
-    </span>
-  );
-}
-
-function WifiSignalGlyph({ percent, disabled }: { percent: number | null; disabled: boolean }) {
-  const state = getWifiSignalState(percent, disabled);
-  const toneClassName = getWifiSignalToneClassName(state);
-
-  return (
-    <span className={cn('inline-flex items-center justify-center', toneClassName)} aria-hidden='true'>
-      <svg viewBox='0 0 640 512' className='h-3.5 w-4 fill-current'>
-        {state === 'weak' ? (
-          <>
-            <path opacity='.4' d='M0 179.8c0 8 3 15.9 8.9 22.2c12.2 12.8 32.5 13.2 45.2 .9C123.2 136.7 216.8 96 320 96s196.8 40.7 265.8 106.9c12.8 12.2 33 11.8 45.2-.9c6-6.2 8.9-14.2 8.9-22.2c0-8.4-3.3-16.8-9.8-23.1C549.7 79.5 440.4 32 320 32S90.3 79.5 9.8 156.7C3.3 163 0 171.4 0 179.8zM126.7 309.2c11.7 13.3 31.9 14.5 45.2 2.8c39.5-34.9 91.3-56 148.2-56s108.6 21.1 148.2 56c13.3 11.7 33.5 10.4 45.2-2.8s10.4-33.5-2.8-45.2C459.8 219.2 393 192 320 192s-139.8 27.2-190.5 72c-13.3 11.7-14.5 31.9-2.8 45.2z' />
-            <path d='M256 416a64 64 0 1 1 128 0 64 64 0 1 1 -128 0z' />
-          </>
-        ) : state === 'fair' ? (
-          <>
-            <path opacity='.4' d='M0 179.8c0 8 3 15.9 8.9 22.2c6.3 6.5 14.7 9.8 23.1 9.8c8 0 15.9-3 22.2-8.9C123.2 136.7 216.8 96 320 96s196.8 40.7 265.8 106.9c6.2 6 14.2 8.9 22.2 8.9c8.4 0 16.8-3.3 23.1-9.8c12.2-12.8 11.8-33-.9-45.2C549.7 79.5 440.4 32 320 32S90.3 79.5 9.8 156.7C3.3 163 0 171.4 0 179.8z' />
-            <path d='M171.8 312c39.5-34.9 91.3-56 148.2-56s108.7 21.1 148.2 56c13.3 11.7 33.5 10.4 45.2-2.8s10.4-33.5-2.8-45.2C459.8 219.2 393 192 320 192s-139.8 27.2-190.5 72c-13.3 11.7-14.5 31.9-2.8 45.2s31.9 14.5 45.2 2.8zM320 480a64 64 0 1 0 0-128 64 64 0 1 0 0 128z' />
-          </>
-        ) : state === 'strong' ? (
-          <path d='M54.2 202.9C123.2 136.7 216.8 96 320 96s196.8 40.7 265.8 106.9c12.8 12.2 33 11.8 45.2-.9s11.8-33-.9-45.2C549.7 79.5 440.4 32 320 32S90.3 79.5 9.8 156.7C-2.9 169-3.3 189.2 8.9 202s32.5 13.2 45.2 .9zM320 256c56.8 0 108.6 21.1 148.2 56c13.3 11.7 33.5 10.4 45.2-2.8s10.4-33.5-2.8-45.2C459.8 219.2 393 192 320 192s-139.8 27.2-190.5 72c-13.3 11.7-14.5 31.9-2.8 45.2s31.9 14.5 45.2 2.8c39.5-34.9 91.3-56 148.2-56zm64 160a64 64 0 1 0 -128 0 64 64 0 1 0 128 0z' />
-        ) : state === 'none' ? (
-          <>
-            <path opacity='.4' d='M8.9 202c12.2 12.8 32.5 13.2 45.2 .9c51.3-49.2 116.2-84.3 188.5-99.1l-1.4-19.3c-1.2-17.4 3.3-33.9 11.9-47.6C159.4 51 75.1 94.1 9.8 156.7C-2.9 169-3.3 189.2 8.9 202zM126.7 309.2c11.7 13.3 31.9 14.5 45.2 2.8c23.6-20.8 51.6-36.7 82.4-46.2l-4.7-65.1C204.4 212 163.4 234.1 129.5 264c-13.3 11.7-14.5 31.9-2.8 45.2zm259.1-43.4c30.8 9.4 58.8 25.4 82.4 46.2c13.3 11.7 33.5 10.4 45.2-2.8s10.4-33.5-2.8-45.2c-33.9-29.9-74.9-52-120.1-63.3l-4.6 65.1zM386.8 37c8.6 13.7 13.1 30.1 11.9 47.6l-1.4 19.3c72.3 14.8 137.2 49.9 188.5 99.1c12.8 12.2 33 11.8 45.2-.9c6-6.2 8.9-14.2 8.9-22.2c0-8.4-3.3-16.8-9.8-23.1C564.9 94.1 480.6 51 386.8 37z' />
-            <path d='M320 32c-27.2 0-48.7 23.1-46.8 50.2l14.9 208C289.3 307 303.2 320 320 320s30.7-13 31.9-29.7l14.9-208C368.7 55.1 347.2 32 320 32zm0 448a64 64 0 1 0 0-128 64 64 0 1 0 0 128z' />
-          </>
-        ) : (
-          <>
-            <path opacity='.4' d='M8.9 202c-12.2-12.8-11.8-33 .9-45.2C20 147 30.7 137.7 41.7 128.9l51.9 40.9C79.7 179.9 66.6 191 54.2 202.9c-12.8 12.2-33 11.8-45.2-.9zM126.7 309.2c-11.7-13.3-10.4-33.5 2.8-45.2c13.4-11.9 28-22.5 43.5-31.7L228 275.7c-20.6 9.3-39.5 21.6-56.2 36.3c-13.3 11.7-33.5 10.4-45.2-2.8zm1.4-234.1C186.3 47.5 251.3 32 320 32c120.4 0 229.7 47.5 310.2 124.7c12.8 12.2 13.2 32.5 .9 45.2s-32.5 13.2-45.2 .9C516.8 136.7 423.2 96 320 96c-47.3 0-92.6 8.5-134.4 24.2c-19.2-15-38.3-30.1-57.5-45.1zM256 416c0-35.3 28.7-64 64-64c1.7 0 3.5 .1 5.2 .2L380.8 396c2.1 6.3 3.2 13 3.2 20c0 35.3-28.7 64-64 64s-64-28.7-64-64zm24.7-221.3c12.9-1.8 26-2.7 39.3-2.7c73 0 139.8 27.2 190.5 72c13.2 11.7 14.5 31.9 2.8 45.2s-31.9 14.5-45.2 2.8c-28.9-25.5-64.4-43.7-103.6-51.6c-28-21.9-55.9-43.8-83.9-65.8z' />
-            <path d='M5.1 9.2C13.3-1.2 28.4-3.1 38.8 5.1l592 464c10.4 8.2 12.3 23.3 4.1 33.7s-23.3 12.3-33.7 4.1L9.2 42.9C-1.2 34.7-3.1 19.6 5.1 9.2z' />
-          </>
-        )}
-      </svg>
-    </span>
-  );
-}
-
 function mergeBluetoothDevices(primary: BluetoothDeviceSnapshot[], secondary: BluetoothDeviceSnapshot[]) {
   const devices = new Map<string, BluetoothDeviceSnapshot>();
 
@@ -3529,22 +2127,6 @@ function mergeBluetoothDevices(primary: BluetoothDeviceSnapshot[], secondary: Bl
 
       return left.displayName.localeCompare(right.displayName);
     });
-}
-
-function normalizeSignalPercent(percent: number | null | undefined) {
-  if (percent == null || !Number.isFinite(percent)) {
-    return null;
-  }
-
-  return Math.max(0, Math.min(100, Math.round(percent)));
-}
-
-function normalizeBluetoothSignalPercent(rssi: number | null | undefined) {
-  if (rssi == null || !Number.isFinite(rssi)) {
-    return null;
-  }
-
-  return normalizeSignalPercent(((rssi + 100) / 50) * 100);
 }
 
 function isWifiNetworkSecured(accessPoint: WifiAccessPointInfo) {
@@ -3654,66 +2236,6 @@ function requiresSaeForLocalAccessPassword(password: string) {
   return true;
 }
 
-function getWifiSignalState(percent: number | null, disabled: boolean) {
-  if (disabled) {
-    return 'disabled' as const;
-  }
-
-  if (percent == null || percent <= 0) {
-    return 'none' as const;
-  }
-
-  if (percent < 34) {
-    return 'weak' as const;
-  }
-
-  if (percent < 67) {
-    return 'fair' as const;
-  }
-
-  return 'strong' as const;
-}
-
-function getWifiSignalToneClassName(state: 'disabled' | 'none' | 'weak' | 'fair' | 'strong') {
-  if (state === 'disabled') {
-    return 'text-muted-foreground/45';
-  }
-
-  if (state === 'none') {
-    return 'text-muted-foreground/55';
-  }
-
-  if (state === 'weak') {
-    return 'text-muted-foreground/75';
-  }
-
-  if (state === 'fair') {
-    return 'text-foreground/85';
-  }
-
-  return 'text-foreground';
-}
-
-function getSignalToneClassName(percent: number | null, disabled: boolean) {
-  if (disabled || percent == null) {
-    return 'text-muted-foreground/35';
-  }
-
-  if (percent >= 75) {
-    return 'text-foreground';
-  }
-
-  if (percent >= 50) {
-    return 'text-foreground/80';
-  }
-
-  if (percent >= 25) {
-    return 'text-muted-foreground/75';
-  }
-
-  return 'text-muted-foreground/45';
-}
-
 function isWifiInterfaceInUse(wifiInterface: WifiInterfaceSnapshot | null | undefined) {
   return Boolean(wifiInterface?.connectedSsid) || (wifiInterface?.addresses.length ?? 0) > 0;
 }
@@ -3738,38 +2260,6 @@ function isEthernetInterfaceActive(ethernetInterface: EthernetInterfaceSnapshot 
   return (ethernetInterface.connectionState ?? ethernetInterface.status ?? '').toLowerCase().includes('connected')
     || stringEqualsIgnoreCase(ethernetInterface.status, 'up')
     || ethernetInterface.addresses.length > 0;
-}
-
-function buildEthernetStatusMessage(ethernetInterface: EthernetInterfaceSnapshot | null | undefined) {
-  if (!ethernetInterface) {
-    return 'No Ethernet interface detected.';
-  }
-
-  if (!isEthernetInterfaceEnabled(ethernetInterface)) {
-    return `${ethernetInterface.name} interface is off.`;
-  }
-
-  if (ethernetInterface.carrierDetected === false) {
-    return `${ethernetInterface.name} interface is active but not operational. Check cable.`;
-  }
-
-  if (isEthernetInterfaceActive(ethernetInterface)) {
-    return `${ethernetInterface.name} interface is active on the wired network.`;
-  }
-
-  return `${ethernetInterface.name} interface is on and waiting for a wired link.`;
-}
-
-function formatEthernetStateLabel(ethernetInterface: EthernetInterfaceSnapshot | null | undefined) {
-  if (!ethernetInterface) {
-    return 'Unknown';
-  }
-
-  if (ethernetInterface.carrierDetected === false) {
-    return 'Cable not detected';
-  }
-
-  return ethernetInterface.connectionState ?? ethernetInterface.status ?? 'Unknown';
 }
 
 function stringEqualsIgnoreCase(left: string | null | undefined, right: string) {
@@ -3863,50 +2353,6 @@ function formatDistance(kilometers: number | null | undefined) {
 function formatInternetSpeedServer(sponsor: string | null | undefined, name: string | null | undefined, country: string | null | undefined) {
   const segments = [sponsor, name, country].filter((value): value is string => Boolean(value?.trim()));
   return segments.length > 0 ? segments.join(' • ') : noDataLabel;
-}
-
-function formatUsage(usedBytes: number | null, totalBytes: number | null) {
-  if (usedBytes == null || totalBytes == null) {
-    return noDataLabel;
-  }
-
-  return `${formatBytes(usedBytes)} of ${formatBytes(totalBytes)}`;
-}
-
-function formatPercent(value: number | null | undefined) {
-  if (value == null || !Number.isFinite(value)) {
-    return noDataLabel;
-  }
-
-  return `${value.toFixed(value >= 10 ? 0 : 1)}%`;
-}
-
-function formatWholeNumber(value: number | null | undefined) {
-  if (value == null || !Number.isFinite(value)) {
-    return noDataLabel;
-  }
-
-  return Math.round(value).toLocaleString();
-}
-
-function formatFrequency(megahertz: number | null | undefined) {
-  if (megahertz == null || !Number.isFinite(megahertz)) {
-    return noDataLabel;
-  }
-
-  if (megahertz >= 1000) {
-    return `${(megahertz / 1000).toFixed(2)} GHz`;
-  }
-
-  return `${Math.round(megahertz).toLocaleString()} MHz`;
-}
-
-function formatDecimalValue(value: number | null | undefined, unit: string) {
-  if (value == null || !Number.isFinite(value)) {
-    return noDataLabel;
-  }
-
-  return `${value.toFixed(Math.abs(value) >= 100 ? 0 : 1)} ${unit}`;
 }
 
 function getMegabitsPerSecond(bitsPerSecond: number | null | undefined) {
@@ -4006,14 +2452,6 @@ function formatInternetSpeedConnectionMode(connectionMode: string | null | undef
       : connectionMode;
 }
 
-function formatRpm(value: number | null | undefined) {
-  if (value == null || !Number.isFinite(value)) {
-    return noDataLabel;
-  }
-
-  return `${Math.round(value).toLocaleString()} RPM`;
-}
-
 function formatTimestamp(value: string | null | undefined) {
   if (!value) {
     return noDataLabel;
@@ -4039,14 +2477,6 @@ function formatCommit(value: string | null | undefined) {
 
 function getReleaseChannel(releaseTag: string | null | undefined) {
   return releaseTag === 'dev-latest' ? 'dev' : 'main';
-}
-
-function formatReleaseChannel(channel: string | null | undefined) {
-  if (!channel) {
-    return noDataLabel;
-  }
-
-  return channel === 'dev' ? 'Dev' : channel === 'main' ? 'Main' : channel;
 }
 
 function formatWorkflowRun(runNumber: string | null | undefined, runAttempt: string | null | undefined) {
@@ -4097,18 +2527,4 @@ function formatElapsedDuration(totalSeconds: number | null | undefined) {
   return '<1m';
 }
 
-function getUsagePercent(usedBytes: number | null, totalBytes: number | null) {
-  if (usedBytes == null || totalBytes == null || totalBytes <= 0) {
-    return null;
-  }
 
-  return Math.min(Math.max((usedBytes / totalBytes) * 100, 0), 100);
-}
-
-function getDerivedUsedBytes(totalBytes: number | null | undefined, availableBytes: number | null | undefined) {
-  if (totalBytes == null || availableBytes == null) {
-    return null;
-  }
-
-  return Math.max(totalBytes - availableBytes, 0);
-}
