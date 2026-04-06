@@ -1,7 +1,7 @@
 import { AlertTriangle, CheckCircle2, LoaderCircle, ShieldAlert, XCircle } from 'lucide-react';
 import { Button } from './ui/button';
 import { cn } from '../lib/utils';
-import { getUpdateStateTone } from '../lib/systemUpdate';
+import { getUpdateCancellationMessage, getUpdateProgressDetail, getUpdateProgressLabel, getUpdateStateTone } from '../lib/systemUpdate';
 import { useAppStore } from '../store/useAppStore';
 
 export function UpdateLockOverlay() {
@@ -31,6 +31,9 @@ export function UpdateLockOverlay() {
       : tone === 'warning'
         ? 'border-amber-500/25 bg-amber-500/10 text-amber-100'
         : 'border-primary/25 bg-card/96 text-foreground';
+  const cancellationMessage = getUpdateCancellationMessage(progress);
+  const canCancel = progress.isRunning && progress.canCancel;
+  const showLockedMessage = progress.isRunning && !progress.canCancel;
 
   return (
     <div className={cn(
@@ -55,11 +58,11 @@ export function UpdateLockOverlay() {
             <div className='text-base font-semibold'>
               {blocking ? 'Software update in progress' : 'Software update status'}
             </div>
-            <div className='mt-1 text-sm font-medium'>
+            <div className='mt-1 text-sm font-medium text-foreground/90'>
               {progress.stage}
             </div>
             <div className='mt-2 text-sm text-muted-foreground'>
-              {progress.detail}
+              {getUpdateProgressDetail(progress)}
             </div>
           </div>
         </div>
@@ -67,9 +70,7 @@ export function UpdateLockOverlay() {
         {progress.percentComplete != null ? (
           <div className='mt-5'>
             <div className='mb-2 flex items-center justify-between gap-3 text-xs uppercase tracking-[0.18em] text-muted-foreground'>
-              <span>
-                {progress.stepIndex && progress.stepCount ? `Step ${progress.stepIndex} of ${progress.stepCount}` : 'Progress'}
-              </span>
+              <span>{getUpdateProgressLabel(progress)}</span>
               <span>{progress.percentComplete}%</span>
             </div>
             <div className='h-2 overflow-hidden rounded-full bg-background/50'>
@@ -90,16 +91,19 @@ export function UpdateLockOverlay() {
           </div>
         ) : null}
 
-        {blocking ? (
-          <div className='mt-4 rounded-2xl border border-border/60 bg-background/35 px-3 py-2 text-xs text-muted-foreground'>
-            {progress.canCancel
-              ? 'You can cancel now if you need to stop the update. Flux Monitor will keep the current installed version.'
-              : progress.cancelUnavailableReason ?? 'Cancellation is no longer available because the update is already switching the installed files.'}
+        {blocking && cancellationMessage ? (
+          <div className={cn(
+            'mt-4 rounded-2xl px-3 py-2 text-xs',
+            showLockedMessage
+              ? 'border border-border/40 bg-background/20 text-muted-foreground'
+              : 'border border-border/60 bg-background/35 text-muted-foreground',
+          )}>
+            {cancellationMessage}
           </div>
         ) : null}
 
         <div className='mt-5 flex justify-end gap-2'>
-          {blocking && progress.canCancel ? (
+          {canCancel ? (
             <Button
               type='button'
               variant='destructive'

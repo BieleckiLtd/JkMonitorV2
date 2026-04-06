@@ -2,8 +2,8 @@ import { create } from 'zustand';
 import { type ThemeConfig, builtInThemes } from '../lib/themes';
 import { type UpdateActionResult, type UpdateProgress } from '../lib/systemUpdate';
 
-const updateRestartHeartbeatDetail = 'Flux Monitor is restarting. Waiting for the heartbeat before reloading the frontend.';
-const updateReloadingFrontendDetail = 'Flux Monitor is back online. Reloading the frontend to pick up the new JavaScript and styles.';
+const updateRestartHeartbeatDetail = 'Flux Monitor is restarting. The page will reload automatically when it is ready.';
+const updateReloadingFrontendDetail = 'Flux Monitor is back online. Reloading the page now.';
 const updateHeartbeatPollIntervalMs = 1500;
 const updateProgressReconnectDelayMs = 2000;
 

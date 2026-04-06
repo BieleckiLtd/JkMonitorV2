@@ -8,7 +8,7 @@ import { Card, CardContent } from '../components/ui/card';
 import { Input } from '../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { Switch } from '../components/ui/switch';
-import { type UpdateProgress, getUpdateStateTone } from '../lib/systemUpdate';
+import { type UpdateProgress, getUpdateCancellationMessage, getUpdateProgressDetail, getUpdateProgressLabel, getUpdateStateTone } from '../lib/systemUpdate';
 import { cn } from '../lib/utils';
 import { LogsPanel } from '../components/LogsPanel';
 import { useAppStore } from '../store/useAppStore';
@@ -2227,14 +2227,12 @@ export function SystemPage() {
                             {updateProgress.stage}
                           </div>
                           <div className='mt-1.5 opacity-90'>
-                            {updateProgress.detail}
+                            {getUpdateProgressDetail(updateProgress)}
                           </div>
                           {updateProgress.percentComplete != null ? (
                             <div className='mt-3'>
                               <div className='mb-1 flex items-center justify-between gap-2 text-[10px] uppercase tracking-[0.16em] opacity-70'>
-                                <span>
-                                  {updateProgress.stepIndex && updateProgress.stepCount ? `Step ${updateProgress.stepIndex} of ${updateProgress.stepCount}` : 'Progress'}
-                                </span>
+                                <span>{getUpdateProgressLabel(updateProgress)}</span>
                                 <span>{updateProgress.percentComplete}%</span>
                               </div>
                               <div className='h-1.5 overflow-hidden rounded-full bg-background/40'>
@@ -2242,11 +2240,9 @@ export function SystemPage() {
                               </div>
                             </div>
                           ) : null}
-                          {updateProgress.isRunning ? (
+                          {updateProgress.isRunning && getUpdateCancellationMessage(updateProgress) ? (
                             <div className='mt-2 opacity-80'>
-                              {updateProgress.canCancel
-                                ? 'You can still cancel now if you need to stop the update.'
-                                : updateProgress.cancelUnavailableReason ?? 'Do not turn off the device while the update is being finalized.'}
+                              {getUpdateCancellationMessage(updateProgress)}
                             </div>
                           ) : null}
                         </div>

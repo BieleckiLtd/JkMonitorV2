@@ -108,7 +108,9 @@ describe('useAppStore update restart recovery', () => {
       isRunning: true,
     });
     expect(useAppStore.getState().updateProgress?.stage).not.toBe('Update complete.');
-    expect(useAppStore.getState().updateProgress?.detail).toMatch(/heartbeat|Reloading the frontend/i);
+    expect(useAppStore.getState().updateProgress?.detail).toBe(
+      'Flux Monitor is restarting. The page will reload automatically when it is ready.',
+    );
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(locationReplace).not.toHaveBeenCalled();
@@ -188,7 +190,9 @@ describe('useAppStore update restart recovery', () => {
       status: 'restarting',
       isRunning: true,
     });
-    expect(useAppStore.getState().updateProgress?.detail).toMatch(/heartbeat|Reloading the frontend/i);
+    expect(useAppStore.getState().updateProgress?.detail).toBe(
+      'Flux Monitor is restarting. The page will reload automatically when it is ready.',
+    );
 
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(locationReplace).not.toHaveBeenCalled();
@@ -513,7 +517,9 @@ describe('useAppStore update restart recovery', () => {
       status: 'restarting',
       isRunning: true,
     });
-    expect(useAppStore.getState().updateProgress?.detail).toMatch(/heartbeat|Reloading the frontend/i);
+    expect(useAppStore.getState().updateProgress?.detail).toBe(
+      'Flux Monitor is restarting. The page will reload automatically when it is ready.',
+    );
     expect(fetchMock).toHaveBeenCalledTimes(2);
     expect(locationReplace).not.toHaveBeenCalled();
 

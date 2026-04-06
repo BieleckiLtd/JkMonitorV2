@@ -42,12 +42,12 @@ public sealed class SystemUpdateService(
     private static readonly UpdateStageDefinition RestartingStage = new(
         InstallerSection: null,
         Stage: "Restarting Flux Monitor…",
-        Detail: "The new version is installed. The service is restarting now.",
+        Detail: "Flux Monitor is restarting. The page will reload automatically when it is ready.",
         StepIndex: 11,
         StepCount: 11,
         PercentComplete: 100,
         CanCancel: false,
-        CancelUnavailableReason: "The update has already been installed and the service is restarting.");
+        CancelUnavailableReason: "Update is now being applied and can no longer be cancelled.");
 
     private static readonly IReadOnlyList<UpdateStageDefinition> InstallerStages =
     [
