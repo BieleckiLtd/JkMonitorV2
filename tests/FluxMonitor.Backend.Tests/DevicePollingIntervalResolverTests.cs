@@ -50,6 +50,36 @@ public sealed class DevicePollingIntervalResolverTests
     }
 
     [Fact]
+    public void Resolve_IgnoresZeroIntervalGroups()
+    {
+        var definition = new DeviceDefinition
+        {
+            Version = "1.0",
+            Device = new DeviceMetadata
+            {
+                Id = "test-device",
+                Name = "Test Device"
+            },
+            Connection = new ConnectionDefinition
+            {
+                Transport = new TransportDefinition { Type = "serial" },
+                Protocol = new ProtocolDefinition { Type = "modbus" }
+            },
+            DataSources = [],
+            PollGroups = new Dictionary<string, PollGroupDefinition>
+            {
+                ["fast"] = new() { IntervalMs = 1_000 },
+                ["slow"] = new() { IntervalMs = 0 }
+            },
+            Entities = []
+        };
+
+        var resolved = DevicePollingIntervalResolver.Resolve(definition);
+
+        Assert.Equal(1_000, resolved);
+    }
+
+    [Fact]
     public void Normalize_ReplacesConfiguredIntervalWithDefinitionInterval()
     {
         var definitionLoader = new DeviceDefinitionLoader(

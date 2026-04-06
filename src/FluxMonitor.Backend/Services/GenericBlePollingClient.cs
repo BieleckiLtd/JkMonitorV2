@@ -1022,8 +1022,10 @@ public sealed class GenericBlePollingClient(
     {
         lock (session.SyncRoot)
         {
+            // intervalMs <= 0 means "cache until reconnection" — once read, the
+            // payload stays valid until the session is reset (e.g. on disconnect).
             if (session.BankCache.TryGetValue(bankId, out var cached) &&
-                DateTimeOffset.UtcNow - cached.LastRead < TimeSpan.FromMilliseconds(intervalMs))
+                (intervalMs <= 0 || DateTimeOffset.UtcNow - cached.LastRead < TimeSpan.FromMilliseconds(intervalMs)))
             {
                 payload = cached.Data;
                 return true;
