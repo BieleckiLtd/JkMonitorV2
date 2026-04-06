@@ -61,6 +61,7 @@ public sealed class DeviceConfigStore(
             await EnsureSchemaAsync(connection);
 
             var loadedDevices = await LoadFromDbAsync(connection);
+            loadedDevices = await ReconcileDefinitionsAsync(connection, loadedDevices);
             UpdateCache(loadedDevices);
 
             _initialized = true;
@@ -232,6 +233,68 @@ public sealed class DeviceConfigStore(
 
         var persistedIds = rows.ToDictionary(row => row.DeviceKey, row => row.DeviceId, StringComparer.OrdinalIgnoreCase);
         return new LoadedDevices(devices, persistedIds);
+    }
+
+    /// <summary>
+    /// If any device's file-based definition has changed since the DB snapshot was
+    /// written, update the DB row so the runtime uses the current definition.
+    /// This ensures definition changes deployed via the installer take effect on
+    /// the next service start without requiring a manual API re-save.
+    /// </summary>
+    private async Task<LoadedDevices> ReconcileDefinitionsAsync(
+        NpgsqlConnection connection,
+        LoadedDevices loaded)
+    {
+        var staleDevices = new List<DeviceConfiguration>();
+        foreach (var device in loaded.Devices)
+        {
+            if (string.IsNullOrWhiteSpace(device.DefinitionId))
+                continue;
+
+            if (!_definitionLoader.TryGet(device.DefinitionId, out var fileDefinition) || fileDefinition is null)
+                continue;
+
+            var fileJson = JsonSerializer.Serialize(fileDefinition, JsonOptions);
+            var fileHash = ComputeSha256(fileJson);
+            if (string.Equals(fileHash, device.DefinitionHash, StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            staleDevices.Add(new DeviceConfiguration
+            {
+                DeviceId = device.DeviceId,
+                DisplayName = device.DisplayName,
+                DefinitionId = device.DefinitionId,
+                TransportPortName = device.TransportPortName,
+                BleSettingsPin = device.BleSettingsPin,
+                Address = device.Address,
+                IsMaster = device.IsMaster,
+                Enabled = device.Enabled,
+                CellVoltageSmoothingFactor = device.CellVoltageSmoothingFactor,
+                CellVoltageSmoothingBreakoutMillivolts = device.CellVoltageSmoothingBreakoutMillivolts,
+                DisplayPrecision = device.DisplayPrecision,
+                DefinitionJson = fileJson,
+                DefinitionHash = fileHash,
+                DefinitionVersion = fileDefinition.Version,
+                PollIntervalMilliseconds = DevicePollingIntervalResolver.Resolve(fileDefinition)
+            });
+        }
+
+        if (staleDevices.Count == 0)
+            return loaded;
+
+        await using var transaction = await connection.BeginTransactionAsync();
+        await UpsertDevicesAsync(connection, transaction, staleDevices);
+        await transaction.CommitAsync();
+
+        foreach (var device in staleDevices)
+        {
+            logger.LogInformation(
+                "Reconciled stale definition snapshot for device {DeviceId}. DefinitionId={DefinitionId}.",
+                device.DeviceId,
+                device.DefinitionId);
+        }
+
+        return await LoadFromDbAsync(connection);
     }
 
     private static DisplayPrecisionConfiguration DeserializeDisplayPrecision(string? json)
