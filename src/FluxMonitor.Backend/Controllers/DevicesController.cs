@@ -352,10 +352,11 @@ public sealed class DevicesController(
                     : d).ToList();
 
             allDevices = await deviceConfigStore.SaveDevicesAsync(updatedDevices, cancellationToken);
+            device = allDevices.First(d => string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase));
         }
 
-        // Apply using the in-memory device list (avoids config file-watcher race)
-        await orchestrator.ApplyConfigurationAsync(allDevices, cancellationToken);
+        // Start only the targeted device (not all enabled devices)
+        await orchestrator.EnsureDeviceRunningAsync(device, cancellationToken);
         logger.LogInformation("Start configuration applied; waiting for initial poll result.");
 
         // Wait for the first poll result (up to ~8 seconds)

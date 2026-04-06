@@ -114,6 +114,41 @@ public sealed class DeviceOrchestrator(
     }
 
     /// <summary>
+    /// Ensure a single device is registered and running. Restarts it if the
+    /// configuration has changed, starts it if not yet running. Does NOT
+    /// touch any other device — useful for targeted start requests.
+    /// </summary>
+    public async Task EnsureDeviceRunningAsync(DeviceConfiguration device, CancellationToken cancellationToken)
+    {
+        stateStore.RegisterDevice(device, definitionLoader);
+
+        if (!IsTransportSupported(device))
+        {
+            logger.LogInformation("Device {DeviceId} registered but not started: {Reason}", device.DeviceId, GetUnsupportedTransportMessage(device));
+            return;
+        }
+
+        if (_handles.TryGetValue(device.DeviceId, out var existing))
+        {
+            if (DeviceConfigChanged(existing.Device, device))
+            {
+                await StopDeviceAsync(device.DeviceId);
+                StartDevice(device, cancellationToken);
+                logger.LogInformation("Restarted device {DeviceId} with updated configuration (targeted start).", device.DeviceId);
+            }
+            else
+            {
+                logger.LogInformation("Device {DeviceId} is already running with matching configuration.", device.DeviceId);
+            }
+        }
+        else
+        {
+            StartDevice(device, cancellationToken);
+            logger.LogInformation("Started device {DeviceId} (targeted start).", device.DeviceId);
+        }
+    }
+
+    /// <summary>
     /// Stop a single device polling loop.
     /// </summary>
     public async Task StopDeviceAsync(string deviceId)

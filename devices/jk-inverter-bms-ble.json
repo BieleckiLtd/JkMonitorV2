@@ -40,7 +40,8 @@
         "writeRegisterOffset": 4,
         "writeValueLengthOffset": 5,
         "writeValueOffset": 6,
-        "writeValueByteOrder": "little-endian"
+        "writeValueByteOrder": "little-endian",
+        "interBankDelayMs": 2500
       }
     }
   },

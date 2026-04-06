@@ -73,10 +73,10 @@ public sealed class DirectAccessServiceTests
     public void BuildSettingsSavedMessage_ReportsRestartWhenPasswordChangesAndWifiIsActive()
     {
         var message = DirectAccessService.BuildSettingsSavedMessage(
-            new DirectAccessStore.DirectAccessSettings(true, DirectAccessStore.AutoStartModeWhenWifiNotConnected, null),
-            new DirectAccessStore.DirectAccessSettings(true, DirectAccessStore.AutoStartModeWhenWifiNotConnected, "abc"),
+            new DirectAccessStore.DirectAccessSettings(true, DirectAccessStore.AutoStartModeWhenWifiNotConnected, null, null, null),
+            new DirectAccessStore.DirectAccessSettings(true, DirectAccessStore.AutoStartModeWhenWifiNotConnected, "abc", null, null),
             directWifiActive: true);
 
-        Assert.Equal("Local access settings were saved. Changes apply the next time local access starts.", message);
+        Assert.Equal("Fallback local access settings were saved. Changes apply the next time fallback local access starts.", message);
     }
 }

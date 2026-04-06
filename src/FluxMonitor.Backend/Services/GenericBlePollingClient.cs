@@ -139,17 +139,18 @@ public sealed class GenericBlePollingClient(
             var isFirstBank = true;
             foreach (var bank in definition.DataSources)
             {
-                if (!isFirstBank && interBankDelay > 0)
-                    await Task.Delay(interBankDelay, cancellationToken);
-                isFirstBank = false;
-
                 var intervalMs = GetBankIntervalMilliseconds(definition, bank);
 
                 if (TryGetFreshCachedPayload(session, bank.Id, intervalMs, out var cachedPayload))
                 {
                     bankData[bank.Id] = cachedPayload;
+                    isFirstBank = false;
                     continue;
                 }
+
+                if (!isFirstBank && interBankDelay > 0)
+                    await Task.Delay(interBankDelay, cancellationToken);
+                isFirstBank = false;
 
                 try
                 {
@@ -1405,6 +1406,24 @@ public sealed class GenericBlePollingClient(
                     address,
                     definition.Device.Id);
                 return new(false, null, "Probe could not find a readable BLE data source.");
+            }
+
+            // Check if any bank was already populated from unsolicited notifications during connection setup.
+            lock (session.SyncRoot)
+            {
+                foreach (var bank in definition.DataSources)
+                {
+                    if (session.BankCache.ContainsKey(bank.Id))
+                    {
+                        var details = $"{bank.Name} auto-detected from unsolicited BLE notification.";
+                        logger.LogInformation(
+                            "BLE probe verified address {Address} for definition {DefinitionId} via unsolicited frame. BankId={BankId}.",
+                            address,
+                            definition.Device.Id,
+                            bank.Id);
+                        return new(true, "Verified BLE device", details);
+                    }
+                }
             }
 
             var failures = new List<string>();
