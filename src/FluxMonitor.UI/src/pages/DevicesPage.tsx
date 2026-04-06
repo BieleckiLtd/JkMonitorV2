@@ -373,7 +373,7 @@ export function DevicesPage() {
         <div>
           <h2 className='text-3xl font-bold tracking-tight text-foreground'>Devices</h2>
           <p className='mt-2 text-sm text-muted-foreground'>
-            Configure device instances. Each saved device stores its resolved definition snapshot with the runtime config.
+            Add devices from the library or upload a definition JSON. Each device stores a local copy of its definition.
           </p>
         </div>
         <div className='flex items-center gap-3'>
@@ -478,8 +478,8 @@ export function DevicesPage() {
                     <div className='text-sm text-muted-foreground'>
                       {definition ? `${definition.manufacturer} · ${definition.model}` : device.definitionId}
                     </div>
-                    <div className='text-xs text-muted-foreground'>
-                      Definition snapshot is saved with this device when configuration changes are applied.
+                    <div className='text-xs font-mono text-muted-foreground/60'>
+                      {device.definitionId}
                     </div>
                   </div>
 
@@ -518,30 +518,15 @@ export function DevicesPage() {
                 ) : null}
 
                 <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-4'>
-                  <label className='space-y-2 text-sm text-foreground'>
+                  <div className='space-y-2 text-sm text-foreground'>
                     <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device ID</span>
                     <Input value={device.deviceId} disabled={device.enabled} onChange={(event) => updateDevice(index, 'deviceId', event.target.value)} />
-                  </label>
+                    <p className='text-[11px] text-muted-foreground'>Use the same ID to reconnect to historical readings after re-adding a device.</p>
+                  </div>
 
                   <label className='space-y-2 text-sm text-foreground'>
                     <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Display name</span>
                     <Input value={device.displayName} onChange={(event) => updateDevice(index, 'displayName', event.target.value)} />
-                  </label>
-
-                  <label className='space-y-2 text-sm text-foreground'>
-                    <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device definition</span>
-                    <select
-                      className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
-                      value={device.definitionId}
-                      disabled={device.enabled}
-                      onChange={(event) => updateDevice(index, 'definitionId', event.target.value)}
-                    >
-                      {availableDefinitions.map((definitionOption) => (
-                        <option key={definitionOption.id} value={definitionOption.id}>
-                          {definitionOption.name} ({definitionOption.transportType})
-                        </option>
-                      ))}
-                    </select>
                   </label>
 
                   <label className='space-y-2 text-sm text-foreground'>
