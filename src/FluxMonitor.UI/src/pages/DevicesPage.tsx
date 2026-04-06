@@ -245,6 +245,69 @@ export function DevicesPage() {
     markDirty();
   }, [markDirty]);
 
+  const updateDeviceDefinition = useCallback((index: number, nextDefinitionId: string) => {
+    const nextDefinition = definitionsRef.current.find((entry) => entry.id === nextDefinitionId);
+    if (!nextDefinition) {
+      return;
+    }
+
+    const targetDeviceId = devicesRef.current[index]?.deviceId;
+
+    setDevices((current) => current.map((device, deviceIndex) => {
+      if (deviceIndex !== index) {
+        return device;
+      }
+
+      const currentDefinition = definitionsRef.current.find((entry) => entry.id === device.definitionId);
+      const currentTransportType = currentDefinition?.transportType ?? null;
+      const nextTransportType = nextDefinition.transportType;
+      const shouldUseDefinitionName = !device.displayName.trim() || device.displayName === (currentDefinition?.name ?? '');
+
+      return {
+        ...device,
+        displayName: shouldUseDefinitionName ? nextDefinition.name : device.displayName,
+        definitionId: nextDefinition.id,
+        definitionVersion: null,
+        transportPortName: currentTransportType === nextTransportType ? (device.transportPortName ?? '') : '',
+        bleSettingsPin: currentTransportType === 'ble' && nextTransportType === 'ble'
+          ? (device.bleSettingsPin ?? '')
+          : '',
+      };
+    }));
+
+    if (targetDeviceId) {
+      setBleScanResults((current) => {
+        if (!(targetDeviceId in current)) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[targetDeviceId];
+        return next;
+      });
+      setBleScanLoading((current) => {
+        if (!(targetDeviceId in current)) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[targetDeviceId];
+        return next;
+      });
+      setBleScanErrors((current) => {
+        if (!(targetDeviceId in current)) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[targetDeviceId];
+        return next;
+      });
+    }
+
+    markDirty();
+  }, [markDirty]);
+
   const scanBleDevices = useCallback(async (deviceId: string, definitionId: string) => {
     setBleScanLoading((current) => ({ ...current, [deviceId]: true }));
     setBleScanErrors((current) => ({ ...current, [deviceId]: null }));
@@ -527,6 +590,18 @@ export function DevicesPage() {
                   <label className='space-y-2 text-sm text-foreground'>
                     <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Display name</span>
                     <Input value={device.displayName} onChange={(event) => updateDevice(index, 'displayName', event.target.value)} />
+                  </label>
+
+                  <label className='space-y-2 text-sm text-foreground'>
+                    <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device definition</span>
+                    <select
+                      className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+                      value={device.definitionId}
+                      disabled={device.enabled}
+                      onChange={(event) => updateDeviceDefinition(index, event.target.value)}
+                    >
+                      {availableDefinitions.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+                    </select>
                   </label>
 
                   <label className='space-y-2 text-sm text-foreground'>

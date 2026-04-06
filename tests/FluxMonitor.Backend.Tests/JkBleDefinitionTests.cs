@@ -10,7 +10,7 @@ public sealed class JkBleDefinitionTests
         Path.Combine(AppContext.BaseDirectory, "..", "..", "..", "..", ".."));
 
     [Fact]
-    public void JkBleLiveBank_RemainsCommandDriven()
+    public void JkBleLiveBank_UsesNotifyStreamWithCommandFallback()
     {
         var loader = new DeviceDefinitionLoader(
             "devices",
@@ -20,9 +20,12 @@ public sealed class JkBleDefinitionTests
         loader.LoadFromJson(File.ReadAllText(Path.Combine(RepositoryRoot, "devices", "jk-inverter-bms-ble.json")));
 
         var definition = loader.Get("jk-inverter-bms-ble");
+        Assert.Equal(["config", "live", "info"], definition.DataSources.Select(bank => bank.Id).ToArray());
+
         var liveBank = Assert.Single(definition.DataSources, bank => bank.Id == "live");
 
-        Assert.Equal("request-response", liveBank.ReadMode);
+        Assert.Equal("notify-stream", liveBank.ReadMode);
+        Assert.Equal(0x97, liveBank.Command);
     }
 
     private sealed class HttpClientFactoryStub : IHttpClientFactory

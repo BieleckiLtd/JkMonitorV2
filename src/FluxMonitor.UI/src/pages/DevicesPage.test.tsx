@@ -34,6 +34,14 @@ describe('DevicesPage', () => {
           ok: true,
           json: async () => ([
             {
+              id: 'jk-inverter-bms',
+              name: 'JK Inverter BMS',
+              manufacturer: 'JK',
+              model: 'JK-PB2A16S20P',
+              transportType: 'serial',
+              isTransportSupported: true,
+            },
+            {
               id: 'jk-inverter-bms-ble',
               name: 'JK Inverter BMS (BLE)',
               manufacturer: 'JK',
@@ -128,6 +136,25 @@ describe('DevicesPage', () => {
 
     expect(screen.getByPlaceholderText(/aa:bb:cc:dd:ee:ff or device alias/i)).toHaveValue('AA:BB:CC:DD:EE:FF');
     expect(screen.getByRole('button', { name: /start/i })).toBeEnabled();
+  });
+
+  it('lets a stopped device switch to the BLE definition without changing its device id', async () => {
+    render(<DevicesPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /add first device/i }));
+    fireEvent.click(screen.getByText(/^JK Inverter BMS$/i).closest('button') as HTMLButtonElement);
+
+    expect(await screen.findByRole('combobox', { name: /serial port/i })).toBeInTheDocument();
+    expect(screen.getByDisplayValue('device-1')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByRole('combobox', { name: /device definition/i }), {
+      target: { value: 'jk-inverter-bms-ble' },
+    });
+
+    expect(await screen.findByPlaceholderText(/aa:bb:cc:dd:ee:ff or device alias/i)).toBeInTheDocument();
+    expect(screen.getByDisplayValue('device-1')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /display name/i })).toHaveValue('JK Inverter BMS (BLE)');
+    expect(screen.queryByRole('combobox', { name: /serial port/i })).not.toBeInTheDocument();
   });
 
   it('shows a waiting message instead of a blank first-poll failure when start is still in progress', async () => {

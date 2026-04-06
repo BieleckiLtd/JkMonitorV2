@@ -48,14 +48,6 @@
 
   "dataSources": [
     {
-      "id": "live",
-      "name": "Live Data",
-      "command": 150,
-      "responseFrameType": 2,
-      "headerSize": 6,
-      "pollGroup": "fast"
-    },
-    {
       "id": "config",
       "name": "Configuration",
       "command": 150,
@@ -67,6 +59,15 @@
         "addressBase": 1,
         "addressStepBytes": 4
       }
+    },
+    {
+      "id": "live",
+      "name": "Live Data",
+      "command": 151,
+      "responseFrameType": 2,
+      "headerSize": 6,
+      "readMode": "notify-stream",
+      "pollGroup": "fast"
     },
     {
       "id": "info",

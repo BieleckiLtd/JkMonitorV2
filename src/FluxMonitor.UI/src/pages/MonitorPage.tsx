@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Activity, AlertTriangle, Battery, BatteryCharging, Check, Edit2, Gauge, LoaderCircle, Pause, Play, Shield, Thermometer, X, Zap } from 'lucide-react';
+import { Activity, AlertTriangle, Battery, BatteryCharging, Check, Edit2, Gauge, LoaderCircle, Shield, Thermometer, X, Zap } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { HistoryCharts } from '../components/HistoryCharts';
 import { cn } from '../lib/utils';
@@ -85,6 +85,11 @@ type DeviceRuntimeState = {
 
 const refreshIntervalMs = 2000;
 const nd = 'N/D';
+
+type SwitchStatusChip = {
+  label: string;
+  className: string;
+};
 
 export function MonitorPage() {
   const [devices, setDevices] = useState<DeviceRuntimeState[]>([]);
@@ -276,18 +281,18 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
                 if (section.groupBy === 'category') {
                   const catGroups = groupByCategory(params);
                   return Array.from(catGroups.entries()).map(([cat, catParams]) => (
-                    <ParameterCategoryCard key={`${idx}-${cat}`} category={cat} params={catParams} deviceId={device.deviceId} />
+                    <ParameterCategoryCard key={`${idx}-${cat}`} category={cat} params={catParams} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} />
                   ));
                 }
                 return (
-                  <ParameterCategoryCard key={idx} category={section.title ?? 'Parameters'} params={params} deviceId={device.deviceId} />
+                  <ParameterCategoryCard key={idx} category={section.title ?? 'Parameters'} params={params} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} />
                 );
               })}
             </div>
           ) : (
             <div className='grid gap-3 sm:gap-4 lg:grid-cols-2'>
               {sortedCategories.filter(c => c !== 'Cell Voltages').map((category) => (
-                <ParameterCategoryCard key={category} category={category} params={grouped.get(category)!} deviceId={device.deviceId} />
+                <ParameterCategoryCard key={category} category={category} params={grouped.get(category)!} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} />
               ))}
             </div>
           )}
@@ -397,12 +402,24 @@ function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndices, onCell
   );
 }
 
-function ParameterRow({ param, deviceId }: { param: DeviceParameter; deviceId: string }) {
+function ParameterRow({
+  param,
+  deviceId,
+  telemetry,
+  paramByKey,
+}: {
+  param: DeviceParameter;
+  deviceId: string;
+  telemetry: DeviceTelemetrySnapshot;
+  paramByKey: Map<string, DeviceParameter>;
+}) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [writeResult, setWriteResult] = useState<{ success: boolean; message: string } | null>(null);
-  const value = formatParamValue(param);
+  const isSwitchSetting = isSwitchSettingParam(param.key);
+  const statusChip = getSwitchStatusChip(param, telemetry, paramByKey);
+  const value = formatParamValue(param, isSwitchSetting ? 'enabled-disabled' : 'yes-no');
 
   const startEdit = useCallback(() => {
     if (!param.isWritable) return;
@@ -455,14 +472,14 @@ function ParameterRow({ param, deviceId }: { param: DeviceParameter; deviceId: s
 
   return (
     <div className='rounded-lg border border-border/50 bg-background/40 px-3 py-2'>
-      <div className='flex items-center justify-between'>
-        <span className='flex items-center gap-1.5 text-xs text-muted-foreground'>
-          {param.booleanValue != null && (
-            param.booleanValue
-              ? <Play className='h-3 w-3 text-emerald-400' />
-              : <Pause className='h-3 w-3 text-muted-foreground/60' />
-          )}
-          {param.displayName}
+      <div className='flex items-center justify-between gap-3'>
+        <span className='flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground'>
+          <span>{param.displayName}</span>
+          {statusChip ? (
+            <span className={cn('rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em]', statusChip.className)}>
+              {statusChip.label}
+            </span>
+          ) : null}
         </span>
         <div className='flex items-center gap-2'>
           {isEditing ? (
@@ -511,7 +528,19 @@ function ParameterRow({ param, deviceId }: { param: DeviceParameter; deviceId: s
   );
 }
 
-function ParameterCategoryCard({ category, params, deviceId }: { category: string; params: DeviceParameter[]; deviceId: string }) {
+function ParameterCategoryCard({
+  category,
+  params,
+  deviceId,
+  telemetry,
+  paramByKey,
+}: {
+  category: string;
+  params: DeviceParameter[];
+  deviceId: string;
+  telemetry: DeviceTelemetrySnapshot;
+  paramByKey: Map<string, DeviceParameter>;
+}) {
   return (
     <Card className='border border-border/80 bg-card/85 shadow-sm'>
       <CardHeader className='border-b border-border/60 pb-3'>
@@ -523,7 +552,7 @@ function ParameterCategoryCard({ category, params, deviceId }: { category: strin
       <CardContent className='pt-3'>
         <div className='grid gap-2'>
           {params.map((param) => (
-            <ParameterRow key={param.key} param={param} deviceId={deviceId} />
+            <ParameterRow key={param.key} param={param} deviceId={deviceId} telemetry={telemetry} paramByKey={paramByKey} />
           ))}
         </div>
       </CardContent>
@@ -614,8 +643,8 @@ function renderDefinitionSections(
         break;
 
       case 'status-indicators':
-        // Status indicator pills removed — charging/discharging/balancing state
-        // is shown via play/pause icons on parameter rows in the System category.
+        // Status indicator pills remain collapsed into the writable switch rows,
+        // now shown as labeled state chips instead of play/pause icons.
         break;
 
       case 'cell-chart':
@@ -789,8 +818,66 @@ function CategoryIcon({ category }: { category: string }) {
   }
 }
 
-function formatParamValue(param: DeviceParameter): string {
+function isSwitchSettingParam(key: string): boolean {
+  return key === 'charge_switch' || key === 'discharge_switch' || key === 'balancer_switch';
+}
+
+function buildSwitchStatusChip(
+  isActive: boolean | null | undefined,
+  activeLabel: string,
+  inactiveLabel: string,
+): SwitchStatusChip | null {
+  if (isActive == null) return null;
+
+  return {
+    label: isActive ? activeLabel : inactiveLabel,
+    className: isActive
+      ? 'border-emerald-500/20 bg-emerald-500/10 text-emerald-300'
+      : 'border-border bg-muted/70 text-muted-foreground',
+  };
+}
+
+function getSwitchStatusChip(
+  param: DeviceParameter,
+  telemetry: DeviceTelemetrySnapshot,
+  paramByKey: Map<string, DeviceParameter>,
+): SwitchStatusChip | null {
+  const batteryState = telemetry.currentAmps == null || !Number.isFinite(telemetry.currentAmps)
+    ? null
+    : getBatteryStateFromCurrent(telemetry.currentAmps);
+
+  switch (param.key) {
+    case 'charge_switch': {
+      const isActive = paramByKey.get('charging_enabled')?.booleanValue
+        ?? telemetry.chargingEnabled
+        ?? (batteryState == null ? null : batteryState === 'CHARGING');
+      return buildSwitchStatusChip(isActive, 'Charging now', 'Not charging');
+    }
+    case 'discharge_switch': {
+      const isActive = paramByKey.get('discharging_enabled')?.booleanValue
+        ?? telemetry.dischargingEnabled
+        ?? (batteryState == null ? null : batteryState === 'DISCHARGING');
+      return buildSwitchStatusChip(isActive, 'Discharging now', 'Not discharging');
+    }
+    case 'balancer_switch': {
+      const isActive = paramByKey.get('balancing_enabled')?.booleanValue
+        ?? telemetry.balancingEnabled
+        ?? null;
+      return buildSwitchStatusChip(isActive, 'Balancing now', 'Not balancing');
+    }
+    default:
+      return null;
+  }
+}
+
+function formatParamValue(
+  param: DeviceParameter,
+  booleanStyle: 'yes-no' | 'enabled-disabled' = 'yes-no',
+): string {
   if (param.booleanValue != null) {
+    if (booleanStyle === 'enabled-disabled') {
+      return param.booleanValue ? 'Enabled' : 'Disabled';
+    }
     return param.booleanValue ? 'Yes' : 'No';
   }
   if (param.numericValue != null) {
