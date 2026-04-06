@@ -1,6 +1,7 @@
 {
   "files": [
     "jk-inverter-bms.json",
-    "jk-inverter-bms-ble.json"
+    "jk-inverter-bms-ble.json",
+    "jk-bd4a8s4p-ble.json"
   ]
 }

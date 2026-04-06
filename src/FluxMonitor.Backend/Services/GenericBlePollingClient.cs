@@ -135,8 +135,14 @@ public sealed class GenericBlePollingClient(
                 requireWriteCharacteristic: DefinitionRequiresWriteCharacteristic(definition));
 
             var bankData = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            var interBankDelay = definition.Connection.Protocol.Settings?.InterBankDelayMs ?? 0;
+            var isFirstBank = true;
             foreach (var bank in definition.DataSources)
             {
+                if (!isFirstBank && interBankDelay > 0)
+                    await Task.Delay(interBankDelay, cancellationToken);
+                isFirstBank = false;
+
                 var intervalMs = GetBankIntervalMilliseconds(definition, bank);
 
                 if (TryGetFreshCachedPayload(session, bank.Id, intervalMs, out var cachedPayload))

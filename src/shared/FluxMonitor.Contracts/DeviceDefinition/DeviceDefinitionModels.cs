@@ -144,6 +144,9 @@ public sealed class ProtocolSettings
 
     /// <summary>Byte order used when encoding raw values into generic frame-register write commands.</summary>
     public string WriteValueByteOrder { get; init; } = "little-endian";
+
+    /// <summary>Minimum delay in milliseconds between sequential bank reads (e.g. BMS requiring wakeup settling time).</summary>
+    public int InterBankDelayMs { get; init; }
 }
 
 public sealed class DataSourceDefinition
