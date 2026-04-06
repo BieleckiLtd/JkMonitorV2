@@ -85,7 +85,7 @@ function Test-DatabaseReady([int]$Port) {
         return $false
     }
 
-    & $pgIsReadyPath -h $targetHost -p $Port -d postgres *> $null
+    & $pgIsReadyPath -h $targetHost -p $Port -U $postgresUser -d postgres *> $null
     return $LASTEXITCODE -eq 0
 }
 

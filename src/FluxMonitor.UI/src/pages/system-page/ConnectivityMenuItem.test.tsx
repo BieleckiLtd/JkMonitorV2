@@ -21,7 +21,7 @@ describe('ConnectivityMenuItem', () => {
     expect(container.querySelector('.system-menu-card-chevron[aria-expanded]')).toBeNull();
   });
 
-  it('uses a visible border for the unchecked switch track', () => {
+  it('uses the button border token and pixel-aligned track height for the unchecked switch track', () => {
     const { container } = render(
       <Switch aria-label='Demo switch' checked={false} onCheckedChange={() => undefined} />
     );
@@ -31,6 +31,7 @@ describe('ConnectivityMenuItem', () => {
       throw new Error('Expected switch root to render.');
     }
 
-    expect(switchRoot.className).toContain('data-unchecked:border-foreground/35');
+    expect(switchRoot.className).toContain('data-unchecked:border-border');
+    expect(switchRoot.className).toContain('data-[size=default]:h-[18px]');
   });
 });
