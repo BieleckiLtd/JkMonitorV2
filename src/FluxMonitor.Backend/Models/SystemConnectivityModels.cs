@@ -43,6 +43,10 @@ public sealed record class EthernetInterfaceSnapshot
     public string? ConnectionName { get; init; }
 
     public string? ConnectionState { get; init; }
+
+    public bool? Enabled { get; init; }
+
+    public bool? CarrierDetected { get; init; }
 }
 
 public sealed record class WifiInterfaceSnapshot
@@ -140,6 +144,17 @@ public sealed record class EthernetDisconnectResult
     public bool Success { get; init; }
 
     public required string InterfaceName { get; init; }
+
+    public required string Message { get; init; }
+}
+
+public sealed record class EthernetPowerResult
+{
+    public bool Success { get; init; }
+
+    public required string InterfaceName { get; init; }
+
+    public bool Enabled { get; init; }
 
     public required string Message { get; init; }
 }
@@ -263,6 +278,10 @@ public sealed record class DirectAccessSettingsSnapshot
     public required string AutoStartMode { get; init; }
 
     public string? WifiPassword { get; init; }
+
+    public string? HotspotName { get; init; }
+
+    public string? BluetoothDeviceName { get; init; }
 }
 
 public sealed record class WifiDirectAccessSnapshot

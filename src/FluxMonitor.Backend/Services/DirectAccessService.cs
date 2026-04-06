@@ -37,7 +37,7 @@ public sealed class DirectAccessService(
         if (!OperatingSystem.IsLinux())
         {
             return BuildUnsupportedSnapshot(
-                "Local access mode is supported on Linux hosts with NetworkManager.",
+                "Fallback local access is supported on Linux hosts with NetworkManager.",
                 settings,
                 bluetooth);
         }
@@ -50,14 +50,14 @@ public sealed class DirectAccessService(
                 toolCheck.StandardOutput,
                 toolCheck.ErrorOutput);
             return BuildUnsupportedSnapshot(
-                "Local access mode is unavailable because NetworkManager tools are not available on this host.",
+                "Fallback local access is unavailable because NetworkManager tools are not available on this host.",
                 settings,
                 bluetooth);
         }
 
         var activeConnections = await GetActiveConnectionsAsync(cancellationToken);
         var wifiTask = BuildWifiSnapshotAsync(network, activeConnections, settings, cancellationToken);
-        var bluetoothTask = BuildBluetoothSnapshotAsync(bluetooth, activeConnections, cancellationToken);
+        var bluetoothTask = BuildBluetoothSnapshotAsync(bluetooth, activeConnections, settings, cancellationToken);
 
         await Task.WhenAll(wifiTask, bluetoothTask);
 
@@ -84,6 +84,8 @@ public sealed class DirectAccessService(
             await directAccessStore.SaveSettingsAsync(
                 enabled ? DirectAccessStore.AutoStartModeWhenWifiNotConnected : DirectAccessStore.AutoStartModeOff,
                 currentSettings.WifiPassword,
+                currentSettings.HotspotNameOverride,
+                currentSettings.BluetoothDeviceNameOverride,
                 cancellationToken);
         }
         catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
@@ -109,29 +111,38 @@ public sealed class DirectAccessService(
             Enabled = snapshot.Mode.Enabled,
             Active = snapshot.Mode.Active,
             Message = enabled
-                ? BuildLocalAccessModeEnabledMessage(snapshot.Mode.HostName, snapshot.Bluetooth.DeviceName)
-                : "Local access mode is off."
+                ? BuildLocalAccessModeEnabledMessage(snapshot.Mode.HotspotName, snapshot.Bluetooth.DeviceName)
+                : "Fallback local access is off."
         };
     }
 
     public async Task<SaveDirectAccessSettingsResult> SaveLocalAccessAdvancedSettingsAsync(
         string? wifiPassword,
+        string? hotspotName,
+        string? bluetoothDeviceName,
         CancellationToken cancellationToken = default)
     {
         var currentSettings = await directAccessStore.GetSettingsAsync(cancellationToken);
-        return await SaveSettingsAsync(currentSettings.AutoStartMode, wifiPassword, cancellationToken);
+        return await SaveSettingsAsync(
+            currentSettings.AutoStartMode,
+            wifiPassword,
+            hotspotName,
+            bluetoothDeviceName,
+            cancellationToken);
     }
 
     public async Task<SaveDirectAccessSettingsResult> SaveSettingsAsync(
         string? autoStartMode,
         string? wifiPassword,
+        string? hotspotName,
+        string? bluetoothDeviceName,
         CancellationToken cancellationToken = default)
     {
         var currentSettings = await directAccessStore.GetSettingsAsync(cancellationToken);
 
         try
         {
-            await directAccessStore.SaveSettingsAsync(autoStartMode, wifiPassword, cancellationToken);
+            await directAccessStore.SaveSettingsAsync(autoStartMode, wifiPassword, hotspotName, bluetoothDeviceName, cancellationToken);
         }
         catch (Exception exception) when (exception is InvalidOperationException or ArgumentException)
         {
@@ -144,6 +155,7 @@ public sealed class DirectAccessService(
         }
 
         var updatedSettings = await directAccessStore.GetSettingsAsync(cancellationToken);
+        await bluetoothManagementService.SetDirectAccessAliasAsync(GetEffectiveBluetoothDeviceName(updatedSettings), cancellationToken);
         var directWifiActive = await IsDirectWifiActiveAsync(cancellationToken);
 
         return new SaveDirectAccessSettingsResult
@@ -339,6 +351,9 @@ public sealed class DirectAccessService(
                 }
             }
 
+            var settings = await directAccessStore.GetSettingsAsync(cancellationToken);
+            await bluetoothManagementService.SetDirectAccessAliasAsync(GetEffectiveBluetoothDeviceName(settings), cancellationToken);
+
             var configureResult = await EnsureBluetoothProfileAsync(cancellationToken);
             if (!configureResult.Succeeded)
             {
@@ -454,17 +469,21 @@ public sealed class DirectAccessService(
         DirectAccessStore.DirectAccessSettings updatedSettings,
         bool directWifiActive)
     {
-        var passwordChanged = !string.Equals(
+        var hotspotSettingsChanged = !string.Equals(
+            GetEffectiveHotspotName(previousSettings),
+            GetEffectiveHotspotName(updatedSettings),
+            StringComparison.Ordinal)
+            || !string.Equals(
             previousSettings.WifiPassword,
             updatedSettings.WifiPassword,
             StringComparison.Ordinal);
 
-        if (passwordChanged && directWifiActive)
+        if (hotspotSettingsChanged && directWifiActive)
         {
-            return "Local access settings were saved. Changes apply the next time local access starts.";
+            return "Fallback local access settings were saved. Changes apply the next time fallback local access starts.";
         }
 
-        return "Local access settings were saved.";
+        return "Fallback local access settings were saved.";
     }
 
     internal static IReadOnlyList<string> BuildWifiSecurityArguments(string? wifiPassword)
@@ -571,13 +590,13 @@ public sealed class DirectAccessService(
                     Supported = false,
                     Enabled = false,
                     StatusMessage = message,
-                    Ssid = BuildDefaultWifiSsid(Environment.MachineName)
+                    Ssid = GetEffectiveHotspotName(settings)
                 },
                 new BluetoothDirectAccessSnapshot
                 {
                     Supported = false,
                     Enabled = false,
-                    DeviceName = bluetooth.Supported ? Environment.MachineName : null,
+                    DeviceName = bluetooth.Supported ? GetEffectiveBluetoothDeviceName(settings) : null,
                     RequiresPairing = true,
                     StatusMessage = message
                 }),
@@ -586,13 +605,13 @@ public sealed class DirectAccessService(
                 Supported = false,
                 Enabled = false,
                 StatusMessage = message,
-                Ssid = BuildDefaultWifiSsid(Environment.MachineName)
+                Ssid = GetEffectiveHotspotName(settings)
             },
             Bluetooth = new BluetoothDirectAccessSnapshot
             {
                 Supported = false,
                 Enabled = false,
-                DeviceName = bluetooth.Supported ? Environment.MachineName : null,
+                DeviceName = bluetooth.Supported ? GetEffectiveBluetoothDeviceName(settings) : null,
                 RequiresPairing = true,
                 StatusMessage = message
             }
@@ -622,25 +641,25 @@ public sealed class DirectAccessService(
             Active = active,
             HostName = Environment.MachineName,
             StatusMessage = !supported
-                ? "Local access mode is unavailable on this host."
+                ? "Fallback local access is unavailable on this host."
                 : !enabled
-                    ? "Local access mode is off."
-                    : BuildLocalAccessModeEnabledMessage(Environment.MachineName, bluetooth.DeviceName),
+                    ? "Fallback local access is off."
+                    : BuildLocalAccessModeEnabledMessage(wifi.Ssid, bluetooth.DeviceName),
             HotspotName = wifi.Ssid,
             HotspotPassword = settings.WifiPassword,
             Addresses = addresses
         };
     }
 
-    private static string BuildLocalAccessModeEnabledMessage(string hostName, string? bluetoothDeviceName)
+    private static string BuildLocalAccessModeEnabledMessage(string? hotspotName, string? bluetoothDeviceName)
     {
         var details = new List<string>();
-        var formattedHostName = FormatLocalAccessHostName(hostName);
+        var formattedHotspotName = FormatLocalAccessHotspotName(hotspotName);
         var formattedBluetoothDeviceName = FormatLocalAccessBluetoothDeviceName(bluetoothDeviceName);
 
-        if (!string.IsNullOrWhiteSpace(formattedHostName))
+        if (!string.IsNullOrWhiteSpace(formattedHotspotName))
         {
-            details.Add($"Hostname: {formattedHostName}");
+            details.Add($"Hotspot SSID: {formattedHotspotName}");
         }
 
         if (!string.IsNullOrWhiteSpace(formattedBluetoothDeviceName))
@@ -650,21 +669,20 @@ public sealed class DirectAccessService(
 
         return details.Count switch
         {
-            0 => "Local access mode is on.",
-            1 => $"Local access mode is on. {details[0]}.",
-            _ => $"Local access mode is on. {details[0]}. {details[1]}."
+            0 => "Fallback local access is on.",
+            1 => $"Fallback local access is on. {details[0]}.",
+            _ => $"Fallback local access is on. {details[0]}. {details[1]}."
         };
     }
 
-    private static string FormatLocalAccessHostName(string hostName)
+    private static string FormatLocalAccessHotspotName(string? hotspotName)
     {
-        if (string.IsNullOrWhiteSpace(hostName))
+        if (string.IsNullOrWhiteSpace(hotspotName))
         {
             return string.Empty;
         }
 
-        var trimmed = hostName.Trim();
-        return trimmed.Contains('.', StringComparison.Ordinal) ? trimmed : $"{trimmed}.local";
+        return hotspotName.Trim();
     }
 
     private static string FormatLocalAccessBluetoothDeviceName(string? bluetoothDeviceName)
@@ -691,7 +709,7 @@ public sealed class DirectAccessService(
                 Supported = false,
                 Enabled = false,
                 StatusMessage = network.StatusMessage ?? "Local access hotspot is unavailable on this host.",
-                Ssid = BuildDefaultWifiSsid(Environment.MachineName)
+                Ssid = GetEffectiveHotspotName(settings)
             };
         }
 
@@ -702,7 +720,7 @@ public sealed class DirectAccessService(
                 Supported = false,
                 Enabled = false,
                 StatusMessage = "No Wi-Fi interface is available for local access.",
-                Ssid = BuildDefaultWifiSsid(Environment.MachineName)
+                Ssid = GetEffectiveHotspotName(settings)
             };
         }
 
@@ -722,7 +740,7 @@ public sealed class DirectAccessService(
             InterfaceName = interfaceName,
             CurrentNetworkName = currentNetworkName,
             DisconnectsCurrentWifi = !enabled && !string.IsNullOrWhiteSpace(currentNetworkName),
-            Ssid = BuildDefaultWifiSsid(Environment.MachineName),
+            Ssid = GetEffectiveHotspotName(settings),
             Addresses = enabled ? GetInterfaceAddresses(interfaceName) : []
         };
     }
@@ -730,11 +748,12 @@ public sealed class DirectAccessService(
     private async Task<BluetoothDirectAccessSnapshot> BuildBluetoothSnapshotAsync(
         BluetoothRuntimeSnapshot bluetooth,
         IReadOnlyList<ActiveConnectionInfo> activeConnections,
+        DirectAccessStore.DirectAccessSettings settings,
         CancellationToken cancellationToken)
     {
         var adapterState = await bluetoothManagementService.GetDirectAccessStateAsync(cancellationToken);
         var enabled = IsConnectionActive(activeConnections, BluetoothProfileName);
-        var deviceName = adapterState.Alias ?? Environment.MachineName;
+        var deviceName = GetEffectiveBluetoothDeviceName(settings);
 
         if (!adapterState.Supported)
         {
@@ -849,7 +868,7 @@ public sealed class DirectAccessService(
             "autoconnect",
             "no",
             "802-11-wireless.ssid",
-            BuildDefaultWifiSsid(Environment.MachineName),
+            GetEffectiveHotspotName(settings),
             "802-11-wireless.mode",
             "ap",
             "ipv4.method",
@@ -932,16 +951,32 @@ public sealed class DirectAccessService(
         {
             StorageAvailable = settings.StorageAvailable,
             AutoStartMode = settings.AutoStartMode,
-            WifiPassword = settings.WifiPassword
+            WifiPassword = settings.WifiPassword,
+            HotspotName = GetEffectiveHotspotName(settings),
+            BluetoothDeviceName = GetEffectiveBluetoothDeviceName(settings)
         };
     }
 
     private static string BuildWifiEnabledMessage(DirectAccessStore.DirectAccessSettings settings)
     {
-        var ssid = BuildDefaultWifiSsid(Environment.MachineName);
+        var ssid = GetEffectiveHotspotName(settings);
         return string.IsNullOrEmpty(settings.WifiPassword)
             ? $"Local access hotspot is on. Join '{ssid}' with no password."
             : $"Local access hotspot is on. Join '{ssid}' with the configured password.";
+    }
+
+    private static string GetEffectiveHotspotName(DirectAccessStore.DirectAccessSettings settings)
+    {
+        return string.IsNullOrWhiteSpace(settings.HotspotNameOverride)
+            ? BuildDefaultWifiSsid(Environment.MachineName)
+            : settings.HotspotNameOverride.Trim();
+    }
+
+    private static string GetEffectiveBluetoothDeviceName(DirectAccessStore.DirectAccessSettings settings)
+    {
+        return string.IsNullOrWhiteSpace(settings.BluetoothDeviceNameOverride)
+            ? Environment.MachineName
+            : settings.BluetoothDeviceNameOverride.Trim();
     }
 
     private static bool IsWifiConnected(NetworkConnectivitySnapshot network)

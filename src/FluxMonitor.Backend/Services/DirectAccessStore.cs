@@ -56,9 +56,11 @@ public sealed class DirectAccessStore(
 
             _initialized = true;
             logger.LogInformation(
-                "Local access settings loaded from PostgreSQL. AutoStartMode={AutoStartMode}, HasWifiPassword={HasWifiPassword}.",
+                "Fallback local access settings loaded from PostgreSQL. AutoStartMode={AutoStartMode}, HasWifiPassword={HasWifiPassword}, HasHotspotNameOverride={HasHotspotNameOverride}, HasBluetoothDeviceNameOverride={HasBluetoothDeviceNameOverride}.",
                 loadedSettings.AutoStartMode,
-                !string.IsNullOrEmpty(loadedSettings.WifiPassword));
+                !string.IsNullOrEmpty(loadedSettings.WifiPassword),
+                !string.IsNullOrEmpty(loadedSettings.HotspotNameOverride),
+                !string.IsNullOrEmpty(loadedSettings.BluetoothDeviceNameOverride));
         }
         finally
         {
@@ -76,28 +78,37 @@ public sealed class DirectAccessStore(
         }
     }
 
-    public async Task SaveSettingsAsync(string? autoStartMode, string? wifiPassword, CancellationToken cancellationToken)
+    public async Task SaveSettingsAsync(
+        string? autoStartMode,
+        string? wifiPassword,
+        string? hotspotName,
+        string? bluetoothDeviceName,
+        CancellationToken cancellationToken)
     {
         await InitializeAsync(cancellationToken);
 
         if (!HasDatabase)
         {
-            throw new InvalidOperationException("Local access settings cannot be saved until PostgreSQL storage is configured.");
+            throw new InvalidOperationException("Fallback local access settings cannot be saved until PostgreSQL storage is configured.");
         }
 
         var normalizedSettings = new DirectAccessSettings(
             StorageAvailable: true,
             AutoStartMode: NormalizeAutoStartMode(autoStartMode),
-            WifiPassword: NormalizeWifiPassword(wifiPassword));
+            WifiPassword: NormalizeWifiPassword(wifiPassword),
+            HotspotNameOverride: NormalizeOptionalName(hotspotName),
+            BluetoothDeviceNameOverride: NormalizeOptionalName(bluetoothDeviceName));
 
         await using var connection = await OpenConnectionAsync(cancellationToken);
         const string sql = """
-            INSERT INTO direct_access_settings (id, auto_start_mode, wifi_password, updated_at)
-            VALUES (TRUE, @AutoStartMode, @WifiPassword, NOW())
+            INSERT INTO direct_access_settings (id, auto_start_mode, wifi_password, hotspot_name, bluetooth_device_name, updated_at)
+            VALUES (TRUE, @AutoStartMode, @WifiPassword, @HotspotNameOverride, @BluetoothDeviceNameOverride, NOW())
             ON CONFLICT (id) DO UPDATE
             SET
                 auto_start_mode = EXCLUDED.auto_start_mode,
                 wifi_password = EXCLUDED.wifi_password,
+                hotspot_name = EXCLUDED.hotspot_name,
+                bluetooth_device_name = EXCLUDED.bluetooth_device_name,
                 updated_at = NOW();
             """;
 
@@ -106,7 +117,9 @@ public sealed class DirectAccessStore(
             new
             {
                 normalizedSettings.AutoStartMode,
-                normalizedSettings.WifiPassword
+                normalizedSettings.WifiPassword,
+                normalizedSettings.HotspotNameOverride,
+                normalizedSettings.BluetoothDeviceNameOverride
             },
             cancellationToken: cancellationToken));
 
@@ -121,7 +134,9 @@ public sealed class DirectAccessStore(
         return new DirectAccessSettings(
             StorageAvailable: storageAvailable,
             AutoStartMode: AutoStartModeWhenWifiNotConnected,
-            WifiPassword: null);
+            WifiPassword: null,
+            HotspotNameOverride: null,
+            BluetoothDeviceNameOverride: null);
     }
 
     internal static string NormalizeAutoStartMode(string? value)
@@ -156,18 +171,39 @@ public sealed class DirectAccessStore(
         return value.Length == 0 ? null : value;
     }
 
+    internal static string? NormalizeOptionalName(string? value)
+    {
+        if (value is null)
+        {
+            return null;
+        }
+
+        var normalized = value.Trim();
+        return normalized.Length == 0 ? null : normalized;
+    }
+
     private static async Task EnsureSchemaAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
     {
-        const string sql = """
+        const string createSql = """
             CREATE TABLE IF NOT EXISTS direct_access_settings (
                 id boolean PRIMARY KEY DEFAULT TRUE CHECK (id),
                 auto_start_mode text NOT NULL DEFAULT 'when-wifi-not-connected',
                 wifi_password text NULL,
+                hotspot_name text NULL,
+                bluetooth_device_name text NULL,
                 updated_at timestamptz NOT NULL DEFAULT NOW()
             );
             """;
 
-        await connection.ExecuteAsync(new CommandDefinition(sql, cancellationToken: cancellationToken));
+        const string migrateSql = """
+            ALTER TABLE direct_access_settings
+                ADD COLUMN IF NOT EXISTS hotspot_name text NULL;
+            ALTER TABLE direct_access_settings
+                ADD COLUMN IF NOT EXISTS bluetooth_device_name text NULL;
+            """;
+
+        await connection.ExecuteAsync(new CommandDefinition(createSql, cancellationToken: cancellationToken));
+        await connection.ExecuteAsync(new CommandDefinition(migrateSql, cancellationToken: cancellationToken));
     }
 
     private static async Task<DirectAccessSettings> LoadSettingsAsync(NpgsqlConnection connection, CancellationToken cancellationToken)
@@ -175,7 +211,9 @@ public sealed class DirectAccessStore(
         const string sql = """
             SELECT
                 auto_start_mode AS "AutoStartMode",
-                wifi_password AS "WifiPassword"
+                wifi_password AS "WifiPassword",
+                hotspot_name AS "HotspotNameOverride",
+                bluetooth_device_name AS "BluetoothDeviceNameOverride"
             FROM direct_access_settings
             WHERE id = TRUE;
             """;
@@ -191,7 +229,9 @@ public sealed class DirectAccessStore(
         return new DirectAccessSettings(
             StorageAvailable: true,
             AutoStartMode: NormalizeAutoStartMode(row.AutoStartMode),
-            WifiPassword: NormalizeWifiPassword(row.WifiPassword));
+            WifiPassword: NormalizeWifiPassword(row.WifiPassword),
+            HotspotNameOverride: NormalizeOptionalName(row.HotspotNameOverride),
+            BluetoothDeviceNameOverride: NormalizeOptionalName(row.BluetoothDeviceNameOverride));
     }
 
     private static DirectAccessSettings Clone(DirectAccessSettings settings)
@@ -199,18 +239,26 @@ public sealed class DirectAccessStore(
         return new DirectAccessSettings(
             settings.StorageAvailable,
             settings.AutoStartMode,
-            settings.WifiPassword);
+            settings.WifiPassword,
+            settings.HotspotNameOverride,
+            settings.BluetoothDeviceNameOverride);
     }
 
     public sealed record DirectAccessSettings(
         bool StorageAvailable,
         string AutoStartMode,
-        string? WifiPassword);
+        string? WifiPassword,
+        string? HotspotNameOverride,
+        string? BluetoothDeviceNameOverride);
 
     private sealed class DirectAccessSettingsRow
     {
         public required string AutoStartMode { get; init; }
 
         public string? WifiPassword { get; init; }
+
+        public string? HotspotNameOverride { get; init; }
+
+        public string? BluetoothDeviceNameOverride { get; init; }
     }
 }

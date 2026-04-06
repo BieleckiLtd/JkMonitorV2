@@ -112,11 +112,13 @@ describe('SystemPage', () => {
     let localAccessEnabled = false;
     let localAccessActive = false;
     let localAccessPassword: string | null = null;
+    let localAccessHotspotName = 'FluxMonitor-test';
+    let localAccessBluetoothName = 'FluxMonitor Pi';
+    let ethernetEnabled = true;
     let sshEnabled = false;
     let sshActive = false;
     let preferredUpdateChannel: 'dev' | 'main' = 'dev';
     const localAccessHostName = 'fluxmonitor';
-    const localAccessHotspotName = 'FluxMonitor-test';
 
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
@@ -191,7 +193,20 @@ describe('SystemPage', () => {
               statusMessage: null,
               wifiPowered: true,
               hasInternetAccess: true,
-              ethernetInterfaces: [],
+              ethernetInterfaces: [
+                {
+                  name: 'eth0',
+                  description: 'Primary Ethernet interface',
+                  status: ethernetEnabled ? 'up' : 'down',
+                  macAddress: '11:22:33:44:55:66',
+                  addresses: [],
+                  speedMbps: 1000,
+                  connectionName: ethernetEnabled ? null : null,
+                  connectionState: ethernetEnabled ? 'disconnected' : 'unavailable',
+                  enabled: ethernetEnabled,
+                  carrierDetected: false,
+                },
+              ],
               wifiInterfaces: [
                 {
                   name: 'wlan0',
@@ -235,6 +250,8 @@ describe('SystemPage', () => {
               settings: {
                 storageAvailable: true,
                 autoStartMode: localAccessEnabled ? 'when-wifi-not-connected' : 'off',
+                hotspotName: localAccessHotspotName,
+                bluetoothDeviceName: localAccessBluetoothName,
                 wifiPassword: localAccessPassword,
               },
               mode: {
@@ -242,7 +259,7 @@ describe('SystemPage', () => {
                 enabled: localAccessEnabled,
                 active: localAccessActive,
                 hostName: localAccessHostName,
-                statusMessage: localAccessEnabled ? 'Local access mode is on. Hostname: fluxmonitor.local. Bluetooth name: FluxMonitor Pi.' : 'Local access mode is off.',
+                statusMessage: localAccessEnabled ? `Fallback local access is on. Hotspot SSID: ${localAccessHotspotName}. Bluetooth name: ${localAccessBluetoothName}.` : 'Fallback local access is off.',
                 hotspotName: localAccessHotspotName,
                 hotspotPassword: localAccessPassword,
                 addresses: localAccessActive ? ['192.168.42.1'] : [],
@@ -262,7 +279,7 @@ describe('SystemPage', () => {
                 enabled: localAccessActive,
                 statusMessage: localAccessActive ? 'Local access Bluetooth is active.' : 'Keeps the Raspberry Pi on its current network while nearby devices connect over Bluetooth PAN.',
                 interfaceName: 'btnap0',
-                deviceName: 'FluxMonitor Pi',
+                deviceName: localAccessBluetoothName,
                 requiresPairing: true,
                 discoverable: localAccessActive,
                 pairable: localAccessActive,
@@ -293,30 +310,63 @@ describe('SystemPage', () => {
       }
 
       if (url === '/api/system/local-access-mode') {
-        localAccessEnabled = true;
-        localAccessActive = true;
+        const body = typeof init?.body === 'string'
+          ? JSON.parse(init.body) as { enabled?: boolean }
+          : null;
+        localAccessEnabled = Boolean(body?.enabled);
+        localAccessActive = Boolean(body?.enabled);
         return {
           ok: true,
           json: async () => ({
             success: true,
-            enabled: true,
-            active: true,
-            message: 'Local access mode is on. Hostname: fluxmonitor.local. Bluetooth name: FluxMonitor Pi.',
+            enabled: localAccessEnabled,
+            active: localAccessActive,
+            message: localAccessEnabled
+              ? `Fallback local access is on. Hotspot SSID: ${localAccessHotspotName}. Bluetooth name: ${localAccessBluetoothName}.`
+              : 'Fallback local access is off.',
           }),
         } as Response;
       }
 
       if (url === '/api/system/local-access-mode/advanced') {
+        const body = typeof init?.body === 'string'
+          ? JSON.parse(init.body) as { wifiPassword?: string | null; hotspotName?: string | null; bluetoothDeviceName?: string | null }
+          : null;
+        localAccessPassword = body?.wifiPassword ?? null;
+        localAccessHotspotName = body?.hotspotName ?? localAccessHotspotName;
+        localAccessBluetoothName = body?.bluetoothDeviceName ?? localAccessBluetoothName;
+
         return {
           ok: true,
           json: async () => ({
             success: true,
-            message: 'Local access settings were saved.',
+            message: 'Fallback local access settings were saved.',
             settings: {
               storageAvailable: true,
               autoStartMode: localAccessEnabled ? 'when-wifi-not-connected' : 'off',
+              hotspotName: localAccessHotspotName,
+              bluetoothDeviceName: localAccessBluetoothName,
               wifiPassword: localAccessPassword,
             },
+          }),
+        } as Response;
+      }
+
+      if (url === '/api/system/network/ethernet/power') {
+        const body = typeof init?.body === 'string'
+          ? JSON.parse(init.body) as { enabled?: boolean }
+          : null;
+        ethernetEnabled = Boolean(body?.enabled);
+
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            interfaceName: 'eth0',
+            enabled: ethernetEnabled,
+            message: ethernetEnabled
+              ? "Ethernet interface 'eth0' is on, but no wired link is available. Check cable."
+              : "Ethernet interface 'eth0' is off.",
           }),
         } as Response;
       }
@@ -609,30 +659,49 @@ describe('SystemPage', () => {
   it('toggles local access mode from the unified connectivity section', async () => {
     renderSystemPage('/system/connectivity');
 
-    fireEvent.click(await screen.findByRole('button', { name: /local access mode/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /expand fallback local access details/i }));
 
-    expect(await screen.findByText(/lets you connect to the device if it loses connection to the wi-fi router/i)).toBeInTheDocument();
-    expect(screen.queryByText(/^hostname$/i)).not.toBeInTheDocument();
+    expect((await screen.findAllByText(/starts a local hotspot if the router is unavailable/i)).length).toBeGreaterThan(0);
+    expect(screen.getByText(/^bluetooth name$/i)).toBeInTheDocument();
+    expect(screen.getByText(/^hotspot ssid$/i)).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('switch', { name: /toggle local access mode/i }));
+    fireEvent.click(screen.getByRole('switch', { name: /toggle fallback local access/i }));
 
     await waitFor(() => {
-      expect(screen.getByText(/local access mode is on\. hostname: fluxmonitor\.local\. bluetooth name: fluxmonitor pi\./i)).toBeInTheDocument();
+      expect(screen.getByText(/fallback local access is on\. hotspot ssid: fluxmonitor-test\. bluetooth name: fluxmonitor pi\./i)).toBeInTheDocument();
     });
 
-    expect(screen.getByText(/if wi-fi drops, the hostname will be fluxmonitor\.local and the bluetooth name will be fluxmonitor pi\./i)).toBeInTheDocument();
-    expect(screen.getByText(/hostname: fluxmonitor\.local \| bluetooth: fluxmonitor pi/i)).toBeInTheDocument();
-    expect(screen.getByText(/^hostname$/i)).toBeInTheDocument();
-    expect(screen.getAllByText(/fluxmonitor.local/i).length).toBeGreaterThan(0);
-    expect(screen.getByText('192.168.42.1')).toBeInTheDocument();
+    expect(screen.getAllByText(/starts a local hotspot if the router is unavailable/i).length).toBeGreaterThan(0);
+    expect(screen.getByText('FluxMonitor Pi')).toBeInTheDocument();
     expect(screen.getByText('FluxMonitor-test')).toBeInTheDocument();
+    expect(screen.getByText('192.168.42.1')).toBeInTheDocument();
     expect(screen.getByText(/no password/i)).toBeInTheDocument();
+  });
+
+  it('toggles the Ethernet interface from the connectivity section', async () => {
+    renderSystemPage('/system/connectivity');
+
+    fireEvent.click(await screen.findByRole('button', { name: /expand ethernet details/i }));
+
+    expect((await screen.findAllByText(/eth0 interface is active but not operational\. check cable\./i)).length).toBeGreaterThan(0);
+    expect(screen.getByText(/wired network connection/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('switch', { name: /toggle ethernet interface/i }));
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith('/api/system/network/ethernet/power', expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }));
+    });
+
+    expect(await screen.findByText(/ethernet interface 'eth0' is off\./i)).toBeInTheDocument();
   });
 
   it('toggles ssh access from the unified connectivity section', async () => {
     renderSystemPage('/system/connectivity');
 
-    expect(await screen.findByText(/enable secure remote terminal access to this device/i)).toBeInTheDocument();
+    expect(await screen.findByText(/remote terminal access\./i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('switch', { name: /toggle ssh access/i }));
 
@@ -651,6 +720,8 @@ describe('SystemPage', () => {
   it('saves local access advanced settings from the unified connectivity section', async () => {
     const baseFetch = globalThis.fetch;
     let localAccessPassword: string | null = null;
+    let localAccessHotspotName = 'FluxMonitor-test';
+    let localAccessBluetoothName = 'FluxMonitor Pi';
     const fetchMock = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
 
@@ -669,11 +740,18 @@ describe('SystemPage', () => {
               ...directAccess,
               settings: {
                 ...settings,
+                hotspotName: localAccessHotspotName,
+                bluetoothDeviceName: localAccessBluetoothName,
                 wifiPassword: localAccessPassword,
               },
               mode: {
                 ...mode,
+                hotspotName: localAccessHotspotName,
                 hotspotPassword: localAccessPassword,
+              },
+              bluetooth: {
+                ...(directAccess.bluetooth as Record<string, unknown>),
+                deviceName: localAccessBluetoothName,
               },
             },
           }),
@@ -681,16 +759,21 @@ describe('SystemPage', () => {
       }
 
       if (url === '/api/system/local-access-mode/advanced' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { wifiPassword?: string | null; hotspotName?: string | null; bluetoothDeviceName?: string | null };
         localAccessPassword = 'abc';
+        localAccessHotspotName = body.hotspotName ?? localAccessHotspotName;
+        localAccessBluetoothName = body.bluetoothDeviceName ?? localAccessBluetoothName;
 
         return {
           ok: true,
           json: async () => ({
             success: true,
-            message: 'Local access settings were saved.',
+            message: 'Fallback local access settings were saved.',
             settings: {
               storageAvailable: true,
               autoStartMode: 'off',
+              hotspotName: localAccessHotspotName,
+              bluetoothDeviceName: localAccessBluetoothName,
               wifiPassword: localAccessPassword,
             },
           }),
@@ -704,14 +787,18 @@ describe('SystemPage', () => {
 
     renderSystemPage('/system/connectivity');
 
-    fireEvent.click(await screen.findByRole('button', { name: /local access mode/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /expand fallback local access details/i }));
 
     fireEvent.click(await screen.findByRole('button', { name: /^advanced$/i }));
 
-    const passwordInput = screen.getByLabelText(/local access hotspot password/i);
+    const bluetoothNameInput = screen.getByLabelText(/fallback bluetooth name/i);
+    const hotspotNameInput = screen.getByLabelText(/fallback hotspot ssid/i);
+    const passwordInput = screen.getByLabelText(/fallback hotspot password/i);
+    fireEvent.change(bluetoothNameInput, { target: { value: 'FluxMonitor Backup' } });
+    fireEvent.change(hotspotNameInput, { target: { value: 'FluxMonitor-emergency' } });
     fireEvent.change(passwordInput, { target: { value: 'abc' } });
 
-    fireEvent.click(screen.getByRole('button', { name: /save local access settings/i }));
+    fireEvent.click(screen.getByRole('button', { name: /save fallback local access settings/i }));
 
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith('/api/system/local-access-mode/advanced', expect.objectContaining({
@@ -725,10 +812,12 @@ describe('SystemPage', () => {
 
     expect(postCall).toBeTruthy();
     expect(JSON.parse(String(postCall?.[1]?.body))).toEqual({
+      bluetoothDeviceName: 'FluxMonitor Backup',
+      hotspotName: 'FluxMonitor-emergency',
       wifiPassword: 'abc',
     });
 
-    expect(await screen.findByText(/local access settings were saved/i)).toBeInTheDocument();
+    expect(await screen.findByText(/fallback local access settings were saved/i)).toBeInTheDocument();
   });
 
   it('posts database retention changes from the database section', async () => {

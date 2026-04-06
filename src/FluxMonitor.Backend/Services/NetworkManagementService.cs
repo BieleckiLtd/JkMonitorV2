@@ -46,7 +46,7 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         var deviceStatuses = await GetDeviceStatusesAsync(cancellationToken);
         var wifiPowered = await GetWifiRadioEnabledAsync(cancellationToken);
         var hasInternetAccess = await GetInternetAccessAsync(cancellationToken);
-        ethernetInterfaces = BuildEthernetInterfaces(interfaces, deviceStatuses);
+        ethernetInterfaces = await BuildEthernetInterfacesAsync(interfaces, deviceStatuses, cancellationToken);
         wifiInterfaces = await BuildWifiInterfacesAsync(interfaces, deviceStatuses, wifiPowered != false, cancellationToken);
 
         return new NetworkConnectivitySnapshot
@@ -281,6 +281,87 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         };
     }
 
+    public async Task<EthernetPowerResult> SetEthernetEnabledAsync(
+        string? interfaceName,
+        bool enabled,
+        CancellationToken cancellationToken = default)
+    {
+        if (!OperatingSystem.IsLinux())
+        {
+            return new EthernetPowerResult
+            {
+                Success = false,
+                InterfaceName = interfaceName?.Trim() ?? string.Empty,
+                Enabled = false,
+                Message = "Ethernet interface controls are supported on Linux hosts with NetworkManager."
+            };
+        }
+
+        var resolvedInterfaceName = await ResolveEthernetInterfaceNameAsync(interfaceName, cancellationToken);
+        if (resolvedInterfaceName is null)
+        {
+            return new EthernetPowerResult
+            {
+                Success = false,
+                InterfaceName = interfaceName?.Trim() ?? string.Empty,
+                Enabled = false,
+                Message = "No Ethernet interface was detected on this host."
+            };
+        }
+
+        logger.LogInformation("Setting Ethernet interface {InterfaceName} enabled state to {Enabled}.", resolvedInterfaceName, enabled);
+
+        var autoconnectResult = await RunNmcliAsync(
+            ["device", "set", resolvedInterfaceName, "autoconnect", enabled ? "yes" : "no"],
+            cancellationToken);
+        if (!autoconnectResult.Succeeded)
+        {
+            return new EthernetPowerResult
+            {
+                Success = false,
+                InterfaceName = resolvedInterfaceName,
+                Enabled = (await GetEthernetDeviceDetailsAsync(resolvedInterfaceName, cancellationToken)).Enabled ?? false,
+                Message = BuildCommandFailureMessage(
+                    autoconnectResult,
+                    $"Unable to change Ethernet interface '{resolvedInterfaceName}'.")
+            };
+        }
+
+        var transitionResult = await RunNmcliAsync(
+            ["device", enabled ? "connect" : "disconnect", resolvedInterfaceName],
+            cancellationToken);
+        var details = await GetEthernetDeviceDetailsAsync(resolvedInterfaceName, cancellationToken);
+        var actualEnabled = details.Enabled ?? enabled;
+        var success = actualEnabled == enabled;
+
+        if (!success)
+        {
+            return new EthernetPowerResult
+            {
+                Success = false,
+                InterfaceName = resolvedInterfaceName,
+                Enabled = actualEnabled,
+                Message = BuildCommandFailureMessage(
+                    transitionResult,
+                    $"Ethernet interface '{resolvedInterfaceName}' did not change as requested.")
+            };
+        }
+
+        return new EthernetPowerResult
+        {
+            Success = true,
+            InterfaceName = resolvedInterfaceName,
+            Enabled = actualEnabled,
+            Message = enabled
+                ? details.CarrierDetected == false
+                    ? $"Ethernet interface '{resolvedInterfaceName}' is on, but no wired link is available. Check cable."
+                    : string.IsNullOrWhiteSpace(transitionResult.StandardOutput)
+                        ? $"Ethernet interface '{resolvedInterfaceName}' is on."
+                        : transitionResult.StandardOutput.Trim()
+                : $"Ethernet interface '{resolvedInterfaceName}' is off."
+        };
+    }
+
     public async Task<EthernetDisconnectResult> DisconnectEthernetAsync(string? interfaceName, CancellationToken cancellationToken = default)
     {
         if (!OperatingSystem.IsLinux())
@@ -498,6 +579,26 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             .ToArray();
     }
 
+    private async Task<EthernetInterfaceSnapshot[]> BuildEthernetInterfacesAsync(
+        IReadOnlyList<BaseInterfaceInfo> interfaces,
+        IReadOnlyDictionary<string, NetworkManagerDeviceStatus>? deviceStatuses,
+        CancellationToken cancellationToken)
+    {
+        var snapshots = BuildEthernetInterfaces(interfaces, deviceStatuses);
+        if (snapshots.Length == 0)
+        {
+            return snapshots;
+        }
+
+        var detailedSnapshots = new List<EthernetInterfaceSnapshot>(snapshots.Length);
+        foreach (var @interface in snapshots)
+        {
+            detailedSnapshots.Add(await ApplyEthernetDeviceDetailsAsync(@interface, cancellationToken));
+        }
+
+        return detailedSnapshots.ToArray();
+    }
+
     private async Task<WifiInterfaceSnapshot[]> BuildWifiInterfacesAsync(
         IReadOnlyList<BaseInterfaceInfo> interfaces,
         IReadOnlyDictionary<string, NetworkManagerDeviceStatus>? deviceStatuses,
@@ -562,6 +663,22 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
 
         var trimmed = value.Trim();
         return string.Equals(trimmed, "--", StringComparison.Ordinal) ? null : trimmed;
+    }
+
+    internal static bool? ParseNmcliBoolean(string? value)
+    {
+        var normalized = NormalizeNmcliValue(value);
+        if (normalized is null)
+        {
+            return null;
+        }
+
+        return normalized.ToLowerInvariant() switch
+        {
+            "yes" or "on" or "enabled" or "true" => true,
+            "no" or "off" or "disabled" or "false" => false,
+            _ => null
+        };
     }
 
     private static int? TryParseInt(string? value)
@@ -675,6 +792,57 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
             ConnectionName = deviceStatus.ConnectionName,
             ConnectionState = deviceStatus.State
         };
+    }
+
+    private async Task<EthernetInterfaceSnapshot> ApplyEthernetDeviceDetailsAsync(
+        EthernetInterfaceSnapshot @interface,
+        CancellationToken cancellationToken)
+    {
+        var details = await GetEthernetDeviceDetailsAsync(@interface.Name, cancellationToken);
+        return @interface with
+        {
+            Enabled = details.Enabled,
+            CarrierDetected = details.CarrierDetected
+        };
+    }
+
+    private async Task<EthernetDeviceDetails> GetEthernetDeviceDetailsAsync(
+        string interfaceName,
+        CancellationToken cancellationToken)
+    {
+        var result = await RunNmcliAsync(
+            ["--terse", "--fields", "GENERAL.AUTOCONNECT,WIRED-PROPERTIES.CARRIER", "device", "show", interfaceName],
+            cancellationToken);
+        if (!result.Succeeded)
+        {
+            logger.LogDebug("Unable to read Ethernet device details for {InterfaceName}.", interfaceName);
+            return new EthernetDeviceDetails(null, null);
+        }
+
+        bool? enabled = null;
+        bool? carrierDetected = null;
+
+        foreach (var line in result.StandardOutput.Split('\n', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
+        {
+            var separatorIndex = line.IndexOf(':');
+            if (separatorIndex < 0)
+            {
+                continue;
+            }
+
+            var key = line[..separatorIndex].Trim();
+            var value = NormalizeNmcliValue(line[(separatorIndex + 1)..]);
+            if (string.Equals(key, "GENERAL.AUTOCONNECT", StringComparison.Ordinal))
+            {
+                enabled = ParseNmcliBoolean(value);
+            }
+            else if (string.Equals(key, "WIRED-PROPERTIES.CARRIER", StringComparison.Ordinal))
+            {
+                carrierDetected = ParseNmcliBoolean(value);
+            }
+        }
+
+        return new EthernetDeviceDetails(enabled, carrierDetected);
     }
 
     private async Task<IReadOnlyDictionary<string, NetworkManagerDeviceStatus>> GetDeviceStatusesAsync(CancellationToken cancellationToken)
@@ -1529,6 +1697,10 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
         string Type,
         string? State,
         string? ConnectionName);
+
+    private sealed record EthernetDeviceDetails(
+        bool? Enabled,
+        bool? CarrierDetected);
 
     internal sealed record ProcessResult(
         bool Succeeded,

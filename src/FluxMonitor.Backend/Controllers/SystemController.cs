@@ -121,6 +121,8 @@ public sealed class SystemController(
         var result = await directAccessService.SaveSettingsAsync(
             request.AutoStartMode,
             request.WifiPassword,
+            request.HotspotName,
+            request.BluetoothDeviceName,
             cancellationToken);
         return result.Success ? Ok(result) : BadRequest(result);
     }
@@ -139,7 +141,11 @@ public sealed class SystemController(
         [FromBody] SaveLocalAccessAdvancedRequest request,
         CancellationToken cancellationToken)
     {
-        var result = await directAccessService.SaveLocalAccessAdvancedSettingsAsync(request.WifiPassword, cancellationToken);
+        var result = await directAccessService.SaveLocalAccessAdvancedSettingsAsync(
+            request.WifiPassword,
+            request.HotspotName,
+            request.BluetoothDeviceName,
+            cancellationToken);
         return result.Success ? Ok(result) : BadRequest(result);
     }
 
@@ -237,6 +243,15 @@ public sealed class SystemController(
         CancellationToken cancellationToken)
     {
         var result = await networkManagementService.SetWifiPowerAsync(request.Enabled, cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpPost("network/ethernet/power")]
+    public async Task<ActionResult<EthernetPowerResult>> SetEthernetPower(
+        [FromBody] EthernetPowerRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await networkManagementService.SetEthernetEnabledAsync(request.InterfaceName, request.Enabled, cancellationToken);
         return result.Success ? Ok(result) : BadRequest(result);
     }
 
@@ -588,14 +603,15 @@ public sealed class NetworkInterfaceInfo
 
 public sealed record WifiConnectRequest(string Ssid, string? Password, string? InterfaceName, string? Bssid);
 public sealed record WifiPowerRequest(bool Enabled);
+public sealed record EthernetPowerRequest(string InterfaceName, bool Enabled);
 public sealed record EthernetDisconnectRequest(string InterfaceName);
 
 public sealed record BluetoothPowerRequest(bool Enabled);
 public sealed record SshToggleRequest(bool Enabled);
 public sealed record DirectAccessToggleRequest(bool Enabled);
-public sealed record SaveDirectAccessSettingsRequest(string AutoStartMode, string? WifiPassword);
+public sealed record SaveDirectAccessSettingsRequest(string AutoStartMode, string? WifiPassword, string? HotspotName, string? BluetoothDeviceName);
 public sealed record LocalAccessModeToggleRequest(bool Enabled);
-public sealed record SaveLocalAccessAdvancedRequest(string? WifiPassword);
+public sealed record SaveLocalAccessAdvancedRequest(string? WifiPassword, string? HotspotName, string? BluetoothDeviceName);
 public sealed record StopServiceRequest(string Name);
 public sealed record SaveUpdateChannelRequest(string Channel);
 

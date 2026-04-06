@@ -177,6 +177,8 @@ type EthernetInterfaceSnapshot = {
   speedMbps?: number | null;
   connectionName?: string | null;
   connectionState?: string | null;
+  enabled?: boolean | null;
+  carrierDetected?: boolean | null;
 };
 
 type WifiInterfaceSnapshot = {
@@ -242,9 +244,10 @@ type WifiPowerResult = {
   message: string;
 };
 
-type EthernetDisconnectResult = {
+type EthernetPowerResult = {
   success: boolean;
   interfaceName: string;
+  enabled: boolean;
   message: string;
 };
 
@@ -309,6 +312,8 @@ type DirectAccessSettingsSnapshot = {
   storageAvailable: boolean;
   autoStartMode: 'off' | 'when-wifi-not-connected' | string;
   wifiPassword?: string | null;
+  hotspotName?: string | null;
+  bluetoothDeviceName?: string | null;
 };
 
 type WifiDirectAccessSnapshot = {
@@ -447,17 +452,11 @@ type InlineFeedback = {
   isError: boolean;
 };
 
-type PendingConnectivityAction =
-  | {
-    kind: 'disable-wifi';
-    interfaceName: string;
-    connectionName?: string | null;
-  }
-  | {
-    kind: 'disconnect-ethernet';
-    interfaceName: string;
-    connectionName?: string | null;
-  };
+type PendingConnectivityAction = {
+  kind: 'disable-wifi';
+  interfaceName: string;
+  connectionName?: string | null;
+};
 
 type WifiConnectDialogState = {
   interfaceName: string;
@@ -562,12 +561,14 @@ export function SystemPage() {
   const [sshToggleLoading, setSshToggleLoading] = useState(false);
   const [localAccessModeLoading, setLocalAccessModeLoading] = useState(false);
   const [localAccessModeFeedback, setLocalAccessModeFeedback] = useState<InlineFeedback | null>(null);
+  const [localAccessHotspotName, setLocalAccessHotspotName] = useState('');
+  const [localAccessBluetoothName, setLocalAccessBluetoothName] = useState('');
   const [localAccessWifiPassword, setLocalAccessWifiPassword] = useState('');
   const [localAccessShowPassword, setLocalAccessShowPassword] = useState(false);
   const [localAccessAdvancedOpen, setLocalAccessAdvancedOpen] = useState(false);
   const [localAccessSettingsSaving, setLocalAccessSettingsSaving] = useState(false);
   const [localAccessSettingsFeedback, setLocalAccessSettingsFeedback] = useState<InlineFeedback | null>(null);
-  const [ethernetDisconnectLoading, setEthernetDisconnectLoading] = useState<string | null>(null);
+  const [ethernetPowerLoading, setEthernetPowerLoading] = useState(false);
   const [ethernetFeedback, setEthernetFeedback] = useState<InlineFeedback | null>(null);
   const [pendingConnectivityAction, setPendingConnectivityAction] = useState<PendingConnectivityAction | null>(null);
   const [expandedConnectivitySection, setExpandedConnectivitySection] = useState<'wifi' | 'bluetooth' | 'ethernet' | 'local-access' | 'internet-speed' | 'tunnel' | null>(null);
@@ -940,6 +941,8 @@ export function SystemPage() {
       return;
     }
 
+    setLocalAccessHotspotName(settings.hotspotName ?? '');
+    setLocalAccessBluetoothName(settings.bluetoothDeviceName ?? '');
     setLocalAccessWifiPassword(settings.wifiPassword ?? '');
   }, [connectivity]);
 
@@ -1159,7 +1162,7 @@ export function SystemPage() {
       }
     } catch (error) {
       setLocalAccessModeFeedback({
-        message: error instanceof Error ? error.message : 'Unable to change local access mode.',
+        message: error instanceof Error ? error.message : 'Unable to change fallback local access.',
         isError: true,
       });
     } finally {
@@ -1176,6 +1179,8 @@ export function SystemPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
+          hotspotName: localAccessHotspotName,
+          bluetoothDeviceName: localAccessBluetoothName,
           wifiPassword: localAccessWifiPassword,
         }),
       });
@@ -1185,12 +1190,14 @@ export function SystemPage() {
 
       if (response.ok && data.success) {
         localAccessSettingsDirtyRef.current = false;
+        setLocalAccessHotspotName(data.settings.hotspotName ?? '');
+        setLocalAccessBluetoothName(data.settings.bluetoothDeviceName ?? '');
         setLocalAccessWifiPassword(data.settings.wifiPassword ?? '');
         await loadConnectivity();
       }
     } catch (error) {
       setLocalAccessSettingsFeedback({
-        message: error instanceof Error ? error.message : 'Unable to save local access settings.',
+        message: error instanceof Error ? error.message : 'Unable to save fallback local access settings.',
         isError: true,
       });
     } finally {
@@ -1198,30 +1205,40 @@ export function SystemPage() {
     }
   };
 
-  const disconnectEthernet = async (interfaceName: string) => {
-    setEthernetDisconnectLoading(interfaceName);
+  const toggleEthernetPower = async (enabled: boolean) => {
+    const interfaceName = activeEthernetInterface?.name;
+    if (!interfaceName) {
+      setEthernetFeedback({
+        message: 'No Ethernet interface is available.',
+        isError: true,
+      });
+      return;
+    }
+
+    setEthernetPowerLoading(true);
     setEthernetFeedback(null);
 
     try {
-      const response = await fetch('/api/system/network/ethernet/disconnect', {
+      const response = await fetch('/api/system/network/ethernet/power', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ interfaceName }),
+        body: JSON.stringify({ interfaceName, enabled }),
       });
 
-      const data = await response.json() as EthernetDisconnectResult;
+      const data = await response.json() as EthernetPowerResult;
       setEthernetFeedback({ message: data.message, isError: !response.ok || !data.success });
 
       if (response.ok && data.success) {
+        setExpandedConnectivitySection('ethernet');
         await loadConnectivity();
       }
     } catch (error) {
       setEthernetFeedback({
-        message: error instanceof Error ? error.message : 'Unable to disconnect the Ethernet interface.',
+        message: error instanceof Error ? error.message : 'Unable to change the Ethernet interface state.',
         isError: true,
       });
     } finally {
-      setEthernetDisconnectLoading(null);
+      setEthernetPowerLoading(false);
     }
   };
 
@@ -1300,19 +1317,6 @@ export function SystemPage() {
     });
   };
 
-  const requestEthernetDisconnect = (ethernetInterface: EthernetInterfaceSnapshot) => {
-    if (isEthernetInterfaceActive(ethernetInterface)) {
-      setPendingConnectivityAction({
-        kind: 'disconnect-ethernet',
-        interfaceName: ethernetInterface.name,
-        connectionName: ethernetInterface.connectionName,
-      });
-      return;
-    }
-
-    void disconnectEthernet(ethernetInterface.name);
-  };
-
   const confirmPendingConnectivityAction = async () => {
     const action = pendingConnectivityAction;
     if (!action) {
@@ -1323,10 +1327,7 @@ export function SystemPage() {
 
     if (action.kind === 'disable-wifi') {
       await toggleWifiPower();
-      return;
     }
-
-    await disconnectEthernet(action.interfaceName);
   };
 
   const selectWifiInterface = async (wifiInterface: WifiInterfaceSnapshot) => {
@@ -1590,7 +1591,7 @@ export function SystemPage() {
   const connectedWifiInterface = wifiInterfaces.find((wifiInterface) => wifiInterface.connectedSsid) ?? selectedWifiInterface;
   const hasInternetAccess = connectivity?.network.hasInternetAccess ?? null;
   const activeBluetoothDevice = visibleBluetoothDevices.find((device) => device.isConnected) ?? visibleBluetoothDevices[0] ?? null;
-  const activeEthernetInterface = ethernetInterfaces.find((ethernetInterface) => isEthernetInterfaceActive(ethernetInterface)) ?? ethernetInterfaces[0] ?? null;
+  const activeEthernetInterface = ethernetInterfaces.find((ethernetInterface) => isEthernetInterfaceEnabled(ethernetInterface)) ?? ethernetInterfaces[0] ?? null;
   const internetSpeedResult = internetSpeedTest?.result ?? null;
   const internetSpeedStage = internetSpeedTest?.stage ?? null;
   const internetSpeedStagePercent = clampPercent(internetSpeedTest?.stagePercentComplete);
@@ -1677,39 +1678,32 @@ export function SystemPage() {
   const bluetoothSummary = activeBluetoothDevice?.displayName ?? 'Nearby devices';
   const localAccessSettings = connectivity?.directAccess.settings ?? null;
   const localAccessMode = connectivity?.directAccess.mode ?? null;
+  const savedLocalAccessHotspotName = localAccessSettings?.hotspotName ?? '';
+  const savedLocalAccessBluetoothName = localAccessSettings?.bluetoothDeviceName ?? '';
   const savedLocalAccessWifiPassword = localAccessSettings?.wifiPassword ?? '';
-  const localAccessSettingsDirty = localAccessWifiPassword !== savedLocalAccessWifiPassword;
+  const localAccessSettingsDirty = localAccessHotspotName !== savedLocalAccessHotspotName
+    || localAccessBluetoothName !== savedLocalAccessBluetoothName
+    || localAccessWifiPassword !== savedLocalAccessWifiPassword;
   const localAccessUsesWpa3Only = requiresSaeForLocalAccessPassword(localAccessWifiPassword);
   const localAccessAddresses = localAccessMode?.addresses ?? [];
   const localAccessPrimaryAddress = localAccessAddresses[0] ?? null;
-  const localAccessHostname = formatLocalAccessHostName(localAccessMode?.hostName);
-  const localAccessBluetoothDeviceName = formatLocalAccessBluetoothDeviceName(connectivity?.directAccess.bluetooth.deviceName);
-  const localAccessEnabledSummary = buildLocalAccessIdentitySummary(localAccessHostname, localAccessBluetoothDeviceName);
-  const localAccessEnabledDescription = buildLocalAccessEnabledDescription(localAccessHostname, localAccessBluetoothDeviceName);
+  const localAccessBluetoothDeviceName = formatLocalAccessBluetoothDeviceName(connectivity?.directAccess.bluetooth.deviceName ?? localAccessSettings?.bluetoothDeviceName);
+  const localAccessHotspotSsid = formatLocalAccessName(localAccessMode?.hotspotName ?? localAccessSettings?.hotspotName);
+  const localAccessStatus = buildFallbackLocalAccessStatus(localAccessMode, localAccessPrimaryAddress);
   const connectivityPanelLinks = buildConnectivityPanelLinks(localAccessMode?.hostName, wifiInterfaces, ethernetInterfaces);
-  const localAccessSummary = localAccessMode?.enabled
-    ? localAccessEnabledSummary
-    : 'Keeps nearby access available';
-  const ethernetSummary = activeEthernetInterface
-    ? activeEthernetInterface.connectionName
-      ? activeEthernetInterface.connectionName
-      : activeEthernetInterface.description || activeEthernetInterface.name
-    : 'Wired network';
+  const localAccessSummary = 'Starts a local hotspot if the router is unavailable.';
+  const ethernetSummary = 'Wired network connection';
+  const ethernetToggleChecked = isEthernetInterfaceEnabled(activeEthernetInterface);
+  const ethernetPrimaryStatus = buildEthernetStatusMessage(activeEthernetInterface);
   const pendingConnectivityDialogTitle = pendingConnectivityAction?.kind === 'disable-wifi'
     ? 'Turn off Wi-Fi?'
-    : pendingConnectivityAction?.kind === 'disconnect-ethernet'
-      ? 'Disconnect Ethernet?'
-      : null;
+    : null;
   const pendingConnectivityDialogDescription = pendingConnectivityAction?.kind === 'disable-wifi'
     ? `You are currently using ${pendingConnectivityAction.connectionName ?? pendingConnectivityAction.interfaceName}. Turning Wi-Fi off will disconnect this device from that network.`
-    : pendingConnectivityAction?.kind === 'disconnect-ethernet'
-      ? `Disconnect ${pendingConnectivityAction.interfaceName}${pendingConnectivityAction.connectionName ? ` from ${pendingConnectivityAction.connectionName}` : ''}? This can interrupt access to the device.`
-      : null;
+    : null;
   const pendingConnectivityConfirmLabel = pendingConnectivityAction?.kind === 'disable-wifi'
     ? 'Turn off Wi-Fi'
-    : pendingConnectivityAction?.kind === 'disconnect-ethernet'
-      ? 'Disconnect Ethernet'
-      : null;
+    : null;
   const isLogsSystemSection = activeSystemSection === 'logs';
 
   const renderLogsPage = () => (
@@ -2580,7 +2574,7 @@ export function SystemPage() {
                             </div>
                             <div className='min-w-0 flex-1'>
                               <div className='text-sm font-semibold text-foreground'>SSH</div>
-                              <div className='mt-0.5 text-xs text-muted-foreground'>Enable secure remote terminal access to this device.</div>
+                              <div className='mt-0.5 text-xs text-muted-foreground'>Remote terminal access.</div>
                             </div>
                           </div>
 
@@ -2596,25 +2590,48 @@ export function SystemPage() {
                       </div>
 
                       <div className='overflow-hidden rounded-[28px] border border-border/70 bg-background/35'>
-                        <button
-                          type='button'
-                          onClick={() => void toggleConnectivitySection('ethernet')}
-                          className='flex w-full min-w-0 items-center gap-3 px-4 py-4 text-left'
-                        >
-                          <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
-                            <Cable className='h-4 w-4 text-muted-foreground' />
+                        <div className='flex items-center gap-3 px-4 py-4'>
+                          <button
+                            type='button'
+                            onClick={() => void toggleConnectivitySection('ethernet')}
+                            className='flex min-w-0 flex-1 items-center gap-3 text-left'
+                            aria-expanded={ethernetSectionOpen}
+                          >
+                            <div className='flex size-10 shrink-0 items-center justify-center rounded-2xl bg-muted/60'>
+                              <Cable className='h-4 w-4 text-muted-foreground' />
+                            </div>
+                            <div className='min-w-0 flex-1'>
+                              <div className='text-sm font-semibold text-foreground'>Ethernet</div>
+                              <div className='mt-0.5 truncate text-xs text-muted-foreground'>{ethernetSummary}</div>
+                            </div>
+                          </button>
+
+                          <div className='flex shrink-0 items-center justify-end'>
+                            <Switch
+                              checked={ethernetToggleChecked}
+                              disabled={ethernetPowerLoading || !activeEthernetInterface}
+                              onCheckedChange={() => void toggleEthernetPower(!ethernetToggleChecked)}
+                              aria-label='Toggle Ethernet interface'
+                            />
                           </div>
-                          <div className='min-w-0 flex-1'>
-                            <div className='text-sm font-semibold text-foreground'>Ethernet</div>
-                            <div className='mt-0.5 truncate text-xs text-muted-foreground'>{ethernetSummary}</div>
-                          </div>
-                          <div className='pl-3 text-muted-foreground'>
+
+                          <button
+                            type='button'
+                            onClick={() => void toggleConnectivitySection('ethernet')}
+                            className='flex shrink-0 items-center justify-center text-muted-foreground'
+                            aria-label={ethernetSectionOpen ? 'Collapse Ethernet details' : 'Expand Ethernet details'}
+                            aria-expanded={ethernetSectionOpen}
+                          >
                             {ethernetSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
-                          </div>
-                        </button>
+                          </button>
+                        </div>
 
                         {ethernetSectionOpen ? (
                           <div className='space-y-4 border-t border-border/60 px-4 py-4'>
+                            <div className='rounded-2xl border border-border bg-muted/70 px-3 py-2 text-xs text-muted-foreground'>
+                              {ethernetPrimaryStatus}
+                            </div>
+
                             {ethernetFeedback ? (
                               <div className={cn(
                                 'rounded-2xl border px-3 py-2 text-xs',
@@ -2641,6 +2658,9 @@ export function SystemPage() {
                                           ? `${ethernetInterface.connectionName}${ethernetInterface.speedMbps ? ` • ${ethernetInterface.speedMbps} Mbps` : ''}`
                                           : ethernetInterface.description || 'Wired interface'}
                                       </div>
+                                      <div className='mt-2 text-xs leading-5 text-muted-foreground'>
+                                        {buildEthernetStatusMessage(ethernetInterface)}
+                                      </div>
                                       {ethernetInterface.addresses.length > 0 ? (
                                         <div className='mt-1 break-all text-[11px] font-mono text-muted-foreground'>
                                           {ethernetInterface.addresses.join(' • ')}
@@ -2649,18 +2669,11 @@ export function SystemPage() {
                                     </div>
                                     <div className='flex w-full flex-col items-start gap-2 sm:w-auto sm:shrink-0 sm:items-end'>
                                       <div className='text-xs text-muted-foreground sm:text-right'>
-                                        {ethernetInterface.connectionState ?? ethernetInterface.status ?? 'Unknown'}
+                                        {formatEthernetStateLabel(ethernetInterface)}
                                       </div>
-                                      {isEthernetInterfaceActive(ethernetInterface) ? (
-                                        <button
-                                          type='button'
-                                          disabled={ethernetDisconnectLoading === ethernetInterface.name}
-                                          onClick={() => requestEthernetDisconnect(ethernetInterface)}
-                                          className='inline-flex items-center justify-center rounded-lg border border-border bg-background/80 px-3 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
-                                        >
-                                          {ethernetDisconnectLoading === ethernetInterface.name ? <LoaderCircle className='h-3.5 w-3.5 animate-spin' /> : 'Disconnect'}
-                                        </button>
-                                      ) : null}
+                                      <div className='text-[11px] uppercase tracking-[0.16em] text-muted-foreground/80'>
+                                        {isEthernetInterfaceEnabled(ethernetInterface) ? 'On' : 'Off'}
+                                      </div>
                                     </div>
                                   </div>
                                 ))}
@@ -2686,7 +2699,7 @@ export function SystemPage() {
                               <Link2 className='h-4 w-4 text-muted-foreground' />
                             </div>
                             <div className='min-w-0 flex-1'>
-                              <div className='text-sm font-semibold text-foreground'>Local access mode</div>
+                              <div className='text-sm font-semibold text-foreground'>Fallback local access</div>
                               <div className='mt-0.5 truncate text-xs text-muted-foreground'>{localAccessSummary}</div>
                             </div>
                           </button>
@@ -2696,7 +2709,7 @@ export function SystemPage() {
                               checked={Boolean(localAccessMode?.supported) && Boolean(localAccessMode?.enabled)}
                               disabled={localAccessModeLoading || !(localAccessMode?.supported ?? false)}
                               onCheckedChange={() => void toggleLocalAccessMode(!(localAccessMode?.enabled ?? false))}
-                              aria-label='Toggle local access mode'
+                              aria-label='Toggle fallback local access'
                             />
                           </div>
 
@@ -2704,7 +2717,7 @@ export function SystemPage() {
                             type='button'
                             onClick={() => void toggleConnectivitySection('local-access')}
                             className='flex shrink-0 items-center justify-center text-muted-foreground'
-                            aria-label={localAccessSectionOpen ? 'Collapse local access details' : 'Expand local access details'}
+                            aria-label={localAccessSectionOpen ? 'Collapse fallback local access details' : 'Expand fallback local access details'}
                             aria-expanded={localAccessSectionOpen}
                           >
                             {localAccessSectionOpen ? <ChevronDown className='h-4 w-4' /> : <ChevronRight className='h-4 w-4' />}
@@ -2714,9 +2727,7 @@ export function SystemPage() {
                         {localAccessSectionOpen ? (
                           <div className='space-y-4 border-t border-border/60 px-4 py-4'>
                             <div className='text-xs leading-5 text-muted-foreground'>
-                              {localAccessMode?.enabled
-                                ? localAccessEnabledDescription
-                                : 'Lets you connect to the device if it loses connection to the Wi-Fi router.'}
+                              {localAccessSummary}
                             </div>
 
                             {localAccessModeFeedback ? (
@@ -2730,25 +2741,23 @@ export function SystemPage() {
 
                             {!localAccessMode?.supported ? (
                               <div className='rounded-2xl border border-dashed border-border bg-background/30 px-4 py-3 text-xs text-muted-foreground'>
-                                {localAccessMode?.statusMessage ?? 'Local access mode is unavailable on this host.'}
+                                {localAccessMode?.statusMessage ?? 'Fallback local access is unavailable on this host.'}
                               </div>
                             ) : null}
 
-                            {localAccessMode?.active ? (
-                              <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-4'>
-                                <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
-                                  <DetailTile label='Hostname' value={localAccessHostname} />
-                                  <DetailTile label='IP address' value={localAccessPrimaryAddress ?? 'Waiting'} />
-                                  <DetailTile label='Hotspot name' value={localAccessMode.hotspotName ?? 'Waiting'} />
-                                  <DetailTile label='Password' value={localAccessMode.hotspotPassword || 'No password'} />
-                                </div>
-                                {localAccessAddresses.length > 1 ? (
-                                  <div className='mt-3 break-all text-[11px] font-mono text-muted-foreground'>
-                                    {localAccessAddresses.join(' • ')}
-                                  </div>
-                                ) : null}
+                            <div className='rounded-2xl border border-border/70 bg-background/35 px-4 py-4'>
+                              <div className='grid gap-3 sm:grid-cols-2 xl:grid-cols-4'>
+                                <DetailTile label='Bluetooth name' value={localAccessBluetoothDeviceName} />
+                                <DetailTile label='Hotspot SSID' value={localAccessHotspotSsid} />
+                                <DetailTile label='Password' value={localAccessMode?.hotspotPassword || 'No password'} />
+                                <DetailTile label='Status' value={localAccessStatus} />
                               </div>
-                            ) : null}
+                              {localAccessAddresses.length > 1 ? (
+                                <div className='mt-3 break-all text-[11px] font-mono text-muted-foreground'>
+                                  {localAccessAddresses.join(' • ')}
+                                </div>
+                              ) : null}
+                            </div>
 
                             <div className='overflow-hidden rounded-2xl border border-border/70 bg-background/30'>
                               <button
@@ -2764,7 +2773,7 @@ export function SystemPage() {
                                 <div className='space-y-4 border-t border-border/60 px-4 py-4'>
                                   {!localAccessSettings?.storageAvailable ? (
                                     <div className='rounded-2xl border border-amber-500/20 bg-amber-500/10 px-4 py-3 text-xs text-amber-100'>
-                                      Local access settings cannot be saved until PostgreSQL storage is configured.
+                                      Fallback local access settings cannot be saved until PostgreSQL storage is configured.
                                     </div>
                                   ) : null}
 
@@ -2779,10 +2788,48 @@ export function SystemPage() {
 
                                   <div className='space-y-2'>
                                     <label className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
+                                      Bluetooth name
+                                    </label>
+                                    <Input
+                                      aria-label='Fallback Bluetooth name'
+                                      value={localAccessBluetoothName}
+                                      onChange={(event) => {
+                                        localAccessSettingsDirtyRef.current = true;
+                                        setLocalAccessSettingsFeedback(null);
+                                        setLocalAccessBluetoothName(event.target.value);
+                                      }}
+                                      placeholder='Flux Monitor'
+                                    />
+                                    <div className='text-xs leading-5 text-muted-foreground'>
+                                      Shown when a phone or laptop pairs with the fallback Bluetooth connection.
+                                    </div>
+                                  </div>
+
+                                  <div className='space-y-2'>
+                                    <label className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
+                                      Hotspot SSID
+                                    </label>
+                                    <Input
+                                      aria-label='Fallback hotspot SSID'
+                                      value={localAccessHotspotName}
+                                      onChange={(event) => {
+                                        localAccessSettingsDirtyRef.current = true;
+                                        setLocalAccessSettingsFeedback(null);
+                                        setLocalAccessHotspotName(event.target.value);
+                                      }}
+                                      placeholder='FluxMonitor-Pi'
+                                    />
+                                    <div className='text-xs leading-5 text-muted-foreground'>
+                                      Broadcast if fallback local access starts a hotspot because the router is unavailable.
+                                    </div>
+                                  </div>
+
+                                  <div className='space-y-2'>
+                                    <label className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
                                       Hotspot password
                                     </label>
                                     <Input
-                                      aria-label='Local access hotspot password'
+                                      aria-label='Fallback hotspot password'
                                       type={localAccessShowPassword ? 'text' : 'password'}
                                       value={localAccessWifiPassword}
                                       onChange={(event) => {
@@ -2813,7 +2860,7 @@ export function SystemPage() {
                                   <div className='flex justify-end'>
                                     <button
                                       type='button'
-                                      aria-label='Save local access settings'
+                                      aria-label='Save fallback local access settings'
                                       disabled={localAccessSettingsSaving || !localAccessSettings?.storageAvailable || !localAccessSettingsDirty}
                                       onClick={() => void saveLocalAccessAdvancedSettings()}
                                       className='inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background/70 px-4 py-2.5 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground disabled:opacity-50'
@@ -3534,12 +3581,28 @@ function formatLocalAccessBluetoothDeviceName(deviceName: string | null | undefi
   return trimmed;
 }
 
-function buildLocalAccessIdentitySummary(hostName: string, bluetoothDeviceName: string) {
-  return `Hostname: ${hostName} | Bluetooth: ${bluetoothDeviceName}`;
+function formatLocalAccessName(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) {
+    return 'Waiting';
+  }
+
+  return trimmed;
 }
 
-function buildLocalAccessEnabledDescription(hostName: string, bluetoothDeviceName: string) {
-  return `If Wi-Fi drops, the hostname will be ${hostName} and the Bluetooth name will be ${bluetoothDeviceName}.`;
+function buildFallbackLocalAccessStatus(
+  localAccessMode: LocalAccessModeSnapshot | null | undefined,
+  primaryAddress: string | null,
+) {
+  if (!localAccessMode?.enabled) {
+    return 'Disabled';
+  }
+
+  if (localAccessMode.active) {
+    return primaryAddress ?? 'Active';
+  }
+
+  return 'Starts when needed';
 }
 
 function buildConnectivityPanelLinks(
@@ -3659,6 +3722,18 @@ function isWifiInterfaceInUse(wifiInterface: WifiInterfaceSnapshot | null | unde
   return Boolean(wifiInterface?.connectedSsid) || (wifiInterface?.addresses.length ?? 0) > 0;
 }
 
+function isEthernetInterfaceEnabled(ethernetInterface: EthernetInterfaceSnapshot | null | undefined) {
+  if (!ethernetInterface) {
+    return false;
+  }
+
+  if (ethernetInterface.enabled != null) {
+    return ethernetInterface.enabled;
+  }
+
+  return isEthernetInterfaceActive(ethernetInterface);
+}
+
 function isEthernetInterfaceActive(ethernetInterface: EthernetInterfaceSnapshot | null | undefined) {
   if (!ethernetInterface) {
     return false;
@@ -3667,6 +3742,38 @@ function isEthernetInterfaceActive(ethernetInterface: EthernetInterfaceSnapshot 
   return (ethernetInterface.connectionState ?? ethernetInterface.status ?? '').toLowerCase().includes('connected')
     || stringEqualsIgnoreCase(ethernetInterface.status, 'up')
     || ethernetInterface.addresses.length > 0;
+}
+
+function buildEthernetStatusMessage(ethernetInterface: EthernetInterfaceSnapshot | null | undefined) {
+  if (!ethernetInterface) {
+    return 'No Ethernet interface detected.';
+  }
+
+  if (!isEthernetInterfaceEnabled(ethernetInterface)) {
+    return `${ethernetInterface.name} interface is off.`;
+  }
+
+  if (ethernetInterface.carrierDetected === false) {
+    return `${ethernetInterface.name} interface is active but not operational. Check cable.`;
+  }
+
+  if (isEthernetInterfaceActive(ethernetInterface)) {
+    return `${ethernetInterface.name} interface is active on the wired network.`;
+  }
+
+  return `${ethernetInterface.name} interface is on and waiting for a wired link.`;
+}
+
+function formatEthernetStateLabel(ethernetInterface: EthernetInterfaceSnapshot | null | undefined) {
+  if (!ethernetInterface) {
+    return 'Unknown';
+  }
+
+  if (ethernetInterface.carrierDetected === false) {
+    return 'Cable not detected';
+  }
+
+  return ethernetInterface.connectionState ?? ethernetInterface.status ?? 'Unknown';
 }
 
 function stringEqualsIgnoreCase(left: string | null | undefined, right: string) {

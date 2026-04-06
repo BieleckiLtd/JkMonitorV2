@@ -460,6 +460,23 @@ public sealed class BluetoothManagementService(ILogger<BluetoothManagementServic
         }
     }
 
+    internal async Task SetDirectAccessAliasAsync(string? alias, CancellationToken cancellationToken = default)
+    {
+        if (!OperatingSystem.IsLinux() || string.IsNullOrWhiteSpace(alias))
+        {
+            return;
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
+        var adapter = await TryGetAdapterAsync();
+        if (adapter is null)
+        {
+            return;
+        }
+
+        await TrySetAdapterPropertyAsync(adapter, "Alias", alias.Trim());
+    }
+
     private async Task<Adapter?> TryGetAdapterAsync()
     {
         try
