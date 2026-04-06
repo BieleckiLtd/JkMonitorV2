@@ -67,9 +67,119 @@ type DeviceDefinitionSummary = {
   unsupportedTransportMessage?: string | null;
 };
 
-const defaultDevice = (index: number, definition: DeviceDefinitionSummary): DeviceConfiguration => ({
+type DeviceDefinitionFamily = {
+  key: string;
+  name: string;
+  manufacturer: string;
+  model: string;
+  category?: string;
+  description?: string;
+  definitions: DeviceDefinitionSummary[];
+};
+
+function getConnectionLabel(transportType: string | null | undefined) {
+  switch (transportType?.toLowerCase()) {
+    case 'serial':
+      return 'USB / serial';
+    case 'ble':
+      return 'Bluetooth';
+    case 'network':
+      return 'Network';
+    default:
+      if (!transportType) {
+        return 'Unknown';
+      }
+
+      return transportType.charAt(0).toUpperCase() + transportType.slice(1);
+  }
+}
+
+function getTransportSortOrder(transportType: string) {
+  switch (transportType.toLowerCase()) {
+    case 'serial':
+      return 0;
+    case 'ble':
+      return 1;
+    default:
+      return 10;
+  }
+}
+
+function stripConnectionSuffix(name: string) {
+  return name.replace(/\s*\((?:ble|bluetooth|serial|usb(?:\s*\/\s*serial)?|wired)\)\s*$/i, '').trim();
+}
+
+function getFamilyKey(definition: DeviceDefinitionSummary) {
+  const manufacturer = definition.manufacturer.trim();
+  const model = definition.model.trim();
+  if (manufacturer || model) {
+    return `${manufacturer.toLowerCase()}|${model.toLowerCase()}`;
+  }
+
+  return definition.id;
+}
+
+function getFamilyName(definitions: DeviceDefinitionSummary[]) {
+  const baseNames = definitions.map((definition) => stripConnectionSuffix(definition.name)).filter((name) => name.length > 0);
+  const firstName = baseNames[0];
+  if (firstName && baseNames.every((name) => name.localeCompare(firstName, undefined, { sensitivity: 'accent' }) === 0)) {
+    return firstName;
+  }
+
+  return stripConnectionSuffix(definitions.find((definition) => definition.transportType === 'serial')?.name ?? definitions[0]?.name ?? 'Device');
+}
+
+function buildDefinitionFamilies(definitions: DeviceDefinitionSummary[]) {
+  const families = new Map<string, DeviceDefinitionSummary[]>();
+  for (const definition of definitions) {
+    const key = getFamilyKey(definition);
+    const existing = families.get(key);
+    if (existing) {
+      existing.push(definition);
+    } else {
+      families.set(key, [definition]);
+    }
+  }
+
+  return Array.from(families.entries())
+    .map(([key, entries]) => {
+      const definitionsForFamily = [...entries].sort((left, right) => {
+        const transportDelta = getTransportSortOrder(left.transportType) - getTransportSortOrder(right.transportType);
+        if (transportDelta !== 0) {
+          return transportDelta;
+        }
+
+        return left.name.localeCompare(right.name, undefined, { sensitivity: 'base' });
+      });
+
+      const primaryDefinition = definitionsForFamily[0];
+      return {
+        key,
+        name: getFamilyName(definitionsForFamily),
+        manufacturer: primaryDefinition?.manufacturer ?? '',
+        model: primaryDefinition?.model ?? '',
+        category: primaryDefinition?.category,
+        description: primaryDefinition?.description,
+        definitions: definitionsForFamily,
+      } satisfies DeviceDefinitionFamily;
+    })
+    .sort((left, right) => {
+      const nameDelta = left.name.localeCompare(right.name, undefined, { sensitivity: 'base' });
+      if (nameDelta !== 0) {
+        return nameDelta;
+      }
+
+      return left.key.localeCompare(right.key, undefined, { sensitivity: 'base' });
+    });
+}
+
+function getFamilyForDefinition(definitionId: string, families: DeviceDefinitionFamily[]) {
+  return families.find((family) => family.definitions.some((definition) => definition.id === definitionId)) ?? null;
+}
+
+const defaultDevice = (index: number, definition: DeviceDefinitionSummary, familyName?: string): DeviceConfiguration => ({
   deviceId: `device-${index}`,
-  displayName: definition.name,
+  displayName: familyName ?? stripConnectionSuffix(definition.name),
   definitionId: definition.id,
   definitionVersion: null,
   transportPortName: '',
@@ -135,6 +245,7 @@ function getActionResultMessage(result: StartStopResult) {
 
 export function DevicesPage() {
   const { definitions: availableDefinitions, refresh: refreshDefinitions } = useDeviceDefinitions();
+  const definitionFamilies = buildDefinitionFamilies(availableDefinitions);
   const [devices, setDevices] = useState<DeviceConfiguration[]>([]);
   const [ports, setPorts] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -245,13 +356,14 @@ export function DevicesPage() {
     markDirty();
   }, [markDirty]);
 
-  const updateDeviceDefinition = useCallback((index: number, nextDefinitionId: string) => {
+  const updateDeviceConnection = useCallback((index: number, nextDefinitionId: string) => {
     const nextDefinition = definitionsRef.current.find((entry) => entry.id === nextDefinitionId);
     if (!nextDefinition) {
       return;
     }
 
     const targetDeviceId = devicesRef.current[index]?.deviceId;
+    const nextFamily = getFamilyForDefinition(nextDefinitionId, buildDefinitionFamilies(definitionsRef.current));
 
     setDevices((current) => current.map((device, deviceIndex) => {
       if (deviceIndex !== index) {
@@ -261,11 +373,16 @@ export function DevicesPage() {
       const currentDefinition = definitionsRef.current.find((entry) => entry.id === device.definitionId);
       const currentTransportType = currentDefinition?.transportType ?? null;
       const nextTransportType = nextDefinition.transportType;
-      const shouldUseDefinitionName = !device.displayName.trim() || device.displayName === (currentDefinition?.name ?? '');
+      const currentFamily = currentDefinition
+        ? getFamilyForDefinition(currentDefinition.id, buildDefinitionFamilies(definitionsRef.current))
+        : null;
+      const shouldUseFamilyName = !device.displayName.trim()
+        || device.displayName === (currentFamily?.name ?? '')
+        || device.displayName === stripConnectionSuffix(currentDefinition?.name ?? '');
 
       return {
         ...device,
-        displayName: shouldUseDefinitionName ? nextDefinition.name : device.displayName,
+        displayName: shouldUseFamilyName ? (nextFamily?.name ?? stripConnectionSuffix(nextDefinition.name)) : device.displayName,
         definitionId: nextDefinition.id,
         definitionVersion: null,
         transportPortName: currentTransportType === nextTransportType ? (device.transportPortName ?? '') : '',
@@ -334,11 +451,11 @@ export function DevicesPage() {
     }
   }, []);
 
-  const addDeviceFromDefinition = useCallback((definitionId: string, explicitDefinition?: DeviceDefinitionSummary) => {
+  const addDeviceFromDefinition = useCallback((definitionId: string, explicitDefinition?: DeviceDefinitionSummary, familyName?: string) => {
     const definition = explicitDefinition ?? definitionsRef.current.find((entry) => entry.id === definitionId);
     if (!definition || !definition.isTransportSupported) return;
 
-    setDevices((current) => [...current, defaultDevice(current.length + 1, definition)]);
+    setDevices((current) => [...current, defaultDevice(current.length + 1, definition, familyName)]);
     setShowAddPicker(false);
     setUploadError(null);
     markDirty();
@@ -379,7 +496,7 @@ export function DevicesPage() {
           isTransportSupported: data.isTransportSupported ?? true,
           unsupportedTransportMessage: data.unsupportedTransportMessage ?? null,
         };
-        addDeviceFromDefinition(data.id, summary);
+        addDeviceFromDefinition(data.id, summary, stripConnectionSuffix(summary.name));
       }
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : 'Upload failed.');
@@ -465,29 +582,50 @@ export function DevicesPage() {
           <div className='mb-4'>
             <span className='mb-3 block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>From device library</span>
             <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3'>
-              {availableDefinitions.map((definition) => (
-                <button
-                  key={definition.id}
-                  type='button'
-                  className={cn(
-                    'flex flex-col gap-1 rounded-xl border p-4 text-left transition',
-                    definition.isTransportSupported
-                      ? 'border-border bg-muted/30 hover:border-primary/50 hover:bg-muted/60'
-                      : 'cursor-not-allowed border-amber-500/30 bg-amber-500/10 opacity-70',
-                  )}
-                  disabled={!definition.isTransportSupported}
-                  onClick={() => addDeviceFromDefinition(definition.id)}
-                >
-                  <span className='text-sm font-semibold text-foreground'>{definition.name}</span>
-                  <span className='text-xs text-muted-foreground'>{definition.manufacturer} · {definition.model}</span>
-                  <span className='mt-1 text-[10px] uppercase tracking-wider text-muted-foreground/70'>{definition.transportType}</span>
-                  {!definition.isTransportSupported ? (
-                    <span className='mt-2 text-[11px] text-amber-700 dark:text-amber-300'>
-                      {definition.unsupportedTransportMessage ?? 'This transport is not supported in the current build.'}
-                    </span>
-                  ) : null}
-                </button>
-              ))}
+              {definitionFamilies.map((family) => {
+                const supportedConnections = family.definitions.filter((definition) => definition.isTransportSupported);
+
+                return (
+                  <div key={family.key} className='rounded-xl border border-border bg-muted/30 p-4'>
+                    <div className='space-y-1'>
+                      <span className='text-sm font-semibold text-foreground'>{family.name}</span>
+                      <span className='block text-xs text-muted-foreground'>{family.manufacturer} · {family.model}</span>
+                      {family.description ? <span className='block text-xs text-muted-foreground/80'>{family.description}</span> : null}
+                    </div>
+
+                    <div className='mt-4 space-y-2'>
+                      <span className='block text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>Connection</span>
+                      <div className='flex flex-wrap gap-2'>
+                        {family.definitions.map((definition) => {
+                          const connectionLabel = getConnectionLabel(definition.transportType);
+                          return (
+                            <button
+                              key={definition.id}
+                              type='button'
+                              aria-label={`Add ${family.name} using ${connectionLabel}`}
+                              className={cn(
+                                'rounded-lg border px-3 py-2 text-sm transition',
+                                definition.isTransportSupported
+                                  ? 'border-border bg-background hover:border-primary/50 hover:bg-muted/60'
+                                  : 'cursor-not-allowed border-amber-500/30 bg-amber-500/10 text-amber-700 opacity-70 dark:text-amber-300',
+                              )}
+                              disabled={!definition.isTransportSupported}
+                              onClick={() => addDeviceFromDefinition(definition.id, definition, family.name)}
+                            >
+                              {connectionLabel}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      {supportedConnections.length === 0 ? (
+                        <span className='block text-[11px] text-amber-700 dark:text-amber-300'>
+                          {family.definitions[0]?.unsupportedTransportMessage ?? 'This device is not supported in the current build.'}
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
@@ -520,6 +658,8 @@ export function DevicesPage() {
         <div className='space-y-4'>
           {devices.map((device, index) => {
             const definition = getDefinition(device, availableDefinitions);
+            const definitionFamily = getFamilyForDefinition(device.definitionId, definitionFamilies);
+            const connectionChoices = definitionFamily?.definitions ?? (definition ? [definition] : []);
             const transportType = getTransportType(device, availableDefinitions);
             const isTransportSupported = definition?.isTransportSupported ?? false;
             const requiresTransport = requiresTransportIdentifier(device, availableDefinitions);
@@ -535,14 +675,14 @@ export function DevicesPage() {
                   <div className='space-y-1'>
                     <div className='flex flex-wrap items-center gap-2'>
                       <h3 className='text-lg font-semibold text-foreground'>{device.displayName || device.deviceId}</h3>
-                      {transportType ? <span className='rounded-full border border-border bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>{transportType}</span> : null}
+                      {transportType ? <span className='rounded-full border border-border bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>{getConnectionLabel(transportType)}</span> : null}
                       {device.definitionVersion ? <span className='rounded-full border border-border bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>v{device.definitionVersion}</span> : null}
                     </div>
                     <div className='text-sm text-muted-foreground'>
-                      {definition ? `${definition.manufacturer} · ${definition.model}` : device.definitionId}
+                      {definition ? `${definition.manufacturer} · ${definition.model}` : device.deviceId}
                     </div>
-                    <div className='text-xs font-mono text-muted-foreground/60'>
-                      {device.definitionId}
+                    <div className='text-xs text-muted-foreground/70'>
+                      Connection: {getConnectionLabel(transportType)}
                     </div>
                   </div>
 
@@ -593,14 +733,16 @@ export function DevicesPage() {
                   </label>
 
                   <label className='space-y-2 text-sm text-foreground'>
-                    <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device definition</span>
+                    <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Connection</span>
                     <select
                       className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
                       value={device.definitionId}
-                      disabled={device.enabled}
-                      onChange={(event) => updateDeviceDefinition(index, event.target.value)}
+                      disabled={device.enabled || connectionChoices.length <= 1}
+                      onChange={(event) => updateDeviceConnection(index, event.target.value)}
                     >
-                      {availableDefinitions.map((entry) => <option key={entry.id} value={entry.id}>{entry.name}</option>)}
+                      {connectionChoices.map((entry) => (
+                        <option key={entry.id} value={entry.id}>{getConnectionLabel(entry.transportType)}</option>
+                      ))}
                     </select>
                   </label>
 

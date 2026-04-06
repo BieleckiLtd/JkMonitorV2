@@ -110,7 +110,10 @@ describe('DevicesPage', () => {
     render(<DevicesPage />);
 
     fireEvent.click(await screen.findByRole('button', { name: /add first device/i }));
-    fireEvent.click(await screen.findByRole('button', { name: /jk inverter bms \(ble\)/i }));
+    expect(await screen.findByText(/^JK Inverter BMS$/i)).toBeInTheDocument();
+    expect(screen.queryByText(/^JK Inverter BMS \(BLE\)$/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using bluetooth/i }));
 
     expect(await screen.findByText(/scan and choose a nearby ble device/i)).toBeInTheDocument();
     expect(screen.getByPlaceholderText(/aa:bb:cc:dd:ee:ff or device alias/i)).toBeInTheDocument();
@@ -122,7 +125,7 @@ describe('DevicesPage', () => {
     render(<DevicesPage />);
 
     fireEvent.click(await screen.findByRole('button', { name: /add first device/i }));
-    fireEvent.click(await screen.findByRole('button', { name: /jk inverter bms \(ble\)/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using bluetooth/i }));
 
     fireEvent.click(screen.getByRole('button', { name: /scan nearby/i }));
 
@@ -138,22 +141,23 @@ describe('DevicesPage', () => {
     expect(screen.getByRole('button', { name: /start/i })).toBeEnabled();
   });
 
-  it('lets a stopped device switch to the BLE definition without changing its device id', async () => {
+  it('lets a stopped device switch connection without changing its device id', async () => {
     render(<DevicesPage />);
 
     fireEvent.click(await screen.findByRole('button', { name: /add first device/i }));
-    fireEvent.click(screen.getByText(/^JK Inverter BMS$/i).closest('button') as HTMLButtonElement);
+    fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using usb \/ serial/i }));
 
     expect(await screen.findByRole('combobox', { name: /serial port/i })).toBeInTheDocument();
     expect(screen.getByDisplayValue('device-1')).toBeInTheDocument();
+    expect(screen.getByRole('textbox', { name: /display name/i })).toHaveValue('JK Inverter BMS');
 
-    fireEvent.change(screen.getByRole('combobox', { name: /device definition/i }), {
+    fireEvent.change(screen.getByRole('combobox', { name: /connection/i }), {
       target: { value: 'jk-inverter-bms-ble' },
     });
 
     expect(await screen.findByPlaceholderText(/aa:bb:cc:dd:ee:ff or device alias/i)).toBeInTheDocument();
     expect(screen.getByDisplayValue('device-1')).toBeInTheDocument();
-    expect(screen.getByRole('textbox', { name: /display name/i })).toHaveValue('JK Inverter BMS (BLE)');
+    expect(screen.getByRole('textbox', { name: /display name/i })).toHaveValue('JK Inverter BMS');
     expect(screen.queryByRole('combobox', { name: /serial port/i })).not.toBeInTheDocument();
   });
 
@@ -161,7 +165,7 @@ describe('DevicesPage', () => {
     render(<DevicesPage />);
 
     fireEvent.click(await screen.findByRole('button', { name: /add first device/i }));
-    fireEvent.click(await screen.findByRole('button', { name: /jk inverter bms \(ble\)/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using bluetooth/i }));
 
     fireEvent.change(screen.getByPlaceholderText(/aa:bb:cc:dd:ee:ff or device alias/i), {
       target: { value: 'C8:47:80:3A:5C:05' }
