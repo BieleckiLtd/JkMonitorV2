@@ -7,7 +7,7 @@ namespace FluxMonitor.Backend.Services;
 /// Routes poll requests to the correct client based on the device definition's transport type.
 /// </summary>
 public sealed class PollingClientDispatcher(
-    GenericModbusPollingClient modbusClient,
+    GenericSerialPollingClient serialClient,
     GenericBlePollingClient bleClient,
     DeviceDefinitionLoader definitionLoader) : IDevicePollingClient
 {
@@ -76,7 +76,7 @@ public sealed class PollingClientDispatcher(
 
         return transport switch
         {
-            "serial" => modbusClient.PollAsync(device, definition, cancellationToken),
+            "serial" => serialClient.PollAsync(device, definition, cancellationToken),
             "ble" when GenericBlePollingClient.IsDefinitionSupported(definition)
                 => bleClient.PollAsync(device, definition, cancellationToken),
             _ => throw new NotSupportedException(

@@ -14,7 +14,7 @@ public sealed class DevicesController(
     DeviceStateStore stateStore,
     DeviceOrchestrator orchestrator,
     DeviceConfigStore deviceConfigStore,
-    GenericModbusPollingClient genericModbusPollingClient,
+    GenericSerialPollingClient genericModbusPollingClient,
     GenericBlePollingClient genericBlePollingClient,
     PollingClientDispatcher pollingClientDispatcher,
     DeviceDefinitionLoader definitionLoader,

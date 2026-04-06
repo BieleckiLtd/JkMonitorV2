@@ -10,15 +10,15 @@ using FluxMonitor.Contracts.Status;
 namespace FluxMonitor.Backend.Services;
 
 /// <summary>
-/// Definition-driven Modbus RTU polling client. Uses device definition JSON to determine
-/// which register banks to read, how to parse entity values, compute derived values,
-/// and decode alarms — with no hardcoded protocol knowledge.
+/// Definition-driven serial polling client. Selects wire framing based on the
+/// protocol type in the device definition (modbus-rtu, ascii-hex-framed, ...).
+/// Response normalization is JSON-driven via ResponseLayout definitions.
 /// </summary>
-public sealed class GenericModbusPollingClient(
+public sealed class GenericSerialPollingClient(
     DefinitionDrivenTelemetryBuilder telemetryBuilder,
     ExpressionEvaluator expressionEvaluator,
     DeviceDefinitionLoader definitionLoader,
-    ILogger<GenericModbusPollingClient> logger) : IDevicePollingClient, IDisposable
+    ILogger<GenericSerialPollingClient> logger) : IDevicePollingClient, IDisposable
 {
     private readonly SemaphoreSlim _busLock = new(1, 1);
     private SerialPort? _serialPort;
@@ -61,9 +61,10 @@ public sealed class GenericModbusPollingClient(
             serialPort.DiscardInBuffer();
             serialPort.DiscardOutBuffer();
 
-            // Read each register bank
+            // Read each data-source bank
             var bankData = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
             var now = DateTimeOffset.UtcNow;
+            var protocolType = definition.Connection.Protocol.Type ?? "modbus-rtu";
 
             foreach (var bank in definition.DataSources)
             {
@@ -85,14 +86,27 @@ public sealed class GenericModbusPollingClient(
                     serialPort.DiscardInBuffer();
                 }
 
-                logger.LogDebug("Reading a configured register bank.");
+                logger.LogDebug("Reading data source bank '{BankId}' via {Protocol}.", bank.Id, protocolType);
 
-                var request = ModbusRtu.BuildReadHoldingRegistersRequest(slaveAddress, bank.Address, bank.Count);
-                var response = await SendAndReceiveAsync(serialPort, request,
-                    ModbusRtu.ExpectedReadResponseLength(bank.Count), readTimeout, cancellationToken);
+                byte[] dataArray;
+                try
+                {
+                    dataArray = protocolType switch
+                    {
+                        "ascii-hex-framed" => await ReadAsciiHexFramedBankAsync(serialPort, bank, slaveAddress, protocolSettings, readTimeout, pollToken),
+                        _ => await ReadModbusBankAsync(serialPort, bank, slaveAddress, readTimeout, pollToken),
+                    };
+                }
+                catch (Exception ex) when (bank.Optional)
+                {
+                    logger.LogWarning(ex, "Optional bank '{BankId}' read failed, skipping.", bank.Id);
+                    continue;
+                }
 
-                var data = ModbusRtu.ValidateAndExtractData(response, slaveAddress, bank.FunctionCode);
-                var dataArray = data.ToArray();
+                // Apply response layout normalization if defined
+                if (bank.ResponseLayout is not null)
+                    dataArray = ResponseLayoutNormalizer.Normalize(dataArray, bank.ResponseLayout);
+
                 bankData[bank.Id] = dataArray;
                 _bankCache[bank.Id] = (now, dataArray);
             }
@@ -163,7 +177,7 @@ public sealed class GenericModbusPollingClient(
             logger.LogInformation("Writing a configured register value. Register=0x{Register:X4}.", registerAddress);
 
             var writeRequest = ModbusRtu.BuildWriteMultipleRegistersRequest(slaveAddress, registerAddress, rawValue);
-            var writeResponse = await SendAndReceiveAsync(serialPort, writeRequest,
+            var writeResponse = await SendAndReceiveModbusAsync(serialPort, writeRequest,
                 ModbusRtu.WriteResponseLength, readTimeout, cancellationToken);
             ModbusRtu.ValidateAndExtractData(writeResponse, slaveAddress, bank.Write.FunctionCode);
 
@@ -172,7 +186,7 @@ public sealed class GenericModbusPollingClient(
             serialPort.DiscardInBuffer();
 
             var readRequest = ModbusRtu.BuildReadHoldingRegistersRequest(slaveAddress, registerAddress, (ushort)bank.Write.RegistersPerWrite);
-            var readResponse = await SendAndReceiveAsync(serialPort, readRequest,
+            var readResponse = await SendAndReceiveModbusAsync(serialPort, readRequest,
                 ModbusRtu.ExpectedReadResponseLength((ushort)bank.Write.RegistersPerWrite), readTimeout, cancellationToken);
 
             var frame = readResponse;
@@ -540,9 +554,45 @@ public sealed class GenericModbusPollingClient(
 
     #endregion
 
+    #region Protocol-specific bank reading
+
+    private async Task<byte[]> ReadModbusBankAsync(
+        SerialPort serialPort, DataSourceDefinition bank, byte slaveAddress,
+        int readTimeout, CancellationToken ct)
+    {
+        var request = ModbusRtu.BuildReadHoldingRegistersRequest(slaveAddress, bank.Address, bank.Count);
+        var response = await SendAndReceiveModbusAsync(serialPort, request,
+            ModbusRtu.ExpectedReadResponseLength(bank.Count), readTimeout, ct);
+        var data = ModbusRtu.ValidateAndExtractData(response, slaveAddress, bank.FunctionCode);
+        return data.ToArray();
+    }
+
+    private async Task<byte[]> ReadAsciiHexFramedBankAsync(
+        SerialPort serialPort, DataSourceDefinition bank, byte slaveAddress,
+        ProtocolSettings protocolSettings, int readTimeout, CancellationToken ct)
+    {
+        var framing = protocolSettings.AsciiHexFrame
+            ?? throw new InvalidOperationException(
+                $"Protocol '{bank.Id}' requires protocol.settings.asciiHexFrame.");
+
+        // RequestInfo is the ASCII-hex payload content (e.g. "FF" for "get all modules").
+        byte[]? infoPayload = null;
+        if (!string.IsNullOrEmpty(bank.RequestInfo))
+            infoPayload = System.Text.Encoding.ASCII.GetBytes(bank.RequestInfo);
+
+        var request = AsciiHexFramedProtocol.BuildCommand(slaveAddress, bank.Command, framing, infoPayload);
+        var stream = serialPort.BaseStream;
+        await stream.WriteAsync(request, ct);
+        await stream.FlushAsync(ct);
+        var response = await AsciiHexFramedProtocol.ReadFrameAsync(stream, framing, readTimeout, ct);
+        return AsciiHexFramedProtocol.ValidateAndExtractPayload(response, framing);
+    }
+
+    #endregion
+
     #region Serial Port Management
 
-    private async Task<byte[]> SendAndReceiveAsync(SerialPort serialPort, byte[] request, int expectedLen, int readTimeout, CancellationToken cancellationToken)
+    private static async Task<byte[]> SendAndReceiveModbusAsync(SerialPort serialPort, byte[] request, int expectedLen, int readTimeout, CancellationToken cancellationToken)
     {
         await serialPort.BaseStream.WriteAsync(request, cancellationToken);
         await serialPort.BaseStream.FlushAsync(cancellationToken);
