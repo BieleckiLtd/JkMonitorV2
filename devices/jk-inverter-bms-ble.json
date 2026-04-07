@@ -86,8 +86,8 @@
       "description": "Real-time sensor data — cell voltages, pack status, temperatures"
     },
     "slow": {
-      "intervalMs": 30000,
-      "description": "Configuration parameters and device info (slow-changing)"
+      "intervalMs": 0,
+      "description": "Read once per connection — avoids repeated BLE command writes that cause the BMS to beep"
     }
   },
 

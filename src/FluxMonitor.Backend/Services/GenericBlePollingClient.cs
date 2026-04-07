@@ -176,7 +176,20 @@ public sealed class GenericBlePollingClient(
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
-            await ResetSessionAsync(session);
+            if (!await IsSessionConnectedAsync(session))
+            {
+                logger.LogInformation(
+                    "BLE connection lost for device {DeviceId}. Resetting session.",
+                    device.DeviceId);
+                await ResetSessionAsync(session);
+            }
+            else
+            {
+                logger.LogDebug(
+                    "BLE poll error for device {DeviceId} but connection is still alive. Keeping session.",
+                    device.DeviceId);
+            }
+
             throw;
         }
         finally
@@ -1649,6 +1662,20 @@ public sealed class GenericBlePollingClient(
         }
 
         return payload.ToString()?.Trim();
+    }
+
+    private static async Task<bool> IsSessionConnectedAsync(BleSession session)
+    {
+        if (session.Device is null)
+            return false;
+        try
+        {
+            return await session.Device.GetAsync<bool>("Connected");
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     private static async Task ResetSessionAsync(BleSession session)
