@@ -1,0 +1,1314 @@
+{
+  "$schema": "https://FluxMonitor.local/schemas/device-definition-v1.json",
+  "version": "1",
+
+  "device": {
+    "id": "pylon-lv-rs485",
+    "name": "Pylon Low Voltage (RS485)",
+    "manufacturer": "Generic",
+    "model": "Pylon LV Protocol V3.x",
+    "category": "energy-storage",
+    "description": "Universal definition for BMS using Pylon Low Voltage RS485 protocol V3.x. Compatible with Pylontech, JK BMS, Dali, Deye, Seplos, Pace and other BMS that implement the standard. Supports per-battery commands (V3.3: CID2 0x42, 0x44, 0x92) for individual cell data and system commands (V3.5: CID2 0x61, 0x62, 0x63) for aggregate pack data. Address 2 = master battery in single-group mode. Baud 9600 per V3.5 default (DIP switch 1=UP on Pylontech).",
+    "icon": "battery",
+    "documentationUrl": "https://github.com/BieleckiLtd/JkMonitorV2"
+  },
+
+  "connection": {
+    "transport": {
+      "type": "serial",
+      "defaults": {
+        "baudRate": 9600,
+        "dataBits": 8,
+        "parity": "none",
+        "stopBits": 1,
+        "readTimeoutMs": 2000,
+        "writeTimeoutMs": 1000
+      }
+    },
+    "protocol": {
+      "type": "ascii-hex-framed",
+      "settings": {
+        "defaultSlaveAddress": 2,
+        "interFrameDelayMs": 200,
+        "retries": 1,
+        "byteOrder": "big-endian",
+        "asciiHexFrame": {
+          "startByte": 126,
+          "endByte": 13,
+          "version": 32,
+          "versionOffsetChars": 0,
+          "addressOffsetChars": 2,
+          "requestCommandSet": 70,
+          "requestCommandSetOffsetChars": 4,
+          "commandOffsetChars": 6,
+          "lengthOffsetChars": 8,
+          "payloadOffsetChars": 12,
+          "lengthCharCount": 4,
+          "checksumCharCount": 4,
+          "lengthEncoding": "nibble-checksum-12bit",
+          "frameChecksumType": "ones-complement-sum16",
+          "responseSuccessCode": 0
+        }
+      }
+    }
+  },
+
+  "dataSources": [
+    {
+      "id": "analog",
+      "name": "Per-Battery Analog (V3.3)",
+      "command": 66,
+      "pollGroup": "fast",
+      "optional": true,
+      "requestInfo": "FF",
+      "_comment": "CID2 0x42 — individual cell voltages, temperatures, current, voltage, capacity, cycles. INFO=0xFF for system query. Supported by Pylontech US/Force series; NOT supported by some 3rd-party Pylon-mode BMS (e.g. JK BMS returns CID2 Invalid).",
+      "responseLayout": {
+        "bufferSize": 96,
+        "steps": [
+          { "op": "skip", "size": 1, "_comment": "INFOFLAG byte" },
+          { "op": "readVar", "var": "modules", "type": "u8" },
+          { "op": "firstOf", "var": "modules", "steps": [
+            { "op": "readVar", "var": "cells", "type": "u8", "writeTo": 64 },
+            { "op": "copyArray", "count": "cells", "elementSize": 2, "writeTo": 0, "max": 32 },
+            { "op": "readVar", "var": "temps", "type": "u8", "writeTo": 76 },
+            { "op": "copyArray", "count": "temps", "elementSize": 2, "writeTo": 66, "max": 5 },
+            { "op": "copy", "size": 2, "writeTo": 78, "_comment": "current (int16, value*100=mA → scale 0.1A)" },
+            { "op": "copy", "size": 2, "writeTo": 80, "_comment": "module voltage (uint16, mV)" },
+            { "op": "readVar", "var": "rc1", "type": "u16" },
+            { "op": "readVar", "var": "udef", "type": "u8", "writeTo": 92 },
+            { "op": "readVar", "var": "tc1", "type": "u16" },
+            { "op": "copy", "size": 2, "writeTo": 90, "_comment": "cycle count" },
+            { "op": "branch", "var": "udef", "gt": 2,
+              "then": [
+                { "op": "readVar", "var": "rc2", "type": "u24", "writeTo": 82, "writeAs": "u32" },
+                { "op": "skip", "size": 2 },
+                { "op": "readVar", "var": "tc2", "type": "u24", "writeTo": 86, "writeAs": "u32" }
+              ],
+              "else": [
+                { "op": "writeVar", "var": "rc1", "writeTo": 82, "writeAs": "u32" },
+                { "op": "writeVar", "var": "tc1", "writeTo": 86, "writeAs": "u32" }
+              ]
+            }
+          ]}
+        ]
+      }
+    },
+    {
+      "id": "alarm",
+      "name": "Per-Battery Alarm (V3.3)",
+      "command": 68,
+      "pollGroup": "fast",
+      "optional": true,
+      "requestInfo": "FF",
+      "_comment": "CID2 0x44 — per-cell voltage alarm, temperature alarm, current/voltage alarm, status flags",
+      "responseLayout": {
+        "bufferSize": 16,
+        "steps": [
+          { "op": "skip", "size": 2, "_comment": "DATAFLAG + command byte" },
+          { "op": "readVar", "var": "cells", "type": "u8", "writeTo": 0 },
+          { "op": "readAnyNonZero", "count": "cells", "writeTo": 8 },
+          { "op": "readVar", "var": "temps", "type": "u8", "writeTo": 1 },
+          { "op": "readAnyNonZero", "count": "temps", "writeTo": 9 },
+          { "op": "readByte", "writeTo": 10 },
+          { "op": "readByte", "writeTo": 11 },
+          { "op": "readByte", "writeTo": 12 },
+          { "op": "readByte", "writeTo": 13 },
+          { "op": "readByte", "writeTo": 14 },
+          { "op": "readByte", "writeTo": 15 }
+        ]
+      }
+    },
+    {
+      "id": "per_battery_mgmt",
+      "name": "Per-Battery Management (V3.3)",
+      "command": 146,
+      "pollGroup": "slow",
+      "optional": true,
+      "requestInfo": "FF",
+      "_comment": "CID2 0x92 — per-battery charge/discharge voltage/current limits and enable flags",
+      "responseLayout": {
+        "bufferSize": 12,
+        "steps": [
+          { "op": "skip", "size": 1, "_comment": "command byte" },
+          { "op": "copy", "size": 2, "writeTo": 0 },
+          { "op": "copy", "size": 2, "writeTo": 2 },
+          { "op": "copy", "size": 2, "writeTo": 4 },
+          { "op": "copy", "size": 2, "writeTo": 6 },
+          { "op": "readVar", "var": "status", "type": "u8" },
+          { "op": "writeBit", "var": "status", "bit": 7, "writeTo": 8 },
+          { "op": "writeBit", "var": "status", "bit": 6, "writeTo": 9 }
+        ]
+      }
+    },
+    {
+      "id": "system_analog",
+      "name": "System Analog (V3.5)",
+      "command": 97,
+      "pollGroup": "fast",
+      "optional": true,
+      "_comment": "CID2 0x61 — V3.5 system aggregate: avg voltage, total current, SOC, cycles, SOH, max/min cell V with module, cell/MOSFET/BMS temperatures. 49-byte payload, straight copy.",
+      "responseLayout": {
+        "bufferSize": 49,
+        "steps": [
+          { "op": "copy", "size": 49, "writeTo": 0 }
+        ]
+      }
+    },
+    {
+      "id": "system_alarm",
+      "name": "System Alarm (V3.5)",
+      "command": 98,
+      "pollGroup": "fast",
+      "optional": true,
+      "_comment": "CID2 0x62 — V3.5 system alarm + protection status (4 bytes, bit flags)",
+      "responseLayout": {
+        "bufferSize": 4,
+        "steps": [
+          { "op": "copy", "size": 4, "writeTo": 0 }
+        ]
+      }
+    },
+    {
+      "id": "system_mgmt",
+      "name": "System Management (V3.5)",
+      "command": 99,
+      "pollGroup": "slow",
+      "optional": true,
+      "_comment": "CID2 0x63 — V3.5 system charge/discharge limits and enable flags. Current scale 0.1A (V3.3 convention, verified with JK BMS; V3.5 spec example suggests 0.01A for Pylontech batteries).",
+      "responseLayout": {
+        "bufferSize": 12,
+        "steps": [
+          { "op": "copy", "size": 2, "writeTo": 0 },
+          { "op": "copy", "size": 2, "writeTo": 2 },
+          { "op": "copy", "size": 2, "writeTo": 4 },
+          { "op": "copy", "size": 2, "writeTo": 6 },
+          { "op": "readVar", "var": "status", "type": "u8" },
+          { "op": "writeBit", "var": "status", "bit": 7, "writeTo": 8 },
+          { "op": "writeBit", "var": "status", "bit": 6, "writeTo": 9 },
+          { "op": "writeBit", "var": "status", "bit": 5, "writeTo": 10 },
+          { "op": "writeBit", "var": "status", "bit": 4, "writeTo": 11 }
+        ]
+      }
+    }
+  ],
+
+  "pollGroups": {
+    "fast": {
+      "intervalMs": 2000,
+      "description": "Real-time telemetry — pack status, cell data, alarms"
+    },
+    "slow": {
+      "intervalMs": 60000,
+      "description": "Charge/discharge limits (slow-changing)"
+    }
+  },
+
+  "entities": [
+
+    {
+      "_comment": "=== System Analog (CID2=0x61, V3.5) ===",
+      "id": "total_voltage",
+      "type": "sensor",
+      "name": "Total Voltage",
+      "category": "Pack Status",
+      "icon": "zap",
+      "source": {
+        "bank": "system_analog",
+        "byteOffset": 0,
+        "dataType": "uint16",
+        "scale": 0.001,
+        "unit": "V"
+      },
+      "display": { "precision": 2 },
+      "role": "total-voltage"
+    },
+    {
+      "id": "current",
+      "type": "sensor",
+      "name": "Current",
+      "category": "Pack Status",
+      "icon": "activity",
+      "source": {
+        "bank": "system_analog",
+        "byteOffset": 2,
+        "dataType": "int16",
+        "scale": 0.001,
+        "unit": "A"
+      },
+      "display": { "precision": 2 },
+      "role": "current",
+      "_comment": "V3.5 spec: value in mA (scale 0.001). Verified with Pylontech example 0x61A8=25.00A."
+    },
+    {
+      "id": "state_of_charge",
+      "type": "sensor",
+      "name": "State of Charge",
+      "category": "Pack Status",
+      "icon": "battery",
+      "source": {
+        "bank": "system_analog",
+        "byteOffset": 4,
+        "dataType": "uint8",
+        "unit": "%"
+      },
+      "display": { "precision": 0 },
+      "role": "state-of-charge"
+    },
+    {
+      "id": "avg_cycle_count",
+      "type": "sensor",
+      "name": "Average Cycle Count",
+      "category": "Pack Status",
+      "source": {
+        "bank": "system_analog",
+        "byteOffset": 5,
+        "dataType": "uint16"
+      },
+      "display": { "precision": 0 },
+      "role": "cycle-count"
+    },
+    {
+      "id": "max_cycle_count",
+      "type": "sensor",
+      "name": "Max Cycle Count",
+      "category": "Pack Status",
+      "source": {
+        "bank": "system_analog",
+        "byteOffset": 7,
+        "dataType": "uint16"
+      },
+      "display": { "precision": 0 },
+      "hidden": true
+    },
+    {
+      "id": "avg_soh",
+      "type": "sensor",
+      "name": "Average SOH",
+      "category": "Pack Status",
+      "source": {
+        "bank": "system_analog",
+        "byteOffset": 9,
+        "dataType": "uint8",
+        "unit": "%"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "min_soh",
+      "type": "sensor",
+      "name": "Min SOH",
+      "category": "Pack Status",
+      "source": {
+        "bank": "system_analog",
+        "byteOffset": 10,
+        "dataType": "uint8",
+        "unit": "%"
+      },
+      "display": { "precision": 0 },
+      "hidden": true
+    },
+
+    {
+      "_comment": "=== System Analog — Cell Voltages (max/min from system) ===",
+      "id": "max_cell_voltage",
+      "type": "sensor",
+      "name": "Max Cell Voltage",
+      "category": "Cells",
+      "source": {
+        "bank": "system_analog",
+        "byteOffset": 11,
+        "dataType": "uint16",
+        "scale": 0.001,
+        "unit": "V"
+      },
+      "display": { "precision": 3 }
+    },
+    {
+      "id": "min_cell_voltage",
+      "type": "sensor",
+      "name": "Min Cell Voltage",
+      "category": "Cells",
+      "source": {
+        "bank": "system_analog",
+        "byteOffset": 15,
+        "dataType": "uint16",
+        "scale": 0.001,
+        "unit": "V"
+      },
+      "display": { "precision": 3 }
+    },
+
+    {
+      "_comment": "=== System Analog — Temperatures (raw Kelvin*10, hidden) ===",
+      "id": "sys_avg_cell_temp_raw",
+      "type": "sensor",
+      "name": "System Avg Cell Temp (raw)",
+      "category": "Temperatures",
+      "source": {
+        "bank": "system_analog",
+        "byteOffset": 19,
+        "dataType": "uint16",
+        "scale": 0.1,
+        "unit": "K"
+      },
+      "hidden": true
+    },
+    {
+      "id": "sys_max_cell_temp_raw",
+      "type": "sensor",
+      "name": "System Max Cell Temp (raw)",
+      "category": "Temperatures",
+      "source": {
+        "bank": "system_analog",
+        "byteOffset": 21,
+        "dataType": "uint16",
+        "scale": 0.1,
+        "unit": "K"
+      },
+      "hidden": true
+    },
+    {
+      "id": "sys_min_cell_temp_raw",
+      "type": "sensor",
+      "name": "System Min Cell Temp (raw)",
+      "category": "Temperatures",
+      "source": {
+        "bank": "system_analog",
+        "byteOffset": 25,
+        "dataType": "uint16",
+        "scale": 0.1,
+        "unit": "K"
+      },
+      "hidden": true
+    },
+    {
+      "id": "sys_mosfet_avg_temp_raw",
+      "type": "sensor",
+      "name": "System MOSFET Avg Temp (raw)",
+      "category": "Temperatures",
+      "source": {
+        "bank": "system_analog",
+        "byteOffset": 29,
+        "dataType": "uint16",
+        "scale": 0.1,
+        "unit": "K"
+      },
+      "hidden": true
+    },
+    {
+      "id": "sys_mosfet_max_temp_raw",
+      "type": "sensor",
+      "name": "System MOSFET Max Temp (raw)",
+      "category": "Temperatures",
+      "source": {
+        "bank": "system_analog",
+        "byteOffset": 31,
+        "dataType": "uint16",
+        "scale": 0.1,
+        "unit": "K"
+      },
+      "hidden": true
+    },
+    {
+      "id": "sys_bms_avg_temp_raw",
+      "type": "sensor",
+      "name": "System BMS Avg Temp (raw)",
+      "category": "Temperatures",
+      "source": {
+        "bank": "system_analog",
+        "byteOffset": 39,
+        "dataType": "uint16",
+        "scale": 0.1,
+        "unit": "K"
+      },
+      "hidden": true
+    },
+    {
+      "id": "sys_bms_max_temp_raw",
+      "type": "sensor",
+      "name": "System BMS Max Temp (raw)",
+      "category": "Temperatures",
+      "source": {
+        "bank": "system_analog",
+        "byteOffset": 41,
+        "dataType": "uint16",
+        "scale": 0.1,
+        "unit": "K"
+      },
+      "hidden": true
+    },
+
+    {
+      "_comment": "=== Per-Battery Analog (CID2=0x42, V3.3) ===",
+      "id": "cell_voltages",
+      "type": "cell_array",
+      "name": "Cell Voltages",
+      "category": "Cells",
+      "source": {
+        "bank": "analog",
+        "byteOffset": 0,
+        "elementDataType": "int16",
+        "elementByteSize": 2,
+        "maxElements": 32,
+        "skipZero": true,
+        "scale": 0.001,
+        "unit": "V"
+      },
+      "display": { "precision": 3, "format": "number" },
+      "role": "cell-voltages"
+    },
+    {
+      "id": "cell_count",
+      "type": "sensor",
+      "name": "Cell Count",
+      "category": "Diagnostics",
+      "source": {
+        "bank": "analog",
+        "byteOffset": 64,
+        "dataType": "uint8"
+      },
+      "hidden": true
+    },
+    {
+      "id": "pb_bms_temp_raw",
+      "type": "sensor",
+      "name": "BMS Temperature (raw)",
+      "category": "Temperatures",
+      "source": {
+        "bank": "analog",
+        "byteOffset": 66,
+        "dataType": "int16",
+        "scale": 0.1,
+        "unit": "K"
+      },
+      "hidden": true
+    },
+    {
+      "id": "pb_cell_temp_1_raw",
+      "type": "sensor",
+      "name": "Cell Group Temp 1 (raw)",
+      "category": "Temperatures",
+      "source": {
+        "bank": "analog",
+        "byteOffset": 68,
+        "dataType": "int16",
+        "scale": 0.1,
+        "unit": "K"
+      },
+      "hidden": true
+    },
+    {
+      "id": "pb_cell_temp_2_raw",
+      "type": "sensor",
+      "name": "Cell Group Temp 2 (raw)",
+      "category": "Temperatures",
+      "source": {
+        "bank": "analog",
+        "byteOffset": 70,
+        "dataType": "int16",
+        "scale": 0.1,
+        "unit": "K"
+      },
+      "hidden": true
+    },
+    {
+      "id": "pb_cell_temp_3_raw",
+      "type": "sensor",
+      "name": "Cell Group Temp 3 (raw)",
+      "category": "Temperatures",
+      "source": {
+        "bank": "analog",
+        "byteOffset": 72,
+        "dataType": "int16",
+        "scale": 0.1,
+        "unit": "K"
+      },
+      "hidden": true
+    },
+    {
+      "id": "pb_cell_temp_4_raw",
+      "type": "sensor",
+      "name": "Cell Group Temp 4 (raw)",
+      "category": "Temperatures",
+      "source": {
+        "bank": "analog",
+        "byteOffset": 74,
+        "dataType": "int16",
+        "scale": 0.1,
+        "unit": "K"
+      },
+      "hidden": true
+    },
+    {
+      "id": "pb_current",
+      "type": "sensor",
+      "name": "Per-Battery Current",
+      "category": "Pack Status",
+      "source": {
+        "bank": "analog",
+        "byteOffset": 78,
+        "dataType": "int16",
+        "scale": 0.1,
+        "unit": "A"
+      },
+      "display": { "precision": 1 },
+      "hidden": true,
+      "_comment": "V3.3: value*100=mA → scale 0.1A. Hidden; system_analog 'current' is primary."
+    },
+    {
+      "id": "pb_total_voltage",
+      "type": "sensor",
+      "name": "Per-Battery Voltage",
+      "category": "Pack Status",
+      "source": {
+        "bank": "analog",
+        "byteOffset": 80,
+        "dataType": "uint16",
+        "scale": 0.001,
+        "unit": "V"
+      },
+      "display": { "precision": 2 },
+      "hidden": true,
+      "_comment": "Hidden; system_analog 'total_voltage' is primary."
+    },
+    {
+      "id": "remaining_capacity",
+      "type": "sensor",
+      "name": "Remaining Capacity",
+      "category": "Pack Status",
+      "icon": "battery",
+      "source": {
+        "bank": "analog",
+        "byteOffset": 82,
+        "dataType": "uint32",
+        "scale": 0.001,
+        "unit": "Ah"
+      },
+      "display": { "precision": 2 }
+    },
+    {
+      "id": "total_capacity",
+      "type": "sensor",
+      "name": "Total Capacity",
+      "category": "Pack Status",
+      "source": {
+        "bank": "analog",
+        "byteOffset": 86,
+        "dataType": "uint32",
+        "scale": 0.001,
+        "unit": "Ah"
+      },
+      "display": { "precision": 2 },
+      "hidden": true
+    },
+    {
+      "id": "pb_cycle_count",
+      "type": "sensor",
+      "name": "Per-Battery Cycle Count",
+      "category": "Pack Status",
+      "source": {
+        "bank": "analog",
+        "byteOffset": 90,
+        "dataType": "uint16"
+      },
+      "display": { "precision": 0 },
+      "hidden": true,
+      "_comment": "Hidden; system_analog 'avg_cycle_count' is primary."
+    },
+
+    {
+      "_comment": "=== Per-Battery Alarm (CID2=0x44, V3.3) ===",
+      "id": "pb_cell_voltage_alarm",
+      "type": "binary_sensor",
+      "name": "Cell Voltage Alarm (per-battery)",
+      "category": "Alarms",
+      "source": {
+        "bank": "alarm",
+        "byteOffset": 8,
+        "dataType": "uint8",
+        "trueValue": 1
+      },
+      "hidden": true
+    },
+    {
+      "id": "pb_temperature_alarm",
+      "type": "binary_sensor",
+      "name": "Temperature Alarm (per-battery)",
+      "category": "Alarms",
+      "source": {
+        "bank": "alarm",
+        "byteOffset": 9,
+        "dataType": "uint8",
+        "trueValue": 1
+      },
+      "hidden": true
+    },
+    {
+      "id": "pb_current_alarm",
+      "type": "binary_sensor",
+      "name": "Current Alarm (per-battery)",
+      "category": "Alarms",
+      "source": {
+        "bank": "alarm",
+        "byteOffset": 10,
+        "dataType": "uint8",
+        "trueValue": 1
+      },
+      "hidden": true
+    },
+    {
+      "id": "pb_voltage_alarm",
+      "type": "binary_sensor",
+      "name": "Voltage Alarm (per-battery)",
+      "category": "Alarms",
+      "source": {
+        "bank": "alarm",
+        "byteOffset": 11,
+        "dataType": "uint8",
+        "trueValue": 1
+      },
+      "hidden": true
+    },
+
+    {
+      "_comment": "=== System Alarm (CID2=0x62, V3.5) ===",
+      "id": "sys_alarm_status_1",
+      "type": "sensor",
+      "name": "System Alarm Status 1",
+      "category": "Alarms",
+      "source": {
+        "bank": "system_alarm",
+        "byteOffset": 0,
+        "dataType": "uint8"
+      },
+      "display": { "format": "hex" },
+      "hidden": true,
+      "_comment": "bit7:ModOV bit6:ModUV bit5:CellOV bit4:CellUV bit3:CellHiTemp bit2:CellLoTemp bit1:MOSFETHiTemp bit0:CellVConsistency"
+    },
+    {
+      "id": "sys_alarm_status_2",
+      "type": "sensor",
+      "name": "System Alarm Status 2",
+      "category": "Alarms",
+      "source": {
+        "bank": "system_alarm",
+        "byteOffset": 1,
+        "dataType": "uint8"
+      },
+      "display": { "format": "hex" },
+      "hidden": true,
+      "_comment": "bit7:TempConsistency bit6:ChargeOC bit5:DischargeOC bit4:InternalCommError"
+    },
+    {
+      "id": "sys_protection_status_1",
+      "type": "sensor",
+      "name": "System Protection Status 1",
+      "category": "Alarms",
+      "source": {
+        "bank": "system_alarm",
+        "byteOffset": 2,
+        "dataType": "uint8"
+      },
+      "display": { "format": "hex" },
+      "hidden": true,
+      "_comment": "bit7:ModOV bit6:ModUV bit5:CellOV bit4:CellUV bit3:CellOT bit2:CellUT bit1:MOSFETOT"
+    },
+    {
+      "id": "sys_protection_status_2",
+      "type": "sensor",
+      "name": "System Protection Status 2",
+      "category": "Alarms",
+      "source": {
+        "bank": "system_alarm",
+        "byteOffset": 3,
+        "dataType": "uint8"
+      },
+      "display": { "format": "hex" },
+      "hidden": true,
+      "_comment": "bit6:ChargeOC bit5:DischargeOC bit3:SystemFault"
+    },
+
+    {
+      "_comment": "=== Per-Battery Management (CID2=0x92, V3.3) ===",
+      "id": "pb_charging_enabled",
+      "type": "binary_sensor",
+      "name": "Charging (per-battery)",
+      "category": "Status",
+      "source": {
+        "bank": "per_battery_mgmt",
+        "byteOffset": 10,
+        "dataType": "uint8",
+        "bitMask": 128,
+        "trueValue": 128
+      },
+      "hidden": true,
+      "role": "charging-enabled",
+      "_comment": "Offset 10 = 2-byte header + 8 bytes limits. Status bits: 7=charge, 6=discharge, 5=chargeImm, 4=fullCharge"
+    },
+    {
+      "id": "pb_discharging_enabled",
+      "type": "binary_sensor",
+      "name": "Discharging (per-battery)",
+      "category": "Status",
+      "source": {
+        "bank": "per_battery_mgmt",
+        "byteOffset": 10,
+        "dataType": "uint8",
+        "bitMask": 64,
+        "trueValue": 64
+      },
+      "hidden": true,
+      "role": "discharging-enabled",
+      "_comment": "Bit 6 of status byte at offset 10"
+    },
+    {
+      "id": "pb_charge_voltage_limit",
+      "type": "sensor",
+      "name": "Charge Voltage Limit (per-battery)",
+      "category": "Limits",
+      "source": {
+        "bank": "per_battery_mgmt",
+        "byteOffset": 2,
+        "dataType": "uint16",
+        "scale": 0.001,
+        "unit": "V"
+      },
+      "display": { "precision": 2 },
+      "hidden": true
+    },
+    {
+      "id": "pb_discharge_voltage_limit",
+      "type": "sensor",
+      "name": "Discharge Voltage Limit (per-battery)",
+      "category": "Limits",
+      "source": {
+        "bank": "per_battery_mgmt",
+        "byteOffset": 4,
+        "dataType": "uint16",
+        "scale": 0.001,
+        "unit": "V"
+      },
+      "display": { "precision": 2 },
+      "hidden": true
+    },
+    {
+      "id": "pb_charge_current_limit",
+      "type": "sensor",
+      "name": "Charge Current Limit (per-battery)",
+      "category": "Limits",
+      "source": {
+        "bank": "per_battery_mgmt",
+        "byteOffset": 6,
+        "dataType": "int16",
+        "scale": 0.1,
+        "unit": "A"
+      },
+      "display": { "precision": 1 },
+      "hidden": true
+    },
+    {
+      "id": "pb_discharge_current_limit",
+      "type": "sensor",
+      "name": "Discharge Current Limit (per-battery)",
+      "category": "Limits",
+      "source": {
+        "bank": "per_battery_mgmt",
+        "byteOffset": 8,
+        "dataType": "int16",
+        "scale": 0.1,
+        "unit": "A"
+      },
+      "display": { "precision": 1 },
+      "hidden": true
+    },
+
+    {
+      "_comment": "=== System Management (CID2=0x63, V3.5) ===",
+      "id": "charging_enabled",
+      "type": "binary_sensor",
+      "name": "Charging",
+      "category": "Status",
+      "source": {
+        "bank": "system_mgmt",
+        "byteOffset": 8,
+        "dataType": "uint8",
+        "bitMask": 128,
+        "trueValue": 128
+      },
+      "role": "charging-enabled"
+    },
+    {
+      "id": "discharging_enabled",
+      "type": "binary_sensor",
+      "name": "Discharging",
+      "category": "Status",
+      "source": {
+        "bank": "system_mgmt",
+        "byteOffset": 8,
+        "dataType": "uint8",
+        "bitMask": 64,
+        "trueValue": 64
+      },
+      "role": "discharging-enabled"
+    },
+    {
+      "id": "charge_immediately",
+      "type": "binary_sensor",
+      "name": "Charge Immediately",
+      "category": "Status",
+      "source": {
+        "bank": "system_mgmt",
+        "byteOffset": 8,
+        "dataType": "uint8",
+        "bitMask": 32,
+        "trueValue": 32
+      }
+    },
+    {
+      "id": "full_charge_request",
+      "type": "binary_sensor",
+      "name": "Full Charge Request",
+      "category": "Status",
+      "source": {
+        "bank": "system_mgmt",
+        "byteOffset": 8,
+        "dataType": "uint8",
+        "bitMask": 16,
+        "trueValue": 16
+      }
+    },
+    {
+      "id": "charge_voltage_limit",
+      "type": "sensor",
+      "name": "Charge Voltage Limit",
+      "category": "Limits",
+      "source": {
+        "bank": "system_mgmt",
+        "byteOffset": 0,
+        "dataType": "uint16",
+        "scale": 0.001,
+        "unit": "V"
+      },
+      "display": { "precision": 2 }
+    },
+    {
+      "id": "discharge_voltage_limit",
+      "type": "sensor",
+      "name": "Discharge Voltage Limit",
+      "category": "Limits",
+      "source": {
+        "bank": "system_mgmt",
+        "byteOffset": 2,
+        "dataType": "uint16",
+        "scale": 0.001,
+        "unit": "V"
+      },
+      "display": { "precision": 2 }
+    },
+    {
+      "id": "charge_current_limit",
+      "type": "sensor",
+      "name": "Charge Current Limit",
+      "category": "Limits",
+      "source": {
+        "bank": "system_mgmt",
+        "byteOffset": 4,
+        "dataType": "int16",
+        "scale": 0.1,
+        "unit": "A"
+      },
+      "display": { "precision": 1 },
+      "_comment": "Scale 0.1A (V3.3 convention, verified with JK BMS). V3.5 Pylontech example suggests 0.01A — adjust if using native Pylontech batteries."
+    },
+    {
+      "id": "discharge_current_limit",
+      "type": "sensor",
+      "name": "Discharge Current Limit",
+      "category": "Limits",
+      "source": {
+        "bank": "system_mgmt",
+        "byteOffset": 6,
+        "dataType": "int16",
+        "scale": 0.1,
+        "unit": "A"
+      },
+      "display": { "precision": 1 }
+    }
+  ],
+
+  "computedEntities": [
+    {
+      "_comment": "=== Temperature Conversions (Kelvin*10 → °C) ===",
+      "id": "battery_temp_1",
+      "type": "sensor",
+      "name": "Avg Cell Temperature",
+      "category": "Temperatures",
+      "expression": "sys_avg_cell_temp_raw - 273.1",
+      "unit": "°C",
+      "display": { "precision": 1 },
+      "role": "temperature",
+      "_comment": "Hits hardcoded ID 'battery_temp_1' in telemetry builder. Source: V3.5 system avg cell temp."
+    },
+    {
+      "id": "max_cell_temp_celsius",
+      "type": "sensor",
+      "name": "Max Cell Temperature",
+      "category": "Temperatures",
+      "expression": "sys_max_cell_temp_raw - 273.1",
+      "unit": "°C",
+      "display": { "precision": 1 }
+    },
+    {
+      "id": "min_cell_temp_celsius",
+      "type": "sensor",
+      "name": "Min Cell Temperature",
+      "category": "Temperatures",
+      "expression": "sys_min_cell_temp_raw - 273.1",
+      "unit": "°C",
+      "display": { "precision": 1 }
+    },
+    {
+      "id": "mos_temperature",
+      "type": "sensor",
+      "name": "MOSFET Temperature",
+      "category": "Temperatures",
+      "expression": "sys_mosfet_avg_temp_raw - 273.1",
+      "unit": "°C",
+      "display": { "precision": 1 },
+      "_comment": "Hits hardcoded ID 'mos_temperature' in telemetry builder."
+    },
+    {
+      "id": "mosfet_max_temp_celsius",
+      "type": "sensor",
+      "name": "MOSFET Max Temperature",
+      "category": "Temperatures",
+      "expression": "sys_mosfet_max_temp_raw - 273.1",
+      "unit": "°C",
+      "display": { "precision": 1 },
+      "hidden": true
+    },
+    {
+      "id": "bms_temperature_celsius",
+      "type": "sensor",
+      "name": "BMS Temperature",
+      "category": "Temperatures",
+      "expression": "sys_bms_avg_temp_raw - 273.1",
+      "unit": "°C",
+      "display": { "precision": 1 }
+    },
+    {
+      "id": "bms_max_temp_celsius",
+      "type": "sensor",
+      "name": "BMS Max Temperature",
+      "category": "Temperatures",
+      "expression": "sys_bms_max_temp_raw - 273.1",
+      "unit": "°C",
+      "display": { "precision": 1 },
+      "hidden": true
+    },
+
+    {
+      "_comment": "=== Per-Battery Temperature Fallbacks ===",
+      "id": "pb_bms_temp_celsius",
+      "type": "sensor",
+      "name": "BMS Temperature (per-battery)",
+      "category": "Temperatures",
+      "expression": "pb_bms_temp_raw - 273.1",
+      "unit": "°C",
+      "display": { "precision": 1 },
+      "role": "temperature",
+      "hidden": true,
+      "_comment": "Role fallback: if system_analog fails and per-battery analog provides BMS temp, builder finds this via role search."
+    },
+    {
+      "id": "pb_cell_temp_1_celsius",
+      "type": "sensor",
+      "name": "Cell Group Temp 1 (per-battery)",
+      "category": "Temperatures",
+      "expression": "pb_cell_temp_1_raw - 273.1",
+      "unit": "°C",
+      "display": { "precision": 1 },
+      "hidden": true
+    },
+    {
+      "id": "pb_cell_temp_2_celsius",
+      "type": "sensor",
+      "name": "Cell Group Temp 2 (per-battery)",
+      "category": "Temperatures",
+      "expression": "pb_cell_temp_2_raw - 273.1",
+      "unit": "°C",
+      "display": { "precision": 1 },
+      "hidden": true
+    },
+
+    {
+      "_comment": "=== Power & Cell Stats ===",
+      "id": "computed_power",
+      "type": "sensor",
+      "name": "Power",
+      "category": "Pack Status",
+      "expression": "total_voltage * current",
+      "unit": "W",
+      "display": { "precision": 0 },
+      "role": "power"
+    },
+    {
+      "id": "avg_cell_voltage",
+      "type": "sensor",
+      "name": "Avg Cell Voltage",
+      "category": "Cells",
+      "expression": "avg(cell_voltages)",
+      "unit": "V",
+      "display": { "precision": 3 },
+      "_comment": "Only available when per-battery CID2=0x42 responds (individual cell data)."
+    },
+    {
+      "id": "delta_cell_voltage",
+      "type": "sensor",
+      "name": "Cell Delta Voltage",
+      "category": "Cells",
+      "expression": "max_cell_voltage - min_cell_voltage",
+      "unit": "V",
+      "display": { "precision": 3 }
+    },
+
+    {
+      "_comment": "=== Alarm Flags ===",
+      "id": "alarm_flags",
+      "type": "sensor",
+      "name": "System Alarm Flags",
+      "category": "Diagnostics",
+      "expression": "sys_alarm_status_1 + sys_alarm_status_2 * 256 + sys_protection_status_1 * 65536 + sys_protection_status_2 * 16777216",
+      "display": { "format": "hex" },
+      "role": "alarm-flags",
+      "hidden": true
+    },
+    {
+      "id": "pb_alarm_flags",
+      "type": "sensor",
+      "name": "Per-Battery Alarm Flags",
+      "category": "Diagnostics",
+      "expression": "pb_cell_voltage_alarm * 1 + pb_temperature_alarm * 2 + pb_current_alarm * 4 + pb_voltage_alarm * 8",
+      "display": { "format": "hex" },
+      "hidden": true
+    }
+  ],
+
+  "alarms": {
+    "source": "alarm_flags",
+    "type": "bitmask",
+    "bits": [
+      { "bit": 0, "name": "Cell voltage consistency alarm",       "severity": "warning" },
+      { "bit": 1, "name": "MOSFET high temperature alarm",        "severity": "critical" },
+      { "bit": 2, "name": "Cell low temperature alarm",           "severity": "warning" },
+      { "bit": 3, "name": "Cell high temperature alarm",          "severity": "critical" },
+      { "bit": 4, "name": "Cell under voltage alarm",             "severity": "critical" },
+      { "bit": 5, "name": "Cell over voltage alarm",              "severity": "critical" },
+      { "bit": 6, "name": "Module under voltage alarm",           "severity": "critical" },
+      { "bit": 7, "name": "Module over voltage alarm",            "severity": "critical" },
+      { "bit": 8, "name": "Cell temperature consistency alarm",   "severity": "warning" },
+      { "bit": 9, "name": "Charge over current alarm",            "severity": "critical" },
+      { "bit": 10, "name": "Discharge over current alarm",        "severity": "critical" },
+      { "bit": 11, "name": "Internal communication error",        "severity": "critical" },
+      { "bit": 17, "name": "MOSFET over temperature protection",  "severity": "critical" },
+      { "bit": 18, "name": "Cell under temperature protection",   "severity": "critical" },
+      { "bit": 19, "name": "Cell over temperature protection",    "severity": "critical" },
+      { "bit": 20, "name": "Cell under voltage protection",       "severity": "critical" },
+      { "bit": 21, "name": "Cell over voltage protection",        "severity": "critical" },
+      { "bit": 22, "name": "Module under voltage protection",     "severity": "critical" },
+      { "bit": 23, "name": "Module over voltage protection",      "severity": "critical" },
+      { "bit": 25, "name": "Charge over current protection",      "severity": "critical" },
+      { "bit": 26, "name": "Discharge over current protection",   "severity": "critical" },
+      { "bit": 27, "name": "System fault protection",             "severity": "critical" }
+    ]
+  },
+
+  "storage": {
+    "database": {
+      "provider": "timescaledb",
+      "defaultNamePattern": "FluxMonitor_{deviceId}"
+    },
+    "timeSeries": [
+      { "entity": "total_voltage",           "aggregate": "avg",  "column": "total_voltage_v" },
+      { "entity": "current",                 "aggregate": "avg",  "column": "current_a" },
+      { "entity": "computed_power",          "aggregate": "avg",  "column": "power_w" },
+      { "entity": "state_of_charge",         "aggregate": "last", "column": "soc_pct" },
+      { "entity": "min_cell_voltage",        "aggregate": "min",  "column": "min_cell_v" },
+      { "entity": "max_cell_voltage",        "aggregate": "max",  "column": "max_cell_v" },
+      { "entity": "delta_cell_voltage",      "aggregate": "avg",  "column": "delta_cell_v" },
+      { "entity": "battery_temp_1",          "aggregate": "avg",  "column": "bms_temp_c" },
+      { "entity": "mos_temperature",         "aggregate": "avg",  "column": "mosfet_temp_c" },
+      { "entity": "avg_soh",                 "aggregate": "last", "column": "soh_pct" }
+    ],
+    "cellVoltages": {
+      "entity": "cell_voltages",
+      "aggregate": "avg"
+    },
+    "retention": {
+      "raw":  { "window": "24h" },
+      "1m":   { "window": "1y" },
+      "5m":   { "window": "1y" },
+      "1h":   { "window": "10y" }
+    }
+  },
+
+  "ui": {
+    "pages": {
+      "monitor": {
+        "sections": [
+          {
+            "type": "hero-metrics",
+            "metrics": [
+              { "entity": "total_voltage",    "icon": "zap",      "color": "emerald" },
+              { "entity": "current",          "icon": "activity",  "color": "blue" },
+              { "entity": "computed_power",   "icon": "gauge",     "color": "amber" },
+              { "entity": "state_of_charge",  "icon": "battery",   "color": "green" }
+            ]
+          },
+          {
+            "type": "status-indicators",
+            "entities": ["charging_enabled", "discharging_enabled", "charge_immediately", "full_charge_request"]
+          },
+          {
+            "type": "cell-chart",
+            "entity": "cell_voltages",
+            "showStats": true,
+            "showDelta": true,
+            "stats": ["min_cell_voltage", "max_cell_voltage", "avg_cell_voltage", "delta_cell_voltage"]
+          },
+          {
+            "type": "parameter-table",
+            "title": "Pack Status",
+            "filter": { "categories": ["Pack Status"] },
+            "groupBy": "category"
+          },
+          {
+            "type": "parameter-table",
+            "title": "Temperatures",
+            "filter": { "categories": ["Temperatures"] },
+            "groupBy": "category"
+          },
+          {
+            "type": "parameter-table",
+            "title": "Limits",
+            "filter": { "categories": ["Limits"] },
+            "groupBy": "category"
+          }
+        ]
+      },
+      "history": {
+        "resolutions": [
+          { "id": "1s", "label": "1 Second",  "defaultWindow": "10m" },
+          { "id": "1m", "label": "1 Minute",  "defaultWindow": "1h" },
+          { "id": "5m", "label": "5 Minutes", "defaultWindow": "24h" },
+          { "id": "1h", "label": "1 Hour",    "defaultWindow": "7d" }
+        ],
+        "charts": [
+          {
+            "title": "Current",
+            "type": "line-chart",
+            "traces": [
+              { "entity": "current", "label": "Current", "color": "blue" }
+            ],
+            "yAxis": { "unit": "A", "label": "Current" }
+          },
+          {
+            "title": "Energy",
+            "type": "area-chart",
+            "traces": [
+              { "entity": "computed_power", "color": "amber", "positiveLabel": "Charging", "negativeLabel": "Discharging" }
+            ],
+            "yAxis": { "unit": "W", "label": "Power" },
+            "showEnergyTotals": true
+          },
+          {
+            "title": "State of Charge",
+            "type": "line-chart",
+            "traces": [
+              { "entity": "state_of_charge", "label": "SOC", "color": "green" }
+            ],
+            "yAxis": { "unit": "%", "label": "SOC", "domain": [0, 100] }
+          },
+          {
+            "title": "Temperatures",
+            "type": "line-chart",
+            "traces": [
+              { "entity": "battery_temp_1",          "label": "Cell Avg",    "color": "red" },
+              { "entity": "mos_temperature",         "label": "MOSFET",      "color": "orange" },
+              { "entity": "bms_temperature_celsius", "label": "BMS",         "color": "yellow" }
+            ],
+            "yAxis": { "unit": "°C", "label": "Temperature" }
+          },
+          {
+            "title": "Cell Voltage Spread",
+            "type": "line-chart",
+            "traces": [
+              { "entity": "min_cell_voltage", "label": "Min",   "color": "red" },
+              { "entity": "max_cell_voltage", "label": "Max",   "color": "emerald" },
+              { "entity": "avg_cell_voltage", "label": "Avg",   "color": "blue", "dashed": true }
+            ],
+            "yAxis": { "unit": "V", "label": "Cell Voltage" }
+          },
+          {
+            "title": "Cell Voltages",
+            "type": "multi-cell-chart",
+            "entity": "cell_voltages",
+            "selectable": true
+          }
+        ]
+      },
+      "dashboard": {
+        "card": {
+          "primaryMetric": "state_of_charge",
+          "secondaryMetrics": ["total_voltage", "current", "computed_power"],
+          "statusEntities": ["charging_enabled", "discharging_enabled"]
+        }
+      }
+    }
+  },
+
+  "notifications": {
+    "rules": [
+      {
+        "id": "low-soc",
+        "name": "Low Battery",
+        "condition": { "entity": "state_of_charge", "operator": "<", "value": 10 },
+        "severity": "critical",
+        "message": "Battery critically low: {state_of_charge}%",
+        "cooldownMinutes": 15
+      },
+      {
+        "id": "high-cell-temp",
+        "name": "High Cell Temperature",
+        "condition": { "entity": "max_cell_temp_celsius", "operator": ">", "value": 50 },
+        "severity": "warning",
+        "message": "Cell temperature high: {max_cell_temp_celsius}°C",
+        "cooldownMinutes": 30
+      },
+      {
+        "id": "high-mosfet-temp",
+        "name": "High MOSFET Temperature",
+        "condition": { "entity": "mos_temperature", "operator": ">", "value": 80 },
+        "severity": "critical",
+        "message": "MOSFET temperature critical: {mos_temperature}°C",
+        "cooldownMinutes": 15
+      },
+      {
+        "id": "high-delta",
+        "name": "Cell Imbalance",
+        "condition": { "entity": "delta_cell_voltage", "operator": ">", "value": 0.05 },
+        "severity": "warning",
+        "message": "Cell imbalance detected: delta {delta_cell_voltage}V",
+        "cooldownMinutes": 60
+      },
+      {
+        "id": "alarm-active",
+        "name": "System Alarm",
+        "condition": { "entity": "alarm_flags", "operator": "!=", "value": 0 },
+        "severity": "critical",
+        "message": "Active system alarm detected",
+        "cooldownMinutes": 5
+      }
+    ]
+  }
+}

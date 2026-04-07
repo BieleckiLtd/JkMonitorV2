@@ -336,6 +336,12 @@ public sealed class EntitySourceDefinition
 
     // binary_sensor specific
     public int TrueValue { get; init; } = 1;
+
+    /// <summary>
+    /// Optional bitmask applied to the raw value before comparing with <see cref="TrueValue"/>.
+    /// When non-zero, the comparison becomes <c>(rawValue &amp; BitMask) == TrueValue</c>.
+    /// </summary>
+    public uint BitMask { get; init; }
 }
 
 public sealed class EntityDisplayDefinition

@@ -305,7 +305,9 @@ public sealed class DefinitionDrivenTelemetryBuilder(ExpressionEvaluator express
             _ => null
         };
 
-        return rawValue is null ? null : rawValue.Value == (uint)source.TrueValue;
+        if (rawValue is null) return null;
+        var effective = source.BitMask != 0 ? rawValue.Value & source.BitMask : rawValue.Value;
+        return effective == (uint)source.TrueValue;
     }
 
     private static string? ParseAsciiEntity(EntityDefinition entity, byte[] data)
