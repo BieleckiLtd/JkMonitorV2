@@ -729,21 +729,19 @@
     },
 
     {
-      "_comment": "=== Per-Battery Management (CID2=0x92, V3.3) ===",
+      "_comment": "=== Per-Battery Management (CID2=0x92, V3.3) — responseLayout extracts each status bit into its own byte ===",
       "id": "pb_charging_enabled",
       "type": "binary_sensor",
       "name": "Charging (per-battery)",
       "category": "Status",
       "source": {
         "bank": "per_battery_mgmt",
-        "byteOffset": 10,
+        "byteOffset": 8,
         "dataType": "uint8",
-        "bitMask": 128,
-        "trueValue": 128
+        "trueValue": 1
       },
       "hidden": true,
-      "role": "charging-enabled",
-      "_comment": "Offset 10 = 2-byte header + 8 bytes limits. Status bits: 7=charge, 6=discharge, 5=chargeImm, 4=fullCharge"
+      "_comment": "writeBit bit:7 → byte 8 (0 or 1)"
     },
     {
       "id": "pb_discharging_enabled",
@@ -752,14 +750,12 @@
       "category": "Status",
       "source": {
         "bank": "per_battery_mgmt",
-        "byteOffset": 10,
+        "byteOffset": 9,
         "dataType": "uint8",
-        "bitMask": 64,
-        "trueValue": 64
+        "trueValue": 1
       },
       "hidden": true,
-      "role": "discharging-enabled",
-      "_comment": "Bit 6 of status byte at offset 10"
+      "_comment": "writeBit bit:6 → byte 9 (0 or 1)"
     },
     {
       "id": "pb_charge_voltage_limit",
@@ -768,7 +764,7 @@
       "category": "Limits",
       "source": {
         "bank": "per_battery_mgmt",
-        "byteOffset": 2,
+        "byteOffset": 0,
         "dataType": "uint16",
         "scale": 0.001,
         "unit": "V"
@@ -783,7 +779,7 @@
       "category": "Limits",
       "source": {
         "bank": "per_battery_mgmt",
-        "byteOffset": 4,
+        "byteOffset": 2,
         "dataType": "uint16",
         "scale": 0.001,
         "unit": "V"
@@ -798,7 +794,7 @@
       "category": "Limits",
       "source": {
         "bank": "per_battery_mgmt",
-        "byteOffset": 6,
+        "byteOffset": 4,
         "dataType": "int16",
         "scale": 0.1,
         "unit": "A"
@@ -813,7 +809,7 @@
       "category": "Limits",
       "source": {
         "bank": "per_battery_mgmt",
-        "byteOffset": 8,
+        "byteOffset": 6,
         "dataType": "int16",
         "scale": 0.1,
         "unit": "A"
@@ -823,7 +819,7 @@
     },
 
     {
-      "_comment": "=== System Management (CID2=0x63, V3.5) ===",
+      "_comment": "=== System Management (CID2=0x63, V3.5) — responseLayout extracts each status bit into its own byte ===",
       "id": "charging_enabled",
       "type": "binary_sensor",
       "name": "Charging",
@@ -832,8 +828,7 @@
         "bank": "system_mgmt",
         "byteOffset": 8,
         "dataType": "uint8",
-        "bitMask": 128,
-        "trueValue": 128
+        "trueValue": 1
       },
       "role": "charging-enabled"
     },
@@ -844,10 +839,9 @@
       "category": "Status",
       "source": {
         "bank": "system_mgmt",
-        "byteOffset": 8,
+        "byteOffset": 9,
         "dataType": "uint8",
-        "bitMask": 64,
-        "trueValue": 64
+        "trueValue": 1
       },
       "role": "discharging-enabled"
     },
@@ -858,10 +852,9 @@
       "category": "Status",
       "source": {
         "bank": "system_mgmt",
-        "byteOffset": 8,
+        "byteOffset": 10,
         "dataType": "uint8",
-        "bitMask": 32,
-        "trueValue": 32
+        "trueValue": 1
       }
     },
     {
@@ -871,10 +864,9 @@
       "category": "Status",
       "source": {
         "bank": "system_mgmt",
-        "byteOffset": 8,
+        "byteOffset": 11,
         "dataType": "uint8",
-        "bitMask": 16,
-        "trueValue": 16
+        "trueValue": 1
       }
     },
     {
