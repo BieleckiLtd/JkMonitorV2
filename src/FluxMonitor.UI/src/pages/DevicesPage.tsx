@@ -11,15 +11,18 @@ type DeviceConfiguration = {
   definitionId: string;
   definitionVersion?: string | null;
   transportPortName?: string | null;
-  bleSettingsPin?: string | null;
   address: number;
   isMaster: boolean;
   pollIntervalMilliseconds: number;
   enabled: boolean;
 };
 
+type DeviceConfigurationWire = DeviceConfiguration & {
+  bleSettingsPin?: string | null;
+};
+
 type DeviceConfigurationResponse = {
-  devices: DeviceConfiguration[];
+  devices: DeviceConfigurationWire[];
 };
 
 type PortsResponse = {
@@ -230,12 +233,20 @@ const defaultDevice = (index: number, definition: DeviceDefinitionSummary, famil
   definitionId: definition.id,
   definitionVersion: null,
   transportPortName: '',
-  bleSettingsPin: '',
   address: index,
   isMaster: false,
   pollIntervalMilliseconds: 1000,
   enabled: false,
 });
+
+function stripBleSettingsPin<T extends object>(device: T): T {
+  if (!Object.prototype.hasOwnProperty.call(device, 'bleSettingsPin')) {
+    return device;
+  }
+
+  const { bleSettingsPin: _bleSettingsPin, ...sanitizedDevice } = device as T & { bleSettingsPin?: string | null };
+  return sanitizedDevice as T;
+}
 
 function getTransportType(device: DeviceConfiguration, definitions: DeviceDefinitionSummary[]) {
   return definitions.find((definition) => definition.id === device.definitionId)?.transportType ?? null;
@@ -334,7 +345,7 @@ export function DevicesPage() {
       const response = await fetch('/api/devices/config');
       if (!response.ok) throw new Error('Unable to load device configuration.');
       const data = (await response.json()) as DeviceConfigurationResponse;
-      setDevices(data.devices);
+      setDevices(data.devices.map(stripBleSettingsPin));
       setLoadError(null);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : 'Unable to load device configuration.');
@@ -362,10 +373,11 @@ export function DevicesPage() {
   const saveDevicesNow = useCallback(async (devicesToSave?: DeviceConfiguration[]) => {
     try {
       setAutoSaveStatus('saving');
+      const devicesPayload = (devicesToSave ?? devicesRef.current).map(stripBleSettingsPin);
       const response = await fetch('/api/devices/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ devices: devicesToSave ?? devicesRef.current }),
+        body: JSON.stringify({ devices: devicesPayload }),
       });
 
       if (!response.ok) {
@@ -373,7 +385,7 @@ export function DevicesPage() {
       }
 
       const data = (await response.json()) as DeviceConfigurationResponse;
-      setDevices(data.devices);
+      setDevices(data.devices.map(stripBleSettingsPin));
       setAutoSaveStatus('saved');
       window.setTimeout(() => {
         setAutoSaveStatus((current) => current === 'saved' ? 'idle' : current);
@@ -435,9 +447,6 @@ export function DevicesPage() {
         definitionId: nextDefinition.id,
         definitionVersion: null,
         transportPortName: currentTransportType === nextTransportType ? (device.transportPortName ?? '') : '',
-        bleSettingsPin: currentTransportType === 'ble' && nextTransportType === 'ble'
-          ? (device.bleSettingsPin ?? '')
-          : '',
       };
     }));
 
@@ -501,7 +510,7 @@ export function DevicesPage() {
     };
 
     try {
-      const quickData = await fetchScanPhase('2000', true);
+      const quickData = await fetchScanPhase('1000', true);
       if (!isLatestScan()) {
         return;
       }
@@ -517,37 +526,46 @@ export function DevicesPage() {
 
       setBleScanFollowUpLoading((current) => ({ ...current, [deviceId]: true }));
 
-      try {
-        const followUpData = await fetchScanPhase('8000', false);
+      window.setTimeout(() => {
         if (!isLatestScan()) {
-          return;
-        }
-
-        const mergedResults = mergeBleScanDevices(quickResults, followUpData.devices);
-        setBleScanResults((current) => ({
-          ...current,
-          [deviceId]: mergeBleScanDevices(current[deviceId] ?? quickResults, followUpData.devices),
-        }));
-        setBleScanErrors((current) => ({
-          ...current,
-          [deviceId]: followUpData.error && mergedResults.length === 0 ? followUpData.error : null,
-        }));
-      } catch (error) {
-        if (!isLatestScan()) {
-          return;
-        }
-
-        if (quickResults.length === 0) {
-          setBleScanErrors((current) => ({
-            ...current,
-            [deviceId]: error instanceof Error ? error.message : 'Unable to scan for BLE devices.',
-          }));
-        }
-      } finally {
-        if (isLatestScan()) {
           setBleScanFollowUpLoading((current) => ({ ...current, [deviceId]: false }));
+          return;
         }
-      }
+
+        void (async () => {
+          try {
+            const followUpData = await fetchScanPhase('8000', false);
+            if (!isLatestScan()) {
+              return;
+            }
+
+            const mergedResults = mergeBleScanDevices(quickResults, followUpData.devices);
+            setBleScanResults((current) => ({
+              ...current,
+              [deviceId]: mergeBleScanDevices(current[deviceId] ?? quickResults, followUpData.devices),
+            }));
+            setBleScanErrors((current) => ({
+              ...current,
+              [deviceId]: followUpData.error && mergedResults.length === 0 ? followUpData.error : null,
+            }));
+          } catch (error) {
+            if (!isLatestScan()) {
+              return;
+            }
+
+            if (quickResults.length === 0) {
+              setBleScanErrors((current) => ({
+                ...current,
+                [deviceId]: error instanceof Error ? error.message : 'Unable to scan for BLE devices.',
+              }));
+            }
+          } finally {
+            if (isLatestScan()) {
+              setBleScanFollowUpLoading((current) => ({ ...current, [deviceId]: false }));
+            }
+          }
+        })();
+      }, 0);
     } catch (error) {
       if (!isLatestScan()) {
         return;
@@ -904,7 +922,6 @@ export function DevicesPage() {
                             {bleIsScanning ? 'Scanning...' : 'Scan nearby'}
                           </Button>
                         </div>
-                        <p className='text-xs text-muted-foreground'>Scan on the Pi and choose a detected device, or enter the address manually.</p>
                         {bleIsScanningForMore ? <p className='text-xs text-muted-foreground'>Quick results shown. Looking for more nearby candidates...</p> : null}
                         {bleScanError ? <div className='rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300'>{bleScanError}</div> : null}
                         {bleDevices.length > 0 ? (
@@ -937,7 +954,6 @@ export function DevicesPage() {
                                         <div className='text-xs text-muted-foreground'>Alias: {candidate.alias} · Name: {candidate.name}</div>
                                       ) : null}
                                       {candidate.verificationDetails ? <div className='text-xs text-muted-foreground'>{candidate.verificationDetails}</div> : null}
-                                      {candidate.manufacturerData.length > 0 ? <div className='text-xs text-muted-foreground'>Manufacturer data: {candidate.manufacturerData.join(' · ')}</div> : null}
                                     </div>
                                     {isSelected ? <span className='rounded-full border border-primary/40 bg-primary/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary'>Selected</span> : null}
                                   </div>
@@ -947,16 +963,6 @@ export function DevicesPage() {
                           </div>
                         ) : null}
                       </div>
-
-                      <label className='space-y-2 text-sm text-foreground'>
-                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>BLE settings PIN</span>
-                        <Input
-                          value={device.bleSettingsPin ?? ''}
-                          disabled={device.enabled}
-                          placeholder='Optional'
-                          onChange={(event) => updateDevice(index, 'bleSettingsPin', event.target.value || null)}
-                        />
-                      </label>
                     </>
                   ) : null}
 
