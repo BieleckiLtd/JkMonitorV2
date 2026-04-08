@@ -287,7 +287,8 @@ public sealed class GenericBlePollingClient(
     public async Task<IReadOnlyList<BleDiscoveredDevice>> DiscoverDevicesAsync(
         DeviceDefinition? definition,
         TimeSpan? timeout,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool returnOnFirstMatch = false)
     {
         if (!OperatingSystem.IsLinux())
             throw new PlatformNotSupportedException("BLE discovery is supported on Linux/BlueZ only.");
@@ -315,12 +316,26 @@ public sealed class GenericBlePollingClient(
             await adapter.SetAsync("Powered", true);
 
         var devices = new ConcurrentDictionary<string, Device>(StringComparer.OrdinalIgnoreCase);
+        var expectedServiceUuid = definition is not null && IsDefinitionSupported(definition)
+            ? BlueZManager.NormalizeUUID(
+                definition.Connection.Transport.Defaults?.ServiceUuid
+                ?? throw new InvalidOperationException($"Definition '{definition.Device.Id}' has no BLE service UUID."))
+            : null;
+        var matchingAdvertisementSeen = returnOnFirstMatch && expectedServiceUuid is not null
+            ? new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            : null;
 
         foreach (var device in await adapter.GetDevicesAsync())
         {
             var key = await GetDiscoveryKeyAsync(device);
             if (!string.IsNullOrWhiteSpace(key))
                 devices[key] = device;
+
+            if (matchingAdvertisementSeen is not null &&
+                await DeviceAdvertisesServiceUuidAsync(device, expectedServiceUuid!))
+            {
+                matchingAdvertisementSeen?.TrySetResult();
+            }
         }
 
         async Task OnDeviceFoundAsync(Adapter _, DeviceFoundEventArgs args)
@@ -328,13 +343,36 @@ public sealed class GenericBlePollingClient(
             var key = await GetDiscoveryKeyAsync(args.Device);
             if (!string.IsNullOrWhiteSpace(key))
                 devices[key] = args.Device;
+
+            if (matchingAdvertisementSeen is not null &&
+                await DeviceAdvertisesServiceUuidAsync(args.Device, expectedServiceUuid!))
+            {
+                matchingAdvertisementSeen?.TrySetResult();
+            }
         }
 
         adapter.DeviceFound += OnDeviceFoundAsync;
         try
         {
             await adapter.StartDiscoveryAsync();
-            await Task.Delay(discoveryWindow, cancellationToken);
+            if (matchingAdvertisementSeen is null)
+            {
+                await Task.Delay(discoveryWindow, cancellationToken);
+            }
+            else
+            {
+                var discoveryDelay = Task.Delay(discoveryWindow, cancellationToken);
+                var completed = await Task.WhenAny(discoveryDelay, matchingAdvertisementSeen.Task);
+                if (completed == matchingAdvertisementSeen.Task)
+                {
+                    var settleWindow = TimeSpan.FromMilliseconds(Math.Clamp((int)(discoveryWindow.TotalMilliseconds / 4), 250, 1000));
+                    await Task.Delay(settleWindow, cancellationToken);
+                }
+                else
+                {
+                    await discoveryDelay;
+                }
+            }
         }
         finally
         {
@@ -346,48 +384,11 @@ public sealed class GenericBlePollingClient(
         foreach (var device in devices.Values)
             discovered.Add(await MapDiscoveredDeviceAsync(device));
 
-        if (definition is not null &&
-            IsDefinitionSupported(definition))
+        if (expectedServiceUuid is not null)
         {
-            var serviceUuid = BlueZManager.NormalizeUUID(
-                definition.Connection.Transport.Defaults?.ServiceUuid
-                ?? throw new InvalidOperationException($"Definition '{definition.Device.Id}' has no BLE service UUID."));
-            var probeTimeout = TimeSpan.FromMilliseconds(Math.Clamp((int)(discoveryWindow.TotalMilliseconds / 2), 1500, 4000));
-
-            foreach (var candidate in discovered
-                .Where(device =>
-                    device.AdvertisedServiceUuids.Length == 0 ||
-                    device.AdvertisedServiceUuids.Contains(serviceUuid, StringComparer.OrdinalIgnoreCase))
-                .OrderByDescending(device => device.Rssi ?? int.MinValue)
-                .Take(4)
-                .ToArray())
-            {
-                var probe = await ProbeDefinitionAsync(candidate.Address, definition, probeTimeout, cancellationToken);
-                if (probe.IsDefinitionVerified)
-                {
-                    logger.LogInformation(
-                        "BLE probe verified candidate {Address} for definition {DefinitionId}. Details={Details}",
-                        candidate.Address,
-                        definition.Device.Id,
-                        probe.VerificationDetails ?? "<none>");
-                }
-                else if (!string.IsNullOrWhiteSpace(probe.VerificationDetails))
-                {
-                    logger.LogWarning(
-                        "BLE probe could not verify candidate {Address} for definition {DefinitionId}. Details={Details}",
-                        candidate.Address,
-                        definition.Device.Id,
-                        probe.VerificationDetails);
-                }
-
-                discovered[discovered.FindIndex(device => string.Equals(device.Address, candidate.Address, StringComparison.OrdinalIgnoreCase))] =
-                    candidate with
-                    {
-                        IsDefinitionVerified = probe.IsDefinitionVerified,
-                        VerificationLabel = probe.VerificationLabel,
-                        VerificationDetails = probe.VerificationDetails
-                    };
-            }
+            discovered = discovered
+                .Select(device => ApplyAdvertisedServiceVerification(device, expectedServiceUuid))
+                .ToList();
         }
 
         var ordered = discovered
@@ -617,10 +618,16 @@ public sealed class GenericBlePollingClient(
             {
                 return await WaitForPendingReadAsync(session, bank, pendingRead, timeout, cancellationToken);
             }
-            catch (TimeoutException) when (session.WriteCharacteristic is not null && SupportsNotifyStreamRequestFallback(bank))
+            catch (TimeoutException) when (session.WriteCharacteristic is not null)
             {
+                if (!SupportsNotifyStreamRequestFallback(bank) ||
+                    !TryMarkNotifyStreamFallbackIssued(session, bank.Id))
+                {
+                    throw;
+                }
+
                 logger.LogDebug(
-                    "BLE notify-stream frame type 0x{FrameType:X2} did not arrive in time for device {DeviceId}. Falling back to a request-response read for bank {BankId}.",
+                    "BLE notify-stream frame type 0x{FrameType:X2} did not arrive in time for device {DeviceId}. Issuing one-time request-response fallback for bank {BankId}.",
                     bank.ResponseFrameType,
                     session.DeviceId,
                     bank.Id);
@@ -997,6 +1004,29 @@ public sealed class GenericBlePollingClient(
     internal static bool SupportsNotifyStreamRequestFallback(DataSourceDefinition bank)
         => bank.Command != 0;
 
+    internal static BleDiscoveredDevice ApplyAdvertisedServiceVerification(BleDiscoveredDevice device, string serviceUuid)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+        ArgumentException.ThrowIfNullOrWhiteSpace(serviceUuid);
+
+        var isMatch = device.AdvertisedServiceUuids.Contains(serviceUuid, StringComparer.OrdinalIgnoreCase);
+        return device with
+        {
+            IsDefinitionVerified = isMatch,
+            VerificationLabel = isMatch ? "Service match" : null,
+            VerificationDetails = isMatch ? "Advertises the expected BLE service." : null
+        };
+    }
+
+    private static async Task<bool> DeviceAdvertisesServiceUuidAsync(Device device, string serviceUuid)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+        ArgumentException.ThrowIfNullOrWhiteSpace(serviceUuid);
+
+        var advertisedServiceUuids = DescribeStringSequence(await SafeGetObjectAsync(() => device.GetUUIDsAsync()));
+        return advertisedServiceUuids.Contains(serviceUuid, StringComparer.OrdinalIgnoreCase);
+    }
+
     private static bool IsSupportedReadMode(string? readMode)
     {
         var normalized = NormalizeReadMode(readMode);
@@ -1047,6 +1077,14 @@ public sealed class GenericBlePollingClient(
 
         payload = [];
         return false;
+    }
+
+    private static bool TryMarkNotifyStreamFallbackIssued(BleSession session, string bankId)
+    {
+        lock (session.SyncRoot)
+        {
+            return session.NotifyStreamFallbackIssued.Add(bankId);
+        }
     }
 
     private static void RemoveCachedPayload(BleSession session, string bankId)
@@ -1687,6 +1725,7 @@ public sealed class GenericBlePollingClient(
             session.PendingReads.Clear();
             session.FrameBuffer.Clear();
             session.BankCache.Clear();
+            session.NotifyStreamFallbackIssued.Clear();
             session.LastFrameHex = string.Empty;
         }
 
@@ -1755,6 +1794,7 @@ public sealed class GenericBlePollingClient(
         public IDisposable? NotifyWatcher { get; set; }
         public List<byte> FrameBuffer { get; } = [];
         public Dictionary<string, BankCacheEntry> BankCache { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> NotifyStreamFallbackIssued { get; } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, TaskCompletionSource<BankCacheEntry>> PendingReads { get; } = new(StringComparer.OrdinalIgnoreCase);
         public string LastFrameHex { get; set; } = string.Empty;
     }

@@ -119,6 +119,53 @@ function getFamilyKey(definition: DeviceDefinitionSummary) {
   return definition.id;
 }
 
+function compareNullableStrings(left: string | null | undefined, right: string | null | undefined) {
+  const normalizedLeft = left?.trim() ?? '';
+  const normalizedRight = right?.trim() ?? '';
+  if (!normalizedLeft && !normalizedRight) return 0;
+  if (!normalizedLeft) return 1;
+  if (!normalizedRight) return -1;
+  return normalizedLeft.localeCompare(normalizedRight, undefined, { sensitivity: 'base' });
+}
+
+function sortBleScanDevices(devices: BleScanDevice[]) {
+  return [...devices].sort((left, right) => {
+    if (left.isDefinitionVerified !== right.isDefinitionVerified) {
+      return Number(right.isDefinitionVerified) - Number(left.isDefinitionVerified);
+    }
+
+    if (left.isConnected !== right.isConnected) {
+      return Number(right.isConnected) - Number(left.isConnected);
+    }
+
+    const leftRssi = left.rssi ?? Number.NEGATIVE_INFINITY;
+    const rightRssi = right.rssi ?? Number.NEGATIVE_INFINITY;
+    if (leftRssi !== rightRssi) {
+      return rightRssi - leftRssi;
+    }
+
+    const displayNameComparison = compareNullableStrings(left.displayName, right.displayName);
+    if (displayNameComparison !== 0) {
+      return displayNameComparison;
+    }
+
+    return compareNullableStrings(left.address, right.address);
+  });
+}
+
+function mergeBleScanDevices(current: BleScanDevice[], incoming: BleScanDevice[]) {
+  const merged = new Map<string, BleScanDevice>();
+  for (const candidate of current) {
+    merged.set(candidate.address, candidate);
+  }
+
+  for (const candidate of incoming) {
+    merged.set(candidate.address, candidate);
+  }
+
+  return sortBleScanDevices([...merged.values()]);
+}
+
 function getFamilyName(definitions: DeviceDefinitionSummary[]) {
   const baseNames = definitions.map((definition) => stripConnectionSuffix(definition.name)).filter((name) => name.length > 0);
   const firstName = baseNames[0];
@@ -256,8 +303,10 @@ export function DevicesPage() {
   const [saveDirty, setSaveDirty] = useState(0);
   const [bleScanResults, setBleScanResults] = useState<Record<string, BleScanDevice[]>>({});
   const [bleScanLoading, setBleScanLoading] = useState<Record<string, boolean>>({});
+  const [bleScanFollowUpLoading, setBleScanFollowUpLoading] = useState<Record<string, boolean>>({});
   const [bleScanErrors, setBleScanErrors] = useState<Record<string, string | null>>({});
   const definitionsRef = useRef<DeviceDefinitionSummary[]>([]);
+  const bleScanSequenceRef = useRef<Record<string, number>>({});
 
   useEffect(() => {
     definitionsRef.current = availableDefinitions;
@@ -426,11 +475,21 @@ export function DevicesPage() {
   }, [markDirty]);
 
   const scanBleDevices = useCallback(async (deviceId: string, definitionId: string) => {
+    const scanSequence = (bleScanSequenceRef.current[deviceId] ?? 0) + 1;
+    bleScanSequenceRef.current[deviceId] = scanSequence;
+
     setBleScanLoading((current) => ({ ...current, [deviceId]: true }));
+    setBleScanFollowUpLoading((current) => ({ ...current, [deviceId]: false }));
     setBleScanErrors((current) => ({ ...current, [deviceId]: null }));
 
-    try {
-      const query = new URLSearchParams({ definitionId, timeoutMs: '6000' });
+    const isLatestScan = () => bleScanSequenceRef.current[deviceId] === scanSequence;
+
+    const fetchScanPhase = async (timeoutMs: string, returnOnFirstMatch: boolean) => {
+      const query = new URLSearchParams({
+        definitionId,
+        timeoutMs,
+        returnOnFirstMatch: returnOnFirstMatch ? 'true' : 'false',
+      });
       const response = await fetch(`/api/devices/ble/scan?${query.toString()}`);
       const data = (await response.json()) as BleScanResponse;
 
@@ -438,16 +497,71 @@ export function DevicesPage() {
         throw new Error(data.error ?? 'Unable to scan for BLE devices.');
       }
 
-      setBleScanResults((current) => ({ ...current, [deviceId]: data.devices }));
-      setBleScanErrors((current) => ({ ...current, [deviceId]: data.error ?? null }));
+      return data;
+    };
+
+    try {
+      const quickData = await fetchScanPhase('2000', true);
+      if (!isLatestScan()) {
+        return;
+      }
+
+      const quickResults = sortBleScanDevices(quickData.devices);
+      setBleScanResults((current) => ({ ...current, [deviceId]: quickResults }));
+      setBleScanErrors((current) => ({ ...current, [deviceId]: quickData.error ?? null }));
+      setBleScanLoading((current) => ({ ...current, [deviceId]: false }));
+
+      if (quickData.error && quickResults.length === 0) {
+        return;
+      }
+
+      setBleScanFollowUpLoading((current) => ({ ...current, [deviceId]: true }));
+
+      try {
+        const followUpData = await fetchScanPhase('8000', false);
+        if (!isLatestScan()) {
+          return;
+        }
+
+        const mergedResults = mergeBleScanDevices(quickResults, followUpData.devices);
+        setBleScanResults((current) => ({
+          ...current,
+          [deviceId]: mergeBleScanDevices(current[deviceId] ?? quickResults, followUpData.devices),
+        }));
+        setBleScanErrors((current) => ({
+          ...current,
+          [deviceId]: followUpData.error && mergedResults.length === 0 ? followUpData.error : null,
+        }));
+      } catch (error) {
+        if (!isLatestScan()) {
+          return;
+        }
+
+        if (quickResults.length === 0) {
+          setBleScanErrors((current) => ({
+            ...current,
+            [deviceId]: error instanceof Error ? error.message : 'Unable to scan for BLE devices.',
+          }));
+        }
+      } finally {
+        if (isLatestScan()) {
+          setBleScanFollowUpLoading((current) => ({ ...current, [deviceId]: false }));
+        }
+      }
     } catch (error) {
+      if (!isLatestScan()) {
+        return;
+      }
+
       setBleScanResults((current) => ({ ...current, [deviceId]: [] }));
       setBleScanErrors((current) => ({
         ...current,
         [deviceId]: error instanceof Error ? error.message : 'Unable to scan for BLE devices.',
       }));
     } finally {
-      setBleScanLoading((current) => ({ ...current, [deviceId]: false }));
+      if (isLatestScan()) {
+        setBleScanLoading((current) => ({ ...current, [deviceId]: false }));
+      }
     }
   }, []);
 
@@ -667,6 +781,7 @@ export function DevicesPage() {
             const action = deviceActions[device.deviceId];
             const bleDevices = bleScanResults[device.deviceId] ?? [];
             const bleIsScanning = bleScanLoading[device.deviceId] ?? false;
+            const bleIsScanningForMore = bleScanFollowUpLoading[device.deviceId] ?? false;
             const bleScanError = bleScanErrors[device.deviceId];
 
             return (
@@ -790,6 +905,7 @@ export function DevicesPage() {
                           </Button>
                         </div>
                         <p className='text-xs text-muted-foreground'>Scan on the Pi and choose a detected device, or enter the address manually.</p>
+                        {bleIsScanningForMore ? <p className='text-xs text-muted-foreground'>Quick results shown. Looking for more nearby candidates...</p> : null}
                         {bleScanError ? <div className='rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300'>{bleScanError}</div> : null}
                         {bleDevices.length > 0 ? (
                           <div className='space-y-2'>

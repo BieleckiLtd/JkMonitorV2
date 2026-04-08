@@ -237,15 +237,17 @@ public sealed class DevicesController(
     public async Task<IActionResult> ScanBleDevices(
         [FromQuery] string? definitionId = null,
         [FromQuery] int? timeoutMs = null,
+        [FromQuery] bool returnOnFirstMatch = false,
         CancellationToken cancellationToken = default)
     {
         try
         {
             var hasDefinitionFilter = !string.IsNullOrWhiteSpace(definitionId);
             logger.LogInformation(
-                "BLE scan requested. HasDefinitionFilter={HasDefinitionFilter}, TimeoutMs={TimeoutMs}.",
+                "BLE scan requested. HasDefinitionFilter={HasDefinitionFilter}, TimeoutMs={TimeoutMs}, ReturnOnFirstMatch={ReturnOnFirstMatch}.",
                 hasDefinitionFilter,
-                timeoutMs);
+                timeoutMs,
+                returnOnFirstMatch);
 
             Contracts.DeviceDefinition.DeviceDefinition? definition = null;
             if (!string.IsNullOrWhiteSpace(definitionId) &&
@@ -274,11 +276,12 @@ public sealed class DevicesController(
                 ? TimeSpan.FromMilliseconds(Math.Clamp(timeoutMs.Value, 1000, 15000))
                 : (TimeSpan?)null;
 
-            var devices = await genericBlePollingClient.DiscoverDevicesAsync(definition, timeout, cancellationToken);
+            var devices = await genericBlePollingClient.DiscoverDevicesAsync(definition, timeout, cancellationToken, returnOnFirstMatch);
             logger.LogInformation(
-                "BLE scan completed. DefinitionFilterApplied={DefinitionFilterApplied}, ResultCount={ResultCount}.",
+                "BLE scan completed. DefinitionFilterApplied={DefinitionFilterApplied}, ResultCount={ResultCount}, ReturnOnFirstMatch={ReturnOnFirstMatch}.",
                 definition is not null,
-                devices.Count);
+                devices.Count,
+                returnOnFirstMatch);
             return Ok(new { devices });
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

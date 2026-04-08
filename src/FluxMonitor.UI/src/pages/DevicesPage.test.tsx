@@ -6,6 +6,7 @@ describe('DevicesPage', () => {
   beforeEach(() => {
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
+      const parsedUrl = new URL(url, 'http://localhost');
 
       if (url === '/api/devices/config' && init?.method === 'PUT') {
         const body = JSON.parse(String(init.body)) as { devices: unknown[] };
@@ -74,6 +75,71 @@ describe('DevicesPage', () => {
       }
 
       if (url.startsWith('/api/devices/ble/scan?')) {
+        const timeoutMs = parsedUrl.searchParams.get('timeoutMs');
+        const returnOnFirstMatch = parsedUrl.searchParams.get('returnOnFirstMatch');
+
+        if (timeoutMs === '2000' && returnOnFirstMatch === 'true') {
+          return {
+            ok: true,
+            json: async () => ({
+              devices: [
+                {
+                  address: 'AA:BB:CC:DD:EE:FF',
+                  alias: 'JK-BMS',
+                  name: 'JK Smart BMS',
+                  displayName: 'JK-BMS',
+                  isConnected: false,
+                  isPaired: true,
+                  rssi: -54,
+                  manufacturerData: ['0x07D0: 4A4B424D53'],
+                  advertisedServiceUuids: ['0000ffe0-0000-1000-8000-00805f9b34fb'],
+                  isDefinitionVerified: true,
+                  verificationLabel: 'Verified JK BMS',
+                  verificationDetails: 'JK · JK-PB2A16S20P · Battery-1',
+                },
+              ],
+            }),
+          } as Response;
+        }
+
+        if (timeoutMs === '8000' && returnOnFirstMatch === 'false') {
+          return {
+            ok: true,
+            json: async () => ({
+              devices: [
+                {
+                  address: 'AA:BB:CC:DD:EE:FF',
+                  alias: 'JK-BMS',
+                  name: 'JK Smart BMS',
+                  displayName: 'JK-BMS',
+                  isConnected: false,
+                  isPaired: true,
+                  rssi: -54,
+                  manufacturerData: ['0x07D0: 4A4B424D53'],
+                  advertisedServiceUuids: ['0000ffe0-0000-1000-8000-00805f9b34fb'],
+                  isDefinitionVerified: true,
+                  verificationLabel: 'Verified JK BMS',
+                  verificationDetails: 'JK · JK-PB2A16S20P · Battery-1',
+                },
+                {
+                  address: '11:22:33:44:55:66',
+                  alias: 'JK-BMS-2',
+                  name: 'JK Smart BMS 2',
+                  displayName: 'JK-BMS-2',
+                  isConnected: false,
+                  isPaired: false,
+                  rssi: -61,
+                  manufacturerData: ['0x07D0: 4A4B424D5332'],
+                  advertisedServiceUuids: ['0000ffe0-0000-1000-8000-00805f9b34fb'],
+                  isDefinitionVerified: true,
+                  verificationLabel: 'Service match',
+                  verificationDetails: 'Advertises the expected BLE service.',
+                },
+              ],
+            }),
+          } as Response;
+        }
+
         return {
           ok: true,
           json: async () => ({
@@ -130,9 +196,18 @@ describe('DevicesPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /scan nearby/i }));
 
     await waitFor(() => {
+      const scanRequests = vi.mocked(globalThis.fetch).mock.calls
+        .map(([input]) => String(input))
+        .filter((url) => url.startsWith('/api/devices/ble/scan?'));
+      expect(scanRequests).toContain('/api/devices/ble/scan?definitionId=jk-inverter-bms-ble&timeoutMs=2000&returnOnFirstMatch=true');
+      expect(scanRequests).toContain('/api/devices/ble/scan?definitionId=jk-inverter-bms-ble&timeoutMs=8000&returnOnFirstMatch=false');
+    });
+
+    await waitFor(() => {
       expect(screen.getByText(/verified jk bms/i)).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: /select ble device 11:22:33:44:55:66/i })).toBeInTheDocument();
       expect(screen.getByText(/-54 dBm/i)).toBeInTheDocument();
-      expect(screen.getByText(/0x07d0: 4a4b424d53/i)).toBeInTheDocument();
+      expect(screen.getByText(/manufacturer data:\s*0x07d0: 4a4b424d53$/i)).toBeInTheDocument();
     });
 
     fireEvent.click(screen.getByRole('button', { name: /select ble device aa:bb:cc:dd:ee:ff/i }));

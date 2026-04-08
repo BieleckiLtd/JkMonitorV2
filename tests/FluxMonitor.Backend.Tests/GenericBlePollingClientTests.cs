@@ -69,6 +69,58 @@ public sealed class GenericBlePollingClientTests
         Assert.True(GenericBlePollingClient.SupportsNotifyStreamRequestFallback(bankWithCommand));
     }
 
+    [Fact]
+    public void ApplyAdvertisedServiceVerification_MarksMatchingCandidatesWithoutConnecting()
+    {
+        var candidate = new BleDiscoveredDevice(
+            "AA:BB:CC:DD:EE:FF",
+            "JK-BMS",
+            "JK-BMS",
+            "JK-BMS",
+            false,
+            false,
+            -52,
+            [],
+            ["0000ffe0-0000-1000-8000-00805f9b34fb"],
+            false,
+            null,
+            null);
+
+        var verified = GenericBlePollingClient.ApplyAdvertisedServiceVerification(
+            candidate,
+            "0000ffe0-0000-1000-8000-00805f9b34fb");
+
+        Assert.True(verified.IsDefinitionVerified);
+        Assert.Equal("Service match", verified.VerificationLabel);
+        Assert.Equal("Advertises the expected BLE service.", verified.VerificationDetails);
+    }
+
+    [Fact]
+    public void ApplyAdvertisedServiceVerification_LeavesNonMatchingCandidatesUnverified()
+    {
+        var candidate = new BleDiscoveredDevice(
+            "AA:BB:CC:DD:EE:FF",
+            "Other",
+            "Other",
+            "Other",
+            false,
+            false,
+            -72,
+            [],
+            ["0000180f-0000-1000-8000-00805f9b34fb"],
+            false,
+            null,
+            null);
+
+        var verified = GenericBlePollingClient.ApplyAdvertisedServiceVerification(
+            candidate,
+            "0000ffe0-0000-1000-8000-00805f9b34fb");
+
+        Assert.False(verified.IsDefinitionVerified);
+        Assert.Null(verified.VerificationLabel);
+        Assert.Null(verified.VerificationDetails);
+    }
+
     private static DataSourceDefinition CreateBank(byte command)
         => new()
         {
