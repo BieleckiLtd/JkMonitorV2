@@ -5,10 +5,96 @@ import { DevicesPage } from './DevicesPage';
 describe('DevicesPage', () => {
   let holdFollowUpScan = false;
   let resolveFollowUpScan: (() => void) | null = null;
+  let initialDevicesResponse: unknown[] = [];
+
+  const definitionDetailsById = {
+    'jk-inverter-bms': {
+      version: '1.0.0',
+      device: {
+        id: 'jk-inverter-bms',
+        name: 'JK Inverter BMS',
+        manufacturer: 'JK',
+        model: 'JK-PB2A16S20P',
+        category: 'Battery',
+      },
+      connection: {
+        transport: {
+          type: 'serial',
+          defaults: {
+            baudRate: 115200,
+            dataBits: 8,
+            parity: 'none',
+            stopBits: 1,
+            readTimeoutMs: 1000,
+            writeTimeoutMs: 1000,
+          },
+        },
+        protocol: {
+          type: 'modbus',
+          settings: {
+            defaultSlaveAddress: 1,
+            interFrameDelayMs: 100,
+            retries: 1,
+            byteOrder: 'big-endian',
+          },
+        },
+      },
+      dataSources: [],
+      pollGroups: {
+        fast: {
+          intervalMs: 1000,
+          description: 'Fast polling',
+        },
+      },
+      entities: [],
+    },
+    'jk-inverter-bms-ble': {
+      version: '1.0.0',
+      device: {
+        id: 'jk-inverter-bms-ble',
+        name: 'JK Inverter BMS (BLE)',
+        manufacturer: 'JK',
+        model: 'JK-PB2A16S20P',
+        category: 'Battery',
+      },
+      connection: {
+        transport: {
+          type: 'ble',
+          defaults: {
+            serviceUuid: '0000ffe0-0000-1000-8000-00805f9b34fb',
+            notifyCharacteristicUuid: '0000ffe1-0000-1000-8000-00805f9b34fb',
+            writeCharacteristicUuid: '0000ffe2-0000-1000-8000-00805f9b34fb',
+            connectionTimeoutMs: 20000,
+            reconnectDelayMs: 5000,
+          },
+        },
+        protocol: {
+          type: 'ble-frame',
+          settings: {
+            byteOrder: 'little-endian',
+            responseFrameSize: 300,
+            checksumType: 'sum8',
+            requestFrameSize: 20,
+            requestPreamble: [85, 170],
+            responsePreamble: [121],
+          },
+        },
+      },
+      dataSources: [],
+      pollGroups: {
+        fast: {
+          intervalMs: 1000,
+          description: 'Fast polling',
+        },
+      },
+      entities: [],
+    },
+  } as const;
 
   beforeEach(() => {
     holdFollowUpScan = false;
     resolveFollowUpScan = null;
+    initialDevicesResponse = [];
 
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
@@ -25,7 +111,7 @@ describe('DevicesPage', () => {
       if (url === '/api/devices/config') {
         return {
           ok: true,
-          json: async () => ({ devices: [] }),
+          json: async () => ({ devices: initialDevicesResponse }),
         } as Response;
       }
 
@@ -57,6 +143,19 @@ describe('DevicesPage', () => {
               isTransportSupported: true,
             },
           ]),
+        } as Response;
+      }
+
+      if (parsedUrl.pathname.startsWith('/api/definitions/')) {
+        const definitionId = decodeURIComponent(parsedUrl.pathname.replace('/api/definitions/', ''));
+        const definition = definitionDetailsById[definitionId as keyof typeof definitionDetailsById];
+        if (!definition) {
+          throw new Error(`Unhandled definition request: ${url}`);
+        }
+
+        return {
+          ok: true,
+          json: async () => definition,
         } as Response;
       }
 
@@ -208,7 +307,7 @@ describe('DevicesPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: /add first device/i }));
     fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using bluetooth/i }));
 
-    fireEvent.click(screen.getByRole('button', { name: /scan nearby/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /scan nearby/i }));
 
     await waitFor(() => {
       const scanRequests = vi.mocked(globalThis.fetch).mock.calls
@@ -263,7 +362,7 @@ describe('DevicesPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: /add first device/i }));
     fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using bluetooth/i }));
 
-    fireEvent.change(screen.getByPlaceholderText(/aa:bb:cc:dd:ee:ff or device alias/i), {
+    fireEvent.change(await screen.findByPlaceholderText(/aa:bb:cc:dd:ee:ff or device alias/i), {
       target: { value: 'C8:47:80:3A:5C:05' }
     });
 
@@ -275,5 +374,75 @@ describe('DevicesPage', () => {
 
     expect(await screen.findByText(/device start requested\. waiting for first poll result/i)).toBeInTheDocument();
     expect(screen.queryByText(/^Device started but first poll failed:\s*$/i)).not.toBeInTheDocument();
+  });
+
+  it('keeps focus while editing the device id', async () => {
+    render(<DevicesPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /add first device/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using usb \/ serial/i }));
+
+    const deviceIdInput = await screen.findByDisplayValue('device-1');
+    deviceIdInput.focus();
+
+    fireEvent.change(deviceIdInput, { target: { value: 'device-1a' } });
+    expect(screen.getByDisplayValue('device-1a')).toHaveFocus();
+
+    fireEvent.change(screen.getByDisplayValue('device-1a'), { target: { value: 'device-1ab' } });
+    expect(screen.getByDisplayValue('device-1ab')).toHaveFocus();
+  });
+
+  it('saves poll-group overrides from an existing device snapshot', async () => {
+    initialDevicesResponse = [
+      {
+        persistedId: 1,
+        deviceId: 'device-1',
+        displayName: 'Battery 1',
+        definitionId: 'jk-inverter-bms',
+        definitionVersion: '1.0.0',
+        transportPortName: 'COM3',
+        bleSettingsPin: null,
+        address: 1,
+        isMaster: false,
+        pollIntervalMilliseconds: 4321,
+        enabled: false,
+        cellVoltageSmoothingFactor: 0,
+        cellVoltageSmoothingBreakoutMillivolts: 0,
+        displayPrecision: {
+          voltage: 2,
+          cellVoltage: 3,
+          current: 1,
+          power: 0,
+          temperature: 1,
+          soc: 0,
+          deltaVoltage: 3,
+        },
+        hasDefinitionOverride: false,
+        definition: {
+          ...definitionDetailsById['jk-inverter-bms'],
+          pollGroups: {
+            fast: {
+              intervalMs: 4321,
+              description: 'Fast polling',
+            },
+          },
+        },
+      },
+    ];
+
+    render(<DevicesPage />);
+
+    fireEvent.click(await screen.findByText(/definition overrides/i));
+
+    fireEvent.change(await screen.findByDisplayValue('4321'), { target: { value: '2500' } });
+
+    await waitFor(() => {
+      const putCall = vi.mocked(globalThis.fetch).mock.calls.find(([input, init]) =>
+        String(input) === '/api/devices/config' && init?.method === 'PUT');
+      expect(putCall).toBeDefined();
+
+      const body = JSON.parse(String(putCall?.[1]?.body)) as { devices: Array<{ definition: { pollGroups: { fast: { intervalMs: number } } } }> };
+      expect(body.devices[0]?.definition.pollGroups.fast.intervalMs).toBe(2500);
+    });
   });
 });

@@ -11,6 +11,7 @@ namespace FluxMonitor.Backend.Services;
 public sealed class SetupConfigurationService(
     IHostEnvironment environment,
     IConfiguration appConfiguration,
+    LocalDependencyInstallerService localDependencyInstallerService,
     ManagedRestartService managedRestartService,
     ILogger<SetupConfigurationService> logger)
 {
@@ -23,6 +24,7 @@ public sealed class SetupConfigurationService(
     };
 
     private readonly string _contentRoot = environment.ContentRootPath;
+    private readonly bool _storageConfiguredAtStartup = IsStorageConfigured(appConfiguration);
 
     public SetupStateResponse GetState()
     {
@@ -32,12 +34,43 @@ public sealed class SetupConfigurationService(
         {
             CurrentStartupMode = "Hardware",
             EnvironmentName = environment.EnvironmentName,
-            UseDatabase = string.Equals(configuration.Storage.Provider, "TimescaleDb", StringComparison.OrdinalIgnoreCase),
+            SetupRequired = !_storageConfiguredAtStartup,
+            UseDatabase = _storageConfiguredAtStartup,
             ConnectionString = configuration.Storage.ConnectionString,
             SerialPort = null,
             SerialPorts = GetSerialPorts(),
             CanAutoRestart = managedRestartService.CanAutoRestart,
             ApplyMessage = managedRestartService.GetApplyMessage()
+        };
+    }
+
+    public LocalDependenciesStateResponse GetLocalDependenciesState()
+    {
+        return localDependencyInstallerService.GetState();
+    }
+
+    public InstallLocalDependenciesResponse InstallLocalDependencies()
+    {
+        return localDependencyInstallerService.Install();
+    }
+
+    public RestartApplicationResponse Restart()
+    {
+        if (!managedRestartService.CanAutoRestart)
+        {
+            return new RestartApplicationResponse
+            {
+                RestartScheduled = false,
+                Message = "Flux Monitor saved the local dependency setup. Restart the app to finish applying it."
+            };
+        }
+
+        managedRestartService.ScheduleRestart();
+
+        return new RestartApplicationResponse
+        {
+            RestartScheduled = true,
+            Message = "Flux Monitor is restarting to finish applying the local dependency setup."
         };
     }
 
@@ -283,6 +316,15 @@ public sealed class SetupConfigurationService(
     {
         return appConfiguration.GetSection("Monitor").Get<MonitorConfiguration>()
             ?? throw new InvalidOperationException("Monitor configuration is missing or invalid.");
+    }
+
+    private static bool IsStorageConfigured(IConfiguration configuration)
+    {
+        var provider = configuration.GetValue<string>("Monitor:Storage:Provider");
+        var connectionString = configuration.GetValue<string>("Monitor:Storage:ConnectionString");
+
+        return string.Equals(provider, "TimescaleDb", StringComparison.OrdinalIgnoreCase)
+            && !string.IsNullOrWhiteSpace(connectionString);
     }
 
     private string GetEnvironmentLocalSettingsPath(string environmentName)

@@ -168,6 +168,7 @@ public sealed class DeviceConfigStore(
                 "DefinitionVersion" TEXT NULL,
                 "DefinitionJson" JSONB NOT NULL,
                 "DefinitionHash" TEXT NOT NULL,
+                "HasDefinitionOverride" BOOLEAN NOT NULL DEFAULT FALSE,
                 "TransportPortName" TEXT NULL,
                 "BleSettingsPin" TEXT NULL,
                 "Address" SMALLINT NOT NULL,
@@ -183,6 +184,10 @@ public sealed class DeviceConfigStore(
             """;
 
         await connection.ExecuteAsync(sql);
+        await connection.ExecuteAsync("""
+            ALTER TABLE "Devices"
+            ADD COLUMN IF NOT EXISTS "HasDefinitionOverride" BOOLEAN NOT NULL DEFAULT FALSE;
+            """);
     }
 
     private async Task<LoadedDevices> LoadFromDbAsync(NpgsqlConnection connection)
@@ -196,6 +201,7 @@ public sealed class DeviceConfigStore(
                 "DefinitionVersion",
                 "DefinitionJson"::text AS "DefinitionJson",
                 "DefinitionHash",
+                "HasDefinitionOverride",
                 "TransportPortName",
                 "BleSettingsPin",
                 "Address",
@@ -226,6 +232,7 @@ public sealed class DeviceConfigStore(
                 CellVoltageSmoothingBreakoutMillivolts = row.CellVoltageSmoothingBreakoutMillivolts,
                 DisplayPrecision = DeserializeDisplayPrecision(row.DisplayPrecisionJson),
                 DefinitionVersion = row.DefinitionVersion,
+                HasDefinitionOverride = row.HasDefinitionOverride,
                 DefinitionJson = row.DefinitionJson,
                 DefinitionHash = row.DefinitionHash
             })
@@ -248,6 +255,11 @@ public sealed class DeviceConfigStore(
         var staleDevices = new List<DeviceConfiguration>();
         foreach (var device in loaded.Devices)
         {
+            if (device.HasDefinitionOverride)
+            {
+                continue;
+            }
+
             if (string.IsNullOrWhiteSpace(device.DefinitionId))
                 continue;
 
@@ -272,6 +284,7 @@ public sealed class DeviceConfigStore(
                 CellVoltageSmoothingFactor = device.CellVoltageSmoothingFactor,
                 CellVoltageSmoothingBreakoutMillivolts = device.CellVoltageSmoothingBreakoutMillivolts,
                 DisplayPrecision = device.DisplayPrecision,
+                HasDefinitionOverride = false,
                 DefinitionJson = fileJson,
                 DefinitionHash = fileHash,
                 DefinitionVersion = fileDefinition.Version,
@@ -328,6 +341,7 @@ public sealed class DeviceConfigStore(
             var definition = device.ResolveDefinition(_definitionLoader);
             var definitionJson = JsonSerializer.Serialize(definition, JsonOptions);
             var definitionHash = ComputeSha256(definitionJson);
+            var hasDefinitionOverride = HasDefinitionOverride(device, definition, definitionHash);
 
             normalizedDevices.Add(new DeviceConfiguration
             {
@@ -343,6 +357,7 @@ public sealed class DeviceConfigStore(
                 CellVoltageSmoothingFactor = device.CellVoltageSmoothingFactor,
                 CellVoltageSmoothingBreakoutMillivolts = device.CellVoltageSmoothingBreakoutMillivolts,
                 DisplayPrecision = device.DisplayPrecision,
+                HasDefinitionOverride = hasDefinitionOverride,
                 DefinitionVersion = definition.Version,
                 DefinitionJson = definitionJson,
                 DefinitionHash = definitionHash
@@ -365,6 +380,7 @@ public sealed class DeviceConfigStore(
                 "DefinitionVersion",
                 "DefinitionJson",
                 "DefinitionHash",
+                "HasDefinitionOverride",
                 "TransportPortName",
                 "BleSettingsPin",
                 "Address",
@@ -383,6 +399,7 @@ public sealed class DeviceConfigStore(
                 @DefinitionVersion,
                 @DefinitionJson::jsonb,
                 @DefinitionHash,
+                @HasDefinitionOverride,
                 @TransportPortName,
                 @BleSettingsPin,
                 @Address,
@@ -400,6 +417,7 @@ public sealed class DeviceConfigStore(
                 "DefinitionVersion" = EXCLUDED."DefinitionVersion",
                 "DefinitionJson" = EXCLUDED."DefinitionJson",
                 "DefinitionHash" = EXCLUDED."DefinitionHash",
+                "HasDefinitionOverride" = EXCLUDED."HasDefinitionOverride",
                 "TransportPortName" = EXCLUDED."TransportPortName",
                 "BleSettingsPin" = EXCLUDED."BleSettingsPin",
                 "Address" = EXCLUDED."Address",
@@ -425,6 +443,7 @@ public sealed class DeviceConfigStore(
                         device.DefinitionVersion,
                         device.DefinitionJson,
                         device.DefinitionHash,
+                        device.HasDefinitionOverride,
                         device.TransportPortName,
                         device.BleSettingsPin,
                         device.Address,
@@ -479,6 +498,22 @@ public sealed class DeviceConfigStore(
         return Convert.ToHexString(hash);
     }
 
+    private bool HasDefinitionOverride(
+        DeviceConfiguration device,
+        FluxMonitor.Contracts.DeviceDefinition.DeviceDefinition definition,
+        string definitionHash)
+    {
+        if (_definitionLoader.TryGet(definition.Device.Id, out var catalogDefinition) &&
+            catalogDefinition is not null)
+        {
+            var catalogJson = JsonSerializer.Serialize(catalogDefinition, JsonOptions);
+            var catalogHash = ComputeSha256(catalogJson);
+            return !string.Equals(definitionHash, catalogHash, StringComparison.OrdinalIgnoreCase);
+        }
+
+        return !string.IsNullOrWhiteSpace(device.DefinitionJson);
+    }
+
     private sealed record StoredDeviceRow(
         int DeviceId,
         string DeviceKey,
@@ -487,6 +522,7 @@ public sealed class DeviceConfigStore(
         string? DefinitionVersion,
         string DefinitionJson,
         string DefinitionHash,
+        bool HasDefinitionOverride,
         string? TransportPortName,
         string? BleSettingsPin,
         short Address,

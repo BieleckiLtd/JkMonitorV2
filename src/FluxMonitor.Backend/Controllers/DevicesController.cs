@@ -35,25 +35,28 @@ public sealed class DevicesController(
     [HttpGet("config")]
     public IActionResult GetConfig()
     {
-        return Ok(new { devices = deviceConfigStore.GetDevices() });
+        return Ok(BuildDeviceConfigurationResponse(deviceConfigStore.GetDevices()));
     }
 
     [HttpPut("config")]
     public async Task<ActionResult> SaveConfig(
-        [FromBody] SaveDeviceConfigurationRequest request,
+        [FromBody] SaveDeviceConfigurationsRequest request,
         CancellationToken cancellationToken)
     {
         try
         {
+            var requestedDevices = request.Devices
+                .Select(DeviceConfigurationApiMapper.ToConfiguration)
+                .ToArray();
             var existingDevices = deviceConfigStore.GetDevices();
             var existingIds = existingDevices.Select(device => device.DeviceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var requestedIds = request.Devices.Select(device => device.DeviceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            var added = request.Devices.Where(device => !existingIds.Contains(device.DeviceId)).Select(device => device.DeviceId).ToArray();
+            var requestedIds = requestedDevices.Select(device => device.DeviceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+            var added = requestedDevices.Where(device => !existingIds.Contains(device.DeviceId)).Select(device => device.DeviceId).ToArray();
             var removed = existingDevices.Where(device => !requestedIds.Contains(device.DeviceId)).Select(device => device.DeviceId).ToArray();
 
             logger.LogInformation(
                 "Saving device configuration. RequestedCount={RequestedCount}, Added={AddedCount}, Removed={RemovedCount}.",
-                request.Devices.Count,
+                requestedDevices.Length,
                 added.Length,
                 removed.Length);
 
@@ -67,13 +70,13 @@ public sealed class DevicesController(
                 logger.LogInformation("Removing {RemovedCount} device(s).", removed.Length);
             }
 
-            var devices = await deviceConfigStore.SaveDevicesAsync(request.Devices, cancellationToken);
+            var devices = await deviceConfigStore.SaveDevicesAsync(requestedDevices, cancellationToken);
 
             // Apply live — starts/stops device polling loops without restart
             await orchestrator.ApplyConfigurationAsync(devices, cancellationToken);
             logger.LogInformation("Device configuration applied successfully. ActiveDeviceCount={DeviceCount}.", devices.Count);
 
-            return Ok(new { devices });
+            return Ok(BuildDeviceConfigurationResponse(devices));
         }
         catch (InvalidOperationException exception)
         {
@@ -348,6 +351,7 @@ public sealed class DevicesController(
                         CellVoltageSmoothingFactor = d.CellVoltageSmoothingFactor,
                         CellVoltageSmoothingBreakoutMillivolts = d.CellVoltageSmoothingBreakoutMillivolts,
                         DisplayPrecision = d.DisplayPrecision,
+                        HasDefinitionOverride = d.HasDefinitionOverride,
                         DefinitionVersion = d.DefinitionVersion,
                         DefinitionJson = d.DefinitionJson,
                         DefinitionHash = d.DefinitionHash
@@ -446,6 +450,7 @@ public sealed class DevicesController(
                         CellVoltageSmoothingFactor = d.CellVoltageSmoothingFactor,
                         CellVoltageSmoothingBreakoutMillivolts = d.CellVoltageSmoothingBreakoutMillivolts,
                         DisplayPrecision = d.DisplayPrecision,
+                        HasDefinitionOverride = d.HasDefinitionOverride,
                         DefinitionVersion = d.DefinitionVersion,
                         DefinitionJson = d.DefinitionJson,
                         DefinitionHash = d.DefinitionHash
@@ -489,6 +494,25 @@ public sealed class DevicesController(
         => IsTerminalStartOutcome(outcome)
             ? $"Device started, but no successful poll completed within 8 seconds. Last error: {GetStartOutcomeError(outcome, lastError)}"
             : "Device started but no response received within 8 seconds. Check serial port and address.";
+
+    private DeviceConfigurationsResponse BuildDeviceConfigurationResponse(IReadOnlyList<DeviceConfiguration> devices)
+    {
+        var mappedDevices = devices
+            .Select(device =>
+            {
+                var persistedId = deviceConfigStore.TryGetPersistedDeviceId(device.DeviceId, out var id)
+                    ? id
+                    : (int?)null;
+                device.TryResolveDefinition(definitionLoader, out var definition);
+                return DeviceConfigurationApiMapper.ToApiModel(device, persistedId, definition);
+            })
+            .ToArray();
+
+        return new DeviceConfigurationsResponse
+        {
+            Devices = mappedDevices
+        };
+    }
 
 }
 

@@ -8,6 +8,8 @@ public sealed record class SetupStateResponse
 
     public required string EnvironmentName { get; init; }
 
+    public required bool SetupRequired { get; init; }
+
     public required bool UseDatabase { get; init; }
 
     public string? ConnectionString { get; init; }
@@ -19,6 +21,43 @@ public sealed record class SetupStateResponse
     public required bool CanAutoRestart { get; init; }
 
     public required string ApplyMessage { get; init; }
+}
+
+public sealed record class LocalDependenciesStateResponse
+{
+    public required bool Supported { get; init; }
+
+    public required bool IsRunning { get; init; }
+
+    public required bool HasCompleted { get; init; }
+
+    public bool? Succeeded { get; init; }
+
+    public required bool RequiresRestart { get; init; }
+
+    public required bool CanAutoRestart { get; init; }
+
+    public required string Message { get; init; }
+
+    public required IReadOnlyList<string> LogLines { get; init; }
+
+    public required DateTimeOffset UpdatedAt { get; init; }
+}
+
+public sealed record class InstallLocalDependenciesResponse
+{
+    public required bool Started { get; init; }
+
+    public required string Message { get; init; }
+
+    public required LocalDependenciesStateResponse Status { get; init; }
+}
+
+public sealed record class RestartApplicationResponse
+{
+    public required bool RestartScheduled { get; init; }
+
+    public required string Message { get; init; }
 }
 
 public sealed record class ApplySetupRequest

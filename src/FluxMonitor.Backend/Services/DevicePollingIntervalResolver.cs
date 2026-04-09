@@ -57,6 +57,7 @@ public static class DevicePollingIntervalResolver
             CellVoltageSmoothingFactor = device.CellVoltageSmoothingFactor,
             CellVoltageSmoothingBreakoutMillivolts = device.CellVoltageSmoothingBreakoutMillivolts,
             DisplayPrecision = device.DisplayPrecision,
+            HasDefinitionOverride = device.HasDefinitionOverride,
             DefinitionVersion = device.DefinitionVersion,
             DefinitionJson = device.DefinitionJson,
             DefinitionHash = device.DefinitionHash

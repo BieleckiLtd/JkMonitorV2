@@ -1,0 +1,60 @@
+{
+  "name": "flux-monitor-desktop",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Electron desktop host for Flux Monitor.",
+  "author": "Bielecki Ltd",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "build:backend:dev": "dotnet build ../FluxMonitor.Backend/FluxMonitor.Backend.csproj",
+    "dev": "npm run build && npm run build:backend:dev && node ./scripts/start-electron.cjs",
+    "publish:backend:win": "dotnet publish ../FluxMonitor.Backend/FluxMonitor.Backend.csproj -c Release -r win-x64 --self-contained true -o ../../.artifacts/desktop/backend/win-x64",
+    "dist:win": "npm run build && npm run publish:backend:win && electron-builder --win"
+  },
+  "build": {
+    "appId": "com.bieleckiltd.fluxmonitor",
+    "productName": "Flux Monitor",
+    "artifactName": "${productName}-${version}-${arch}.${ext}",
+    "files": [
+      "dist/**/*",
+      "package.json",
+      "app.ico"
+    ],
+    "extraResources": [
+      {
+        "from": "../../.artifacts/desktop/backend/win-x64",
+        "to": "backend",
+        "filter": [
+          "**/*"
+        ]
+      }
+    ],
+    "directories": {
+      "output": "../../artifacts/desktop/win"
+    },
+    "nsis": {
+      "artifactName": "${productName}-${version}-${arch}-setup.${ext}",
+      "installerIcon": "app.ico",
+      "uninstallerIcon": "app.ico",
+      "installerHeaderIcon": "app.ico"
+    },
+    "portable": {
+      "artifactName": "${productName}-${version}-${arch}-portable.${ext}"
+    },
+    "win": {
+      "icon": "app.ico",
+      "signAndEditExecutable": false,
+      "target": [
+        "nsis",
+        "portable"
+      ]
+    }
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "electron": "^39.2.3",
+    "electron-builder": "^26.0.12",
+    "typescript": "^5.9.3"
+  }
+}

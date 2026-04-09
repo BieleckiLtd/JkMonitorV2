@@ -1,24 +1,45 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { Check, LoaderCircle, Play, Plus, Square, Trash2, Upload, X } from 'lucide-react';
+import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { Check, LoaderCircle, Play, Plus, RotateCcw, Square, Trash2, Upload, X } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { useDeviceDefinitions } from '../hooks/useDeviceDefinition';
 import { cn } from '../lib/utils';
+import type { DeviceDefinition, DeviceDefinitionSummary } from '../types/deviceDefinition';
 
-type DeviceConfiguration = {
+type DisplayPrecision = {
+  voltage: number;
+  cellVoltage: number;
+  current: number;
+  power: number;
+  temperature: number;
+  soc: number;
+  deltaVoltage: number;
+};
+
+type DeviceConfigurationWire = {
+  persistedId?: number | null;
   deviceId: string;
   displayName: string;
   definitionId: string;
   definitionVersion?: string | null;
   transportPortName?: string | null;
+  bleSettingsPin?: string | null;
   address: number;
   isMaster: boolean;
   pollIntervalMilliseconds: number;
   enabled: boolean;
+  cellVoltageSmoothingFactor: number;
+  cellVoltageSmoothingBreakoutMillivolts: number;
+  displayPrecision?: DisplayPrecision | null;
+  hasDefinitionOverride?: boolean;
+  definition?: DeviceDefinition | null;
 };
 
-type DeviceConfigurationWire = DeviceConfiguration & {
-  bleSettingsPin?: string | null;
+type DeviceConfiguration = DeviceConfigurationWire & {
+  clientKey: string;
+  displayPrecision: DisplayPrecision;
+  hasDefinitionOverride: boolean;
+  definition: DeviceDefinition | null;
 };
 
 type DeviceConfigurationResponse = {
@@ -58,18 +79,6 @@ type StartStopResult = {
   message: string;
 };
 
-type DeviceDefinitionSummary = {
-  id: string;
-  name: string;
-  manufacturer: string;
-  model: string;
-  category?: string;
-  description?: string;
-  transportType: string;
-  isTransportSupported: boolean;
-  unsupportedTransportMessage?: string | null;
-};
-
 type DeviceDefinitionFamily = {
   key: string;
   name: string;
@@ -78,6 +87,20 @@ type DeviceDefinitionFamily = {
   category?: string;
   description?: string;
   definitions: DeviceDefinitionSummary[];
+};
+
+type PrimitiveEditorValue = string | number | boolean | null | undefined;
+
+const catalogDefinitionCache = new Map<string, DeviceDefinition>();
+let nextDeviceClientKey = 0;
+const defaultDisplayPrecision: DisplayPrecision = {
+  voltage: 2,
+  cellVoltage: 3,
+  current: 1,
+  power: 0,
+  temperature: 1,
+  soc: 0,
+  deltaVoltage: 3,
 };
 
 function getConnectionLabel(transportType: string | null | undefined) {
@@ -227,29 +250,166 @@ function getFamilyForDefinition(definitionId: string, families: DeviceDefinition
   return families.find((family) => family.definitions.some((definition) => definition.id === definitionId)) ?? null;
 }
 
-const defaultDevice = (index: number, definition: DeviceDefinitionSummary, familyName?: string): DeviceConfiguration => ({
+function createDeviceClientKey() {
+  nextDeviceClientKey += 1;
+  return `device-${nextDeviceClientKey}`;
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function humanizeKey(value: string) {
+  return value
+    .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
+    .replace(/\bUuid\b/g, 'UUID')
+    .replace(/\bId\b/g, 'ID')
+    .replace(/\bMs\b/g, 'ms')
+    .replace(/^./, (character) => character.toUpperCase());
+}
+
+function getDefinitionPollInterval(definition: DeviceDefinition | null | undefined, fallback = 1000) {
+  if (!definition) {
+    return fallback;
+  }
+
+  const intervals = Object.values(definition.pollGroups ?? {})
+    .map((group) => group.intervalMs)
+    .filter((intervalMs) => intervalMs > 0);
+  return intervals.length > 0 ? Math.min(...intervals) : fallback;
+}
+
+function setNestedValue(source: unknown, path: string[], nextValue: unknown): unknown {
+  if (path.length === 0) {
+    return nextValue;
+  }
+
+  const [segment, ...rest] = path;
+  const current = isObjectRecord(source) ? source : {};
+  return {
+    ...current,
+    [segment]: rest.length === 0
+      ? nextValue
+      : setNestedValue(current[segment], rest, nextValue),
+  };
+}
+
+function parseArrayInput(rawValue: string, currentValue: unknown[], path: string[]) {
+  const parts = rawValue
+    .split(',')
+    .map((part) => part.trim())
+    .filter((part) => part.length > 0);
+  const expectsNumbers = currentValue.some((entry) => typeof entry === 'number')
+    || /preamble/i.test(path[path.length - 1] ?? '');
+  if (!expectsNumbers) {
+    return parts;
+  }
+
+  return parts
+    .map((part) => Number(part))
+    .filter((entry) => Number.isFinite(entry));
+}
+
+function getEditorInputValue(value: PrimitiveEditorValue) {
+  if (value == null) {
+    return '';
+  }
+
+  return String(value);
+}
+
+function mergeDeviceConfigurations(
+  incomingDevices: DeviceConfigurationWire[],
+  previousDevices: DeviceConfiguration[],
+) {
+  const previousKeysByPersistedId = new Map<number, string>();
+  const previousKeysByDeviceId = new Map<string, string>();
+
+  for (const device of previousDevices) {
+    if (device.persistedId != null) {
+      previousKeysByPersistedId.set(device.persistedId, device.clientKey);
+    }
+
+    previousKeysByDeviceId.set(device.deviceId.toLowerCase(), device.clientKey);
+  }
+
+  return incomingDevices.map((device) => {
+    const clientKey = device.persistedId != null
+      ? (previousKeysByPersistedId.get(device.persistedId) ?? previousKeysByDeviceId.get(device.deviceId.toLowerCase()) ?? createDeviceClientKey())
+      : (previousKeysByDeviceId.get(device.deviceId.toLowerCase()) ?? createDeviceClientKey());
+
+    return {
+      clientKey,
+      persistedId: device.persistedId ?? null,
+      deviceId: device.deviceId,
+      displayName: device.displayName,
+      definitionId: device.definitionId,
+      definitionVersion: device.definitionVersion ?? null,
+      transportPortName: device.transportPortName ?? '',
+      bleSettingsPin: device.bleSettingsPin ?? '',
+      address: device.address,
+      isMaster: device.isMaster,
+      pollIntervalMilliseconds: device.pollIntervalMilliseconds,
+      enabled: device.enabled,
+      cellVoltageSmoothingFactor: device.cellVoltageSmoothingFactor ?? 0,
+      cellVoltageSmoothingBreakoutMillivolts: device.cellVoltageSmoothingBreakoutMillivolts ?? 0,
+      displayPrecision: device.displayPrecision ?? defaultDisplayPrecision,
+      hasDefinitionOverride: device.hasDefinitionOverride ?? false,
+      definition: device.definition ?? catalogDefinitionCache.get(device.definitionId) ?? null,
+    } satisfies DeviceConfiguration;
+  });
+}
+
+function serializeDevice(device: DeviceConfiguration): DeviceConfigurationWire {
+  return {
+    persistedId: device.persistedId ?? null,
+    deviceId: device.deviceId,
+    displayName: device.displayName,
+    definitionId: device.definitionId,
+    definitionVersion: device.definitionVersion ?? null,
+    transportPortName: device.transportPortName?.trim() ? device.transportPortName.trim() : null,
+    bleSettingsPin: device.bleSettingsPin?.trim() ? device.bleSettingsPin.trim() : null,
+    address: device.address,
+    isMaster: device.isMaster,
+    pollIntervalMilliseconds: getDefinitionPollInterval(device.definition, device.pollIntervalMilliseconds),
+    enabled: device.enabled,
+    cellVoltageSmoothingFactor: device.cellVoltageSmoothingFactor,
+    cellVoltageSmoothingBreakoutMillivolts: device.cellVoltageSmoothingBreakoutMillivolts,
+    displayPrecision: device.displayPrecision,
+    hasDefinitionOverride: device.hasDefinitionOverride,
+    definition: device.definition,
+  };
+}
+
+const defaultDevice = (
+  index: number,
+  definition: DeviceDefinitionSummary,
+  definitionSnapshot: DeviceDefinition,
+  familyName?: string,
+): DeviceConfiguration => ({
+  clientKey: createDeviceClientKey(),
+  persistedId: null,
   deviceId: `device-${index}`,
   displayName: familyName ?? stripConnectionSuffix(definition.name),
   definitionId: definition.id,
-  definitionVersion: null,
+  definitionVersion: definitionSnapshot.version,
   transportPortName: '',
+  bleSettingsPin: '',
   address: index,
   isMaster: false,
-  pollIntervalMilliseconds: 1000,
+  pollIntervalMilliseconds: getDefinitionPollInterval(definitionSnapshot, 1000),
   enabled: false,
+  cellVoltageSmoothingFactor: 0,
+  cellVoltageSmoothingBreakoutMillivolts: 0,
+  displayPrecision: defaultDisplayPrecision,
+  hasDefinitionOverride: false,
+  definition: definitionSnapshot,
 });
 
-function stripBleSettingsPin<T extends object>(device: T): T {
-  if (!Object.prototype.hasOwnProperty.call(device, 'bleSettingsPin')) {
-    return device;
-  }
-
-  const { bleSettingsPin: _bleSettingsPin, ...sanitizedDevice } = device as T & { bleSettingsPin?: string | null };
-  return sanitizedDevice as T;
-}
-
 function getTransportType(device: DeviceConfiguration, definitions: DeviceDefinitionSummary[]) {
-  return definitions.find((definition) => definition.id === device.definitionId)?.transportType ?? null;
+  return device.definition?.connection.transport.type
+    ?? definitions.find((definition) => definition.id === device.definitionId)?.transportType
+    ?? null;
 }
 
 function getDefinition(device: DeviceConfiguration, definitions: DeviceDefinitionSummary[]) {
@@ -301,6 +461,83 @@ function getActionResultMessage(result: StartStopResult) {
   return error || 'Action completed.';
 }
 
+function renderDefinitionEditorFields(
+  value: Record<string, unknown>,
+  path: string[],
+  disabled: boolean,
+  onChange: (path: string[], nextValue: unknown) => void,
+  depth = 0,
+): ReactNode {
+  return Object.entries(value)
+    .filter(([, entry]) => entry !== undefined)
+    .map(([key, entry]) => {
+      const fieldPath = [...path, key];
+      const fieldKey = fieldPath.join('.');
+
+      if (Array.isArray(entry)) {
+        return (
+          <label key={fieldKey} className='space-y-2 text-sm text-foreground'>
+            <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{humanizeKey(key)}</span>
+            <Input
+              value={entry.join(', ')}
+              disabled={disabled}
+              onChange={(event) => onChange(fieldPath, parseArrayInput(event.target.value, entry, fieldPath))}
+            />
+            <p className='text-[11px] text-muted-foreground'>Comma-separated values.</p>
+          </label>
+        );
+      }
+
+      if (isObjectRecord(entry)) {
+        return (
+          <div
+            key={fieldKey}
+            className={cn(
+              'space-y-3 rounded-xl border border-border/70 bg-background/60 p-4',
+              depth > 0 ? 'md:col-span-2 xl:col-span-4' : '',
+            )}
+          >
+            <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{humanizeKey(key)}</div>
+            <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
+              {renderDefinitionEditorFields(entry, fieldPath, disabled, onChange, depth + 1)}
+            </div>
+          </div>
+        );
+      }
+
+      if (typeof entry === 'boolean') {
+        return (
+          <label key={fieldKey} className='flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-background/60 px-4 py-3 text-sm text-foreground'>
+            <span>{humanizeKey(key)}</span>
+            <input
+              type='checkbox'
+              checked={entry}
+              disabled={disabled}
+              onChange={(event) => onChange(fieldPath, event.target.checked)}
+            />
+          </label>
+        );
+      }
+
+      const isNumberField = typeof entry === 'number';
+      return (
+        <label key={fieldKey} className='space-y-2 text-sm text-foreground'>
+          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{humanizeKey(key)}</span>
+          <Input
+            type={isNumberField ? 'number' : 'text'}
+            step={isNumberField ? 'any' : undefined}
+            value={getEditorInputValue(entry as PrimitiveEditorValue)}
+            disabled={disabled}
+            onChange={(event) => {
+              const rawValue = event.target.value;
+              onChange(fieldPath, isNumberField ? Number(rawValue || '0') : rawValue);
+            }}
+          />
+        </label>
+      );
+    });
+}
+
 export function DevicesPage() {
   const { definitions: availableDefinitions, refresh: refreshDefinitions } = useDeviceDefinitions();
   const definitionFamilies = buildDefinitionFamilies(availableDefinitions);
@@ -340,20 +577,34 @@ export function DevicesPage() {
     }
   }, []);
 
+  const loadDefinitionSnapshot = useCallback(async (definitionId: string) => {
+    const cachedDefinition = catalogDefinitionCache.get(definitionId);
+    if (cachedDefinition) {
+      return cachedDefinition;
+    }
+
+    const response = await fetch(`/api/definitions/${encodeURIComponent(definitionId)}?preferCatalog=true`);
+    if (!response.ok) {
+      throw new Error(`Unable to load device definition '${definitionId}'.`);
+    }
+
+    const definition = (await response.json()) as DeviceDefinition;
+    catalogDefinitionCache.set(definitionId, definition);
+    return definition;
+  }, []);
+
   const loadDevices = useCallback(async () => {
     try {
       const response = await fetch('/api/devices/config');
       if (!response.ok) throw new Error('Unable to load device configuration.');
       const data = (await response.json()) as DeviceConfigurationResponse;
-      setDevices(data.devices.map(stripBleSettingsPin));
+      setDevices((current) => mergeDeviceConfigurations(data.devices, current));
       setLoadError(null);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : 'Unable to load device configuration.');
     } finally {
       setIsLoading(false);
-      window.setTimeout(() => {
-        initialLoadDone.current = true;
-      }, 200);
+      initialLoadDone.current = true;
     }
   }, []);
 
@@ -373,7 +624,7 @@ export function DevicesPage() {
   const saveDevicesNow = useCallback(async (devicesToSave?: DeviceConfiguration[]) => {
     try {
       setAutoSaveStatus('saving');
-      const devicesPayload = (devicesToSave ?? devicesRef.current).map(stripBleSettingsPin);
+      const devicesPayload = (devicesToSave ?? devicesRef.current).map(serializeDevice);
       const response = await fetch('/api/devices/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -381,11 +632,12 @@ export function DevicesPage() {
       });
 
       if (!response.ok) {
-        throw new Error('Unable to save device configuration.');
+        const errorPayload = await response.json().catch(() => null) as { message?: string } | null;
+        throw new Error(errorPayload?.message ?? 'Unable to save device configuration.');
       }
 
       const data = (await response.json()) as DeviceConfigurationResponse;
-      setDevices(data.devices.map(stripBleSettingsPin));
+      setDevices((current) => mergeDeviceConfigurations(data.devices, current));
       setAutoSaveStatus('saved');
       window.setTimeout(() => {
         setAutoSaveStatus((current) => current === 'saved' ? 'idle' : current);
@@ -417,13 +669,68 @@ export function DevicesPage() {
     markDirty();
   }, [markDirty]);
 
-  const updateDeviceConnection = useCallback((index: number, nextDefinitionId: string) => {
+  const updateDisplayPrecision = useCallback((index: number, key: keyof DisplayPrecision, value: number) => {
+    setDevices((current) => current.map((device, deviceIndex) => {
+      if (deviceIndex !== index) {
+        return device;
+      }
+
+      return {
+        ...device,
+        displayPrecision: {
+          ...device.displayPrecision,
+          [key]: value,
+        },
+      };
+    }));
+    markDirty();
+  }, [markDirty]);
+
+  const updateDefinitionValue = useCallback((index: number, path: string[], nextValue: unknown) => {
+    setDevices((current) => current.map((device, deviceIndex) => {
+      if (deviceIndex !== index || !device.definition) {
+        return device;
+      }
+
+      const updatedDefinition = setNestedValue(device.definition, path, nextValue) as DeviceDefinition;
+      return {
+        ...device,
+        definition: updatedDefinition,
+        hasDefinitionOverride: true,
+        definitionVersion: updatedDefinition.version,
+        pollIntervalMilliseconds: getDefinitionPollInterval(updatedDefinition, device.pollIntervalMilliseconds),
+      };
+    }));
+    markDirty();
+  }, [markDirty]);
+
+  const resetDefinitionOverride = useCallback(async (index: number, definitionId: string) => {
+    const definitionSnapshot = await loadDefinitionSnapshot(definitionId);
+
+    setDevices((current) => current.map((device, deviceIndex) => {
+      if (deviceIndex !== index) {
+        return device;
+      }
+
+      return {
+        ...device,
+        definition: definitionSnapshot,
+        definitionVersion: definitionSnapshot.version,
+        hasDefinitionOverride: false,
+        pollIntervalMilliseconds: getDefinitionPollInterval(definitionSnapshot, device.pollIntervalMilliseconds),
+      };
+    }));
+    markDirty();
+  }, [loadDefinitionSnapshot, markDirty]);
+
+  const updateDeviceConnection = useCallback(async (index: number, nextDefinitionId: string) => {
     const nextDefinition = definitionsRef.current.find((entry) => entry.id === nextDefinitionId);
     if (!nextDefinition) {
       return;
     }
 
-    const targetDeviceId = devicesRef.current[index]?.deviceId;
+    const nextDefinitionSnapshot = await loadDefinitionSnapshot(nextDefinitionId);
+    const targetClientKey = devicesRef.current[index]?.clientKey;
     const nextFamily = getFamilyForDefinition(nextDefinitionId, buildDefinitionFamilies(definitionsRef.current));
 
     setDevices((current) => current.map((device, deviceIndex) => {
@@ -445,53 +752,57 @@ export function DevicesPage() {
         ...device,
         displayName: shouldUseFamilyName ? (nextFamily?.name ?? stripConnectionSuffix(nextDefinition.name)) : device.displayName,
         definitionId: nextDefinition.id,
-        definitionVersion: null,
+        definitionVersion: nextDefinitionSnapshot.version,
         transportPortName: currentTransportType === nextTransportType ? (device.transportPortName ?? '') : '',
+        bleSettingsPin: nextTransportType === 'ble' ? (device.bleSettingsPin ?? '') : '',
+        definition: nextDefinitionSnapshot,
+        hasDefinitionOverride: false,
+        pollIntervalMilliseconds: getDefinitionPollInterval(nextDefinitionSnapshot, device.pollIntervalMilliseconds),
       };
     }));
 
-    if (targetDeviceId) {
+    if (targetClientKey) {
       setBleScanResults((current) => {
-        if (!(targetDeviceId in current)) {
+        if (!(targetClientKey in current)) {
           return current;
         }
 
         const next = { ...current };
-        delete next[targetDeviceId];
+        delete next[targetClientKey];
         return next;
       });
       setBleScanLoading((current) => {
-        if (!(targetDeviceId in current)) {
+        if (!(targetClientKey in current)) {
           return current;
         }
 
         const next = { ...current };
-        delete next[targetDeviceId];
+        delete next[targetClientKey];
         return next;
       });
       setBleScanErrors((current) => {
-        if (!(targetDeviceId in current)) {
+        if (!(targetClientKey in current)) {
           return current;
         }
 
         const next = { ...current };
-        delete next[targetDeviceId];
+        delete next[targetClientKey];
         return next;
       });
     }
 
     markDirty();
-  }, [markDirty]);
+  }, [loadDefinitionSnapshot, markDirty]);
 
-  const scanBleDevices = useCallback(async (deviceId: string, definitionId: string) => {
-    const scanSequence = (bleScanSequenceRef.current[deviceId] ?? 0) + 1;
-    bleScanSequenceRef.current[deviceId] = scanSequence;
+  const scanBleDevices = useCallback(async (clientKey: string, definitionId: string) => {
+    const scanSequence = (bleScanSequenceRef.current[clientKey] ?? 0) + 1;
+    bleScanSequenceRef.current[clientKey] = scanSequence;
 
-    setBleScanLoading((current) => ({ ...current, [deviceId]: true }));
-    setBleScanFollowUpLoading((current) => ({ ...current, [deviceId]: false }));
-    setBleScanErrors((current) => ({ ...current, [deviceId]: null }));
+    setBleScanLoading((current) => ({ ...current, [clientKey]: true }));
+    setBleScanFollowUpLoading((current) => ({ ...current, [clientKey]: false }));
+    setBleScanErrors((current) => ({ ...current, [clientKey]: null }));
 
-    const isLatestScan = () => bleScanSequenceRef.current[deviceId] === scanSequence;
+    const isLatestScan = () => bleScanSequenceRef.current[clientKey] === scanSequence;
 
     const fetchScanPhase = async (timeoutMs: string, returnOnFirstMatch: boolean) => {
       const query = new URLSearchParams({
@@ -516,19 +827,19 @@ export function DevicesPage() {
       }
 
       const quickResults = sortBleScanDevices(quickData.devices);
-      setBleScanResults((current) => ({ ...current, [deviceId]: quickResults }));
-      setBleScanErrors((current) => ({ ...current, [deviceId]: quickData.error ?? null }));
-      setBleScanLoading((current) => ({ ...current, [deviceId]: false }));
+      setBleScanResults((current) => ({ ...current, [clientKey]: quickResults }));
+      setBleScanErrors((current) => ({ ...current, [clientKey]: quickData.error ?? null }));
+      setBleScanLoading((current) => ({ ...current, [clientKey]: false }));
 
       if (quickData.error && quickResults.length === 0) {
         return;
       }
 
-      setBleScanFollowUpLoading((current) => ({ ...current, [deviceId]: true }));
+      setBleScanFollowUpLoading((current) => ({ ...current, [clientKey]: true }));
 
       window.setTimeout(() => {
         if (!isLatestScan()) {
-          setBleScanFollowUpLoading((current) => ({ ...current, [deviceId]: false }));
+          setBleScanFollowUpLoading((current) => ({ ...current, [clientKey]: false }));
           return;
         }
 
@@ -542,11 +853,11 @@ export function DevicesPage() {
             const mergedResults = mergeBleScanDevices(quickResults, followUpData.devices);
             setBleScanResults((current) => ({
               ...current,
-              [deviceId]: mergeBleScanDevices(current[deviceId] ?? quickResults, followUpData.devices),
+              [clientKey]: mergeBleScanDevices(current[clientKey] ?? quickResults, followUpData.devices),
             }));
             setBleScanErrors((current) => ({
               ...current,
-              [deviceId]: followUpData.error && mergedResults.length === 0 ? followUpData.error : null,
+              [clientKey]: followUpData.error && mergedResults.length === 0 ? followUpData.error : null,
             }));
           } catch (error) {
             if (!isLatestScan()) {
@@ -556,12 +867,12 @@ export function DevicesPage() {
             if (quickResults.length === 0) {
               setBleScanErrors((current) => ({
                 ...current,
-                [deviceId]: error instanceof Error ? error.message : 'Unable to scan for BLE devices.',
+                [clientKey]: error instanceof Error ? error.message : 'Unable to scan for BLE devices.',
               }));
             }
           } finally {
             if (isLatestScan()) {
-              setBleScanFollowUpLoading((current) => ({ ...current, [deviceId]: false }));
+              setBleScanFollowUpLoading((current) => ({ ...current, [clientKey]: false }));
             }
           }
         })();
@@ -571,27 +882,28 @@ export function DevicesPage() {
         return;
       }
 
-      setBleScanResults((current) => ({ ...current, [deviceId]: [] }));
+      setBleScanResults((current) => ({ ...current, [clientKey]: [] }));
       setBleScanErrors((current) => ({
         ...current,
-        [deviceId]: error instanceof Error ? error.message : 'Unable to scan for BLE devices.',
+        [clientKey]: error instanceof Error ? error.message : 'Unable to scan for BLE devices.',
       }));
     } finally {
       if (isLatestScan()) {
-        setBleScanLoading((current) => ({ ...current, [deviceId]: false }));
+        setBleScanLoading((current) => ({ ...current, [clientKey]: false }));
       }
     }
   }, []);
 
-  const addDeviceFromDefinition = useCallback((definitionId: string, explicitDefinition?: DeviceDefinitionSummary, familyName?: string) => {
+  const addDeviceFromDefinition = useCallback(async (definitionId: string, explicitDefinition?: DeviceDefinitionSummary, familyName?: string) => {
     const definition = explicitDefinition ?? definitionsRef.current.find((entry) => entry.id === definitionId);
     if (!definition || !definition.isTransportSupported) return;
+    const definitionSnapshot = await loadDefinitionSnapshot(definitionId);
 
-    setDevices((current) => [...current, defaultDevice(current.length + 1, definition, familyName)]);
+    setDevices((current) => [...current, defaultDevice(current.length + 1, definition, definitionSnapshot, familyName)]);
     setShowAddPicker(false);
     setUploadError(null);
     markDirty();
-  }, [markDirty]);
+  }, [loadDefinitionSnapshot, markDirty]);
 
   const handleUploadDefinition = useCallback(async (file: File) => {
     setUploadError(null);
@@ -613,46 +925,53 @@ export function DevicesPage() {
       message?: string;
     };
 
-    const data = (await response.json()) as DefinitionUploadResult;
+      const data = (await response.json()) as DefinitionUploadResult;
       if (!response.ok) throw new Error(data.message ?? 'Upload failed.');
       await refreshDefinitions();
       if (data.id) {
+        const definitionSnapshot = await loadDefinitionSnapshot(data.id);
         const summary: DeviceDefinitionSummary = {
           id: data.id,
           name: data.name ?? '',
           manufacturer: data.manufacturer ?? '',
           model: data.model ?? '',
-          category: data.category,
+          category: data.category ?? '',
           description: data.description,
+          icon: undefined,
           transportType: data.transportType ?? 'serial',
+          protocolType: 'uploaded',
           isTransportSupported: data.isTransportSupported ?? true,
           unsupportedTransportMessage: data.unsupportedTransportMessage ?? null,
+          entityCount: definitionSnapshot.entities.length,
+          dataSourceCount: definitionSnapshot.dataSources.length,
         };
-        addDeviceFromDefinition(data.id, summary, stripConnectionSuffix(summary.name));
+        setDevices((current) => [...current, defaultDevice(current.length + 1, summary, definitionSnapshot, stripConnectionSuffix(summary.name))]);
+        setShowAddPicker(false);
+        markDirty();
       }
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : 'Upload failed.');
     }
-  }, [addDeviceFromDefinition, refreshDefinitions]);
+  }, [loadDefinitionSnapshot, markDirty, refreshDefinitions]);
 
   const removeDevice = useCallback((index: number) => {
     setDevices((current) => current.filter((_, deviceIndex) => deviceIndex !== index));
     markDirty();
   }, [markDirty]);
 
-  const startDevice = useCallback(async (deviceId: string) => {
-    setDeviceActions((current) => ({ ...current, [deviceId]: { loading: true } }));
+  const startDevice = useCallback(async (clientKey: string, deviceId: string) => {
+    setDeviceActions((current) => ({ ...current, [clientKey]: { loading: true } }));
 
     try {
       await saveDevicesNow();
       const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/start`, { method: 'POST' });
       const data = (await response.json()) as StartStopResult;
-      setDeviceActions((current) => ({ ...current, [deviceId]: { loading: false, result: data } }));
-      setDevices((current) => current.map((device) => device.deviceId === deviceId ? { ...device, enabled: true } : device));
+      setDeviceActions((current) => ({ ...current, [clientKey]: { loading: false, result: data } }));
+      setDevices((current) => current.map((device) => device.clientKey === clientKey ? { ...device, enabled: true } : device));
     } catch (error) {
       setDeviceActions((current) => ({
         ...current,
-        [deviceId]: {
+        [clientKey]: {
           loading: false,
           result: { deviceId, message: error instanceof Error ? error.message : 'Failed to start device.' },
         },
@@ -660,18 +979,18 @@ export function DevicesPage() {
     }
   }, [saveDevicesNow]);
 
-  const stopDevice = useCallback(async (deviceId: string) => {
-    setDeviceActions((current) => ({ ...current, [deviceId]: { loading: true } }));
+  const stopDevice = useCallback(async (clientKey: string, deviceId: string) => {
+    setDeviceActions((current) => ({ ...current, [clientKey]: { loading: true } }));
 
     try {
       const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/stop`, { method: 'POST' });
       const data = (await response.json()) as StartStopResult;
-      setDeviceActions((current) => ({ ...current, [deviceId]: { loading: false, result: data } }));
-      setDevices((current) => current.map((device) => device.deviceId === deviceId ? { ...device, enabled: false } : device));
+      setDeviceActions((current) => ({ ...current, [clientKey]: { loading: false, result: data } }));
+      setDevices((current) => current.map((device) => device.clientKey === clientKey ? { ...device, enabled: false } : device));
     } catch (error) {
       setDeviceActions((current) => ({
         ...current,
-        [deviceId]: {
+        [clientKey]: {
           loading: false,
           result: { deviceId, message: error instanceof Error ? error.message : 'Failed to stop device.' },
         },
@@ -685,7 +1004,7 @@ export function DevicesPage() {
         <div>
           <h2 className='text-3xl font-bold tracking-tight text-foreground'>Devices</h2>
           <p className='mt-2 text-sm text-muted-foreground'>
-            Add devices from the library or upload a definition JSON. Each device stores a local copy of its definition.
+            Add devices from the library or upload a definition JSON. Each device keeps its own definition snapshot, so transport, protocol, and polling overrides can be edited per device.
           </p>
         </div>
         <div className='flex items-center gap-3'>
@@ -789,39 +1108,67 @@ export function DevicesPage() {
       {!isLoading ? (
         <div className='space-y-4'>
           {devices.map((device, index) => {
-            const definition = getDefinition(device, availableDefinitions);
+            const definitionSummary = getDefinition(device, availableDefinitions);
             const definitionFamily = getFamilyForDefinition(device.definitionId, definitionFamilies);
-            const connectionChoices = definitionFamily?.definitions ?? (definition ? [definition] : []);
+            const connectionChoices = definitionFamily?.definitions ?? (definitionSummary ? [definitionSummary] : []);
             const transportType = getTransportType(device, availableDefinitions);
-            const isTransportSupported = definition?.isTransportSupported ?? false;
+            const isTransportSupported = definitionSummary?.isTransportSupported ?? true;
             const requiresTransport = requiresTransportIdentifier(device, availableDefinitions);
             const hasTransportTarget = !requiresTransport || Boolean(device.transportPortName?.trim());
-            const action = deviceActions[device.deviceId];
-            const bleDevices = bleScanResults[device.deviceId] ?? [];
-            const bleIsScanning = bleScanLoading[device.deviceId] ?? false;
-            const bleIsScanningForMore = bleScanFollowUpLoading[device.deviceId] ?? false;
-            const bleScanError = bleScanErrors[device.deviceId];
+            const action = deviceActions[device.clientKey];
+            const bleDevices = bleScanResults[device.clientKey] ?? [];
+            const bleIsScanning = bleScanLoading[device.clientKey] ?? false;
+            const bleIsScanningForMore = bleScanFollowUpLoading[device.clientKey] ?? false;
+            const bleScanError = bleScanErrors[device.clientKey];
+            const effectivePollInterval = getDefinitionPollInterval(device.definition, device.pollIntervalMilliseconds);
+            const manufacturerAndModel = [device.definition?.device.manufacturer ?? definitionSummary?.manufacturer, device.definition?.device.model ?? definitionSummary?.model]
+              .filter((value): value is string => Boolean(value))
+              .join(' · ');
+            const definitionSections = [
+              {
+                key: 'transport-defaults',
+                title: 'Transport defaults',
+                description: 'Serial or BLE transport settings stored with this device.',
+                path: ['connection', 'transport', 'defaults'],
+                value: device.definition?.connection.transport.defaults,
+              },
+              {
+                key: 'protocol-settings',
+                title: 'Protocol settings',
+                description: 'Retries, timeouts, framing, and protocol-specific options.',
+                path: ['connection', 'protocol', 'settings'],
+                value: device.definition?.connection.protocol.settings,
+              },
+              {
+                key: 'poll-groups',
+                title: 'Poll groups',
+                description: 'Polling cadence per group. The fastest interval becomes the device poll rate.',
+                path: ['pollGroups'],
+                value: device.definition?.pollGroups,
+              },
+            ].filter((section): section is { key: string; title: string; description: string; path: string[]; value: Record<string, unknown> } => isObjectRecord(section.value));
 
             return (
-              <section key={`${device.deviceId}-${index}`} className='rounded-2xl border border-border bg-card/85 p-5 shadow-sm'>
+              <section key={device.clientKey} className='rounded-2xl border border-border bg-card/85 p-5 shadow-sm'>
                 <div className='mb-4 flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between'>
                   <div className='space-y-1'>
                     <div className='flex flex-wrap items-center gap-2'>
                       <h3 className='text-lg font-semibold text-foreground'>{device.displayName || device.deviceId}</h3>
                       {transportType ? <span className='rounded-full border border-border bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>{getConnectionLabel(transportType)}</span> : null}
                       {device.definitionVersion ? <span className='rounded-full border border-border bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>v{device.definitionVersion}</span> : null}
+                      {device.hasDefinitionOverride ? <span className='rounded-full border border-primary/30 bg-primary/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary'>Override</span> : null}
                     </div>
                     <div className='text-sm text-muted-foreground'>
-                      {definition ? `${definition.manufacturer} · ${definition.model}` : device.deviceId}
+                      {manufacturerAndModel || device.deviceId}
                     </div>
                     <div className='text-xs text-muted-foreground/70'>
-                      Connection: {getConnectionLabel(transportType)}
+                      Connection: {getConnectionLabel(transportType)} · Effective poll: {effectivePollInterval} ms
                     </div>
                   </div>
 
                   <div className='flex flex-wrap gap-2'>
                     {device.enabled ? (
-                      <Button type='button' variant='outline' onClick={() => void stopDevice(device.deviceId)} disabled={action?.loading}>
+                      <Button type='button' variant='outline' onClick={() => void stopDevice(device.clientKey, device.deviceId)} disabled={action?.loading}>
                         {action?.loading ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Square className='h-4 w-4' />}
                         Stop
                       </Button>
@@ -829,7 +1176,7 @@ export function DevicesPage() {
                       <Button
                         type='button'
                         variant='outline'
-                        onClick={() => void startDevice(device.deviceId)}
+                        onClick={() => void startDevice(device.clientKey, device.deviceId)}
                         disabled={action?.loading || !device.deviceId || !isTransportSupported || !hasTransportTarget}
                       >
                         {action?.loading ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Play className='h-4 w-4' />}
@@ -844,7 +1191,7 @@ export function DevicesPage() {
                 </div>
 
                 {action?.result ? <div className={`mb-4 rounded-lg border px-4 py-3 text-sm ${getActionResultClassName(action.result)}`}>{getActionResultMessage(action.result)}</div> : null}
-                {!isTransportSupported ? <div className='mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300'>{definition?.unsupportedTransportMessage ?? 'This device transport is not supported in the current build.'}</div> : null}
+                {!isTransportSupported ? <div className='mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300'>{definitionSummary?.unsupportedTransportMessage ?? 'This device transport is not supported in the current build.'}</div> : null}
                 {isTransportSupported && requiresTransport && !hasTransportTarget ? (
                   <div className='mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300'>
                     {transportType === 'ble'
@@ -871,7 +1218,7 @@ export function DevicesPage() {
                       className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
                       value={device.definitionId}
                       disabled={device.enabled || connectionChoices.length <= 1}
-                      onChange={(event) => updateDeviceConnection(index, event.target.value)}
+                      onChange={(event) => { void updateDeviceConnection(index, event.target.value); }}
                     >
                       {connectionChoices.map((entry) => (
                         <option key={entry.id} value={entry.id}>{getConnectionLabel(entry.transportType)}</option>
@@ -880,8 +1227,8 @@ export function DevicesPage() {
                   </label>
 
                   <label className='space-y-2 text-sm text-foreground'>
-                    <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Poll interval</span>
-                    <Input value={`${device.pollIntervalMilliseconds} ms`} disabled />
+                    <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Effective poll interval</span>
+                    <Input value={`${effectivePollInterval} ms`} disabled />
                   </label>
 
                   {transportType === 'serial' ? (
@@ -905,21 +1252,21 @@ export function DevicesPage() {
                         <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>BLE device</span>
                         <div className='flex flex-col gap-2 xl:flex-row'>
                           <Input
-                            className='flex-1'
-                            value={device.transportPortName ?? ''}
-                            disabled={device.enabled}
-                            placeholder='AA:BB:CC:DD:EE:FF or device alias'
-                            onChange={(event) => updateDevice(index, 'transportPortName', event.target.value || null)}
-                          />
-                          <Button
-                            type='button'
-                            variant='outline'
-                            className='shrink-0'
-                            disabled={device.enabled || bleIsScanning || !device.definitionId}
-                            onClick={() => void scanBleDevices(device.deviceId, device.definitionId)}
-                          >
-                            {bleIsScanning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : null}
-                            {bleIsScanning ? 'Scanning...' : 'Scan nearby'}
+                          className='flex-1'
+                          value={device.transportPortName ?? ''}
+                          disabled={device.enabled}
+                          placeholder='AA:BB:CC:DD:EE:FF or device alias'
+                          onChange={(event) => updateDevice(index, 'transportPortName', event.target.value)}
+                        />
+                        <Button
+                          type='button'
+                          variant='outline'
+                          className='shrink-0'
+                          disabled={device.enabled || bleIsScanning || !device.definitionId}
+                          onClick={() => void scanBleDevices(device.clientKey, device.definitionId)}
+                        >
+                          {bleIsScanning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : null}
+                          {bleIsScanning ? 'Scanning...' : 'Scan nearby'}
                           </Button>
                         </div>
                         {bleIsScanningForMore ? <p className='text-xs text-muted-foreground'>Quick results shown. Looking for more nearby candidates...</p> : null}
@@ -979,7 +1326,132 @@ export function DevicesPage() {
                       />
                     </label>
                   ) : null}
+
+                  <label className='space-y-2 text-sm text-foreground'>
+                    <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Is master</span>
+                    <div className='flex h-10 items-center rounded-md border border-input bg-background px-3'>
+                      <input
+                        type='checkbox'
+                        checked={device.isMaster}
+                        disabled={device.enabled}
+                        onChange={(event) => updateDevice(index, 'isMaster', event.target.checked)}
+                      />
+                    </div>
+                  </label>
+
+                  {transportType === 'ble' ? (
+                    <label className='space-y-2 text-sm text-foreground'>
+                      <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>BLE settings PIN</span>
+                      <Input
+                        type='password'
+                        value={device.bleSettingsPin ?? ''}
+                        disabled={device.enabled}
+                        onChange={(event) => updateDevice(index, 'bleSettingsPin', event.target.value)}
+                      />
+                    </label>
+                  ) : null}
                 </div>
+
+                <details className='mt-4 rounded-2xl border border-border/70 bg-background/40 p-4'>
+                  <summary className='cursor-pointer list-none text-sm font-semibold text-foreground'>Runtime tuning</summary>
+                  <div className='mt-4 space-y-4'>
+                    {device.enabled ? <div className='rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300'>Stop the device before changing runtime or definition settings.</div> : null}
+                    <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-4'>
+                      <label className='space-y-2 text-sm text-foreground'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Cell smoothing factor</span>
+                        <Input
+                          type='number'
+                          min={0}
+                          max={1}
+                          step='0.01'
+                          value={device.cellVoltageSmoothingFactor}
+                          disabled={device.enabled}
+                          onChange={(event) => updateDevice(index, 'cellVoltageSmoothingFactor', Number(event.target.value))}
+                        />
+                      </label>
+                      <label className='space-y-2 text-sm text-foreground'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Breakout mV</span>
+                        <Input
+                          type='number'
+                          min={0}
+                          step='1'
+                          value={device.cellVoltageSmoothingBreakoutMillivolts}
+                          disabled={device.enabled}
+                          onChange={(event) => updateDevice(index, 'cellVoltageSmoothingBreakoutMillivolts', Number(event.target.value))}
+                        />
+                      </label>
+                      <label className='space-y-2 text-sm text-foreground'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Voltage precision</span>
+                        <Input type='number' min={0} step='1' value={device.displayPrecision.voltage} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'voltage', Number(event.target.value))} />
+                      </label>
+                      <label className='space-y-2 text-sm text-foreground'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Cell precision</span>
+                        <Input type='number' min={0} step='1' value={device.displayPrecision.cellVoltage} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'cellVoltage', Number(event.target.value))} />
+                      </label>
+                      <label className='space-y-2 text-sm text-foreground'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Current precision</span>
+                        <Input type='number' min={0} step='1' value={device.displayPrecision.current} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'current', Number(event.target.value))} />
+                      </label>
+                      <label className='space-y-2 text-sm text-foreground'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Power precision</span>
+                        <Input type='number' min={0} step='1' value={device.displayPrecision.power} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'power', Number(event.target.value))} />
+                      </label>
+                      <label className='space-y-2 text-sm text-foreground'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Temperature precision</span>
+                        <Input type='number' min={0} step='1' value={device.displayPrecision.temperature} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'temperature', Number(event.target.value))} />
+                      </label>
+                      <label className='space-y-2 text-sm text-foreground'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>SOC precision</span>
+                        <Input type='number' min={0} step='1' value={device.displayPrecision.soc} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'soc', Number(event.target.value))} />
+                      </label>
+                      <label className='space-y-2 text-sm text-foreground'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Delta V precision</span>
+                        <Input type='number' min={0} step='1' value={device.displayPrecision.deltaVoltage} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'deltaVoltage', Number(event.target.value))} />
+                      </label>
+                    </div>
+                  </div>
+                </details>
+
+                <details className='mt-4 rounded-2xl border border-border/70 bg-background/40 p-4'>
+                  <summary className='cursor-pointer list-none text-sm font-semibold text-foreground'>Definition overrides</summary>
+                  <div className='mt-4 space-y-4'>
+                    <div className='flex flex-wrap items-center justify-between gap-3'>
+                      <p className='text-sm text-muted-foreground'>
+                        These values are saved with this device&apos;s stored definition snapshot so old devices can be corrected without editing the shared catalog file.
+                      </p>
+                      {device.hasDefinitionOverride ? (
+                        <Button
+                          type='button'
+                          variant='outline'
+                          size='sm'
+                          disabled={device.enabled}
+                          onClick={() => void resetDefinitionOverride(index, device.definitionId)}
+                        >
+                          <RotateCcw className='h-4 w-4' />
+                          Reset to catalog
+                        </Button>
+                      ) : null}
+                    </div>
+
+                    {!device.definition ? (
+                      <div className='rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive'>
+                        The stored definition snapshot could not be loaded for this device.
+                      </div>
+                    ) : null}
+
+                    {definitionSections.map((section) => (
+                      <div key={section.key} className='rounded-2xl border border-border/70 bg-card/60 p-4'>
+                        <div className='mb-4 space-y-1'>
+                          <div className='text-sm font-semibold text-foreground'>{section.title}</div>
+                          <div className='text-xs text-muted-foreground'>{section.description}</div>
+                        </div>
+                        <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
+                          {renderDefinitionEditorFields(section.value, section.path, device.enabled, (path, nextValue) => updateDefinitionValue(index, path, nextValue))}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </details>
               </section>
             );
           })}

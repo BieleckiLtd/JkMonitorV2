@@ -5,9 +5,16 @@ namespace FluxMonitor.Backend.Services;
 public sealed class ManagedRestartService(IHostEnvironment environment, IHostApplicationLifetime applicationLifetime, ILogger<ManagedRestartService> logger)
 {
     private const string ServiceName = "fluxmonitor.service";
+    private const string DesktopHostEnvironmentVariable = "FLUXMONITOR_DESKTOP_HOST";
     private readonly string _contentRoot = environment.ContentRootPath;
 
-    public bool CanAutoRestart => IsManagedInstall;
+    public bool CanAutoRestart => IsManagedInstall || IsElectronDesktopHost;
+
+    public bool IsElectronDesktopHost =>
+        string.Equals(
+            Environment.GetEnvironmentVariable(DesktopHostEnvironmentVariable),
+            "electron",
+            StringComparison.OrdinalIgnoreCase);
 
     public bool IsManagedInstall
     {
@@ -37,11 +44,27 @@ public sealed class ManagedRestartService(IHostEnvironment environment, IHostApp
             return "Saving from the app will restart this managed install automatically.";
         }
 
+        if (IsElectronDesktopHost)
+        {
+            return "Saving from the app will restart the desktop app automatically.";
+        }
+
         return "Settings can be saved here, but this environment still needs a manual restart to apply them.";
     }
 
     public void ScheduleRestart()
     {
+        if (IsElectronDesktopHost)
+        {
+            logger.LogInformation("Scheduling application stop so the Electron host can restart Flux Monitor.");
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(750));
+                applicationLifetime.StopApplication();
+            });
+            return;
+        }
+
         if (!IsManagedInstall)
         {
             logger.LogInformation("Restart was requested, but this instance is not running as a managed install.");

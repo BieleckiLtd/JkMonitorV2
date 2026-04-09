@@ -32,6 +32,18 @@ public sealed class SetupConfigurationServiceTests : IDisposable
     }
 
     [Fact]
+    public void GetState_ReportsSetupRequiredWhenStorageWasMissingAtStartup()
+    {
+        var service = CreateService(storageConfiguredAtStartup: false);
+
+        var state = service.GetState();
+
+        Assert.True(state.SetupRequired);
+        Assert.False(state.UseDatabase);
+        Assert.False(string.IsNullOrWhiteSpace(state.ApplyMessage));
+    }
+
+    [Fact]
     public void Apply_AlwaysWritesTimescaleDbStorage()
     {
         var service = CreateService();
@@ -144,7 +156,10 @@ public sealed class SetupConfigurationServiceTests : IDisposable
         Assert.Contains("RawSecondsWindowMinutes must be one of", ex.Message);
     }
 
-    private SetupConfigurationService CreateService(string? contentRootPath = null, string environmentName = "Test")
+    private SetupConfigurationService CreateService(
+        string? contentRootPath = null,
+        string environmentName = "Test",
+        bool storageConfiguredAtStartup = true)
     {
         var effectiveContentRoot = contentRootPath ?? _tempRootPath;
         Directory.CreateDirectory(effectiveContentRoot);
@@ -152,8 +167,8 @@ public sealed class SetupConfigurationServiceTests : IDisposable
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Monitor:Storage:Provider"] = "TimescaleDb",
-                ["Monitor:Storage:ConnectionString"] = "Host=localhost;Database=seed;",
+                ["Monitor:Storage:Provider"] = storageConfiguredAtStartup ? "TimescaleDb" : "None",
+                ["Monitor:Storage:ConnectionString"] = storageConfiguredAtStartup ? "Host=localhost;Database=seed;" : null,
                 ["Monitor:Storage:Retention:RawSecondsWindowMinutes"] = "10",
                 ["Monitor:Storage:Retention:PersistedBucketMinutes"] = "5",
                 ["Monitor:Storage:Retention:FiveMinuteWindowDays"] = "7",
@@ -171,10 +186,17 @@ public sealed class SetupConfigurationServiceTests : IDisposable
             environment,
             lifetime,
             NullLogger<ManagedRestartService>.Instance);
+        var commandRunner = new TestCommandRunner();
+        var dependencyInstallerService = new LocalDependencyInstallerService(
+            environment,
+            commandRunner,
+            restartService,
+            NullLogger<LocalDependencyInstallerService>.Instance);
 
         return new SetupConfigurationService(
             environment,
             configuration,
+            dependencyInstallerService,
             restartService,
             NullLogger<SetupConfigurationService>.Instance);
     }
@@ -203,6 +225,23 @@ public sealed class SetupConfigurationServiceTests : IDisposable
 
         public void StopApplication()
         {
+        }
+    }
+
+    private sealed class TestCommandRunner : ICommandRunner
+    {
+        public Task<CommandResult> RunAsync(string fileName, IReadOnlyList<string> arguments, CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new CommandResult(true, string.Empty, string.Empty, 0));
+        }
+
+        public Task<CommandResult> RunStreamingAsync(
+            string fileName,
+            IReadOnlyList<string> arguments,
+            Func<CommandOutputLine, ValueTask>? onOutput,
+            CancellationToken cancellationToken)
+        {
+            return Task.FromResult(new CommandResult(true, string.Empty, string.Empty, 0));
         }
     }
 }

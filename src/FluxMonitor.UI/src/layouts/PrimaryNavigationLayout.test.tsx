@@ -72,7 +72,7 @@ describe('PrimaryNavigationLayout', () => {
     renderLayout('/');
 
     expect(screen.getByRole('navigation', { name: /primary navigation/i })).toBeInTheDocument();
-    expect(screen.getByText('Home workspace')).toBeInTheDocument();
+    expect(screen.getByText('Open a section')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /monitor/i }));
 
@@ -81,7 +81,7 @@ describe('PrimaryNavigationLayout', () => {
     });
 
     expect(screen.getByRole('navigation', { name: /primary navigation/i })).toBeInTheDocument();
-    expect(screen.queryByText('Home workspace')).not.toBeInTheDocument();
+    expect(screen.queryByText('Open a section')).not.toBeInTheDocument();
   });
 
   it('falls back to rendering only the active route below the split breakpoint', () => {

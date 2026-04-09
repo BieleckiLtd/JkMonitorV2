@@ -1,3 +1,7 @@
+param(
+    [string]$BackendSettingsPath
+)
+
 $ErrorActionPreference = 'Stop'
 
 $scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -38,7 +42,12 @@ $postgresDataRoot = Join-Path $postgresStateRoot 'data'
 $postgresLogPath = Join-Path $postgresStateRoot 'postgresql.log'
 $migrationDumpPath = Join-Path $postgresStateRoot 'fluxmonitor-repo-local.backup'
 $ensureLogPath = Join-Path $postgresStateRoot 'ensure-local-postgres.log'
-$backendLocalSettingsPath = Join-Path $repoRoot 'src\FluxMonitor.Backend\appsettings.Development.Local.json'
+$backendLocalSettingsPath = if ([string]::IsNullOrWhiteSpace($BackendSettingsPath)) {
+    Join-Path $repoRoot 'src\FluxMonitor.Backend\appsettings.Development.Local.json'
+}
+else {
+    $BackendSettingsPath
+}
 
 $targetHost = '127.0.0.1'
 $targetPort = 5432
@@ -54,6 +63,7 @@ $repoLocalLogPath = Join-Path $repoRoot '.artifacts\postgresql\postgresql.log'
 function Write-Section([string]$Message) {
     Write-Host ''
     Write-Host $Message -ForegroundColor Cyan
+    Write-Output $Message
 }
 
 function Write-Step([string]$Message) {
@@ -368,6 +378,11 @@ function Write-BackendLocalSettings() {
   }
 }
 "@
+
+    $directory = Split-Path -Parent $backendLocalSettingsPath
+    if (-not [string]::IsNullOrWhiteSpace($directory)) {
+        Ensure-Directory $directory
+    }
 
     Set-Content -Path $backendLocalSettingsPath -Value $content -Encoding UTF8
 }

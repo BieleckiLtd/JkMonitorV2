@@ -104,6 +104,9 @@ public sealed class DeviceConfiguration
     public string? DefinitionVersion { get; init; }
 
     [JsonIgnore]
+    public bool HasDefinitionOverride { get; init; }
+
+    [JsonIgnore]
     public string DefinitionJson { get; init; } = string.Empty;
 
     [JsonIgnore]

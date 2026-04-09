@@ -42,8 +42,15 @@ public sealed class DefinitionsController(
     }
 
     [HttpGet("{id}")]
-    public IActionResult GetById(string id)
+    public IActionResult GetById(string id, [FromQuery] bool preferCatalog = false)
     {
+        if (preferCatalog &&
+            definitionLoader.TryGet(id, out var catalogDefinition) &&
+            catalogDefinition is not null)
+        {
+            return Ok(catalogDefinition);
+        }
+
         if (!TryResolveDefinition(id, out var definition) || definition is null)
         {
             return NotFound(new { message = $"Device definition '{id}' not found." });

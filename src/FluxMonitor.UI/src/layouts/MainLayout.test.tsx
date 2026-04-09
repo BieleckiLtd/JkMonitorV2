@@ -27,6 +27,7 @@ function TestPage({
 
 describe('MainLayout', () => {
   let scrollYValue = 0;
+  const originalFetch = global.fetch;
 
   beforeEach(() => {
     scrollYValue = 0;
@@ -55,10 +56,13 @@ describe('MainLayout', () => {
       updateActionPending: null,
       dismissedUpdateSessionId: null,
     });
+
+    global.fetch = vi.fn().mockRejectedValue(new Error('network unavailable')) as typeof fetch;
   });
 
   afterEach(() => {
     cleanup();
+    global.fetch = originalFetch;
     useAppStore.setState({
       updateProgress: null,
       updateActionPending: null,
@@ -77,6 +81,46 @@ describe('MainLayout', () => {
 
     expect(screen.getByText('Page content')).toBeInTheDocument();
     expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+  });
+
+  it('renders the setup-required screen when backend storage is missing at startup', async () => {
+    const fetchMock = vi.mocked(global.fetch);
+    fetchMock
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        setupRequired: true,
+        environmentName: 'Production',
+        connectionString: null,
+        canAutoRestart: true,
+        applyMessage: 'Flux Monitor can restart automatically.',
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        supported: true,
+        isRunning: false,
+        hasCompleted: false,
+        succeeded: null,
+        requiresRestart: false,
+        canAutoRestart: true,
+        message: 'Ready to install.',
+        logLines: [],
+        updatedAt: '2026-04-08T22:45:00Z',
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+
+    render(
+      <MemoryRouter initialEntries={['/monitor']}>
+        <MainLayout>
+          <div>Page content</div>
+        </MainLayout>
+      </MemoryRouter>
+    );
+
+    expect(await screen.findByText('Local storage still needs to be installed.')).toBeInTheDocument();
+    expect(screen.queryByText('Page content')).not.toBeInTheDocument();
   });
 
   it('restores scroll position independently for each route in the document scroll position', async () => {

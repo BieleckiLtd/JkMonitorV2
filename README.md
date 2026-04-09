@@ -53,6 +53,15 @@ The release installers download published builds from GitHub Releases, install o
 
 The source installer remains available for local development and debugging.
 
+## Windows desktop app
+
+The repo now includes an Electron desktop host under `src/FluxMonitor.Desktop` so Flux Monitor can run as a native Windows window instead of only in a browser tab.
+
+- Development launch on Windows: `.\scripts\start-desktop.ps1`
+- Package a Windows installer and portable EXE: `.\scripts\package-desktop.ps1`
+
+The development flow starts the existing ASP.NET backend locally and opens it in an Electron shell. The packaging flow publishes a self-contained Windows backend and bundles it into the desktop app, so end users do not need a separate .NET runtime installed.
+
 See `Docs/GETTING_STARTED.md` for a step-by-step first run and deployment path.
 
 ## Skills

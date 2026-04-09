@@ -1,14 +1,24 @@
-import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { useLocation } from 'react-router-dom';
 import { AppBarProvider } from '../components/AppBar';
+import { SetupRequiredScreen } from '../components/SetupRequiredScreen';
 import { UpdateLockOverlay } from '../components/UpdateLockOverlay';
 import { useAppStore } from '../store/useAppStore';
+
+type SetupStateSnapshot = {
+  setupRequired: boolean;
+  environmentName: string;
+  connectionString?: string | null;
+  canAutoRestart: boolean;
+  applyMessage: string;
+};
 
 export function MainLayout({ children }: { children: ReactNode }) {
   const location = useLocation();
   const updateProgress = useAppStore((state) => state.updateProgress);
   const hasUpdateOverlay = updateProgress !== null;
   const hasBlockingUpdateOverlay = updateProgress?.isRunning ?? false;
+  const [setupState, setSetupState] = useState<SetupStateSnapshot | null>(null);
   const scrollPositionsRef = useRef(new Map<string, number>());
   const restoreFrameRef = useRef<number | null>(null);
   const scrollKey = `${location.pathname}${location.search}${location.hash}`;
@@ -24,6 +34,31 @@ export function MainLayout({ children }: { children: ReactNode }) {
       document.body.style.overflow = '';
     };
   }, [hasUpdateOverlay]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadSetupState = async () => {
+      try {
+        const response = await fetch('/api/setup', { cache: 'no-store' });
+        const body = await response.json().catch(() => null) as SetupStateSnapshot | null;
+
+        if (!cancelled && response.ok && body) {
+          setSetupState(body);
+        }
+      } catch {
+        if (!cancelled) {
+          setSetupState(null);
+        }
+      }
+    };
+
+    void loadSetupState();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (typeof window === 'undefined') {
@@ -78,18 +113,24 @@ export function MainLayout({ children }: { children: ReactNode }) {
     };
   }, []);
 
+  const showSetupRequired = setupState?.setupRequired === true;
+
   return (
     <div className='app-shell flex w-full flex-col font-sans text-foreground'>
       {!hasBlockingUpdateOverlay ? (
-        <div className='flex min-w-0 flex-1 flex-col'>
-          <AppBarProvider>
-            <main className='app-main flex min-w-0 flex-1 w-full'>
-              <div className='mx-auto flex min-h-full w-full max-w-none flex-col'>
-                {children}
-              </div>
-            </main>
-          </AppBarProvider>
-        </div>
+        showSetupRequired ? (
+          <SetupRequiredScreen setupState={setupState} />
+        ) : (
+          <div className='flex min-w-0 flex-1 flex-col'>
+            <AppBarProvider>
+              <main className='app-main flex min-w-0 flex-1 w-full'>
+                <div className='mx-auto flex min-h-full w-full max-w-none flex-col'>
+                  {children}
+                </div>
+              </main>
+            </AppBarProvider>
+          </div>
+        )
       ) : null}
       <UpdateLockOverlay />
     </div>

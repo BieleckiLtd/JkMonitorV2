@@ -54,6 +54,7 @@ builder.Services.AddHostedService<FluxMonitor.Backend.Services.DirectAccessBackg
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.HostServicesCatalogService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.ICommandRunner, FluxMonitor.Backend.Services.ProcessCommandRunner>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.ManagedRestartService>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.LocalDependencyInstallerService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.CloudflareTunnelStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.CloudflareTunnelService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.IInternetSpeedTestStore, FluxMonitor.Backend.Services.InternetSpeedTestStore>();
