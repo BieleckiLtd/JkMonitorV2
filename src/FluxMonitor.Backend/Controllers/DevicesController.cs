@@ -510,7 +510,8 @@ public sealed class DevicesController(
 
         return new DeviceConfigurationsResponse
         {
-            Devices = mappedDevices
+            Devices = mappedDevices,
+            RememberedDeviceIds = deviceConfigStore.GetRememberedDeviceIds()
         };
     }
 

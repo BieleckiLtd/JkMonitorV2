@@ -6,6 +6,7 @@ describe('DevicesPage', () => {
   let holdFollowUpScan = false;
   let resolveFollowUpScan: (() => void) | null = null;
   let initialDevicesResponse: unknown[] = [];
+  let initialRememberedDeviceIds: string[] = [];
 
   const definitionDetailsById = {
     'jk-inverter-bms': {
@@ -95,6 +96,7 @@ describe('DevicesPage', () => {
     holdFollowUpScan = false;
     resolveFollowUpScan = null;
     initialDevicesResponse = [];
+    initialRememberedDeviceIds = [];
 
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = typeof input === 'string' ? input : input.toString();
@@ -104,14 +106,14 @@ describe('DevicesPage', () => {
         const body = JSON.parse(String(init.body)) as { devices: unknown[] };
         return {
           ok: true,
-          json: async () => ({ devices: body.devices }),
+          json: async () => ({ devices: body.devices, rememberedDeviceIds: initialRememberedDeviceIds }),
         } as Response;
       }
 
       if (url === '/api/devices/config') {
         return {
           ok: true,
-          json: async () => ({ devices: initialDevicesResponse }),
+          json: async () => ({ devices: initialDevicesResponse, rememberedDeviceIds: initialRememberedDeviceIds }),
         } as Response;
       }
 
@@ -390,6 +392,92 @@ describe('DevicesPage', () => {
 
     fireEvent.change(screen.getByDisplayValue('device-1a'), { target: { value: 'device-1ab' } });
     expect(screen.getByDisplayValue('device-1ab')).toHaveFocus();
+  });
+
+  it('does not autosave device id changes until the field loses focus', async () => {
+    render(<DevicesPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /add first device/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using usb \/ serial/i }));
+
+    const deviceIdInput = await screen.findByDisplayValue('device-1');
+    deviceIdInput.focus();
+
+    fireEvent.change(deviceIdInput, { target: { value: 'device-1a' } });
+    await new Promise((resolve) => window.setTimeout(resolve, 700));
+
+    expect(screen.getByDisplayValue('device-1a')).toHaveFocus();
+    expect(vi.mocked(globalThis.fetch).mock.calls.find(([input, init]) =>
+      String(input) === '/api/devices/config' && init?.method === 'PUT')).toBeUndefined();
+
+    fireEvent.change(screen.getByDisplayValue('device-1a'), { target: { value: 'device-1ab' } });
+    await new Promise((resolve) => window.setTimeout(resolve, 700));
+
+    expect(screen.getByDisplayValue('device-1ab')).toHaveFocus();
+    expect(vi.mocked(globalThis.fetch).mock.calls.find(([input, init]) =>
+      String(input) === '/api/devices/config' && init?.method === 'PUT')).toBeUndefined();
+
+    fireEvent.blur(screen.getByDisplayValue('device-1ab'));
+
+    await waitFor(() => {
+      expect(vi.mocked(globalThis.fetch).mock.calls.find(([input, init]) =>
+        String(input) === '/api/devices/config' && init?.method === 'PUT')).toBeDefined();
+    }, { timeout: 1500 });
+  });
+
+  it('offers remembered device ids except ones already used by other devices', async () => {
+    initialDevicesResponse = [
+      {
+        persistedId: 1,
+        deviceId: 'device-1',
+        displayName: 'Battery 1',
+        definitionId: 'jk-inverter-bms',
+        definitionVersion: '1.0.0',
+        transportPortName: 'COM3',
+        bleSettingsPin: null,
+        address: 1,
+        isMaster: false,
+        pollIntervalMilliseconds: 1000,
+        enabled: false,
+        cellVoltageSmoothingFactor: 0,
+        cellVoltageSmoothingBreakoutMillivolts: 0,
+        displayPrecision: {
+          voltage: 2,
+          cellVoltage: 3,
+          current: 1,
+          power: 0,
+          temperature: 1,
+          soc: 0,
+          deltaVoltage: 3,
+        },
+        hasDefinitionOverride: false,
+        definition: definitionDetailsById['jk-inverter-bms'],
+      },
+    ];
+    initialRememberedDeviceIds = ['device-1', 'legacy-a', 'legacy-b'];
+
+    render(<DevicesPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /add device/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using usb \/ serial/i }));
+
+    const newDeviceIdInput = await screen.findByDisplayValue('device-2');
+    const listId = newDeviceIdInput.getAttribute('list');
+    expect(listId).toBeTruthy();
+
+    const datalist = document.getElementById(String(listId));
+    expect(datalist).not.toBeNull();
+
+    const options = Array.from(datalist?.querySelectorAll('option') ?? []).map((option) => option.getAttribute('value'));
+    expect(options).toContain('legacy-a');
+    expect(options).toContain('legacy-b');
+    expect(options).not.toContain('device-1');
+
+    fireEvent.change(newDeviceIdInput, { target: { value: 'legacy-b' } });
+    expect(screen.getByDisplayValue('legacy-b')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByDisplayValue('legacy-b'), { target: { value: 'custom-new-id' } });
+    expect(screen.getByDisplayValue('custom-new-id')).toBeInTheDocument();
   });
 
   it('saves poll-group overrides from an existing device snapshot', async () => {

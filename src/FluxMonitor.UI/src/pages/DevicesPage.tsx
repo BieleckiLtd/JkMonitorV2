@@ -44,6 +44,7 @@ type DeviceConfiguration = DeviceConfigurationWire & {
 
 type DeviceConfigurationResponse = {
   devices: DeviceConfigurationWire[];
+  rememberedDeviceIds?: string[];
 };
 
 type PortsResponse = {
@@ -381,6 +382,30 @@ function serializeDevice(device: DeviceConfiguration): DeviceConfigurationWire {
   };
 }
 
+function getAvailableRememberedDeviceIds(
+  devices: DeviceConfiguration[],
+  rememberedDeviceIds: string[],
+  currentClientKey: string,
+) {
+  const usedByOtherDevices = new Set(
+    devices
+      .filter((device) => device.clientKey !== currentClientKey)
+      .map((device) => device.deviceId.trim().toLowerCase())
+      .filter((deviceId) => deviceId.length > 0),
+  );
+
+  return rememberedDeviceIds.filter((deviceId, index, allDeviceIds) => {
+    const normalizedDeviceId = deviceId.trim();
+    if (!normalizedDeviceId) {
+      return false;
+    }
+
+    const normalizedKey = normalizedDeviceId.toLowerCase();
+    return !usedByOtherDevices.has(normalizedKey)
+      && allDeviceIds.findIndex((entry) => entry.trim().toLowerCase() === normalizedKey) === index;
+  });
+}
+
 const defaultDevice = (
   index: number,
   definition: DeviceDefinitionSummary,
@@ -542,6 +567,7 @@ export function DevicesPage() {
   const { definitions: availableDefinitions, refresh: refreshDefinitions } = useDeviceDefinitions();
   const definitionFamilies = buildDefinitionFamilies(availableDefinitions);
   const [devices, setDevices] = useState<DeviceConfiguration[]>([]);
+  const [rememberedDeviceIds, setRememberedDeviceIds] = useState<string[]>([]);
   const [ports, setPorts] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -549,6 +575,7 @@ export function DevicesPage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [saveDirty, setSaveDirty] = useState(0);
+  const [editingDeviceIdClientKey, setEditingDeviceIdClientKey] = useState<string | null>(null);
   const [bleScanResults, setBleScanResults] = useState<Record<string, BleScanDevice[]>>({});
   const [bleScanLoading, setBleScanLoading] = useState<Record<string, boolean>>({});
   const [bleScanFollowUpLoading, setBleScanFollowUpLoading] = useState<Record<string, boolean>>({});
@@ -599,6 +626,7 @@ export function DevicesPage() {
       if (!response.ok) throw new Error('Unable to load device configuration.');
       const data = (await response.json()) as DeviceConfigurationResponse;
       setDevices((current) => mergeDeviceConfigurations(data.devices, current));
+      setRememberedDeviceIds(data.rememberedDeviceIds ?? []);
       setLoadError(null);
     } catch (error) {
       setLoadError(error instanceof Error ? error.message : 'Unable to load device configuration.');
@@ -638,6 +666,7 @@ export function DevicesPage() {
 
       const data = (await response.json()) as DeviceConfigurationResponse;
       setDevices((current) => mergeDeviceConfigurations(data.devices, current));
+      setRememberedDeviceIds(data.rememberedDeviceIds ?? []);
       setAutoSaveStatus('saved');
       window.setTimeout(() => {
         setAutoSaveStatus((current) => current === 'saved' ? 'idle' : current);
@@ -648,14 +677,14 @@ export function DevicesPage() {
   }, []);
 
   useEffect(() => {
-    if (!initialLoadDone.current || saveDirty === 0) return;
+    if (!initialLoadDone.current || saveDirty === 0 || editingDeviceIdClientKey) return;
 
     const timer = window.setTimeout(() => {
       void saveDevicesNow();
     }, 600);
 
     return () => window.clearTimeout(timer);
-  }, [saveDirty, saveDevicesNow]);
+  }, [editingDeviceIdClientKey, saveDirty, saveDevicesNow]);
 
   const markDirty = useCallback(() => {
     setSaveDirty((value) => value + 1);
@@ -1121,6 +1150,8 @@ export function DevicesPage() {
             const bleIsScanningForMore = bleScanFollowUpLoading[device.clientKey] ?? false;
             const bleScanError = bleScanErrors[device.clientKey];
             const effectivePollInterval = getDefinitionPollInterval(device.definition, device.pollIntervalMilliseconds);
+            const rememberedIdsForDevice = getAvailableRememberedDeviceIds(devices, rememberedDeviceIds, device.clientKey);
+            const deviceIdListId = `device-id-suggestions-${device.clientKey}`;
             const manufacturerAndModel = [device.definition?.device.manufacturer ?? definitionSummary?.manufacturer, device.definition?.device.model ?? definitionSummary?.model]
               .filter((value): value is string => Boolean(value))
               .join(' · ');
@@ -1203,8 +1234,22 @@ export function DevicesPage() {
                 <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-4'>
                   <div className='space-y-2 text-sm text-foreground'>
                     <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device ID</span>
-                    <Input value={device.deviceId} disabled={device.enabled} onChange={(event) => updateDevice(index, 'deviceId', event.target.value)} />
-                    <p className='text-[11px] text-muted-foreground'>Use the same ID to reconnect to historical readings after re-adding a device.</p>
+                    <Input
+                      list={rememberedIdsForDevice.length > 0 ? deviceIdListId : undefined}
+                      value={device.deviceId}
+                      disabled={device.enabled}
+                      onFocus={() => setEditingDeviceIdClientKey(device.clientKey)}
+                      onBlur={() => setEditingDeviceIdClientKey((current) => current === device.clientKey ? null : current)}
+                      onChange={(event) => updateDevice(index, 'deviceId', event.target.value)}
+                    />
+                    {rememberedIdsForDevice.length > 0 ? (
+                      <datalist id={deviceIdListId}>
+                        {rememberedIdsForDevice.map((deviceId) => (
+                          <option key={deviceId} value={deviceId} />
+                        ))}
+                      </datalist>
+                    ) : null}
+                    <p className='text-[11px] text-muted-foreground'>Choose a remembered ID or type a new one. IDs already used by other devices are hidden.</p>
                   </div>
 
                   <label className='space-y-2 text-sm text-foreground'>

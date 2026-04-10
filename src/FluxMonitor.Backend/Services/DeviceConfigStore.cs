@@ -33,6 +33,7 @@ public sealed class DeviceConfigStore(
     private readonly SemaphoreSlim _initializationLock = new(1, 1);
     private IReadOnlyList<DeviceConfiguration> _devices = [];
     private IReadOnlyDictionary<string, int> _persistedDeviceIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    private IReadOnlyList<string> _rememberedDeviceIds = [];
     private volatile bool _initialized;
 
     public async Task InitializeAsync(CancellationToken cancellationToken)
@@ -51,6 +52,7 @@ public sealed class DeviceConfigStore(
                 {
                     _devices = [];
                     _persistedDeviceIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                    _rememberedDeviceIds = [];
                 }
 
                 _initialized = true;
@@ -82,6 +84,15 @@ public sealed class DeviceConfigStore(
         }
     }
 
+    public IReadOnlyList<string> GetRememberedDeviceIds()
+    {
+        EnsureInitialized();
+        lock (_cacheLock)
+        {
+            return _rememberedDeviceIds;
+        }
+    }
+
     public async Task ReloadAsync(CancellationToken cancellationToken)
     {
         EnsureInitialized();
@@ -92,6 +103,7 @@ public sealed class DeviceConfigStore(
             {
                 _devices = [];
                 _persistedDeviceIds = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                _rememberedDeviceIds = [];
             }
 
             return;
@@ -137,6 +149,7 @@ public sealed class DeviceConfigStore(
         await using var connection = await OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
 
+        await RememberDeviceIdsAsync(connection, transaction, materializedDevices.Select(device => device.DeviceId).ToArray());
         await UpsertDevicesAsync(connection, transaction, materializedDevices);
         await DeleteRemovedDevicesAsync(connection, transaction, materializedDevices.Select(device => device.DeviceId).ToArray());
 
@@ -181,6 +194,11 @@ public sealed class DeviceConfigStore(
                 "CreatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 "UpdatedAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
+
+            CREATE TABLE IF NOT EXISTS "RememberedDeviceIds" (
+                "DeviceKey" TEXT NOT NULL PRIMARY KEY,
+                "LastSeenAt" TIMESTAMPTZ NOT NULL DEFAULT NOW()
+            );
             """;
 
         await connection.ExecuteAsync(sql);
@@ -216,6 +234,12 @@ public sealed class DeviceConfigStore(
             """;
 
         var rows = (await connection.QueryAsync<StoredDeviceRow>(sql)).ToArray();
+        var rememberedIds = (await connection.QueryAsync<string>("""
+            SELECT "DeviceKey"
+            FROM "RememberedDeviceIds"
+            ORDER BY "LastSeenAt" DESC, "DeviceKey";
+            """)).ToArray();
+
         var devices = rows
             .Select(row => new DeviceConfiguration
             {
@@ -239,7 +263,7 @@ public sealed class DeviceConfigStore(
             .ToArray();
 
         var persistedIds = rows.ToDictionary(row => row.DeviceKey, row => row.DeviceId, StringComparer.OrdinalIgnoreCase);
-        return new LoadedDevices(devices, persistedIds);
+        return new LoadedDevices(devices, persistedIds, rememberedIds);
     }
 
     /// <summary>
@@ -458,6 +482,39 @@ public sealed class DeviceConfigStore(
         }
     }
 
+    private static async Task RememberDeviceIdsAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        IReadOnlyCollection<string> deviceKeys)
+    {
+        if (deviceKeys.Count == 0)
+        {
+            return;
+        }
+
+        const string sql = """
+            INSERT INTO "RememberedDeviceIds" (
+                "DeviceKey",
+                "LastSeenAt"
+            )
+            VALUES (
+                @DeviceKey,
+                NOW()
+            )
+            ON CONFLICT ("DeviceKey") DO UPDATE SET
+                "LastSeenAt" = NOW();
+            """;
+
+        foreach (var deviceKey in deviceKeys)
+        {
+            await connection.ExecuteAsync(
+                new CommandDefinition(
+                    sql,
+                    new { DeviceKey = deviceKey },
+                    transaction));
+        }
+    }
+
     private static async Task DeleteRemovedDevicesAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
@@ -488,6 +545,7 @@ public sealed class DeviceConfigStore(
         {
             _devices = loadedDevices.Devices;
             _persistedDeviceIds = loadedDevices.PersistedDeviceIds;
+            _rememberedDeviceIds = loadedDevices.RememberedDeviceIds;
         }
     }
 
@@ -535,5 +593,6 @@ public sealed class DeviceConfigStore(
 
     private sealed record LoadedDevices(
         IReadOnlyList<DeviceConfiguration> Devices,
-        IReadOnlyDictionary<string, int> PersistedDeviceIds);
+        IReadOnlyDictionary<string, int> PersistedDeviceIds,
+        IReadOnlyList<string> RememberedDeviceIds);
 }

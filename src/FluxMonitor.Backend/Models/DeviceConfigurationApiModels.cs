@@ -46,4 +46,6 @@ public sealed record class SaveDeviceConfigurationsRequest
 public sealed record class DeviceConfigurationsResponse
 {
     public required IReadOnlyList<DeviceConfigurationApiModel> Devices { get; init; }
+
+    public IReadOnlyList<string> RememberedDeviceIds { get; init; } = [];
 }
