@@ -61,7 +61,12 @@ type MonitorRuntimeStatus = {
   devices: DeviceRuntimeState[];
 };
 
-const refreshIntervalMs = 5000;
+type MonitorRuntimeStatusStreamEnvelope = {
+  status: MonitorRuntimeStatus;
+};
+
+const reconnectDelayMs = 2000;
+const fallbackRefreshIntervalMs = 5000;
 const noDataLabel = 'N/D';
 
 export function DashboardPage() {
@@ -72,6 +77,19 @@ export function DashboardPage() {
   useEffect(() => {
     let isMounted = true;
     let requestInFlight = false;
+    let eventSource: EventSource | null = null;
+    let reconnectTimerId: number | null = null;
+    let fallbackIntervalId: number | null = null;
+
+    const applyStatus = (nextStatus: MonitorRuntimeStatus) => {
+      if (!isMounted) {
+        return;
+      }
+
+      setStatus(nextStatus);
+      setLoadError(null);
+      setIsLoading(false);
+    };
 
     const loadStatus = async () => {
       if (requestInFlight) {
@@ -88,13 +106,7 @@ export function DashboardPage() {
         }
 
         const data = (await response.json()) as MonitorRuntimeStatus;
-
-        if (!isMounted) {
-          return;
-        }
-
-        setStatus(data);
-        setLoadError(null);
+        applyStatus(data);
       } catch (error) {
         if (!isMounted) {
           return;
@@ -110,15 +122,91 @@ export function DashboardPage() {
       }
     };
 
-    void loadStatus();
+    const clearReconnectTimer = () => {
+      if (reconnectTimerId == null) {
+        return;
+      }
 
-    const intervalId = window.setInterval(() => {
-      void loadStatus();
-    }, refreshIntervalMs);
+      window.clearTimeout(reconnectTimerId);
+      reconnectTimerId = null;
+    };
+
+    const closeEventSource = () => {
+      if (!eventSource) {
+        return;
+      }
+
+      eventSource.close();
+      eventSource = null;
+    };
+
+    const connectStream = () => {
+      if (!isMounted) {
+        return;
+      }
+
+      if (typeof EventSource === 'undefined') {
+        if (fallbackIntervalId == null) {
+          fallbackIntervalId = window.setInterval(() => {
+            void loadStatus();
+          }, fallbackRefreshIntervalMs);
+        }
+        return;
+      }
+
+      clearReconnectTimer();
+      closeEventSource();
+
+      const stream = new EventSource('/api/health/stream');
+      eventSource = stream;
+
+      stream.onmessage = (event) => {
+        let payload: MonitorRuntimeStatus | MonitorRuntimeStatusStreamEnvelope;
+
+        try {
+          payload = JSON.parse(event.data) as MonitorRuntimeStatus | MonitorRuntimeStatusStreamEnvelope;
+        } catch {
+          setLoadError('Unable to read runtime status stream.');
+          return;
+        }
+
+        if ('status' in payload && payload.status) {
+          applyStatus(payload.status);
+          return;
+        }
+
+        applyStatus(payload as MonitorRuntimeStatus);
+      };
+
+      stream.onerror = () => {
+        if (eventSource === stream) {
+          closeEventSource();
+        }
+
+        void loadStatus();
+
+        if (!isMounted || reconnectTimerId != null) {
+          return;
+        }
+
+        reconnectTimerId = window.setTimeout(() => {
+          reconnectTimerId = null;
+          connectStream();
+        }, reconnectDelayMs);
+      };
+    };
+
+    void loadStatus();
+    connectStream();
 
     return () => {
       isMounted = false;
-      window.clearInterval(intervalId);
+      closeEventSource();
+      clearReconnectTimer();
+
+      if (fallbackIntervalId != null) {
+        window.clearInterval(fallbackIntervalId);
+      }
     };
   }, []);
 

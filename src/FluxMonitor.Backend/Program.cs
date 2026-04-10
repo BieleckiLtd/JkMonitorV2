@@ -45,6 +45,7 @@ builder.Services.AddSingleton<FluxMonitor.Backend.Services.IBuildMetadataProvide
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.DeviceConfigStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.DeviceStateBroadcaster>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.DeviceStateStore>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.RuntimeStatusBroadcaster>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.NetworkManagementService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.WifiCredentialStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.BluetoothManagementService>();
@@ -60,6 +61,7 @@ builder.Services.AddSingleton<FluxMonitor.Backend.Services.CloudflareTunnelStore
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.CloudflareTunnelService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.IInternetSpeedTestStore, FluxMonitor.Backend.Services.InternetSpeedTestStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.InternetSpeedTestService>();
+builder.Services.AddHostedService<FluxMonitor.Backend.Services.RuntimeStatusStreamingService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.ISoftwareUpdateStore, FluxMonitor.Backend.Services.SoftwareUpdateStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.UpdateProgressBroadcaster>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.SystemUpdateService>();
