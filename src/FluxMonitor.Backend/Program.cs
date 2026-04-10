@@ -43,6 +43,7 @@ builder.Host.UseSerilog((context, services, loggerConfiguration) => loggerConfig
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.HostSystemMonitoringService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.IBuildMetadataProvider, FluxMonitor.Backend.Services.AssemblyBuildMetadataProvider>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.DeviceConfigStore>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.DeviceStateBroadcaster>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.DeviceStateStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.NetworkManagementService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.WifiCredentialStore>();

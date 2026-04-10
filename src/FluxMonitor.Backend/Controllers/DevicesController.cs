@@ -1,7 +1,9 @@
 ﻿using System.IO.Ports;
+using System.Text.Json;
 using FluxMonitor.Backend.Models;
 using FluxMonitor.Backend.Services;
 using FluxMonitor.Contracts.Configuration;
+using FluxMonitor.Contracts.Status;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
 
@@ -10,8 +12,8 @@ namespace FluxMonitor.Backend.Controllers;
 [ApiController]
 [Route("api/devices")]
 public sealed class DevicesController(
-    IHostEnvironment environment,
     DeviceStateStore stateStore,
+    DeviceStateBroadcaster deviceStateBroadcaster,
     DeviceOrchestrator orchestrator,
     DeviceConfigStore deviceConfigStore,
     GenericSerialPollingClient genericModbusPollingClient,
@@ -23,13 +25,38 @@ public sealed class DevicesController(
     PollTrigger pollTrigger,
     ILogger<DevicesController> logger) : ControllerBase
 {
+    private static readonly JsonSerializerOptions DeviceStateStreamJsonOptions = new(JsonSerializerDefaults.Web);
+
     private RetentionConfiguration GetCurrentRetention() => configuration.CurrentValue.Storage.Retention;
 
     [HttpGet("current")]
     public IActionResult GetCurrent()
     {
-        var status = stateStore.GetStatus(environment.EnvironmentName);
-        return Ok(status.Devices);
+        return Ok(stateStore.GetCurrentDevices());
+    }
+
+    [HttpGet("current/stream")]
+    public async Task GetCurrentStream(CancellationToken cancellationToken)
+    {
+        Response.Headers.Append("Cache-Control", "no-cache");
+        Response.Headers.Append("X-Accel-Buffering", "no");
+        Response.ContentType = "text/event-stream";
+
+        await using var subscription = deviceStateBroadcaster.Subscribe(stateStore.GetCurrentDevices());
+
+        try
+        {
+            await foreach (var devices in subscription.Reader.ReadAllAsync(cancellationToken))
+            {
+                var payload = SerializeCurrentDevicesStream(devices);
+                await Response.WriteAsync($"data: {payload}\n\n", cancellationToken);
+                await Response.Body.FlushAsync(cancellationToken);
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            // The client disconnected.
+        }
     }
 
     [HttpGet("config")]
@@ -515,6 +542,19 @@ public sealed class DevicesController(
         };
     }
 
+    internal static string SerializeCurrentDevicesStream(IReadOnlyList<DeviceRuntimeState> devices)
+    {
+        return JsonSerializer.Serialize(new DeviceStateStreamEnvelope
+        {
+            Devices = devices
+        }, DeviceStateStreamJsonOptions);
+    }
+
 }
 
 public sealed record WriteParameterRequest(uint RawValue);
+
+internal sealed record DeviceStateStreamEnvelope
+{
+    public required IReadOnlyList<DeviceRuntimeState> Devices { get; init; }
+}

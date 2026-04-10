@@ -83,7 +83,12 @@ type DeviceRuntimeState = {
   latestTelemetry?: DeviceTelemetrySnapshot | null;
 };
 
-const refreshIntervalMs = 2000;
+type DeviceRuntimeStateStreamEnvelope = {
+  devices: DeviceRuntimeState[];
+};
+
+const reconnectDelayMs = 2000;
+const fallbackRefreshIntervalMs = 2000;
 const nd = 'N/D';
 
 type SwitchStatusChip = {
@@ -99,6 +104,16 @@ export function MonitorPage() {
   useEffect(() => {
     let isMounted = true;
     let requestInFlight = false;
+    let eventSource: EventSource | null = null;
+    let reconnectTimerId: number | null = null;
+    let fallbackIntervalId: number | null = null;
+
+    const applySnapshot = (snapshot: DeviceRuntimeState[]) => {
+      if (!isMounted) return;
+      setDevices(snapshot);
+      setLoadError(null);
+      setIsLoading(false);
+    };
 
     const load = async () => {
       if (requestInFlight) return;
@@ -108,9 +123,7 @@ export function MonitorPage() {
         const response = await fetch('/api/devices/current', { cache: 'no-store' });
         if (!response.ok) throw new Error('Unable to load device telemetry.');
         const data = (await response.json()) as DeviceRuntimeState[];
-        if (!isMounted) return;
-        setDevices(data);
-        setLoadError(null);
+        applySnapshot(data);
       } catch (error) {
         if (!isMounted) return;
         setLoadError(error instanceof Error ? error.message : 'Unable to load device telemetry.');
@@ -120,9 +133,87 @@ export function MonitorPage() {
       }
     };
 
+    const clearReconnectTimer = () => {
+      if (reconnectTimerId == null) return;
+      window.clearTimeout(reconnectTimerId);
+      reconnectTimerId = null;
+    };
+
+    const closeEventSource = () => {
+      if (!eventSource) return;
+      eventSource.close();
+      eventSource = null;
+    };
+
+    const connectStream = () => {
+      if (!isMounted) return;
+
+      if (typeof EventSource === 'undefined') {
+        if (fallbackIntervalId == null) {
+          fallbackIntervalId = window.setInterval(() => { void load(); }, fallbackRefreshIntervalMs);
+        }
+        return;
+      }
+
+      clearReconnectTimer();
+      closeEventSource();
+
+      const stream = new EventSource('/api/devices/current/stream');
+      eventSource = stream;
+
+      stream.onmessage = (event) => {
+        let payload: DeviceRuntimeState[] | DeviceRuntimeStateStreamEnvelope;
+
+        try {
+          payload = JSON.parse(event.data) as DeviceRuntimeState[] | DeviceRuntimeStateStreamEnvelope;
+        } catch {
+          setLoadError('Unable to read device telemetry stream.');
+          return;
+        }
+
+        if (Array.isArray(payload)) {
+          applySnapshot(payload);
+          return;
+        }
+
+        if (Array.isArray(payload.devices)) {
+          applySnapshot(payload.devices);
+          return;
+        }
+
+        setLoadError('Unable to read device telemetry stream.');
+      };
+
+      stream.onerror = () => {
+        if (eventSource === stream) {
+          closeEventSource();
+        }
+
+        void load();
+
+        if (!isMounted || reconnectTimerId != null) {
+          return;
+        }
+
+        reconnectTimerId = window.setTimeout(() => {
+          reconnectTimerId = null;
+          connectStream();
+        }, reconnectDelayMs);
+      };
+    };
+
     void load();
-    const intervalId = window.setInterval(() => { void load(); }, refreshIntervalMs);
-    return () => { isMounted = false; window.clearInterval(intervalId); };
+    connectStream();
+
+    return () => {
+      isMounted = false;
+      closeEventSource();
+      clearReconnectTimer();
+
+      if (fallbackIntervalId != null) {
+        window.clearInterval(fallbackIntervalId);
+      }
+    };
   }, []);
 
   return (

@@ -143,7 +143,8 @@ public sealed class DeviceOrchestratorTests
             deviceConfigStore,
             definitionLoader,
             hostSystemMonitoringService,
-            new FakeBuildMetadataProvider(new BuildRuntimeInfo()));
+            new FakeBuildMetadataProvider(new BuildRuntimeInfo()),
+            new DeviceStateBroadcaster());
     }
 
     private static DeviceDefinitionLoader CreateDefinitionLoader()

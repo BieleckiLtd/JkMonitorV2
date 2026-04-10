@@ -10,15 +10,18 @@ public sealed class DeviceStateStore
     private readonly DateTimeOffset _startedAt = DateTimeOffset.UtcNow;
     private readonly HostSystemMonitoringService _hostSystemMonitoringService;
     private readonly IBuildMetadataProvider _buildMetadataProvider;
+    private readonly DeviceStateBroadcaster _deviceStateBroadcaster;
 
     public DeviceStateStore(
         DeviceConfigStore deviceConfigStore,
         DeviceDefinitionLoader definitionLoader,
         HostSystemMonitoringService hostSystemMonitoringService,
-        IBuildMetadataProvider buildMetadataProvider)
+        IBuildMetadataProvider buildMetadataProvider,
+        DeviceStateBroadcaster deviceStateBroadcaster)
     {
         _hostSystemMonitoringService = hostSystemMonitoringService;
         _buildMetadataProvider = buildMetadataProvider;
+        _deviceStateBroadcaster = deviceStateBroadcaster;
 
         foreach (var device in deviceConfigStore.GetDevices())
         {
@@ -51,6 +54,8 @@ public sealed class DeviceStateStore
             DisplayPrecision = device.DisplayPrecision,
             LastOutcome = "NotStarted"
         };
+
+        PublishCurrentDevices();
     }
 
     /// <summary>
@@ -59,19 +64,28 @@ public sealed class DeviceStateStore
     /// </summary>
     public void UnregisterDevice(string deviceId)
     {
-        _states.TryRemove(deviceId, out _);
+        if (_states.TryRemove(deviceId, out _))
+        {
+            PublishCurrentDevices();
+        }
     }
 
     public void UnregisterMissingDevices(IEnumerable<string> deviceIdsToKeep)
     {
         var keep = new HashSet<string>(deviceIdsToKeep, StringComparer.OrdinalIgnoreCase);
+        var changed = false;
 
         foreach (var deviceId in _states.Keys)
         {
             if (!keep.Contains(deviceId))
             {
-                _states.TryRemove(deviceId, out _);
+                changed |= _states.TryRemove(deviceId, out _);
             }
+        }
+
+        if (changed)
+        {
+            PublishCurrentDevices();
         }
     }
 
@@ -80,12 +94,17 @@ public sealed class DeviceStateStore
         return _states.TryGetValue(deviceId, out var state) ? state : null;
     }
 
-    public MonitorRuntimeStatus GetStatus(string environmentName)
+    public IReadOnlyList<DeviceRuntimeState> GetCurrentDevices()
     {
-        var devices = _states.Values
+        return _states.Values
             .OrderByDescending(device => device.IsMaster)
             .ThenBy(device => device.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
+    }
+
+    public MonitorRuntimeStatus GetStatus(string environmentName)
+    {
+        var devices = GetCurrentDevices();
 
         return new MonitorRuntimeStatus
         {
@@ -136,6 +155,8 @@ public sealed class DeviceStateStore
                 LastPersistedAt = lastPersistedAt,
                 LatestTelemetry = latestTelemetry
             });
+
+        PublishCurrentDevices();
     }
 
     public void MarkPollFailed(DeviceConfiguration device, DateTimeOffset startedAt, Exception exception)
@@ -150,6 +171,13 @@ public sealed class DeviceStateStore
                 LastOutcome = "Failed",
                 LastError = exception.Message
             });
+
+        PublishCurrentDevices();
+    }
+
+    private void PublishCurrentDevices()
+    {
+        _deviceStateBroadcaster.Publish(GetCurrentDevices());
     }
 
     private static DeviceRuntimeState CreateState(

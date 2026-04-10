@@ -111,7 +111,8 @@ public class DeviceStateStoreTests
             deviceConfigStore,
             definitionLoader,
             hostSystemMonitoringService,
-            new FakeBuildMetadataProvider(buildInfo));
+            new FakeBuildMetadataProvider(buildInfo),
+            new DeviceStateBroadcaster());
     }
 
     private static MonitorConfiguration CreateDefaultConfiguration()
