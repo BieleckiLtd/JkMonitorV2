@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { type ThemeConfig, builtInThemes } from '../lib/themes';
+import { applyThemeToDocument, defaultThemeId, findThemeById, getStoredThemeId } from '../lib/themeRuntime';
 import { type UpdateActionResult, type UpdateProgress } from '../lib/systemUpdate';
 
 const updateRestartHeartbeatDetail = 'Flux Monitor is restarting. The page will reload automatically when it is ready.';
@@ -379,6 +380,14 @@ function scheduleUpdateProgressReconnect(
   }, updateProgressReconnectDelayMs);
 }
 
+const storedThemeId = getStoredThemeId();
+const initialActiveTheme = findThemeById(storedThemeId, builtInThemes) ?? findThemeById(defaultThemeId, builtInThemes);
+const initialActiveThemeId = initialActiveTheme?.id ?? defaultThemeId;
+
+if (typeof document !== 'undefined' && initialActiveTheme) {
+  applyThemeToDocument(initialActiveTheme);
+}
+
 interface AppState {
   themes: ThemeConfig[];
   activeThemeId: string;
@@ -398,7 +407,7 @@ interface AppState {
 
 export const useAppStore = create<AppState>((set, get) => ({
   themes: builtInThemes,
-  activeThemeId: (typeof window !== 'undefined' && localStorage.getItem('FluxMonitor-theme')) || 'tactical-slate',
+  activeThemeId: initialActiveThemeId,
 
   setActiveThemeId: (id) => {
     const theme = get().themes.find(t => t.id === id);
@@ -410,32 +419,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   applyTheme: (theme) => {
-    const root = document.documentElement;
-    root.dataset.theme = theme.id;
-
-    if (theme.mode === 'dark') {
-      root.classList.add('dark');
-      root.classList.remove('light');
-    } else {
-      root.classList.add('light');
-      root.classList.remove('dark');
-    }
-
-    if (theme.radius) {
-      root.style.setProperty('--radius', theme.radius);
-    }
-
-    if (theme.colors) {
-      Object.entries(theme.colors).forEach(([key, value]) => {
-        root.style.setProperty(key, value);
-      });
-    }
-
-    root.style.colorScheme = theme.mode;
-
-    const bg = theme.colors?.['--background'] ?? (theme.mode === 'dark' ? '#09090b' : '#f8fafc');
-    const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', bg);
+    applyThemeToDocument(theme);
   },
 
   loadExternalTheme: async () => {

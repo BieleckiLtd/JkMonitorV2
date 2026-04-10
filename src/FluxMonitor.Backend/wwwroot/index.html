@@ -9,6 +9,127 @@
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
     <title>Flux Monitor</title>
+    <style>
+      html {
+        background: var(--background, #0a0b10);
+        color: var(--foreground, #e3e1e9);
+        color-scheme: var(--app-color-scheme, dark);
+      }
+
+      body {
+        margin: 0;
+        min-height: 100vh;
+        background-color: var(--background, #0a0b10);
+        color: var(--foreground, #e3e1e9);
+        background-image: var(--app-body-background-image, radial-gradient(circle at 2px 2px, rgb(197 255 65 / 3%) 1px, transparent 0));
+        background-size: 24px 24px;
+      }
+
+      #root {
+        min-height: 100vh;
+      }
+    </style>
+    <script>
+      (() => {
+        const themeStorageKey = 'FluxMonitor-theme';
+        const defaultThemeId = 'tactical-slate';
+        const themes = {
+          'tactical-slate': {
+            mode: 'dark',
+            radius: '0rem',
+            fonts: {
+              heading: "'JetBrains Mono', 'Cascadia Code', monospace",
+              sans: "'JetBrains Mono', 'Cascadia Code', monospace",
+              mono: "'JetBrains Mono', 'Cascadia Code', 'Cascadia Mono', 'Consolas', 'SFMono-Regular', monospace",
+            },
+            bodyBackgroundImage: 'radial-gradient(circle at 2px 2px, rgb(197 255 65 / 3%) 1px, transparent 0)',
+            colors: {
+              '--background': '#0A0B10',
+              '--foreground': '#E3E1E9',
+              '--card': '#1E1F25',
+              '--card-foreground': '#E3E1E9',
+              '--popover': '#1E1F25',
+              '--popover-foreground': '#E3E1E9',
+              '--primary': '#c5ff41',
+              '--primary-foreground': '#253500',
+              '--secondary': '#292A2F',
+              '--secondary-foreground': '#E3E1E9',
+              '--muted': '#1A1B21',
+              '--muted-foreground': '#8D937B',
+              '--accent': '#292A2F',
+              '--accent-foreground': '#E3E1E9',
+              '--destructive': '#ff6b70',
+              '--border': '#34343A',
+              '--input': '#1A1B21',
+              '--ring': '#c5ff41',
+              '--chart-1': '#c5ff41',
+              '--chart-2': '#7de2d1',
+              '--chart-3': '#f7b955',
+              '--chart-4': '#6fa8ff',
+              '--chart-5': '#ff6b70',
+              '--sidebar': '#0D0E13',
+              '--sidebar-foreground': '#E3E1E9',
+              '--sidebar-primary': '#c5ff41',
+              '--sidebar-primary-foreground': '#253500',
+              '--sidebar-accent': '#1A1B21',
+              '--sidebar-accent-foreground': '#E3E1E9',
+              '--sidebar-border': '#34343A',
+              '--sidebar-ring': '#c5ff41',
+            },
+          },
+          'ocean-light': {
+            mode: 'light',
+            radius: '0.75rem',
+            fonts: null,
+            bodyBackgroundImage: 'radial-gradient(circle at 2px 2px, oklch(0.85 0.15 128 / 3%) 1px, transparent 0)',
+            colors: {
+              '--background': '#f8fafc',
+              '--foreground': '#0f172a',
+              '--primary': '#0ea5e9',
+              '--primary-foreground': '#f8fafc',
+              '--muted': '#e2e8f0',
+              '--muted-foreground': '#64748b',
+              '--border': '#cbd5e1',
+              '--card': '#ffffff',
+              '--card-foreground': '#0f172a',
+            },
+          },
+        };
+
+        const root = document.documentElement;
+
+        let activeThemeId = defaultThemeId;
+        try {
+          activeThemeId = localStorage.getItem(themeStorageKey) || defaultThemeId;
+        } catch {
+          activeThemeId = defaultThemeId;
+        }
+
+        const theme = themes[activeThemeId] || themes[defaultThemeId];
+        root.dataset.theme = theme === themes[defaultThemeId] && !(activeThemeId in themes) ? defaultThemeId : activeThemeId;
+        root.classList.remove(theme.mode === 'dark' ? 'light' : 'dark');
+        root.classList.add(theme.mode);
+        root.style.colorScheme = theme.mode;
+        root.style.setProperty('--app-color-scheme', theme.mode);
+        root.style.setProperty('--radius', theme.radius);
+        root.style.setProperty('--app-body-background-image', theme.bodyBackgroundImage);
+
+        if (theme.fonts) {
+          root.style.setProperty('--app-font-heading', theme.fonts.heading);
+          root.style.setProperty('--app-font-sans', theme.fonts.sans);
+          root.style.setProperty('--app-font-mono', theme.fonts.mono);
+        }
+
+        Object.entries(theme.colors).forEach(([key, value]) => {
+          root.style.setProperty(key, value);
+        });
+
+        const metaThemeColor = document.querySelector('meta[name="theme-color"]');
+        if (metaThemeColor) {
+          metaThemeColor.setAttribute('content', theme.colors['--background'] || (theme.mode === 'dark' ? '#0A0B10' : '#f8fafc'));
+        }
+      })();
+    </script>
     <script type="module" crossorigin src="/assets/index.js"></script>
     <link rel="stylesheet" crossorigin href="/assets/index.css">
   </head>
