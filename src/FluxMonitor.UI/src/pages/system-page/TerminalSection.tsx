@@ -29,6 +29,7 @@ export function TerminalSection({ terminalAccess, connectivityLoading }: Termina
   const socketRef = useRef<WebSocket | null>(null);
   const socketGenerationRef = useRef(0);
   const resetViewportOnNextConnectRef = useRef(false);
+  const [terminalReady, setTerminalReady] = useState(false);
   const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
   const [connectionDetail, setConnectionDetail] = useState<string | null>(null);
   const [reconnectKey, setReconnectKey] = useState(0);
@@ -109,6 +110,7 @@ export function TerminalSection({ terminalAccess, connectivityLoading }: Termina
 
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
+    setTerminalReady(true);
 
     const focusTerminal = () => {
       terminal.focus();
@@ -156,6 +158,7 @@ export function TerminalSection({ terminalAccess, connectivityLoading }: Termina
       terminal.dispose();
       terminalRef.current = null;
       fitAddonRef.current = null;
+      setTerminalReady(false);
     };
   }, []);
 
@@ -169,6 +172,12 @@ export function TerminalSection({ terminalAccess, connectivityLoading }: Termina
       socketRef.current = null;
       setConnectionState('idle');
       setConnectionDetail(terminalAccess?.statusMessage ?? null);
+      return undefined;
+    }
+
+    if (!terminalReady) {
+      setConnectionState('idle');
+      setConnectionDetail('Preparing terminal…');
       return undefined;
     }
 
@@ -257,7 +266,7 @@ export function TerminalSection({ terminalAccess, connectivityLoading }: Termina
         socketRef.current = null;
       }
     };
-  }, [canConnect, reconnectKey, socketUrl, terminalAccess?.statusMessage]);
+  }, [canConnect, reconnectKey, socketUrl, terminalAccess?.statusMessage, terminalReady]);
 
   return (
     <Card className='flex min-h-full flex-1 flex-col overflow-hidden border border-border/80 bg-card/85 shadow-sm'>
