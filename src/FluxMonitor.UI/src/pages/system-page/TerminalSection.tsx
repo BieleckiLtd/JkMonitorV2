@@ -30,7 +30,7 @@ function configureHelperTextArea(terminal: Terminal) {
 
   helperTextArea.autocapitalize = 'none';
   helperTextArea.autocomplete = 'off';
-  helperTextArea.autocorrect = 'off';
+  helperTextArea.setAttribute('autocorrect', 'off');
   helperTextArea.enterKeyHint = 'enter';
   helperTextArea.inputMode = 'text';
   helperTextArea.spellcheck = false;

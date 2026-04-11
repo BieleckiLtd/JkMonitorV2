@@ -215,7 +215,7 @@ describe('TerminalSection', () => {
     expect(terminal.textarea).toBeInstanceOf(HTMLTextAreaElement);
     expect(terminal.textarea.autocapitalize).toBe('none');
     expect(terminal.textarea.autocomplete).toBe('off');
-    expect(terminal.textarea.autocorrect).toBe('off');
+    expect(terminal.textarea.getAttribute('autocorrect')).toBe('off');
     expect(terminal.textarea.inputMode).toBe('text');
     expect(terminal.textarea.spellcheck).toBe(false);
     expect(terminal.textarea.style.left).toBe('0px');
