@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryRouter } from 'react-router-dom';
 import { TerminalSection } from './TerminalSection';
@@ -24,6 +24,7 @@ vi.mock('xterm', () => {
     focusCount = 0;
     clearCount = 0;
     writtenLines: string[] = [];
+    textarea: HTMLTextAreaElement | undefined;
     helperTextArea: HTMLTextAreaElement | null = null;
     private onDataHandler: ((data: string) => void) | null = null;
     private onResizeHandler: ((size: { cols: number; rows: number }) => void) | null = null;
@@ -38,6 +39,7 @@ vi.mock('xterm', () => {
       const helperTextArea = document.createElement('textarea');
       helperTextArea.className = 'xterm-helper-textarea';
       container.appendChild(helperTextArea);
+      this.textarea = helperTextArea;
       this.helperTextArea = helperTextArea;
     }
 
@@ -123,6 +125,16 @@ describe('TerminalSection', () => {
     terminalMocks.sockets.length = 0;
     vi.stubGlobal('WebSocket', MockWebSocket);
     vi.stubGlobal('ResizeObserver', undefined);
+    vi.stubGlobal('matchMedia', vi.fn().mockImplementation(() => ({
+      matches: false,
+      media: '(pointer: coarse)',
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })));
   });
 
   afterEach(() => {
@@ -164,5 +176,52 @@ describe('TerminalSection', () => {
 
     expect(terminal.focusCount).toBeGreaterThan(focusCountBeforePress);
     expect(document.activeElement).toBe(host.querySelector('.xterm-helper-textarea'));
+  });
+
+  it('configures the helper textarea for touch keyboards', async () => {
+    vi.stubGlobal('matchMedia', vi.fn().mockImplementation(() => ({
+      matches: true,
+      media: '(pointer: coarse)',
+      onchange: null,
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    })));
+
+    render(
+      <MemoryRouter>
+        <TerminalSection
+          terminalAccess={{
+            supported: true,
+            enabled: true,
+            storageAvailable: true,
+            activeSessionCount: 0,
+            statusMessage: 'Web terminal access is enabled.',
+            shellPath: '/bin/bash',
+            transport: 'pty-via-script',
+          }}
+          connectivityLoading={false}
+        />
+      </MemoryRouter>
+    );
+
+    await waitFor(() => {
+      expect(terminalMocks.terminals).toHaveLength(1);
+    });
+
+    const terminal = terminalMocks.terminals[0];
+    expect(terminal.textarea).toBeInstanceOf(HTMLTextAreaElement);
+    expect(terminal.textarea.autocapitalize).toBe('none');
+    expect(terminal.textarea.autocomplete).toBe('off');
+    expect(terminal.textarea.autocorrect).toBe('off');
+    expect(terminal.textarea.inputMode).toBe('text');
+    expect(terminal.textarea.spellcheck).toBe(false);
+    expect(terminal.textarea.style.left).toBe('0px');
+    expect(terminal.textarea.style.width).toBe('1px');
+    expect(terminal.textarea.style.height).toBe('1px');
+    expect(terminal.textarea.style.opacity).toBe('0.01');
+    expect(terminal.textarea.style.zIndex).toBe('1');
   });
 });

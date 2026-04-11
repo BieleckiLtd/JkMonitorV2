@@ -22,6 +22,31 @@ function seedTerminal(terminal: Terminal) {
   terminal.writeln('\x1b[90mUse the same shell you would over SSH, including sudo prompts and interactive apps.\x1b[0m');
 }
 
+function configureHelperTextArea(terminal: Terminal) {
+  const helperTextArea = terminal.textarea;
+  if (!(helperTextArea instanceof HTMLTextAreaElement)) {
+    return null;
+  }
+
+  helperTextArea.autocapitalize = 'none';
+  helperTextArea.autocomplete = 'off';
+  helperTextArea.autocorrect = 'off';
+  helperTextArea.enterKeyHint = 'enter';
+  helperTextArea.inputMode = 'text';
+  helperTextArea.spellcheck = false;
+
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function' && window.matchMedia('(pointer: coarse)').matches) {
+    helperTextArea.style.left = '0';
+    helperTextArea.style.top = '0';
+    helperTextArea.style.width = '1px';
+    helperTextArea.style.height = '1px';
+    helperTextArea.style.opacity = '0.01';
+    helperTextArea.style.zIndex = '1';
+  }
+
+  return helperTextArea;
+}
+
 export function TerminalSection({ terminalAccess, connectivityLoading }: TerminalSectionProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
@@ -107,6 +132,7 @@ export function TerminalSection({ terminalAccess, connectivityLoading }: Termina
     fitAddon.fit();
     terminal.focus();
     seedTerminal(terminal);
+    const helperTextArea = configureHelperTextArea(terminal);
 
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
@@ -114,9 +140,8 @@ export function TerminalSection({ terminalAccess, connectivityLoading }: Termina
 
     const focusTerminal = () => {
       terminal.focus();
-      const helperTextArea = container.querySelector('.xterm-helper-textarea');
       if (helperTextArea instanceof HTMLTextAreaElement) {
-        helperTextArea.focus();
+        helperTextArea.focus({ preventScroll: true });
       }
     };
 
