@@ -17,11 +17,18 @@ type TerminalSectionProps = {
 
 type ConnectionState = 'idle' | 'connecting' | 'connected' | 'disconnected' | 'error';
 
+function seedTerminal(terminal: Terminal) {
+  terminal.writeln('\x1b[1;36mFlux Monitor web terminal\x1b[0m');
+  terminal.writeln('\x1b[90mUse the same shell you would over SSH, including sudo prompts and interactive apps.\x1b[0m');
+}
+
 export function TerminalSection({ terminalAccess, connectivityLoading }: TerminalSectionProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<WebSocket | null>(null);
+  const socketGenerationRef = useRef(0);
+  const resetViewportOnNextConnectRef = useRef(false);
   const [connectionState, setConnectionState] = useState<ConnectionState>('idle');
   const [connectionDetail, setConnectionDetail] = useState<string | null>(null);
   const [reconnectKey, setReconnectKey] = useState(0);
@@ -98,11 +105,18 @@ export function TerminalSection({ terminalAccess, connectivityLoading }: Termina
     terminal.open(container);
     fitAddon.fit();
     terminal.focus();
-    terminal.writeln('\x1b[1;36mFlux Monitor web terminal\x1b[0m');
-    terminal.writeln('\x1b[90mUse the same shell you would over SSH, including sudo prompts and interactive apps.\x1b[0m');
+    seedTerminal(terminal);
 
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
+
+    const focusTerminal = () => {
+      terminal.focus();
+      const helperTextArea = container.querySelector('.xterm-helper-textarea');
+      if (helperTextArea instanceof HTMLTextAreaElement) {
+        helperTextArea.focus();
+      }
+    };
 
     const dataDisposable = terminal.onData((data) => {
       const socket = socketRef.current;
@@ -128,9 +142,13 @@ export function TerminalSection({ terminalAccess, connectivityLoading }: Termina
         fitAddon.fit();
       });
 
+    container.addEventListener('pointerdown', focusTerminal);
+    container.addEventListener('touchstart', focusTerminal, { passive: true });
     resizeObserver?.observe(container);
 
     return () => {
+      container.removeEventListener('pointerdown', focusTerminal);
+      container.removeEventListener('touchstart', focusTerminal);
       resizeObserver?.disconnect();
       dataDisposable.dispose();
       resizeDisposable.dispose();
@@ -162,6 +180,12 @@ export function TerminalSection({ terminalAccess, connectivityLoading }: Termina
     }
 
     fitAddonRef.current?.fit();
+    if (resetViewportOnNextConnectRef.current) {
+      terminal.clear();
+      seedTerminal(terminal);
+      resetViewportOnNextConnectRef.current = false;
+    }
+
     setConnectionState('connecting');
     setConnectionDetail('Opening host shell…');
 
@@ -169,27 +193,46 @@ export function TerminalSection({ terminalAccess, connectivityLoading }: Termina
     url.searchParams.set('cols', String(terminal.cols));
     url.searchParams.set('rows', String(terminal.rows));
 
+    const socketGeneration = socketGenerationRef.current + 1;
+    socketGenerationRef.current = socketGeneration;
     const nextSocket = new WebSocket(url);
     socketRef.current = nextSocket;
 
     nextSocket.onopen = () => {
+      if (socketRef.current !== nextSocket || socketGenerationRef.current !== socketGeneration) {
+        return;
+      }
+
       setConnectionState('connected');
       setConnectionDetail('Connected to the host shell.');
       terminal.focus();
+      nextSocket.send(JSON.stringify({ type: 'resize', cols: terminal.cols, rows: terminal.rows }));
     };
 
     nextSocket.onmessage = (event) => {
+      if (socketRef.current !== nextSocket || socketGenerationRef.current !== socketGeneration) {
+        return;
+      }
+
       if (typeof event.data === 'string') {
         terminal.write(event.data);
       }
     };
 
     nextSocket.onerror = () => {
+      if (socketRef.current !== nextSocket || socketGenerationRef.current !== socketGeneration) {
+        return;
+      }
+
       setConnectionState('error');
       setConnectionDetail('The terminal connection failed.');
     };
 
     nextSocket.onclose = (event) => {
+      if (socketGenerationRef.current !== socketGeneration) {
+        return;
+      }
+
       if (socketRef.current === nextSocket) {
         socketRef.current = null;
       }
@@ -236,7 +279,10 @@ export function TerminalSection({ terminalAccess, connectivityLoading }: Termina
               type='button'
               variant='outline'
               size='sm'
-              onClick={() => setReconnectKey((current) => current + 1)}
+              onClick={() => {
+                resetViewportOnNextConnectRef.current = true;
+                setReconnectKey((current) => current + 1);
+              }}
               disabled={!canConnect || connectionState === 'connecting'}
             >
               {connectionState === 'connecting' ? <LoaderCircle className='animate-spin' /> : <RefreshCw />}

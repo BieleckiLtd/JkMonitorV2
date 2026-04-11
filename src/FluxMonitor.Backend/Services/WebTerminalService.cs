@@ -152,28 +152,27 @@ public sealed class WebTerminalService
 
         Interlocked.Increment(ref _activeSessionCount);
         using var sendLock = new SemaphoreSlim(1, 1);
+        using var sessionCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
 
         try
         {
-            var stdoutTask = PumpOutputAsync(process.StandardOutput, webSocket, sendLock, cancellationToken);
-            var stderrTask = PumpOutputAsync(process.StandardError, webSocket, sendLock, cancellationToken);
-            var inputTask = PumpInputAsync(webSocket, process.StandardInput, cancellationToken);
+            var stdoutTask = PumpOutputAsync(process.StandardOutput, webSocket, sendLock, sessionCts.Token);
+            var stderrTask = PumpOutputAsync(process.StandardError, webSocket, sendLock, sessionCts.Token);
+            var inputTask = PumpInputAsync(webSocket, process.StandardInput, sessionCts.Token);
+            var processExitTask = process.WaitForExitAsync(sessionCts.Token);
 
-            await Task.WhenAny(inputTask, process.WaitForExitAsync(cancellationToken));
+            await Task.WhenAny(inputTask, processExitTask);
+            sessionCts.Cancel();
 
             if (!process.HasExited)
             {
                 TryKillProcess(process);
             }
 
-            try
-            {
-                await Task.WhenAll(stdoutTask, stderrTask);
-            }
-            catch (OperationCanceledException)
-            {
-                // Client disconnected or request ended.
-            }
+            await IgnoreExpectedSessionEndAsync(inputTask);
+            await IgnoreExpectedSessionEndAsync(processExitTask);
+            await IgnoreExpectedSessionEndAsync(stdoutTask);
+            await IgnoreExpectedSessionEndAsync(stderrTask);
 
             if (webSocket.State == WebSocketState.Open || webSocket.State == WebSocketState.CloseReceived)
             {
@@ -187,6 +186,30 @@ public sealed class WebTerminalService
         {
             Interlocked.Decrement(ref _activeSessionCount);
             TryKillProcess(process);
+        }
+    }
+
+    private static async Task IgnoreExpectedSessionEndAsync(Task task)
+    {
+        try
+        {
+            await task;
+        }
+        catch (OperationCanceledException)
+        {
+            // Session ended while waiting on I/O.
+        }
+        catch (IOException)
+        {
+            // The shell process or websocket ended while streaming I/O.
+        }
+        catch (ObjectDisposedException)
+        {
+            // The websocket or redirected stream was disposed during shutdown.
+        }
+        catch (WebSocketException)
+        {
+            // The client disconnected before the websocket close handshake completed.
         }
     }
 
