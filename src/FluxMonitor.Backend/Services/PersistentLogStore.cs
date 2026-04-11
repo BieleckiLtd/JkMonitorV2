@@ -29,7 +29,7 @@ public sealed class PersistentLogSink(PostgresLogStore store) : ILogEventSink
     }
 }
 
-public sealed class PostgresLogStore : ILogQueryService, IDisposable, IAsyncDisposable
+public sealed class PostgresLogStore : ILogQueryService, ILogMutationService, IDisposable, IAsyncDisposable
 {
     private readonly LogStorageOptions _options;
     private readonly InMemoryLogStore _fallbackStore = new();
@@ -345,6 +345,74 @@ CREATE INDEX IF NOT EXISTS {QuoteIdentifier($"ix_{_options.TableName}_level_time
         };
     }
 
+    public async Task<int> DeleteAllAsync(CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken);
+
+        if (!_postgresAvailable || _dataSource is null)
+        {
+            ClearPendingEntries();
+            return await _fallbackStore.DeleteAllAsync(cancellationToken);
+        }
+
+        ClearPendingEntries();
+
+        try
+        {
+            await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"DELETE FROM {_qualifiedTableName};";
+            var deletedCount = await command.ExecuteNonQueryAsync(cancellationToken);
+            await _fallbackStore.DeleteAllAsync(cancellationToken);
+            return deletedCount;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _postgresAvailable = false;
+            WriteDiagnostic("Failed to clear logs from PostgreSQL", ex);
+            throw;
+        }
+    }
+
+    public async Task<int> DeleteAsync(IReadOnlyList<long> entryIds, CancellationToken cancellationToken)
+    {
+        if (entryIds.Count == 0)
+        {
+            return 0;
+        }
+
+        await InitializeAsync(cancellationToken);
+
+        if (!_postgresAvailable || _dataSource is null)
+        {
+            return await _fallbackStore.DeleteAsync(entryIds, cancellationToken);
+        }
+
+        try
+        {
+            await using var connection = await _dataSource.OpenConnectionAsync(cancellationToken);
+            await using var command = connection.CreateCommand();
+            command.CommandText = $"DELETE FROM {_qualifiedTableName} WHERE id = ANY (@entry_ids);";
+            command.Parameters.Add(new NpgsqlParameter<long[]>("entry_ids", entryIds.Distinct().ToArray())
+            {
+                NpgsqlDbType = NpgsqlDbType.Array | NpgsqlDbType.Bigint
+            });
+
+            var deletedCount = await command.ExecuteNonQueryAsync(cancellationToken);
+
+            // Fallback ids are generated independently, so clear the cache to avoid deleted rows resurfacing
+            // if PostgreSQL becomes unavailable later.
+            await _fallbackStore.DeleteAllAsync(cancellationToken);
+            return deletedCount;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _postgresAvailable = false;
+            WriteDiagnostic("Failed to delete selected logs from PostgreSQL", ex);
+            throw;
+        }
+    }
+
     private async Task<int> QueryTotalCountAsync(
         NpgsqlConnection connection,
         string whereClause,
@@ -468,6 +536,14 @@ LIMIT @take;
         if (!string.IsNullOrWhiteSpace(search))
         {
             command.Parameters.AddWithValue("search", $"%{search.Trim()}%");
+        }
+    }
+
+    private void ClearPendingEntries()
+    {
+        while (_pendingEntries.TryDequeue(out _))
+        {
+            Interlocked.Decrement(ref _pendingCount);
         }
     }
 

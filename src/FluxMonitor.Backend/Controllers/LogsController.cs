@@ -6,7 +6,9 @@ namespace FluxMonitor.Backend.Controllers;
 
 [ApiController]
 [Route("api/logs")]
-public sealed class LogsController(ILogQueryService logQueryService) : ControllerBase
+public sealed class LogsController(
+    ILogQueryService logQueryService,
+    ILogMutationService logMutationService) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<LogQueryResponse>> Get(
@@ -29,5 +31,39 @@ public sealed class LogsController(ILogQueryService logQueryService) : Controlle
         }
 
         return Ok(await logQueryService.QueryAsync(levelList, from, to, search, skip, take, cancellationToken));
+    }
+
+    [HttpPost("delete")]
+    public async Task<ActionResult<DeleteLogsResponse>> Delete(
+        [FromBody] DeleteLogsRequest request,
+        CancellationToken cancellationToken = default)
+    {
+        var hasEntryIds = request.EntryIds is { Count: > 0 };
+
+        if (request.DeleteAll == hasEntryIds)
+        {
+            return BadRequest("Specify either deleteAll=true or one or more entryIds.");
+        }
+
+        var deletedCount = request.DeleteAll
+            ? await logMutationService.DeleteAllAsync(cancellationToken)
+            : await logMutationService.DeleteAsync(request.EntryIds!, cancellationToken);
+
+        return Ok(new DeleteLogsResponse
+        {
+            DeletedCount = deletedCount
+        });
+    }
+
+    public sealed record class DeleteLogsRequest
+    {
+        public bool DeleteAll { get; init; }
+
+        public IReadOnlyList<long>? EntryIds { get; init; }
+    }
+
+    public sealed record class DeleteLogsResponse
+    {
+        public required int DeletedCount { get; init; }
     }
 }

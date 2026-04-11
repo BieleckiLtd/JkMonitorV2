@@ -1,5 +1,5 @@
 import { useEffect, useState, useCallback } from 'react';
-import { Search, RefreshCw, ChevronLeft, ChevronRight, Copy, Check, ClipboardX } from 'lucide-react';
+import { Search, RefreshCw, ChevronLeft, ChevronRight, Copy, Check, ClipboardX, Trash2, LoaderCircle } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Card, CardContent } from '../components/ui/card';
 import { cn } from '../lib/utils';
@@ -16,6 +16,10 @@ type LogEntry = {
 type LogQueryResponse = {
   entries: LogEntry[];
   totalCount: number;
+};
+
+type DeleteLogsResponse = {
+  deletedCount: number;
 };
 
 const severityLevels = ['Trace', 'Debug', 'Information', 'Warning', 'Error', 'Critical'] as const;
@@ -141,6 +145,8 @@ export function LogsPanel() {
   const [page, setPage] = useState(0);
   const [expandedId, setExpandedId] = useState<number | null>(null);
   const [copyFeedback, setCopyFeedback] = useState<{ entryId: number; state: 'success' | 'error' } | null>(null);
+  const [actionFeedback, setActionFeedback] = useState<{ state: 'success' | 'error'; message: string } | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<'all' | 'visible' | number | null>(null);
 
   const fetchLogs = useCallback(async () => {
     setIsLoading(true);
@@ -198,6 +204,15 @@ export function LogsPanel() {
     return () => window.clearTimeout(timeoutId);
   }, [copyFeedback]);
 
+  useEffect(() => {
+    if (!actionFeedback) {
+      return undefined;
+    }
+
+    const timeoutId = window.setTimeout(() => setActionFeedback(null), 4000);
+    return () => window.clearTimeout(timeoutId);
+  }, [actionFeedback]);
+
   const toggleLevel = (level: string) => {
     setSelectedLevels((prev) => {
       const next = new Set(prev);
@@ -220,7 +235,69 @@ export function LogsPanel() {
     }
   };
 
+  const handleDeleteEntries = useCallback(async (
+    target: 'all' | 'visible' | number,
+    entryIds: number[],
+    confirmationMessage: string,
+    successMessage: (deletedCount: number) => string,
+  ) => {
+    if (target !== 'all' && entryIds.length === 0) {
+      return;
+    }
+
+    if (!window.confirm(confirmationMessage)) {
+      return;
+    }
+
+    setDeleteTarget(target);
+    setActionFeedback(null);
+
+    try {
+      const response = await fetch('/api/logs/delete', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(target === 'all'
+          ? { deleteAll: true }
+          : { entryIds }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(errorText || 'Failed to clear logs.');
+      }
+
+      const { deletedCount } = (await response.json()) as DeleteLogsResponse;
+      const removedIds = new Set(entryIds);
+
+      setExpandedId((current) => (current != null && removedIds.has(current) ? null : current));
+      setCopyFeedback((current) => (current != null && removedIds.has(current.entryId) ? null : current));
+      setActionFeedback({
+        state: 'success',
+        message: successMessage(deletedCount),
+      });
+
+      const remainingCount = Math.max(0, totalCount - deletedCount);
+      const nextPage = target === 'all'
+        ? 0
+        : Math.min(page, Math.max(0, Math.ceil(remainingCount / pageSize) - 1));
+
+      if (nextPage !== page) {
+        setPage(nextPage);
+      } else {
+        await fetchLogs();
+      }
+    } catch (error) {
+      setActionFeedback({
+        state: 'error',
+        message: error instanceof Error ? error.message : 'Failed to clear logs.',
+      });
+    } finally {
+      setDeleteTarget(null);
+    }
+  }, [fetchLogs, page, totalCount]);
+
   const totalPages = Math.max(1, Math.ceil(totalCount / pageSize));
+  const isDeleting = deleteTarget !== null;
 
   return (
     <Card className='flex min-h-0 flex-1 flex-col border border-border/80 bg-card/85 shadow-sm'>
@@ -301,14 +378,52 @@ export function LogsPanel() {
                   className='rounded p-1 hover:bg-muted disabled:opacity-30'
                 >
                   <ChevronRight className='h-4 w-4' />
-                  </button>
+                </button>
               </div>
             ) : null}
             <Button
               type='button'
+              variant='destructive'
+              onClick={() => void handleDeleteEntries(
+                'visible',
+                entries.map((entry) => entry.id),
+                `Clear the ${entries.length} log entries visible on this page?`,
+                (deletedCount) => `Cleared ${deletedCount.toLocaleString()} visible log entries.`,
+              )}
+              disabled={isLoading || isDeleting || entries.length === 0}
+              className='h-8 gap-1.5 px-3 text-xs'
+            >
+              {deleteTarget === 'visible' ? (
+                <LoaderCircle className='h-3.5 w-3.5 animate-spin' />
+              ) : (
+                <Trash2 className='h-3.5 w-3.5' />
+              )}
+              Clear visible
+            </Button>
+            <Button
+              type='button'
+              variant='destructive'
+              onClick={() => void handleDeleteEntries(
+                'all',
+                [],
+                'Clear every captured log entry?',
+                (deletedCount) => `Cleared ${deletedCount.toLocaleString()} log entries.`,
+              )}
+              disabled={isLoading || isDeleting || totalCount === 0}
+              className='h-8 gap-1.5 px-3 text-xs'
+            >
+              {deleteTarget === 'all' ? (
+                <LoaderCircle className='h-3.5 w-3.5 animate-spin' />
+              ) : (
+                <Trash2 className='h-3.5 w-3.5' />
+              )}
+              Clear all
+            </Button>
+            <Button
+              type='button'
               variant='outline'
               onClick={() => void fetchLogs()}
-              disabled={isLoading}
+              disabled={isLoading || isDeleting}
               className='h-8 gap-1.5 px-3 text-xs text-muted-foreground'
             >
               <RefreshCw className={cn('h-3.5 w-3.5', isLoading && 'animate-spin')} />
@@ -321,6 +436,19 @@ export function LogsPanel() {
         {loadError && (
           <div className='rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive'>
             {loadError}
+          </div>
+        )}
+
+        {actionFeedback && (
+          <div
+            className={cn(
+              'rounded-xl border px-4 py-3 text-sm',
+              actionFeedback.state === 'success'
+                ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-200'
+                : 'border-destructive/30 bg-destructive/10 text-destructive',
+            )}
+          >
+            {actionFeedback.message}
           </div>
         )}
 
@@ -387,6 +515,7 @@ export function LogsPanel() {
                   variant='ghost'
                   size='icon-sm'
                   onClick={() => void handleCopyEntry(entry)}
+                  disabled={isDeleting}
                   aria-label={`Copy log entry ${entry.id} to clipboard`}
                   title={
                     copyFeedback?.entryId === entry.id
@@ -411,6 +540,30 @@ export function LogsPanel() {
                     )
                   ) : (
                     <Copy />
+                  )}
+                </Button>
+                <Button
+                  type='button'
+                  variant='ghost'
+                  size='icon-sm'
+                  onClick={() => void handleDeleteEntries(
+                    entry.id,
+                    [entry.id],
+                    'Clear this log entry?',
+                    () => 'Cleared log entry.',
+                  )}
+                  disabled={isDeleting}
+                  aria-label={`Delete log entry ${entry.id}`}
+                  title='Clear log entry'
+                  className={cn(
+                    'mt-0.5 shrink-0 text-muted-foreground',
+                    deleteTarget === entry.id && 'text-destructive bg-destructive/10 hover:bg-destructive/15 hover:text-destructive',
+                  )}
+                >
+                  {deleteTarget === entry.id ? (
+                    <LoaderCircle className='animate-spin' />
+                  ) : (
+                    <Trash2 />
                   )}
                 </Button>
               </div>

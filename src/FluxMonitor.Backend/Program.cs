@@ -33,6 +33,7 @@ builder.Services.AddControllers();
 builder.Services.AddOpenApi();
 builder.Services.AddSingleton(logStore);
 builder.Services.AddSingleton<ILogQueryService>(logStore);
+builder.Services.AddSingleton<ILogMutationService>(logStore);
 
 builder.Host.UseSerilog((context, services, loggerConfiguration) => loggerConfiguration
     .ReadFrom.Configuration(context.Configuration)
