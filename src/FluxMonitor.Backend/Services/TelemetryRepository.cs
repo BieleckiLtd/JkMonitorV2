@@ -122,6 +122,8 @@ public sealed class TimescaleTelemetryRepository(
     private readonly SemaphoreSlim _initializationLock = new(1, 1);
     private readonly object _stateGate = new();
     private readonly Dictionary<string, Queue<BufferedSnapshot>> _recentSamples = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, Queue<MeasurementValueRow>> _recentMinuteHistory = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<AggregateKey, AggregateAccumulator> _pendingMinuteBuckets = new();
     private readonly Dictionary<AggregateKey, AggregateAccumulator> _pendingBuckets = new();
     private TelemetryRuntimeSettings _runtimeSettings = TelemetryRuntimeSettings.FromStorage(configuration.CurrentValue.Storage);
     private volatile bool _initialized;
@@ -132,6 +134,7 @@ public sealed class TimescaleTelemetryRepository(
     private const int RetentionDeleteBatchSize = 5_000;
     private const int RetentionDeleteCommandTimeoutSeconds = 120;
     private const double ShutdownFlushMinimumCompletionRatio = 0.45;
+    private static readonly TimeSpan MinuteHistoryWindow = TimeSpan.FromHours(1);
 
     private TelemetryRuntimeSettings GetRuntimeSettings()
     {
@@ -173,10 +176,11 @@ public sealed class TimescaleTelemetryRepository(
 
             logger.LogInformation(
                 useTimescale
-                    ? "Telemetry schema is ready with a single {PersistedBucket} Measurements hypertable and {RawHistoryMinutes}-minute in-memory raw cache."
-                    : "Telemetry schema is ready using plain PostgreSQL storage with a {PersistedBucket} persisted tier and {RawHistoryMinutes}-minute in-memory raw cache.",
+                    ? "Telemetry schema is ready with a single {PersistedBucket} Measurements hypertable, a {RawHistoryMinutes}-minute in-memory raw cache, and a {MinuteHistoryMinutes}-minute in-memory 1-minute rollup cache."
+                    : "Telemetry schema is ready using plain PostgreSQL storage with a {PersistedBucket} persisted tier, a {RawHistoryMinutes}-minute in-memory raw cache, and a {MinuteHistoryMinutes}-minute in-memory 1-minute rollup cache.",
                 GetPersistedBucketDescription(),
-                GetRawHistoryWindow().TotalMinutes);
+                GetRawHistoryWindow().TotalMinutes,
+                MinuteHistoryWindow.TotalMinutes);
         }
         finally
         {
@@ -204,10 +208,18 @@ public sealed class TimescaleTelemetryRepository(
         {
             var runtimeSettings = _runtimeSettings;
             var persistedBucketMinutes = runtimeSettings.PersistedBucketMinutes;
+            var currentMinuteBucket = AlignToBucketBoundaryFloor(sample.Snapshot.CollectedAt, "1m");
             var persistedResolution = GetPersistedResolution(persistedBucketMinutes);
             var currentBucket = AlignToBucketBoundaryFloor(sample.Snapshot.CollectedAt, persistedResolution);
 
             EnqueueRecentSampleLocked(device.DeviceId, sample.Snapshot.CollectedAt, measurements);
+            AccumulateMinuteBucketLocked(
+                device.DeviceId,
+                currentMinuteBucket,
+                sample.Snapshot.CollectedAt,
+                measurements);
+            PromoteCompletedMinuteBucketsLocked(currentMinuteBucket);
+            TrimRecentMinuteHistoryLocked(DateTimeOffset.UtcNow.Subtract(MinuteHistoryWindow));
             AccumulatePersistedBucketLocked(
                 device.DeviceId,
                 persistedBucketMinutes,
@@ -248,6 +260,7 @@ public sealed class TimescaleTelemetryRepository(
 
             _runtimeSettings = updatedSettings;
             TrimRecentSamplesLocked(DateTimeOffset.UtcNow.Subtract(GetRawHistoryWindow(updatedSettings)));
+            TrimRecentMinuteHistoryLocked(DateTimeOffset.UtcNow.Subtract(MinuteHistoryWindow));
         }
 
         await UpsertMeasurementsAsync(rowsToPersist, cancellationToken);
@@ -290,8 +303,13 @@ public sealed class TimescaleTelemetryRepository(
             return [];
         }
 
-        return string.Equals(resolution, "1s", StringComparison.Ordinal)
-            ? QueryBufferedHistory(deviceId, sensors, bucketValueKind, from, to)
+        if (string.Equals(resolution, "1s", StringComparison.Ordinal))
+        {
+            return QueryBufferedHistory(deviceId, sensors, bucketValueKind, from, to);
+        }
+
+        return ShouldUseMinuteHistoryCache(resolution)
+            ? QueryBufferedMinuteHistory(deviceId, sensors, bucketValueKind, from, to)
             : await QueryPersistedHistoryAsync(deviceId, sensors, resolution, bucketValueKind, from, to, cancellationToken);
     }
 
@@ -322,8 +340,13 @@ public sealed class TimescaleTelemetryRepository(
 
         var sensorName = BuildCellSensorName(cellEntityKey, cellIndex);
 
-        return string.Equals(resolution, "1s", StringComparison.Ordinal)
-            ? QueryBufferedCellHistory(deviceId, sensorName, bucketValueKind, from, to)
+        if (string.Equals(resolution, "1s", StringComparison.Ordinal))
+        {
+            return QueryBufferedCellHistory(deviceId, sensorName, bucketValueKind, from, to);
+        }
+
+        return ShouldUseMinuteHistoryCache(resolution)
+            ? QueryBufferedMinuteCellHistory(deviceId, sensorName, bucketValueKind, from, to)
             : await QueryPersistedCellHistoryAsync(deviceId, sensorName, resolution, bucketValueKind, from, to, cancellationToken);
     }
 
@@ -333,12 +356,15 @@ public sealed class TimescaleTelemetryRepository(
 
         List<MeasurementValueRow> rowsToPersist;
         var now = DateTimeOffset.UtcNow;
+        var currentMinuteBucket = AlignToBucketBoundaryFloor(now, "1m");
         var persistedResolution = GetPersistedResolution();
         var currentBucket = AlignToBucketBoundaryFloor(now, persistedResolution);
 
         lock (_stateGate)
         {
+            PromoteCompletedMinuteBucketsLocked(currentMinuteBucket);
             TrimRecentSamplesLocked(now.Subtract(GetRawHistoryWindow()));
+            TrimRecentMinuteHistoryLocked(now.Subtract(MinuteHistoryWindow));
             rowsToPersist = DrainPendingBucketsLocked(currentBucket);
         }
 
@@ -608,6 +634,8 @@ public sealed class TimescaleTelemetryRepository(
         lock (_stateGate)
         {
             _recentSamples.Clear();
+            _recentMinuteHistory.Clear();
+            _pendingMinuteBuckets.Clear();
             _pendingBuckets.Clear();
         }
     }
@@ -910,7 +938,23 @@ public sealed class TimescaleTelemetryRepository(
         TrimQueueLocked(queue, DateTimeOffset.UtcNow.Subtract(GetRawHistoryWindow()));
     }
 
+    private void AccumulateMinuteBucketLocked(
+        string deviceId,
+        DateTimeOffset bucketStart,
+        DateTimeOffset sampleTimestamp,
+        IReadOnlyDictionary<string, double> measurements)
+        => AccumulateBucketLocked(_pendingMinuteBuckets, deviceId, 1, bucketStart, sampleTimestamp, measurements);
+
     private void AccumulatePersistedBucketLocked(
+        string deviceId,
+        int bucketMinutes,
+        DateTimeOffset bucketStart,
+        DateTimeOffset sampleTimestamp,
+        IReadOnlyDictionary<string, double> measurements)
+        => AccumulateBucketLocked(_pendingBuckets, deviceId, bucketMinutes, bucketStart, sampleTimestamp, measurements);
+
+    private static void AccumulateBucketLocked(
+        IDictionary<AggregateKey, AggregateAccumulator> pendingBuckets,
         string deviceId,
         int bucketMinutes,
         DateTimeOffset bucketStart,
@@ -920,10 +964,10 @@ public sealed class TimescaleTelemetryRepository(
         foreach (var measurement in measurements)
         {
             var key = new AggregateKey(bucketMinutes, deviceId, bucketStart, measurement.Key);
-            if (!_pendingBuckets.TryGetValue(key, out var accumulator))
+            if (!pendingBuckets.TryGetValue(key, out var accumulator))
             {
                 accumulator = new AggregateAccumulator();
-                _pendingBuckets[key] = accumulator;
+                pendingBuckets[key] = accumulator;
             }
 
             accumulator.Add(sampleTimestamp, measurement.Value);
@@ -931,19 +975,24 @@ public sealed class TimescaleTelemetryRepository(
     }
 
     private List<MeasurementValueRow> DrainPendingBucketsLocked(DateTimeOffset drainBeforeExclusive)
-        => DrainMatchingPendingBucketsLocked(key => key.Time < drainBeforeExclusive);
+        => DrainMatchingPendingBucketsLocked(_pendingBuckets, key => key.Time < drainBeforeExclusive);
 
     private List<MeasurementValueRow> DrainAllPendingBucketsLocked()
-        => DrainMatchingPendingBucketsLocked(static _ => true);
+        => DrainMatchingPendingBucketsLocked(_pendingBuckets, static _ => true);
 
-    private List<MeasurementValueRow> DrainMatchingPendingBucketsLocked(Func<AggregateKey, bool> predicate)
+    private List<MeasurementValueRow> DrainMinuteBucketsLocked(DateTimeOffset drainBeforeExclusive)
+        => DrainMatchingPendingBucketsLocked(_pendingMinuteBuckets, key => key.Time < drainBeforeExclusive);
+
+    private static List<MeasurementValueRow> DrainMatchingPendingBucketsLocked(
+        IDictionary<AggregateKey, AggregateAccumulator> pendingBuckets,
+        Func<AggregateKey, bool> predicate)
     {
-        if (_pendingBuckets.Count == 0)
+        if (pendingBuckets.Count == 0)
         {
             return [];
         }
 
-        var matchingKeys = _pendingBuckets.Keys
+        var matchingKeys = pendingBuckets.Keys
             .Where(predicate)
             .OrderBy(key => key.Time)
             .ThenBy(key => key.BucketMinutes)
@@ -959,7 +1008,7 @@ public sealed class TimescaleTelemetryRepository(
         var rows = new List<MeasurementValueRow>(matchingKeys.Length);
         foreach (var key in matchingKeys)
         {
-            if (_pendingBuckets.Remove(key, out var accumulator) && accumulator.HasValue)
+            if (pendingBuckets.Remove(key, out var accumulator) && accumulator.HasValue)
             {
                 rows.Add(new MeasurementValueRow(
                     key.BucketMinutes,
@@ -976,6 +1025,28 @@ public sealed class TimescaleTelemetryRepository(
         return rows;
     }
 
+    private void PromoteCompletedMinuteBucketsLocked(DateTimeOffset drainBeforeExclusive)
+    {
+        var rows = DrainMinuteBucketsLocked(drainBeforeExclusive);
+        if (rows.Count == 0)
+        {
+            return;
+        }
+
+        var cutoff = DateTimeOffset.UtcNow.Subtract(MinuteHistoryWindow);
+        foreach (var row in rows)
+        {
+            if (!_recentMinuteHistory.TryGetValue(row.DeviceId, out var queue))
+            {
+                queue = new Queue<MeasurementValueRow>();
+                _recentMinuteHistory[row.DeviceId] = queue;
+            }
+
+            queue.Enqueue(row);
+            TrimMinuteHistoryQueueLocked(queue, cutoff);
+        }
+    }
+
     private void TrimRecentSamplesLocked(DateTimeOffset cutoff)
     {
         foreach (var queue in _recentSamples.Values)
@@ -984,9 +1055,25 @@ public sealed class TimescaleTelemetryRepository(
         }
     }
 
+    private void TrimRecentMinuteHistoryLocked(DateTimeOffset cutoff)
+    {
+        foreach (var queue in _recentMinuteHistory.Values)
+        {
+            TrimMinuteHistoryQueueLocked(queue, cutoff);
+        }
+    }
+
     private static void TrimQueueLocked(Queue<BufferedSnapshot> queue, DateTimeOffset cutoff)
     {
         while (queue.Count > 0 && queue.Peek().Timestamp < cutoff)
+        {
+            queue.Dequeue();
+        }
+    }
+
+    private static void TrimMinuteHistoryQueueLocked(Queue<MeasurementValueRow> queue, DateTimeOffset cutoff)
+    {
+        while (queue.Count > 0 && queue.Peek().Time < cutoff)
         {
             queue.Dequeue();
         }
@@ -1097,6 +1184,77 @@ public sealed class TimescaleTelemetryRepository(
             .ToArray();
     }
 
+    private IReadOnlyList<HistoryDataPoint> QueryBufferedMinuteHistory(
+        string deviceId,
+        ResolvedHistorySensors sensors,
+        BucketValueKind bucketValueKind,
+        DateTimeOffset from,
+        DateTimeOffset to)
+    {
+        List<MeasurementValueRow> rows = [];
+        var sensorNames = sensors
+            .AsEnumerable()
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Cast<string>()
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        lock (_stateGate)
+        {
+            var now = DateTimeOffset.UtcNow;
+            PromoteCompletedMinuteBucketsLocked(AlignToBucketBoundaryFloor(now, "1m"));
+            TrimRecentMinuteHistoryLocked(now.Subtract(MinuteHistoryWindow));
+
+            if (_recentMinuteHistory.TryGetValue(deviceId, out var queue))
+            {
+                rows.AddRange(queue.Where(row =>
+                    sensorNames.Contains(row.SensorName) &&
+                    row.Time >= from &&
+                    row.Time <= to));
+            }
+
+            rows.AddRange(_pendingMinuteBuckets
+                .Where(entry =>
+                    string.Equals(entry.Key.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase) &&
+                    sensorNames.Contains(entry.Key.SensorName) &&
+                    entry.Key.Time >= from &&
+                    entry.Key.Time <= to &&
+                    entry.Value.HasValue)
+                .OrderBy(entry => entry.Key.Time)
+                .ThenBy(entry => entry.Key.SensorName, StringComparer.OrdinalIgnoreCase)
+                .Select(entry => new MeasurementValueRow(
+                    entry.Key.BucketMinutes,
+                    entry.Key.Time,
+                    entry.Key.DeviceId,
+                    entry.Key.SensorName,
+                    entry.Value.Min,
+                    entry.Value.Max,
+                    entry.Value.Average,
+                    entry.Value.Last)));
+        }
+
+        if (rows.Count == 0)
+        {
+            return [];
+        }
+
+        var points = new SortedDictionary<DateTimeOffset, HistoryPointAccumulator>();
+        foreach (var row in rows.OrderBy(row => row.Time).ThenBy(row => row.SensorName, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!points.TryGetValue(row.Time, out var accumulator))
+            {
+                accumulator = new HistoryPointAccumulator();
+                points[row.Time] = accumulator;
+            }
+
+            accumulator.Add(row.SensorName, row.GetValue(bucketValueKind), sensors);
+        }
+
+        return points
+            .Select(entry => entry.Value.ToHistoryDataPoint(entry.Key, bucketValueKind))
+            .ToArray();
+    }
+
     private async Task<IReadOnlyList<HistoryDataPoint>> QueryPersistedHistoryAsync(
         string deviceId,
         ResolvedHistorySensors sensors,
@@ -1186,6 +1344,54 @@ public sealed class TimescaleTelemetryRepository(
 
         return points
             .Select(entry => new CellHistoryDataPoint(entry.Key, entry.Value.GetValue(bucketValueKind)))
+            .ToArray();
+    }
+
+    private IReadOnlyList<CellHistoryDataPoint> QueryBufferedMinuteCellHistory(
+        string deviceId,
+        string sensorName,
+        BucketValueKind bucketValueKind,
+        DateTimeOffset from,
+        DateTimeOffset to)
+    {
+        List<MeasurementValueRow> rows = [];
+
+        lock (_stateGate)
+        {
+            var now = DateTimeOffset.UtcNow;
+            PromoteCompletedMinuteBucketsLocked(AlignToBucketBoundaryFloor(now, "1m"));
+            TrimRecentMinuteHistoryLocked(now.Subtract(MinuteHistoryWindow));
+
+            if (_recentMinuteHistory.TryGetValue(deviceId, out var queue))
+            {
+                rows.AddRange(queue.Where(row =>
+                    string.Equals(row.SensorName, sensorName, StringComparison.OrdinalIgnoreCase) &&
+                    row.Time >= from &&
+                    row.Time <= to));
+            }
+
+            rows.AddRange(_pendingMinuteBuckets
+                .Where(entry =>
+                    string.Equals(entry.Key.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(entry.Key.SensorName, sensorName, StringComparison.OrdinalIgnoreCase) &&
+                    entry.Key.Time >= from &&
+                    entry.Key.Time <= to &&
+                    entry.Value.HasValue)
+                .OrderBy(entry => entry.Key.Time)
+                .Select(entry => new MeasurementValueRow(
+                    entry.Key.BucketMinutes,
+                    entry.Key.Time,
+                    entry.Key.DeviceId,
+                    entry.Key.SensorName,
+                    entry.Value.Min,
+                    entry.Value.Max,
+                    entry.Value.Average,
+                    entry.Value.Last)));
+        }
+
+        return rows
+            .OrderBy(row => row.Time)
+            .Select(row => new CellHistoryDataPoint(row.Time, row.GetValue(bucketValueKind)))
             .ToArray();
     }
 
@@ -1475,6 +1681,10 @@ public sealed class TimescaleTelemetryRepository(
            ?? definition.ComputedEntities.FirstOrDefault(entity =>
                string.Equals(entity.Id, "computed_power", StringComparison.OrdinalIgnoreCase))?.Id
            ?? "computed_power";
+
+    private bool ShouldUseMinuteHistoryCache(string resolution)
+        => string.Equals(resolution, "1m", StringComparison.Ordinal) &&
+           GetPersistedBucketMinutes() != 1;
 
     private static string? ResolveMosTemperatureSensorName(DeviceDefinition definition)
         => definition.Entities.FirstOrDefault(entity =>

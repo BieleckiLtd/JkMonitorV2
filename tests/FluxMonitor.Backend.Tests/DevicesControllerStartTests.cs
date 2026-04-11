@@ -31,6 +31,29 @@ public sealed class DevicesControllerStartTests
         Assert.Equal(expected, actual);
     }
 
+    [Theory]
+    [InlineData("1s", "5m", "1s")]
+    [InlineData("1m", "5m", "1m")]
+    [InlineData("5m", "5m", "5m")]
+    [InlineData("1h", "5m", "5m")]
+    [InlineData("5m", "1m", "1m")]
+    public void NormalizeHistoryResolution_ReturnsExpectedResolution(string requested, string persisted, string expected)
+    {
+        var actual = DevicesController.NormalizeHistoryResolution(requested, persisted);
+
+        Assert.Equal(expected, actual);
+    }
+
+    [Fact]
+    public void GetDefaultHistoryFrom_UsesOneHourWindow_ForMinuteResolution()
+    {
+        var to = new DateTimeOffset(2026, 4, 12, 14, 30, 45, TimeSpan.Zero);
+
+        var actual = DevicesController.GetDefaultHistoryFrom("1m", to);
+
+        Assert.Equal(new DateTimeOffset(2026, 4, 12, 13, 30, 45, TimeSpan.Zero), actual);
+    }
+
     [Fact]
     public void GetStartOutcomeError_UsesFallbackWhenFailureHasNoMessage()
     {

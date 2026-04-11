@@ -129,19 +129,15 @@ public sealed class DevicesController(
         var persistedResolution = TimescaleTelemetryRepository.GetPersistedResolution(GetCurrentRetention().PersistedBucketMinutes);
         var allowed = new HashSet<string>(StringComparer.Ordinal) { "1s", "1m", "5m", "1h", persistedResolution };
         if (!allowed.Contains(resolution))
-            return BadRequest(new { message = $"Invalid resolution '{resolution}'. Use 1s or {persistedResolution}. Legacy 1m, 5m, and 1h inputs are accepted as persisted-history aliases." });
+            return BadRequest(new { message = $"Invalid resolution '{resolution}'. Use 1s, 1m, or {persistedResolution}. Legacy 5m and 1h inputs are accepted as persisted-history aliases." });
 
         if (!TimescaleTelemetryRepository.TryParseBucketValueKind(bucketView, out var bucketValueKind))
             return BadRequest(new { message = $"Invalid bucket view '{bucketView}'. Use avg, min, max, or last." });
 
         var toValue = to ?? DateTimeOffset.UtcNow;
-        var fromValue = from ?? (
-            string.Equals(resolution, "1s", StringComparison.Ordinal) ? toValue.AddMinutes(-10) :
-            string.Equals(resolution, "1m", StringComparison.Ordinal) ? toValue.AddHours(-1) :
-            string.Equals(resolution, "1h", StringComparison.Ordinal) ? toValue.AddDays(-7) :
-            toValue.AddDays(-1));
+        var fromValue = from ?? GetDefaultHistoryFrom(resolution, toValue);
 
-        var normalizedResolution = string.Equals(resolution, "1s", StringComparison.Ordinal) ? "1s" : persistedResolution;
+        var normalizedResolution = NormalizeHistoryResolution(resolution, persistedResolution);
         var points = await telemetryRepository.QueryHistoryAsync(deviceId, normalizedResolution, bucketValueKind, fromValue, toValue, cancellationToken);
         return Ok(new
         {
@@ -170,19 +166,15 @@ public sealed class DevicesController(
         var persistedResolution = TimescaleTelemetryRepository.GetPersistedResolution(GetCurrentRetention().PersistedBucketMinutes);
         var allowed = new HashSet<string>(StringComparer.Ordinal) { "1s", "1m", "5m", "1h", persistedResolution };
         if (!allowed.Contains(resolution))
-            return BadRequest(new { message = $"Invalid resolution '{resolution}'. Use 1s or {persistedResolution}. Legacy 1m, 5m, and 1h inputs are accepted as persisted-history aliases." });
+            return BadRequest(new { message = $"Invalid resolution '{resolution}'. Use 1s, 1m, or {persistedResolution}. Legacy 5m and 1h inputs are accepted as persisted-history aliases." });
 
         if (!TimescaleTelemetryRepository.TryParseBucketValueKind(bucketView, out var bucketValueKind))
             return BadRequest(new { message = $"Invalid bucket view '{bucketView}'. Use avg, min, max, or last." });
 
         var toValue = to ?? DateTimeOffset.UtcNow;
-        var fromValue = from ?? (
-            string.Equals(resolution, "1s", StringComparison.Ordinal) ? toValue.AddMinutes(-10) :
-            string.Equals(resolution, "1m", StringComparison.Ordinal) ? toValue.AddHours(-1) :
-            string.Equals(resolution, "1h", StringComparison.Ordinal) ? toValue.AddDays(-7) :
-            toValue.AddDays(-1));
+        var fromValue = from ?? GetDefaultHistoryFrom(resolution, toValue);
 
-        var normalizedResolution = string.Equals(resolution, "1s", StringComparison.Ordinal) ? "1s" : persistedResolution;
+        var normalizedResolution = NormalizeHistoryResolution(resolution, persistedResolution);
         var points = await telemetryRepository.QueryCellHistoryAsync(deviceId, cellIndex, normalizedResolution, bucketValueKind, fromValue, toValue, cancellationToken);
         return Ok(new
         {
@@ -501,6 +493,32 @@ public sealed class DevicesController(
 
     internal static bool IsSuccessfulStartOutcome(string? outcome)
         => string.Equals(outcome, "Succeeded", StringComparison.OrdinalIgnoreCase);
+
+    internal static string NormalizeHistoryResolution(string requestedResolution, string persistedResolution)
+        => string.Equals(requestedResolution, "1s", StringComparison.Ordinal) ||
+           string.Equals(requestedResolution, "1m", StringComparison.Ordinal)
+            ? requestedResolution
+            : persistedResolution;
+
+    internal static DateTimeOffset GetDefaultHistoryFrom(string resolution, DateTimeOffset toValue)
+    {
+        if (string.Equals(resolution, "1s", StringComparison.Ordinal))
+        {
+            return toValue.AddMinutes(-10);
+        }
+
+        if (string.Equals(resolution, "1m", StringComparison.Ordinal))
+        {
+            return toValue.AddHours(-1);
+        }
+
+        if (string.Equals(resolution, "1h", StringComparison.Ordinal))
+        {
+            return toValue.AddDays(-7);
+        }
+
+        return toValue.AddDays(-1);
+    }
 
     internal static string? GetStartOutcomeError(string? outcome, string? lastError)
     {

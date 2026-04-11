@@ -81,7 +81,7 @@ type HistoryDisplayMode = HistoryRangeId | 'today';
 
 const historyRanges: { id: HistoryRangeId; label: string; hint: string; queryResolution: Resolution; windowMs: number }[] = [
   { id: '10m', label: '10m', hint: 'Last 10 minutes — 1s samples from memory', queryResolution: '1s', windowMs: 600_000 },
-  { id: '1h', label: '1h', hint: 'Last hour — persisted averages', queryResolution: '5m', windowMs: 3_600_000 },
+  { id: '1h', label: '1h', hint: 'Last hour — 1-minute rollups from memory', queryResolution: '1m', windowMs: 3_600_000 },
   { id: '24h', label: '24h', hint: 'Last 24 hours — persisted averages', queryResolution: '5m', windowMs: 86_400_000 },
   { id: '7d', label: '7d', hint: 'Last 7 days — persisted averages', queryResolution: '5m', windowMs: 604_800_000 },
 ];
