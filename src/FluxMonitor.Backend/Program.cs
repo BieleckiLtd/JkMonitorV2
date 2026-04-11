@@ -50,6 +50,9 @@ builder.Services.AddSingleton<FluxMonitor.Backend.Services.NetworkManagementServ
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.WifiCredentialStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.BluetoothManagementService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.SshManagementService>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.WebTerminalAccessStore>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.IWebTerminalAccessStore>(sp => sp.GetRequiredService<FluxMonitor.Backend.Services.WebTerminalAccessStore>());
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.WebTerminalService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.DirectAccessStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.DirectAccessService>();
 builder.Services.AddHostedService<FluxMonitor.Backend.Services.DirectAccessBackgroundService>();
@@ -187,6 +190,9 @@ using (var scope = app.Services.CreateScope())
     await softwareUpdateStore.InitializeAsync(CancellationToken.None);
     await softwareUpdateStore.SyncCurrentBuildAsync(CancellationToken.None);
 
+    var webTerminalAccessStore = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.IWebTerminalAccessStore>();
+    await webTerminalAccessStore.InitializeAsync(CancellationToken.None);
+
     var directAccessStore = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.DirectAccessStore>();
     await directAccessStore.InitializeAsync(CancellationToken.None);
 
@@ -197,6 +203,7 @@ using (var scope = app.Services.CreateScope())
 app.UseDefaultFiles();
 app.UseStaticFiles();
 
+app.UseWebSockets();
 app.UseAuthorization();
 app.MapControllers();
 app.MapFallbackToFile("index.html");

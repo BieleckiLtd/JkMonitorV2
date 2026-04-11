@@ -537,3 +537,11 @@ html[data-theme='tactical-slate'] [data-slot='select-item']:hover {
     transform: translateX(0);
   }
 }
+
+.web-terminal-host .xterm {
+  height: 100%;
+}
+
+.web-terminal-host .xterm-viewport {
+  scrollbar-color: rgb(71 85 105 / 0.85) transparent;
+}

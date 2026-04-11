@@ -117,6 +117,7 @@ describe('SystemPage', () => {
     let ethernetEnabled = true;
     let sshEnabled = false;
     let sshActive = false;
+    let terminalEnabled = true;
     let preferredUpdateChannel: 'dev' | 'main' = 'dev';
     const localAccessHostName = 'fluxmonitor';
 
@@ -246,6 +247,15 @@ describe('SystemPage', () => {
               serviceUnitFileState: sshEnabled ? 'enabled' : 'disabled',
               serviceResult: 'success',
             },
+            terminal: {
+              supported: true,
+              enabled: terminalEnabled,
+              storageAvailable: true,
+              activeSessionCount: 0,
+              statusMessage: terminalEnabled ? 'Web terminal access is enabled.' : 'Web terminal access is off.',
+              shellPath: '/bin/bash',
+              transport: 'pty-via-script',
+            },
             directAccess: {
               settings: {
                 storageAvailable: true,
@@ -324,6 +334,32 @@ describe('SystemPage', () => {
             message: localAccessEnabled
               ? `Fallback local access is on. Hotspot SSID: ${localAccessHotspotName}. Bluetooth name: ${localAccessBluetoothName}.`
               : 'Fallback local access is off.',
+          }),
+        } as Response;
+      }
+
+      if (url === '/api/system/terminal-access') {
+        const body = typeof init?.body === 'string'
+          ? JSON.parse(init.body) as { enabled?: boolean }
+          : null;
+
+        terminalEnabled = Boolean(body?.enabled);
+
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            enabled: terminalEnabled,
+            message: terminalEnabled ? 'Web terminal access was enabled.' : 'Web terminal access was disabled.',
+            snapshot: {
+              supported: true,
+              enabled: terminalEnabled,
+              storageAvailable: true,
+              activeSessionCount: 0,
+              statusMessage: terminalEnabled ? 'Web terminal access is enabled.' : 'Web terminal access is off.',
+              shellPath: '/bin/bash',
+              transport: 'pty-via-script',
+            },
           }),
         } as Response;
       }
@@ -497,13 +533,16 @@ describe('SystemPage', () => {
 
     const notificationsButton = screen.getByRole('button', { name: /notifications/i });
     const themeButton = screen.getByRole('button', { name: /theme/i });
+    const terminalButton = screen.getByRole('button', { name: /terminal/i });
     const logsButton = screen.getByRole('button', { name: /logs/i });
 
     expect(notificationsButton).toBeInTheDocument();
     expect(themeButton).toBeInTheDocument();
+    expect(terminalButton).toBeInTheDocument();
     expect(logsButton).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /internet speed/i })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^tunnel$/i })).not.toBeInTheDocument();
+    expect(Boolean(terminalButton.compareDocumentPosition(logsButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(Boolean(themeButton.compareDocumentPosition(logsButton) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
     expect(screen.getByRole('button', { name: /^back$/i })).toBeInTheDocument();
 
@@ -715,6 +754,21 @@ describe('SystemPage', () => {
     expect(screen.queryByText(/ssh was enabled/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/enabled and running/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/ssh is off/i)).not.toBeInTheDocument();
+  });
+
+  it('toggles web terminal access from the unified connectivity section', async () => {
+    renderSystemPage('/system/connectivity');
+
+    expect(await screen.findByText(/browser shell access\./i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('switch', { name: /toggle web terminal access/i }));
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith('/api/system/terminal-access', expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }));
+    });
   });
 
   it('saves local access advanced settings from the unified connectivity section', async () => {

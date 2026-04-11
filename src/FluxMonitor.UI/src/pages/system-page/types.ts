@@ -277,6 +277,23 @@ export type SshServiceCommandResult = {
   message: string;
 };
 
+export type WebTerminalSnapshot = {
+  supported: boolean;
+  enabled: boolean;
+  storageAvailable: boolean;
+  activeSessionCount: number;
+  statusMessage?: string | null;
+  shellPath?: string | null;
+  transport?: string | null;
+};
+
+export type WebTerminalCommandResult = {
+  success: boolean;
+  enabled: boolean;
+  message: string;
+  snapshot: WebTerminalSnapshot;
+};
+
 export type DirectAccessSettingsSnapshot = {
   storageAvailable: boolean;
   autoStartMode: 'off' | 'when-wifi-not-connected' | string;
@@ -330,6 +347,7 @@ export type SystemConnectivitySnapshot = {
   network: NetworkConnectivitySnapshot;
   bluetooth: BluetoothRuntimeSnapshot;
   ssh: SshServiceSnapshot;
+  terminal: WebTerminalSnapshot;
   directAccess: DirectAccessSnapshot;
 };
 

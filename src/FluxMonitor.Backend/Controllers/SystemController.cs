@@ -17,6 +17,7 @@ public sealed class SystemController(
     WifiCredentialStore wifiCredentialStore,
     BluetoothManagementService bluetoothManagementService,
     SshManagementService sshManagementService,
+    WebTerminalService webTerminalService,
     DirectAccessService directAccessService,
     HostServicesCatalogService hostServicesCatalogService,
     ILogger<SystemController> logger) : ControllerBase
@@ -69,12 +70,14 @@ public sealed class SystemController(
         var networkTask = networkManagementService.GetSnapshotAsync(cancellationToken);
         var bluetoothTask = bluetoothManagementService.GetSnapshotAsync(cancellationToken);
         var sshTask = sshManagementService.GetSnapshotAsync(cancellationToken);
+        var terminalTask = webTerminalService.GetSnapshotAsync(cancellationToken);
 
-        await Task.WhenAll(networkTask, bluetoothTask, sshTask);
+        await Task.WhenAll(networkTask, bluetoothTask, sshTask, terminalTask);
 
         var network = await networkTask;
         var bluetooth = await bluetoothTask;
         var ssh = await sshTask;
+        var terminal = await terminalTask;
         var directAccess = await directAccessService.GetSnapshotAsync(network, bluetooth, cancellationToken);
 
         return Ok(new SystemConnectivitySnapshot
@@ -82,6 +85,7 @@ public sealed class SystemController(
             Network = network,
             Bluetooth = bluetooth,
             Ssh = ssh,
+            Terminal = terminal,
             DirectAccess = directAccess
         });
     }
@@ -93,6 +97,24 @@ public sealed class SystemController(
     {
         var result = await sshManagementService.SetEnabledAsync(request.Enabled, cancellationToken);
         return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpPost("terminal-access")]
+    public async Task<ActionResult<WebTerminalCommandResult>> SetTerminalAccessEnabled(
+        [FromBody] TerminalAccessToggleRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await webTerminalService.SetEnabledAsync(request.Enabled, cancellationToken);
+        return result.Success ? Ok(result) : BadRequest(result);
+    }
+
+    [HttpGet("terminal/ws")]
+    public async Task GetTerminalWebSocket(
+        [FromQuery] int? cols = null,
+        [FromQuery] int? rows = null,
+        CancellationToken cancellationToken = default)
+    {
+        await webTerminalService.AcceptSessionAsync(HttpContext, cols, rows, cancellationToken);
     }
 
     [HttpPost("direct-access/wifi")]
@@ -608,6 +630,7 @@ public sealed record EthernetDisconnectRequest(string InterfaceName);
 
 public sealed record BluetoothPowerRequest(bool Enabled);
 public sealed record SshToggleRequest(bool Enabled);
+public sealed record TerminalAccessToggleRequest(bool Enabled);
 public sealed record DirectAccessToggleRequest(bool Enabled);
 public sealed record SaveDirectAccessSettingsRequest(string AutoStartMode, string? WifiPassword, string? HotspotName, string? BluetoothDeviceName);
 public sealed record LocalAccessModeToggleRequest(bool Enabled);

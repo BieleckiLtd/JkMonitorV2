@@ -1,4 +1,4 @@
-import { Bell, Cpu, Database, List, Palette, RefreshCcw, Usb, Wifi, type LucideIcon } from 'lucide-react';
+import { Bell, Cpu, Database, List, Palette, RefreshCcw, SquareTerminal, Usb, Wifi, type LucideIcon } from 'lucide-react';
 
 export type SystemSection =
   | 'resource-usage'
@@ -6,6 +6,7 @@ export type SystemSection =
   | 'connectivity'
   | 'hardware-interfaces'
   | 'database'
+  | 'terminal'
   | 'logs';
 
 export const systemSectionRouteSegments: SystemSection[] = [
@@ -14,6 +15,7 @@ export const systemSectionRouteSegments: SystemSection[] = [
   'connectivity',
   'hardware-interfaces',
   'database',
+  'terminal',
   'logs',
 ];
 
@@ -30,6 +32,7 @@ export const systemSectionItems: readonly SystemSectionItem[] = [
   { id: 'connectivity', label: 'Connectivity', description: 'Wi-Fi, Bluetooth, and Ethernet', icon: Wifi },
   { id: 'hardware-interfaces', label: 'Hardware interfaces', description: 'Serial ports and block devices', icon: Usb },
   { id: 'database', label: 'Database', description: 'Storage size, backup, and restore', icon: Database },
+  { id: 'terminal', label: 'Terminal', description: 'Interactive host shell', icon: SquareTerminal },
   { id: 'logs', label: 'Logs', description: 'Application log output', icon: List },
 ];
 
@@ -51,11 +54,13 @@ export type SystemMenuItem =
   | SystemShortcutItem;
 
 const logsSystemSection = systemSectionItems.find((item) => item.id === 'logs');
-const mainSystemSectionItems = systemSectionItems.filter((item) => item.id !== 'logs');
+const terminalSystemSection = systemSectionItems.find((item) => item.id === 'terminal');
+const mainSystemSectionItems = systemSectionItems.filter((item) => item.id !== 'logs' && item.id !== 'terminal');
 
 export const systemMenuItems: readonly SystemMenuItem[] = [
   ...mainSystemSectionItems.map((item) => ({ ...item, path: `/system/${item.id}`, sectionId: item.id })),
   ...systemShortcutItems,
+  ...(terminalSystemSection ? [{ ...terminalSystemSection, path: `/system/${terminalSystemSection.id}`, sectionId: terminalSystemSection.id }] : []),
   ...(logsSystemSection ? [{ ...logsSystemSection, path: `/system/${logsSystemSection.id}`, sectionId: logsSystemSection.id }] : []),
 ];
 

@@ -8,6 +8,8 @@ public sealed record class SystemConnectivitySnapshot
 
     public required SshServiceSnapshot Ssh { get; init; }
 
+    public required WebTerminalSnapshot Terminal { get; init; }
+
     public required DirectAccessSnapshot DirectAccess { get; init; }
 }
 
@@ -220,6 +222,34 @@ public sealed record class SshServiceCommandResult
     public bool Active { get; init; }
 
     public required string Message { get; init; }
+}
+
+public sealed record class WebTerminalSnapshot
+{
+    public bool Supported { get; init; }
+
+    public bool Enabled { get; init; }
+
+    public bool StorageAvailable { get; init; }
+
+    public int ActiveSessionCount { get; init; }
+
+    public string? StatusMessage { get; init; }
+
+    public string? ShellPath { get; init; }
+
+    public string? Transport { get; init; }
+}
+
+public sealed record class WebTerminalCommandResult
+{
+    public bool Success { get; init; }
+
+    public bool Enabled { get; init; }
+
+    public required string Message { get; init; }
+
+    public required WebTerminalSnapshot Snapshot { get; init; }
 }
 
 public sealed record class BluetoothDeviceSnapshot

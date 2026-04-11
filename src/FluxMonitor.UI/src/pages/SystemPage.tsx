@@ -13,12 +13,14 @@ import { SoftwareUpdateSection } from './system-page/SoftwareUpdateSection';
 import { WifiMenuItem } from './system-page/WifiMenuItem';
 import { BluetoothMenuItem } from './system-page/BluetoothMenuItem';
 import { SshMenuItem } from './system-page/SshMenuItem';
+import { WebTerminalMenuItem } from './system-page/WebTerminalMenuItem';
 import { EthernetMenuItem } from './system-page/EthernetMenuItem';
 import { LocalAccessMenuItem } from './system-page/LocalAccessMenuItem';
 import { InternetSpeedMenuItem } from './system-page/InternetSpeedMenuItem';
 import { TunnelMenuItem } from './system-page/TunnelMenuItem';
 import { HardwareInterfacesSection } from './system-page/HardwareInterfacesSection';
 import { DatabaseSection } from './system-page/DatabaseSection';
+import { TerminalSection } from './system-page/TerminalSection';
 
 type DeviceTelemetrySnapshot = {
   totalVoltageVolts?: number | null;
@@ -312,10 +314,28 @@ type SshServiceCommandResult = {
   message: string;
 };
 
+type WebTerminalSnapshot = {
+  supported: boolean;
+  enabled: boolean;
+  storageAvailable: boolean;
+  activeSessionCount: number;
+  statusMessage?: string | null;
+  shellPath?: string | null;
+  transport?: string | null;
+};
+
+type WebTerminalCommandResult = {
+  success: boolean;
+  enabled: boolean;
+  message: string;
+  snapshot: WebTerminalSnapshot;
+};
+
 type SystemConnectivitySnapshot = {
   network: NetworkConnectivitySnapshot;
   bluetooth: BluetoothRuntimeSnapshot;
   ssh: SshServiceSnapshot;
+  terminal: WebTerminalSnapshot;
   directAccess: DirectAccessSnapshot;
 };
 
@@ -570,6 +590,7 @@ export function SystemPage() {
   const [bluetoothPowerLoading, setBluetoothPowerLoading] = useState(false);
   const [bluetoothFeedback, setBluetoothFeedback] = useState<InlineFeedback | null>(null);
   const [sshToggleLoading, setSshToggleLoading] = useState(false);
+  const [terminalToggleLoading, setTerminalToggleLoading] = useState(false);
   const [localAccessModeLoading, setLocalAccessModeLoading] = useState(false);
   const [localAccessModeFeedback, setLocalAccessModeFeedback] = useState<InlineFeedback | null>(null);
   const [localAccessHotspotName, setLocalAccessHotspotName] = useState('');
@@ -1505,6 +1526,28 @@ export function SystemPage() {
     }
   };
 
+  const toggleWebTerminalAccess = async (enabled: boolean) => {
+    setTerminalToggleLoading(true);
+
+    try {
+      const response = await fetch('/api/system/terminal-access', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ enabled }),
+      });
+
+      const data = await response.json() as WebTerminalCommandResult;
+
+      if (response.ok && data.success) {
+        await loadConnectivity();
+      }
+    } catch (error) {
+      console.error('Unable to change web terminal access.', error);
+    } finally {
+      setTerminalToggleLoading(false);
+    }
+  };
+
   const scanBluetooth = async () => {
     setBluetoothScanLoading(true);
     setBluetoothFeedback(null);
@@ -1746,6 +1789,7 @@ export function SystemPage() {
   const tunnelSectionOpen = expandedConnectivitySection === 'tunnel';
   const sshAccess = connectivity?.ssh ?? null;
   const sshToggleChecked = Boolean(sshAccess?.enabled || sshAccess?.active);
+  const terminalAccess = connectivity?.terminal ?? null;
   const wifiSummary = connectedWifiInterface?.connectedSsid
     ? connectedWifiInterface.connectedSsid
     : wifiInterfaces.length > 0
@@ -1913,6 +1957,12 @@ export function SystemPage() {
                         onToggle={() => toggleSshAccess(!sshToggleChecked)}
                       />
 
+                      <WebTerminalMenuItem
+                        terminalAccess={terminalAccess}
+                        terminalToggleLoading={terminalToggleLoading}
+                        onToggle={() => toggleWebTerminalAccess(!(terminalAccess?.enabled ?? false))}
+                      />
+
                       <EthernetMenuItem
                         ethernetSummary={ethernetSummary}
                         ethernetSectionOpen={ethernetSectionOpen}
@@ -2062,6 +2112,13 @@ export function SystemPage() {
                   onSaveSettings={saveDatabaseSettings}
                   onExport={handleExport}
                   onImportFile={handleImport}
+                />
+              ) : null}
+
+              {activeSystemSection === 'terminal' ? (
+                <TerminalSection
+                  terminalAccess={terminalAccess}
+                  connectivityLoading={connectivityLoading}
                 />
               ) : null}
 
