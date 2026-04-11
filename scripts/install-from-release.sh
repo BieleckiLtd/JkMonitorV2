@@ -719,6 +719,43 @@ timescaledb_is_enabled_for_database() {
   [ "$(run_as_postgres "psql -Atq -d \"$database_name\" -c \"SELECT 1 FROM pg_extension WHERE extname = 'timescaledb';\"" | tr -d '[:space:]')" = '1' ]
 }
 
+get_postgres_extension_directory() {
+  local sharedir
+  sharedir="$(pg_config --sharedir 2>/dev/null | tr -d '[:space:]')"
+  if [ -z "$sharedir" ]; then
+    return 1
+  fi
+
+  printf '%s\n' "$sharedir/extension"
+}
+
+read_timescaledb_default_version() {
+  local extension_dir="$1"
+  local control_path="$extension_dir/timescaledb.control"
+
+  if [ ! -f "$control_path" ]; then
+    return 1
+  fi
+
+  awk -F"'" '/^[[:space:]]*default_version[[:space:]]*=/{ print $2; exit }' "$control_path"
+}
+
+timescaledb_installation_scripts_are_present() {
+  local extension_dir
+  local default_version
+  local scripts
+
+  extension_dir="$(get_postgres_extension_directory)" || return 1
+  default_version="$(read_timescaledb_default_version "$extension_dir" || true)"
+
+  if [ -n "$default_version" ] && [ -f "$extension_dir/timescaledb--$default_version.sql" ]; then
+    return 0
+  fi
+
+  scripts=("$extension_dir"/timescaledb--*.sql)
+  [ -e "${scripts[0]}" ]
+}
+
 dpkg_package_is_installed() {
   local package_name="$1"
   dpkg -l "$package_name" 2>/dev/null \
@@ -774,10 +811,16 @@ install_timescaledb_package_for_local_postgres() {
   local apache_package=''
   local community_package="timescaledb-2-postgresql-$postgres_major"
   local package_name
+  local scripts_missing='false'
 
   apache_package="$(find_installed_timescaledb_apache_package "$postgres_major" || true)"
 
   if timescaledb_is_available_on_server; then
+    if ! timescaledb_installation_scripts_are_present; then
+      warn 'TimescaleDB is listed by PostgreSQL, but the installation SQL files are missing. Reinstalling the package.' >&2
+      scripts_missing='true'
+    fi
+
     if [ -n "$apache_package" ] && ! dpkg_package_is_installed "$community_package"; then
       section 'Upgrading TimescaleDB from Apache (OSS) to Community Edition' >&2
       info "Detected Apache-only TimescaleDB package '$apache_package'." >&2
@@ -804,7 +847,9 @@ install_timescaledb_package_for_local_postgres() {
       fi
     fi
 
-    return 0
+    if [ "$scripts_missing" = 'false' ]; then
+      return 0
+    fi
   fi
 
   if ! command -v apt-get >/dev/null 2>&1; then
@@ -823,18 +868,24 @@ install_timescaledb_package_for_local_postgres() {
     return 1
   fi
 
-  info "Installing package '$package_name'." >&2
-  run_elevated apt-get install -y "$package_name" >&2
+  if [ "$scripts_missing" = 'true' ] && dpkg_package_is_installed "$package_name"; then
+    info "Reinstalling package '$package_name' to restore the missing extension SQL files." >&2
+    run_elevated apt-get install --reinstall -y "$package_name" >&2
+  else
+    info "Installing package '$package_name'." >&2
+    run_elevated apt-get install -y "$package_name" >&2
+  fi
+
   if command -v systemctl >/dev/null 2>&1; then
     run_elevated systemctl restart postgresql >/dev/null 2>&1 || true
   fi
 
-  if timescaledb_is_available_on_server; then
+  if timescaledb_is_available_on_server && timescaledb_installation_scripts_are_present; then
     success "TimescaleDB package '$package_name' is available to PostgreSQL." >&2
     return 0
   fi
 
-  warn "TimescaleDB package '$package_name' was installed, but PostgreSQL still does not list the extension as available." >&2
+  warn "TimescaleDB package '$package_name' was installed, but PostgreSQL still cannot use the extension cleanly." >&2
   return 1
 }
 
@@ -885,6 +936,21 @@ maybe_provision_local_timescaledb_for_connection_string() {
 
   database_name="$(read_connection_string_database_name "$connection_string")"
   ensure_timescaledb_for_local_database "$database_name"
+}
+
+require_local_timescaledb_for_connection_string() {
+  local connection_string="$1"
+
+  if [ -z "$connection_string" ] || ! is_local_connection_string "$connection_string"; then
+    return 0
+  fi
+
+  if maybe_provision_local_timescaledb_for_connection_string "$connection_string"; then
+    return 0
+  fi
+
+  echo 'Local TimescaleDB repair failed. The update cannot continue with a broken local telemetry database.' >&2
+  return 1
 }
 
 read_connection_string_from_configuration_file() {
@@ -1628,9 +1694,9 @@ if [ "$reused_existing_configuration" = 'false' ]; then
   }
 }
 EOF
-  maybe_provision_local_timescaledb_for_connection_string "$CONNECTION_STRING" || true
+  require_local_timescaledb_for_connection_string "$CONNECTION_STRING"
 elif [ -n "${EXISTING_CONNECTION_STRING:-}" ]; then
-  maybe_provision_local_timescaledb_for_connection_string "$EXISTING_CONNECTION_STRING" || true
+  require_local_timescaledb_for_connection_string "$EXISTING_CONNECTION_STRING"
 fi
 
 if [ "$reused_existing_configuration" = 'false' ] || [ ! -f "$ENV_PATH" ]; then
