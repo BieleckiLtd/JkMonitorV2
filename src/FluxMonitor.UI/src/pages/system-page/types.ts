@@ -16,6 +16,7 @@ export type DeviceRuntimeState = {
   lastOutcome: string;
   lastError?: string | null;
   lastPersistedAt?: string | null;
+  temperatureUnit?: string | null;
   latestTelemetry?: DeviceTelemetrySnapshot | null;
 };
 

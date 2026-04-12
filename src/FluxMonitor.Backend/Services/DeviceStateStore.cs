@@ -52,6 +52,7 @@ public sealed class DeviceStateStore
             IsMaster = device.IsMaster,
             PollIntervalMilliseconds = device.PollIntervalMilliseconds,
             DisplayPrecision = device.DisplayPrecision,
+            TemperatureUnit = device.TemperatureUnit,
             LastOutcome = "NotStarted"
         };
 
@@ -198,6 +199,7 @@ public sealed class DeviceStateStore
             IsMaster = device.IsMaster,
             PollIntervalMilliseconds = device.PollIntervalMilliseconds,
             DisplayPrecision = device.DisplayPrecision,
+            TemperatureUnit = device.TemperatureUnit,
             LastPollStartedAt = startedAt,
             LastPollCompletedAt = completedAt,
             LastOutcome = outcome,

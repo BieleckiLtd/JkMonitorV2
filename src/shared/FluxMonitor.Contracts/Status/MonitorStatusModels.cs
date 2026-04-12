@@ -30,6 +30,8 @@ public sealed record class DeviceRuntimeState
 
     public DisplayPrecisionConfiguration DisplayPrecision { get; init; } = new();
 
+    public string TemperatureUnit { get; init; } = "c";
+
     public DeviceTelemetrySnapshot? LatestTelemetry { get; init; }
 }
 

@@ -31,6 +31,7 @@ type DeviceConfigurationWire = {
   cellVoltageSmoothingFactor: number;
   cellVoltageSmoothingBreakoutMillivolts: number;
   displayPrecision?: DisplayPrecision | null;
+  temperatureUnit?: string | null;
   hasDefinitionOverride?: boolean;
   definition?: DeviceDefinition | null;
 };
@@ -38,6 +39,7 @@ type DeviceConfigurationWire = {
 type DeviceConfiguration = DeviceConfigurationWire & {
   clientKey: string;
   displayPrecision: DisplayPrecision;
+  temperatureUnit: string;
   hasDefinitionOverride: boolean;
   definition: DeviceDefinition | null;
 };
@@ -371,6 +373,7 @@ function mergeDeviceConfigurations(
       cellVoltageSmoothingFactor: device.cellVoltageSmoothingFactor ?? 0,
       cellVoltageSmoothingBreakoutMillivolts: device.cellVoltageSmoothingBreakoutMillivolts ?? 0,
       displayPrecision: device.displayPrecision ?? defaultDisplayPrecision,
+      temperatureUnit: device.temperatureUnit ?? 'c',
       hasDefinitionOverride: device.hasDefinitionOverride ?? false,
       definition: device.definition ?? catalogDefinitionCache.get(device.definitionId) ?? null,
     } satisfies DeviceConfiguration;
@@ -393,6 +396,7 @@ function serializeDevice(device: DeviceConfiguration): DeviceConfigurationWire {
     cellVoltageSmoothingFactor: device.cellVoltageSmoothingFactor,
     cellVoltageSmoothingBreakoutMillivolts: device.cellVoltageSmoothingBreakoutMillivolts,
     displayPrecision: device.displayPrecision,
+    temperatureUnit: device.temperatureUnit,
     hasDefinitionOverride: device.hasDefinitionOverride,
     definition: device.definition,
   };
@@ -443,6 +447,7 @@ const defaultDevice = (
   cellVoltageSmoothingFactor: 0,
   cellVoltageSmoothingBreakoutMillivolts: 0,
   displayPrecision: defaultDisplayPrecision,
+  temperatureUnit: 'c',
   hasDefinitionOverride: false,
   definition: definitionSnapshot,
 });
@@ -1673,6 +1678,33 @@ export function DevicesPage() {
                       <label className='space-y-2 text-sm text-foreground'>
                         <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Temperature precision</span>
                         <Input type='number' min={0} step='1' value={device.displayPrecision.temperature} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'temperature', Number(event.target.value))} />
+                      </label>
+                      <label className='space-y-2 text-sm text-foreground'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Temperature unit</span>
+                        <div className='inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/70 p-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
+                          <button
+                            type='button'
+                            disabled={device.enabled}
+                            onClick={() => updateDevice(index, 'temperatureUnit', 'c')}
+                            className={cn(
+                              'rounded-full px-3 py-1 transition-colors',
+                              device.temperatureUnit === 'c' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted/70',
+                            )}
+                          >
+                            °C
+                          </button>
+                          <button
+                            type='button'
+                            disabled={device.enabled}
+                            onClick={() => updateDevice(index, 'temperatureUnit', 'f')}
+                            className={cn(
+                              'rounded-full px-3 py-1 transition-colors',
+                              device.temperatureUnit === 'f' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted/70',
+                            )}
+                          >
+                            °F
+                          </button>
+                        </div>
                       </label>
                       <label className='space-y-2 text-sm text-foreground'>
                         <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>SOC precision</span>

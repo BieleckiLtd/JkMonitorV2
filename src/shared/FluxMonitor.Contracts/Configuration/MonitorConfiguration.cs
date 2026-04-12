@@ -101,6 +101,11 @@ public sealed class DeviceConfiguration
 
     public DisplayPrecisionConfiguration DisplayPrecision { get; init; } = new();
 
+    /// <summary>
+    /// Preferred temperature display unit for this device: "c" (Celsius, default) or "f" (Fahrenheit).
+    /// </summary>
+    public string TemperatureUnit { get; init; } = "c";
+
     public string? DefinitionVersion { get; init; }
 
     [JsonIgnore]

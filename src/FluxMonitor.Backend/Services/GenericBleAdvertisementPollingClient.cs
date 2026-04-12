@@ -90,41 +90,59 @@ public sealed class GenericBleAdvertisementPollingClient(
         await EnsureScannerRunningAsync(cancellationToken);
 
         var advertisement = definition.Connection.Protocol.Settings!.Advertisement!;
+
+        // For passive broadcast devices we use a relaxed model: return the latest
+        // cached advertisement immediately if one exists.  Only on the very first
+        // poll (when the cache is empty) do we wait up to scanWindowMs for an
+        // initial advertisement to arrive.  This avoids timeout errors for devices
+        // that broadcast intermittently — the orchestrator's poll interval controls
+        // how often data is recorded, not how quickly the device must respond.
+        if (TryResolveLatestPayload(identifier, definition, out var immediateSnapshot))
+        {
+            return BuildResultFromPayload(immediateSnapshot, definition);
+        }
+
+        // First poll — wait for the initial advertisement.
         var scanWindow = TimeSpan.FromMilliseconds(Math.Max(advertisement.ScanWindowMs, 1000));
-        var freshness = TimeSpan.FromMilliseconds(Math.Max(advertisement.FreshnessMs, (int)scanWindow.TotalMilliseconds));
         var startedAt = DateTimeOffset.UtcNow;
 
         while (!cancellationToken.IsCancellationRequested)
         {
-            if (TryResolvePayload(identifier, definition, freshness, out var payloadSnapshot))
+            if (TryResolveLatestPayload(identifier, definition, out var payloadSnapshot))
             {
-                var bankData = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
-                foreach (var bank in definition.DataSources)
-                {
-                    var buffer = payloadSnapshot.Payload.ToArray();
-                    if (bank.ResponseLayout is not null)
-                        buffer = ResponseLayoutNormalizer.Normalize(buffer, bank.ResponseLayout);
-
-                    bankData[bank.Id] = buffer;
-                }
-
-                return telemetryBuilder.BuildPollResult(
-                    definition,
-                    bankData,
-                    DateTimeOffset.UtcNow,
-                    Convert.ToHexString(payloadSnapshot.Payload));
+                return BuildResultFromPayload(payloadSnapshot, definition);
             }
 
             if (DateTimeOffset.UtcNow - startedAt >= scanWindow)
             {
                 throw new TimeoutException(
-                    $"Timed out waiting for a fresh BLE advertisement from '{identifier}' for definition '{definition.Device.Id}'.");
+                    $"No BLE advertisement received from '{identifier}' for definition '{definition.Device.Id}'. " +
+                    "The device may be out of range or powered off.");
             }
 
             await Task.Delay(200, cancellationToken);
         }
 
         throw new OperationCanceledException(cancellationToken);
+    }
+
+    private DevicePollResult BuildResultFromPayload(AdvertisementPayloadSnapshot payloadSnapshot, DeviceDefinition definition)
+    {
+        var bankData = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+        foreach (var bank in definition.DataSources)
+        {
+            var buffer = payloadSnapshot.Payload.ToArray();
+            if (bank.ResponseLayout is not null)
+                buffer = ResponseLayoutNormalizer.Normalize(buffer, bank.ResponseLayout);
+
+            bankData[bank.Id] = buffer;
+        }
+
+        return telemetryBuilder.BuildPollResult(
+            definition,
+            bankData,
+            DateTimeOffset.UtcNow,
+            Convert.ToHexString(payloadSnapshot.Payload));
     }
 
     public async Task<IReadOnlyList<BleDiscoveredDevice>> DiscoverDevicesAsync(
@@ -215,6 +233,33 @@ public sealed class GenericBleAdvertisementPollingClient(
             if (candidate is null ||
                 DateTimeOffset.UtcNow - candidate.LastSeen > freshness ||
                 !TryExtractPayload(candidate, definition, out payload))
+            {
+                payload = default;
+                return false;
+            }
+
+            return true;
+        }
+    }
+
+    /// <summary>
+    /// Returns the latest matching payload regardless of age. Used for passive
+    /// broadcast devices where event-driven data is returned whenever available.
+    /// </summary>
+    private bool TryResolveLatestPayload(
+        string identifier,
+        DeviceDefinition definition,
+        out AdvertisementPayloadSnapshot payload)
+    {
+        lock (_cacheGate)
+        {
+            var candidate = _snapshots.Values
+                .Where(snapshot =>
+                    GenericBlePollingClient.IdentifierMatches(identifier, snapshot.Address, snapshot.Alias, snapshot.Name))
+                .OrderByDescending(snapshot => snapshot.LastSeen)
+                .FirstOrDefault();
+
+            if (candidate is null || !TryExtractPayload(candidate, definition, out payload))
             {
                 payload = default;
                 return false;
