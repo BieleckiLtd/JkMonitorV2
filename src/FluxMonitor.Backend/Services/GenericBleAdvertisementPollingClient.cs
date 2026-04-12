@@ -24,8 +24,11 @@ public sealed class GenericBleAdvertisementPollingClient(
     private readonly object _cacheGate = new();
     private readonly Dictionary<string, AdvertisementDeviceSnapshot> _snapshots = new(StringComparer.OrdinalIgnoreCase);
     private static readonly TimeSpan SnapshotMetadataRefreshInterval = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan SnapshotRefreshInterval = TimeSpan.FromSeconds(1);
     private Adapter? _adapter;
     private DeviceChangeEventHandlerAsync? _deviceFoundHandler;
+    private CancellationTokenSource? _scannerRefreshCancellationSource;
+    private Task? _scannerRefreshTask;
     private bool _disposed;
 
     public static bool IsDefinitionSupported(DeviceDefinition definition)
@@ -189,8 +192,6 @@ public sealed class GenericBleAdvertisementPollingClient(
             if (!await adapter.GetAsync<bool>("Powered"))
                 await adapter.SetAsync("Powered", true);
 
-            await ConfigureDiscoveryFilterAsync(adapter);
-
             foreach (var device in await adapter.GetDevicesAsync())
                 await CaptureSnapshotAsync(device);
 
@@ -207,6 +208,8 @@ public sealed class GenericBleAdvertisementPollingClient(
             }
 
             _adapter = adapter;
+            _scannerRefreshCancellationSource = new CancellationTokenSource();
+            _scannerRefreshTask = RunSnapshotRefreshLoopAsync(adapter, _scannerRefreshCancellationSource.Token);
         }
         finally
         {
@@ -214,21 +217,49 @@ public sealed class GenericBleAdvertisementPollingClient(
         }
     }
 
-    private async Task ConfigureDiscoveryFilterAsync(Adapter adapter)
+    private async Task RunSnapshotRefreshLoopAsync(Adapter adapter, CancellationToken cancellationToken)
     {
+        using var timer = new PeriodicTimer(SnapshotRefreshInterval);
+
         try
         {
-            await adapter.SetDiscoveryFilterAsync(new Dictionary<string, object>
+            while (await timer.WaitForNextTickAsync(cancellationToken))
             {
-                ["Transport"] = "le",
-                ["DuplicateData"] = true
-            });
+                IReadOnlyList<Device> devices;
+                try
+                {
+                    devices = await adapter.GetDevicesAsync();
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception exception)
+                {
+                    logger.LogDebug(exception, "Unable to refresh BLE advertisement snapshots from BlueZ.");
+                    continue;
+                }
+
+                foreach (var device in devices)
+                {
+                    try
+                    {
+                        await CaptureSnapshotAsync(device);
+                    }
+                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                    {
+                        return;
+                    }
+                    catch (Exception exception)
+                    {
+                        logger.LogDebug(exception, "Unable to capture a refreshed BLE advertisement snapshot.");
+                    }
+                }
+            }
         }
-        catch (Exception exception)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            logger.LogDebug(
-                exception,
-                "Unable to enable duplicate BLE advertisement updates on the active adapter.");
+            // Expected during shutdown.
         }
     }
 
@@ -450,8 +481,9 @@ public sealed class GenericBleAdvertisementPollingClient(
         string address,
         AdvertisementDeviceSnapshot? previousSnapshot)
     {
+        var capturedAt = DateTimeOffset.UtcNow;
         var shouldRefreshMetadata = previousSnapshot is null ||
-            DateTimeOffset.UtcNow - previousSnapshot.MetadataRefreshedAt >= SnapshotMetadataRefreshInterval;
+            capturedAt - previousSnapshot.MetadataRefreshedAt >= SnapshotMetadataRefreshInterval;
 
         var alias = previousSnapshot?.Alias;
         if (string.IsNullOrWhiteSpace(alias) || shouldRefreshMetadata)
@@ -484,6 +516,14 @@ public sealed class GenericBleAdvertisementPollingClient(
         if (string.IsNullOrWhiteSpace(displayName))
             displayName = address;
 
+        var advertisementChanged = previousSnapshot is null ||
+            rssi != previousSnapshot.Rssi ||
+            !PayloadMapsEqual(manufacturerData.Payloads, previousSnapshot.ManufacturerData) ||
+            !PayloadMapsEqual(serviceData, previousSnapshot.ServiceData);
+        var lastSeen = previousSnapshot is null || advertisementChanged
+            ? capturedAt
+            : previousSnapshot.LastSeen;
+
         return new AdvertisementDeviceSnapshot(
             address,
             alias,
@@ -496,8 +536,8 @@ public sealed class GenericBleAdvertisementPollingClient(
             serviceData,
             manufacturerData.Descriptions,
             advertisedServiceUuids,
-            DateTimeOffset.UtcNow,
-            shouldRefreshMetadata ? DateTimeOffset.UtcNow : previousSnapshot?.MetadataRefreshedAt ?? DateTimeOffset.UtcNow);
+            lastSeen,
+            shouldRefreshMetadata ? capturedAt : previousSnapshot?.MetadataRefreshedAt ?? capturedAt);
     }
 
     private Task PublishAdvertisementObservationsAsync(AdvertisementDeviceSnapshot snapshot)
@@ -789,6 +829,27 @@ public sealed class GenericBleAdvertisementPollingClient(
         return payloads;
     }
 
+    private static bool PayloadMapsEqual<TKey>(
+        IReadOnlyDictionary<TKey, byte[]> current,
+        IReadOnlyDictionary<TKey, byte[]>? previous)
+        where TKey : notnull
+    {
+        if (previous is null || current.Count != previous.Count)
+            return false;
+
+        foreach (var (key, currentPayload) in current)
+        {
+            if (!previous.TryGetValue(key, out var previousPayload) ||
+                previousPayload is null ||
+                !currentPayload.AsSpan().SequenceEqual(previousPayload))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static byte[]? ToByteArray(object? payload)
     {
         switch (payload)
@@ -906,6 +967,11 @@ public sealed class GenericBleAdvertisementPollingClient(
 
         _disposed = true;
 
+        if (_scannerRefreshCancellationSource is not null)
+        {
+            _scannerRefreshCancellationSource.Cancel();
+        }
+
         if (_adapter is not null && _deviceFoundHandler is not null)
             _adapter.DeviceFound -= _deviceFoundHandler;
 
@@ -920,6 +986,20 @@ public sealed class GenericBleAdvertisementPollingClient(
                 // Best effort during shutdown.
             }
         }
+
+        if (_scannerRefreshTask is not null)
+        {
+            try
+            {
+                _scannerRefreshTask.GetAwaiter().GetResult();
+            }
+            catch
+            {
+                // Best effort during shutdown.
+            }
+        }
+
+        _scannerRefreshCancellationSource?.Dispose();
 
         _scannerLock.Dispose();
     }
