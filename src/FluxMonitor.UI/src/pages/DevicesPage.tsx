@@ -99,6 +99,11 @@ type DeviceDefinitionFamily = {
 
 type PrimitiveEditorValue = string | number | boolean | null | undefined;
 
+type SaveFieldTarget = {
+  deviceClientKey: string;
+  fieldKey: string;
+};
+
 const catalogDefinitionCache = new Map<string, DeviceDefinition>();
 let nextDeviceClientKey = 0;
 const defaultDisplayPrecision: DisplayPrecision = {
@@ -553,6 +558,7 @@ function renderDefinitionEditorFields(
   path: string[],
   disabled: boolean,
   onChange: (path: string[], nextValue: unknown) => void,
+  renderSaveState: (fieldKey: string) => ReactNode,
   depth = 0,
 ): ReactNode {
   return Object.entries(value)
@@ -564,7 +570,10 @@ function renderDefinitionEditorFields(
       if (Array.isArray(entry)) {
         return (
           <label key={fieldKey} className='space-y-2 text-sm text-foreground'>
-            <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{humanizeKey(key)}</span>
+            <div className='flex items-center justify-between gap-2'>
+              <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{humanizeKey(key)}</span>
+              {renderSaveState(fieldKey)}
+            </div>
             <Input
               value={entry.join(', ')}
               disabled={disabled}
@@ -586,7 +595,7 @@ function renderDefinitionEditorFields(
           >
             <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{humanizeKey(key)}</div>
             <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
-              {renderDefinitionEditorFields(entry, fieldPath, disabled, onChange, depth + 1)}
+              {renderDefinitionEditorFields(entry, fieldPath, disabled, onChange, renderSaveState, depth + 1)}
             </div>
           </div>
         );
@@ -595,7 +604,10 @@ function renderDefinitionEditorFields(
       if (typeof entry === 'boolean') {
         return (
           <label key={fieldKey} className='flex items-center justify-between gap-3 rounded-xl border border-border/70 bg-background/60 px-4 py-3 text-sm text-foreground'>
-            <span>{humanizeKey(key)}</span>
+            <span className='flex items-center gap-2'>
+              <span>{humanizeKey(key)}</span>
+              {renderSaveState(fieldKey)}
+            </span>
             <input
               type='checkbox'
               checked={entry}
@@ -609,7 +621,10 @@ function renderDefinitionEditorFields(
       const isNumberField = typeof entry === 'number';
       return (
         <label key={fieldKey} className='space-y-2 text-sm text-foreground'>
-          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{humanizeKey(key)}</span>
+          <div className='flex items-center justify-between gap-2'>
+            <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{humanizeKey(key)}</span>
+            {renderSaveState(fieldKey)}
+          </div>
           <Input
             type={isNumberField ? 'number' : 'text'}
             step={isNumberField ? 'any' : undefined}
@@ -638,6 +653,7 @@ export function DevicesPage() {
   const [selectedLibraryBleAddresses, setSelectedLibraryBleAddresses] = useState<string[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
+  const [autoSaveField, setAutoSaveField] = useState<SaveFieldTarget | null>(null);
   const [saveDirty, setSaveDirty] = useState(0);
   const [editingDeviceIdClientKey, setEditingDeviceIdClientKey] = useState<string | null>(null);
   const [bleScanResults, setBleScanResults] = useState<Record<string, BleScanDevice[]>>({});
@@ -645,6 +661,7 @@ export function DevicesPage() {
   const [bleScanFollowUpLoading, setBleScanFollowUpLoading] = useState<Record<string, boolean>>({});
   const [bleScanErrors, setBleScanErrors] = useState<Record<string, string | null>>({});
   const definitionsRef = useRef<DeviceDefinitionSummary[]>([]);
+  const autoSaveFieldRef = useRef<SaveFieldTarget | null>(null);
   const bleScanSequenceRef = useRef<Record<string, number>>({});
   const activeLibraryBleScanKey = libraryBleSelection ? `library:${libraryBleSelection.definition.id}` : null;
 
@@ -657,6 +674,16 @@ export function DevicesPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   devicesRef.current = devices;
+
+  const setAutoSaveTarget = useCallback((target: SaveFieldTarget | null) => {
+    autoSaveFieldRef.current = target;
+    setAutoSaveField(target);
+  }, []);
+
+  const getSaveFieldTarget = useCallback((index: number, fieldKey: string): SaveFieldTarget | null => {
+    const deviceClientKey = devicesRef.current[index]?.clientKey;
+    return deviceClientKey ? { deviceClientKey, fieldKey } : null;
+  }, []);
 
   const loadPorts = useCallback(async () => {
     try {
@@ -753,17 +780,21 @@ export function DevicesPage() {
     return () => window.clearTimeout(timer);
   }, [editingDeviceIdClientKey, saveDirty, saveDevicesNow]);
 
-  const markDirty = useCallback(() => {
+  const markDirty = useCallback((target?: SaveFieldTarget | null) => {
+    if (target) {
+      setAutoSaveTarget(target);
+    }
+    setAutoSaveStatus('idle');
     setSaveDirty((value) => value + 1);
-  }, []);
+  }, [setAutoSaveTarget]);
 
   const updateDevice = useCallback(<K extends keyof DeviceConfiguration>(index: number, key: K, value: DeviceConfiguration[K]) => {
     setDevices((current) => current.map((device, deviceIndex) => {
       if (deviceIndex !== index) return device;
       return { ...device, [key]: value };
     }));
-    markDirty();
-  }, [markDirty]);
+    markDirty(getSaveFieldTarget(index, String(key)));
+  }, [getSaveFieldTarget, markDirty]);
 
   const updateDisplayPrecision = useCallback((index: number, key: keyof DisplayPrecision, value: number) => {
     setDevices((current) => current.map((device, deviceIndex) => {
@@ -779,8 +810,8 @@ export function DevicesPage() {
         },
       };
     }));
-    markDirty();
-  }, [markDirty]);
+    markDirty(getSaveFieldTarget(index, `displayPrecision.${key}`));
+  }, [getSaveFieldTarget, markDirty]);
 
   const updateDefinitionValue = useCallback((index: number, path: string[], nextValue: unknown) => {
     setDevices((current) => current.map((device, deviceIndex) => {
@@ -797,8 +828,8 @@ export function DevicesPage() {
         pollIntervalMilliseconds: getDefinitionPollInterval(updatedDefinition, device.pollIntervalMilliseconds),
       };
     }));
-    markDirty();
-  }, [markDirty]);
+    markDirty(getSaveFieldTarget(index, path.join('.')));
+  }, [getSaveFieldTarget, markDirty]);
 
   const resetDefinitionOverride = useCallback(async (index: number, definitionId: string) => {
     const definitionSnapshot = await loadDefinitionSnapshot(definitionId);
@@ -816,8 +847,8 @@ export function DevicesPage() {
         pollIntervalMilliseconds: getDefinitionPollInterval(definitionSnapshot, device.pollIntervalMilliseconds),
       };
     }));
-    markDirty();
-  }, [loadDefinitionSnapshot, markDirty]);
+    markDirty(getSaveFieldTarget(index, 'definitionOverride'));
+  }, [getSaveFieldTarget, loadDefinitionSnapshot, markDirty]);
 
   const updateDeviceConnection = useCallback(async (index: number, nextDefinitionId: string) => {
     const nextDefinition = definitionsRef.current.find((entry) => entry.id === nextDefinitionId);
@@ -887,8 +918,28 @@ export function DevicesPage() {
       });
     }
 
-    markDirty();
-  }, [loadDefinitionSnapshot, markDirty]);
+    markDirty(getSaveFieldTarget(index, 'definitionId'));
+  }, [getSaveFieldTarget, loadDefinitionSnapshot, markDirty]);
+
+  const renderFieldSaveState = useCallback((deviceClientKey: string, fieldKey: string) => {
+    if (!autoSaveField || autoSaveField.deviceClientKey !== deviceClientKey || autoSaveField.fieldKey !== fieldKey) {
+      return null;
+    }
+
+    if (autoSaveStatus === 'saving') {
+      return <span className='flex items-center gap-1 text-[11px] text-muted-foreground'><LoaderCircle className='h-3 w-3 animate-spin' /> Saving...</span>;
+    }
+
+    if (autoSaveStatus === 'saved') {
+      return <span className='flex items-center gap-1 text-[11px] text-emerald-500'><Check className='h-3 w-3' /> Saved</span>;
+    }
+
+    if (autoSaveStatus === 'error') {
+      return <span className='text-[11px] text-destructive'>Save failed</span>;
+    }
+
+    return null;
+  }, [autoSaveField, autoSaveStatus]);
 
   const scanBleDevices = useCallback(async (clientKey: string, definitionId: string) => {
     const scanSequence = (bleScanSequenceRef.current[clientKey] ?? 0) + 1;
@@ -1160,11 +1211,6 @@ export function DevicesPage() {
           <p className='mt-2 text-sm text-muted-foreground'>
             Add devices from the library or upload a definition JSON. Each device keeps its own definition snapshot, so transport, protocol, and polling overrides can be edited per device.
           </p>
-        </div>
-        <div className='flex items-center gap-3'>
-          {autoSaveStatus === 'saving' ? <span className='flex items-center gap-1.5 text-xs text-muted-foreground'><LoaderCircle className='h-3 w-3 animate-spin' /> Saving...</span> : null}
-          {autoSaveStatus === 'saved' ? <span className='flex items-center gap-1.5 text-xs text-emerald-500'><Check className='h-3 w-3' /> Saved</span> : null}
-          {autoSaveStatus === 'error' ? <span className='text-xs text-destructive'>Save failed</span> : null}
         </div>
       </div>
 
@@ -1462,7 +1508,10 @@ export function DevicesPage() {
 
                 <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-4'>
                   <div className='space-y-2 text-sm text-foreground'>
-                    <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device ID</span>
+                    <div className='flex items-center justify-between gap-2'>
+                      <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Device ID</span>
+                      {renderFieldSaveState(device.clientKey, 'deviceId')}
+                    </div>
                     <Input
                       list={rememberedIdsForDevice.length > 0 ? deviceIdListId : undefined}
                       value={device.deviceId}
@@ -1482,12 +1531,18 @@ export function DevicesPage() {
                   </div>
 
                   <label className='space-y-2 text-sm text-foreground'>
-                    <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Display name</span>
+                    <div className='flex items-center justify-between gap-2'>
+                      <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Display name</span>
+                      {renderFieldSaveState(device.clientKey, 'displayName')}
+                    </div>
                     <Input value={device.displayName} onChange={(event) => updateDevice(index, 'displayName', event.target.value)} />
                   </label>
 
                   <label className='space-y-2 text-sm text-foreground'>
-                    <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Connection</span>
+                    <div className='flex items-center justify-between gap-2'>
+                      <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Connection</span>
+                      {renderFieldSaveState(device.clientKey, 'definitionId')}
+                    </div>
                     <select
                       className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
                       value={device.definitionId}
@@ -1509,7 +1564,10 @@ export function DevicesPage() {
 
                   {transportType === 'serial' ? (
                     <label className='space-y-2 text-sm text-foreground'>
-                      <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Serial port</span>
+                      <div className='flex items-center justify-between gap-2'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Serial port</span>
+                        {renderFieldSaveState(device.clientKey, 'transportPortName')}
+                      </div>
                       <select
                         className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
                         value={device.transportPortName ?? ''}
@@ -1525,7 +1583,10 @@ export function DevicesPage() {
                   {transportType === 'ble' ? (
                     <>
                       <div className='space-y-2 text-sm text-foreground md:col-span-2 xl:col-span-3'>
-                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>BLE device</span>
+                        <div className='flex items-center justify-between gap-2'>
+                          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>BLE device</span>
+                          {renderFieldSaveState(device.clientKey, 'transportPortName')}
+                        </div>
                         <div className='flex flex-col gap-2 xl:flex-row'>
                           <Input
                           className='flex-1'
@@ -1591,7 +1652,10 @@ export function DevicesPage() {
 
                   {transportType !== 'ble' ? (
                     <label className='space-y-2 text-sm text-foreground'>
-                      <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Address</span>
+                      <div className='flex items-center justify-between gap-2'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Address</span>
+                        {renderFieldSaveState(device.clientKey, 'address')}
+                      </div>
                       <Input
                         type='number'
                         min={0}
@@ -1605,7 +1669,10 @@ export function DevicesPage() {
 
                   {definitionFamily?.category === 'energy-storage' ? (
                     <label className='space-y-2 text-sm text-foreground'>
-                      <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Is master</span>
+                      <div className='flex items-center justify-between gap-2'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Is master</span>
+                        {renderFieldSaveState(device.clientKey, 'isMaster')}
+                      </div>
                       <div className='flex h-10 items-center rounded-md border border-input bg-background px-3'>
                         <input
                           type='checkbox'
@@ -1619,7 +1686,10 @@ export function DevicesPage() {
 
                   {transportType === 'ble' && !isPassiveBroadcast ? (
                     <label className='space-y-2 text-sm text-foreground'>
-                      <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>BLE settings PIN</span>
+                      <div className='flex items-center justify-between gap-2'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>BLE settings PIN</span>
+                        {renderFieldSaveState(device.clientKey, 'bleSettingsPin')}
+                      </div>
                       <Input
                         type='password'
                         value={device.bleSettingsPin ?? ''}
@@ -1637,7 +1707,10 @@ export function DevicesPage() {
                     {device.enabled ? <div className='rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300'>Stop the device before changing runtime or definition settings.</div> : null}
                     <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-4'>
                       <label className='space-y-2 text-sm text-foreground'>
-                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Cell smoothing factor</span>
+                        <div className='flex items-center justify-between gap-2'>
+                          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Cell smoothing factor</span>
+                          {renderFieldSaveState(device.clientKey, 'cellVoltageSmoothingFactor')}
+                        </div>
                         <Input
                           type='number'
                           min={0}
@@ -1649,7 +1722,10 @@ export function DevicesPage() {
                         />
                       </label>
                       <label className='space-y-2 text-sm text-foreground'>
-                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Breakout mV</span>
+                        <div className='flex items-center justify-between gap-2'>
+                          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Breakout mV</span>
+                          {renderFieldSaveState(device.clientKey, 'cellVoltageSmoothingBreakoutMillivolts')}
+                        </div>
                         <Input
                           type='number'
                           min={0}
@@ -1660,27 +1736,45 @@ export function DevicesPage() {
                         />
                       </label>
                       <label className='space-y-2 text-sm text-foreground'>
-                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Voltage precision</span>
+                        <div className='flex items-center justify-between gap-2'>
+                          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Voltage precision</span>
+                          {renderFieldSaveState(device.clientKey, 'displayPrecision.voltage')}
+                        </div>
                         <Input type='number' min={0} step='1' value={device.displayPrecision.voltage} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'voltage', Number(event.target.value))} />
                       </label>
                       <label className='space-y-2 text-sm text-foreground'>
-                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Cell precision</span>
+                        <div className='flex items-center justify-between gap-2'>
+                          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Cell precision</span>
+                          {renderFieldSaveState(device.clientKey, 'displayPrecision.cellVoltage')}
+                        </div>
                         <Input type='number' min={0} step='1' value={device.displayPrecision.cellVoltage} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'cellVoltage', Number(event.target.value))} />
                       </label>
                       <label className='space-y-2 text-sm text-foreground'>
-                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Current precision</span>
+                        <div className='flex items-center justify-between gap-2'>
+                          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Current precision</span>
+                          {renderFieldSaveState(device.clientKey, 'displayPrecision.current')}
+                        </div>
                         <Input type='number' min={0} step='1' value={device.displayPrecision.current} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'current', Number(event.target.value))} />
                       </label>
                       <label className='space-y-2 text-sm text-foreground'>
-                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Power precision</span>
+                        <div className='flex items-center justify-between gap-2'>
+                          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Power precision</span>
+                          {renderFieldSaveState(device.clientKey, 'displayPrecision.power')}
+                        </div>
                         <Input type='number' min={0} step='1' value={device.displayPrecision.power} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'power', Number(event.target.value))} />
                       </label>
                       <label className='space-y-2 text-sm text-foreground'>
-                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Temperature precision</span>
+                        <div className='flex items-center justify-between gap-2'>
+                          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Temperature precision</span>
+                          {renderFieldSaveState(device.clientKey, 'displayPrecision.temperature')}
+                        </div>
                         <Input type='number' min={0} step='1' value={device.displayPrecision.temperature} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'temperature', Number(event.target.value))} />
                       </label>
                       <label className='space-y-2 text-sm text-foreground'>
-                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Temperature unit</span>
+                        <div className='flex items-center justify-between gap-2'>
+                          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Temperature unit</span>
+                          {renderFieldSaveState(device.clientKey, 'temperatureUnit')}
+                        </div>
                         <div className='inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/70 p-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
                           <button
                             type='button'
@@ -1707,11 +1801,17 @@ export function DevicesPage() {
                         </div>
                       </label>
                       <label className='space-y-2 text-sm text-foreground'>
-                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>SOC precision</span>
+                        <div className='flex items-center justify-between gap-2'>
+                          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>SOC precision</span>
+                          {renderFieldSaveState(device.clientKey, 'displayPrecision.soc')}
+                        </div>
                         <Input type='number' min={0} step='1' value={device.displayPrecision.soc} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'soc', Number(event.target.value))} />
                       </label>
                       <label className='space-y-2 text-sm text-foreground'>
-                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Delta V precision</span>
+                        <div className='flex items-center justify-between gap-2'>
+                          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Delta V precision</span>
+                          {renderFieldSaveState(device.clientKey, 'displayPrecision.deltaVoltage')}
+                        </div>
                         <Input type='number' min={0} step='1' value={device.displayPrecision.deltaVoltage} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'deltaVoltage', Number(event.target.value))} />
                       </label>
                     </div>
@@ -1749,11 +1849,14 @@ export function DevicesPage() {
                     {definitionSections.map((section) => (
                       <div key={section.key} className='rounded-2xl border border-border/70 bg-card/60 p-4'>
                         <div className='mb-4 space-y-1'>
-                          <div className='text-sm font-semibold text-foreground'>{section.title}</div>
+                          <div className='flex items-center justify-between gap-2'>
+                            <div className='text-sm font-semibold text-foreground'>{section.title}</div>
+                            {section.key === 'transport-defaults' ? renderFieldSaveState(device.clientKey, 'definitionOverride') : null}
+                          </div>
                           <div className='text-xs text-muted-foreground'>{section.description}</div>
                         </div>
                         <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
-                          {renderDefinitionEditorFields(section.value, section.path, device.enabled, (path, nextValue) => updateDefinitionValue(index, path, nextValue))}
+                          {renderDefinitionEditorFields(section.value, section.path, device.enabled, (path, nextValue) => updateDefinitionValue(index, path, nextValue), (fieldKey) => renderFieldSaveState(device.clientKey, fieldKey))}
                         </div>
                       </div>
                     ))}

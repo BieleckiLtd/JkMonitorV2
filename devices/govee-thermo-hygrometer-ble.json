@@ -90,7 +90,7 @@
     {
       "id": "humidity_pct",
       "type": "sensor",
-      "name": "Humidity",
+      "name": "Relative Humidity",
       "category": "Environment",
       "source": {
         "bank": "broadcast",
@@ -144,8 +144,7 @@
       { "entity": "temperature_c", "aggregate": "avg", "column": "temperature_c" },
       { "entity": "humidity_pct", "aggregate": "avg", "column": "humidity_pct" },
       { "entity": "dew_point_c", "aggregate": "avg", "column": "dew_point_c" },
-      { "entity": "vpd_kpa", "aggregate": "avg", "column": "vpd_kpa" },
-      { "entity": "battery_pct", "aggregate": "last", "column": "battery_pct" }
+      { "entity": "vpd_kpa", "aggregate": "avg", "column": "vpd_kpa" }
     ],
     "retention": {
       "raw": { "window": "24h" },
@@ -169,12 +168,7 @@
           },
           {
             "type": "parameter-table",
-            "title": "Environment",
-            "filter": { "categories": ["Environment"] }
-          },
-          {
-            "type": "parameter-table",
-            "title": "Status",
+            "title": "Battery",
             "filter": { "categories": ["Status"] }
           }
         ]
@@ -188,21 +182,21 @@
         ],
         "charts": [
           {
-            "title": "Temperature",
+            "title": "Temperature and Dew Point",
             "type": "line-chart",
             "traces": [
               { "entity": "temperature_c", "label": "Temperature", "color": "orange" },
               { "entity": "dew_point_c", "label": "Dew Point", "color": "teal" }
             ],
-            "yAxis": { "unit": "°C", "label": "Temperature" }
+            "yAxis": { "unit": "°C", "label": "Temperature / Dew Point" }
           },
           {
-            "title": "Humidity",
+            "title": "Relative Humidity",
             "type": "line-chart",
             "traces": [
-              { "entity": "humidity_pct", "label": "Humidity", "color": "blue" }
+              { "entity": "humidity_pct", "label": "Relative Humidity", "color": "blue" }
             ],
-            "yAxis": { "unit": "%", "label": "Humidity", "domain": [0, 100] }
+            "yAxis": { "unit": "%", "label": "Relative Humidity", "domain": [0, 100] }
           },
           {
             "title": "VPD",
@@ -211,14 +205,6 @@
               { "entity": "vpd_kpa", "label": "VPD", "color": "emerald" }
             ],
             "yAxis": { "unit": "kPa", "label": "VPD" }
-          },
-          {
-            "title": "Battery",
-            "type": "line-chart",
-            "traces": [
-              { "entity": "battery_pct", "label": "Battery", "color": "amber" }
-            ],
-            "yAxis": { "unit": "%", "label": "Battery", "domain": [0, 100] }
           }
         ]
       },

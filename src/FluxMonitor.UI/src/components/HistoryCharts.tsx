@@ -572,7 +572,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
                 onHover={setSharedHoveredTime}
                 onSelect={setSharedSelectedTime}
               />
-            ) : (
+            ) : !definitionCharts ? (
               <ChartSection title='Voltage' data={chartData}
                 lines={[{ key: 'totalVoltageVolts', color: '#38bdf8', name: 'Pack Voltage' }]}
                 getDecimalsForKey={getDecimalsForKey}
@@ -580,7 +580,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
                 hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
                 onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
                 todayXTicks={todayXTicks} />
-            )}
+            ) : null}
             {definitionCharts ? renderDefinitionCharts(definitionCharts, chartData, resolvedResolution, displayMode, sharedHoveredTime, sharedSelectedTime, setSharedHoveredTime, setSharedSelectedTime, todayXTicks, batteryStatusSubtitle, getDecimalsForKey, getUnitForKey) : (
               <>
                 <EnergyChartSection data={chartData} resolution={resolvedResolution} displayMode={displayMode}
