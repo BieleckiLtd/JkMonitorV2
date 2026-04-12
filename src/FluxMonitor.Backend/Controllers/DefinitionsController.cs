@@ -59,6 +59,34 @@ public sealed class DefinitionsController(
         return Ok(definition);
     }
 
+    [HttpGet("{id}/entities")]
+    public IActionResult GetEntities(string id)
+    {
+        if (!TryResolveDefinition(id, out var definition) || definition is null)
+        {
+            return NotFound(new { message = $"Device definition '{id}' not found." });
+        }
+
+        var storedEntities = new HashSet<string>(
+            definition.Storage?.TimeSeries?.Select(ts => ts.Entity) ?? [],
+            StringComparer.OrdinalIgnoreCase);
+
+        if (definition.Storage?.CellVoltages is not null)
+            storedEntities.Add(definition.Storage.CellVoltages.Entity);
+
+        var entities = definition.Entities.Select(e => new EntitySummaryResponse(
+            e.Id, e.Name, e.Type, e.Category, e.Source.Unit, e.Role, e.Hidden,
+            Computed: false, Expression: null, FallbackFor: null,
+            Stored: storedEntities.Contains(e.Id)));
+
+        var computed = definition.ComputedEntities.Select(c => new EntitySummaryResponse(
+            c.Id, c.Name, c.Type, c.Category, c.Unit, c.Role, c.Hidden,
+            Computed: true, c.Expression, c.FallbackFor,
+            Stored: storedEntities.Contains(c.Id)));
+
+        return Ok(entities.Concat(computed));
+    }
+
     [HttpGet("{id}/ui/{page}")]
     public IActionResult GetUiPage(string id, string page)
     {
@@ -152,4 +180,17 @@ public sealed class DefinitionsController(
         string? UnsupportedTransportMessage,
         int EntityCount,
         int DataSourceCount);
+
+    private sealed record EntitySummaryResponse(
+        string Id,
+        string Name,
+        string Type,
+        string Category,
+        string? Unit,
+        string? Role,
+        bool Hidden,
+        bool Computed,
+        string? Expression,
+        string? FallbackFor,
+        bool Stored);
 }
