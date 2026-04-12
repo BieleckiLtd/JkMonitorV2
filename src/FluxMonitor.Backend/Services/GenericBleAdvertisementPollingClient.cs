@@ -24,11 +24,22 @@ public sealed class GenericBleAdvertisementPollingClient(
     private readonly object _cacheGate = new();
     private readonly Dictionary<string, AdvertisementDeviceSnapshot> _snapshots = new(StringComparer.OrdinalIgnoreCase);
     private static readonly TimeSpan SnapshotMetadataRefreshInterval = TimeSpan.FromSeconds(15);
-    private static readonly TimeSpan SnapshotRefreshInterval = TimeSpan.FromSeconds(1);
+    private static readonly HashSet<string> SnapshotRelevantDeviceProperties = new(StringComparer.Ordinal)
+    {
+        "RSSI",
+        "ManufacturerData",
+        "ServiceData",
+        "AdvertisingData",
+        "AdvertisingFlags",
+        "Alias",
+        "Name",
+        "Connected",
+        "Paired",
+        "UUIDs"
+    };
     private Adapter? _adapter;
     private DeviceChangeEventHandlerAsync? _deviceFoundHandler;
-    private CancellationTokenSource? _scannerRefreshCancellationSource;
-    private Task? _scannerRefreshTask;
+    private readonly Dictionary<string, IDisposable> _devicePropertyWatchers = new(StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
 
     public static bool IsDefinitionSupported(DeviceDefinition definition)
@@ -193,9 +204,16 @@ public sealed class GenericBleAdvertisementPollingClient(
                 await adapter.SetAsync("Powered", true);
 
             foreach (var device in await adapter.GetDevicesAsync())
+            {
                 await CaptureSnapshotAsync(device);
+                await EnsureDeviceWatcherAsync(device);
+            }
 
-            _deviceFoundHandler = async (_, args) => await CaptureSnapshotAsync(args.Device);
+            _deviceFoundHandler = async (_, args) =>
+            {
+                await CaptureSnapshotAsync(args.Device);
+                await EnsureDeviceWatcherAsync(args.Device);
+            };
             adapter.DeviceFound += _deviceFoundHandler;
 
             try
@@ -208,8 +226,6 @@ public sealed class GenericBleAdvertisementPollingClient(
             }
 
             _adapter = adapter;
-            _scannerRefreshCancellationSource = new CancellationTokenSource();
-            _scannerRefreshTask = RunSnapshotRefreshLoopAsync(adapter, _scannerRefreshCancellationSource.Token);
         }
         finally
         {
@@ -217,50 +233,83 @@ public sealed class GenericBleAdvertisementPollingClient(
         }
     }
 
-    private async Task RunSnapshotRefreshLoopAsync(Adapter adapter, CancellationToken cancellationToken)
+    private async Task EnsureDeviceWatcherAsync(Device device)
     {
-        using var timer = new PeriodicTimer(SnapshotRefreshInterval);
+        var watcherKey = device.ObjectPath.ToString();
 
+        lock (_cacheGate)
+        {
+            if (_devicePropertyWatchers.ContainsKey(watcherKey))
+                return;
+        }
+
+        IDisposable? watcher = null;
         try
         {
-            while (await timer.WaitForNextTickAsync(cancellationToken))
-            {
-                IReadOnlyList<Device> devices;
-                try
-                {
-                    devices = await adapter.GetDevicesAsync();
-                }
-                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                {
-                    break;
-                }
-                catch (Exception exception)
-                {
-                    logger.LogDebug(exception, "Unable to refresh BLE advertisement snapshots from BlueZ.");
-                    continue;
-                }
-
-                foreach (var device in devices)
-                {
-                    try
-                    {
-                        await CaptureSnapshotAsync(device);
-                    }
-                    catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                    {
-                        return;
-                    }
-                    catch (Exception exception)
-                    {
-                        logger.LogDebug(exception, "Unable to capture a refreshed BLE advertisement snapshot.");
-                    }
-                }
-            }
+            watcher = await device.WatchPropertiesAsync(changes => OnDevicePropertiesChanged(device, changes));
         }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        catch (Exception exception)
         {
-            // Expected during shutdown.
+            logger.LogDebug(
+                exception,
+                "Unable to subscribe to BLE device property changes for {ObjectPath}.",
+                watcherKey);
+            return;
         }
+
+        lock (_cacheGate)
+        {
+            if (_disposed)
+            {
+                watcher.Dispose();
+                return;
+            }
+
+            if (_devicePropertyWatchers.ContainsKey(watcherKey))
+            {
+                watcher.Dispose();
+                return;
+            }
+
+            _devicePropertyWatchers[watcherKey] = watcher;
+        }
+    }
+
+    private void OnDevicePropertiesChanged(Device device, Tmds.DBus.PropertyChanges changes)
+    {
+        if (!ShouldRefreshSnapshot(changes))
+            return;
+
+        _ = HandleDevicePropertiesChangedAsync(device);
+    }
+
+    private async Task HandleDevicePropertiesChangedAsync(Device device)
+    {
+        try
+        {
+            await CaptureSnapshotAsync(device);
+        }
+        catch (Exception exception)
+        {
+            logger.LogDebug(exception, "Unable to capture a BLE advertisement snapshot from a property change callback.");
+        }
+    }
+
+    private static bool ShouldRefreshSnapshot(Tmds.DBus.PropertyChanges changes)
+    {
+        foreach (var change in changes.Changed)
+        {
+            if (SnapshotRelevantDeviceProperties.Contains(change.Key))
+                return true;
+        }
+
+        foreach (var invalidated in changes.Invalidated)
+        {
+            if (SnapshotRelevantDeviceProperties.Contains(invalidated))
+                return true;
+        }
+
+        return false;
     }
 
     private bool TryResolvePayload(
@@ -967,13 +1016,27 @@ public sealed class GenericBleAdvertisementPollingClient(
 
         _disposed = true;
 
-        if (_scannerRefreshCancellationSource is not null)
-        {
-            _scannerRefreshCancellationSource.Cancel();
-        }
-
         if (_adapter is not null && _deviceFoundHandler is not null)
             _adapter.DeviceFound -= _deviceFoundHandler;
+
+        List<IDisposable> watchers;
+        lock (_cacheGate)
+        {
+            watchers = _devicePropertyWatchers.Values.ToList();
+            _devicePropertyWatchers.Clear();
+        }
+
+        foreach (var watcher in watchers)
+        {
+            try
+            {
+                watcher.Dispose();
+            }
+            catch
+            {
+                // Best effort during shutdown.
+            }
+        }
 
         if (_adapter is not null)
         {
@@ -986,20 +1049,6 @@ public sealed class GenericBleAdvertisementPollingClient(
                 // Best effort during shutdown.
             }
         }
-
-        if (_scannerRefreshTask is not null)
-        {
-            try
-            {
-                _scannerRefreshTask.GetAwaiter().GetResult();
-            }
-            catch
-            {
-                // Best effort during shutdown.
-            }
-        }
-
-        _scannerRefreshCancellationSource?.Dispose();
 
         _scannerLock.Dispose();
     }
