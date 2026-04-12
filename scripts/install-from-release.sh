@@ -938,21 +938,6 @@ maybe_provision_local_timescaledb_for_connection_string() {
   ensure_timescaledb_for_local_database "$database_name"
 }
 
-require_local_timescaledb_for_connection_string() {
-  local connection_string="$1"
-
-  if [ -z "$connection_string" ] || ! is_local_connection_string "$connection_string"; then
-    return 0
-  fi
-
-  if maybe_provision_local_timescaledb_for_connection_string "$connection_string"; then
-    return 0
-  fi
-
-  echo 'Local TimescaleDB repair failed. The update cannot continue with a broken local telemetry database.' >&2
-  return 1
-}
-
 read_connection_string_from_configuration_file() {
   local config_path="$1"
 
@@ -1694,9 +1679,9 @@ if [ "$reused_existing_configuration" = 'false' ]; then
   }
 }
 EOF
-  require_local_timescaledb_for_connection_string "$CONNECTION_STRING"
+  maybe_provision_local_timescaledb_for_connection_string "$CONNECTION_STRING" || true
 elif [ -n "${EXISTING_CONNECTION_STRING:-}" ]; then
-  require_local_timescaledb_for_connection_string "$EXISTING_CONNECTION_STRING"
+  maybe_provision_local_timescaledb_for_connection_string "$EXISTING_CONNECTION_STRING" || true
 fi
 
 if [ "$reused_existing_configuration" = 'false' ] || [ ! -f "$ENV_PATH" ]; then
