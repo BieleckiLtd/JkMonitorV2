@@ -265,6 +265,17 @@ function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
 
+const serialTransportKeys = new Set(['baudRate', 'dataBits', 'parity', 'stopBits', 'readTimeoutMs', 'writeTimeoutMs']);
+const bleTransportKeys = new Set(['serviceUuid', 'notifyCharacteristicUuid', 'writeCharacteristicUuid', 'connectionTimeoutMs', 'reconnectDelayMs']);
+
+function filterTransportDefaults(defaults: Record<string, unknown> | undefined, transportType: string | null): Record<string, unknown> | undefined {
+  if (!defaults || !isObjectRecord(defaults)) return defaults;
+  const allowedKeys = transportType === 'ble' ? bleTransportKeys : transportType === 'serial' ? serialTransportKeys : null;
+  if (!allowedKeys) return defaults;
+  const filtered = Object.fromEntries(Object.entries(defaults).filter(([key]) => allowedKeys.has(key)));
+  return Object.keys(filtered).length > 0 ? filtered : undefined;
+}
+
 function humanizeKey(value: string) {
   return value
     .replace(/([a-z0-9])([A-Z])/g, '$1 $2')
@@ -1352,6 +1363,8 @@ export function DevicesPage() {
             const definitionFamily = getFamilyForDefinition(device.definitionId, definitionFamilies);
             const connectionChoices = definitionFamily?.definitions ?? (definitionSummary ? [definitionSummary] : []);
             const transportType = getTransportType(device, availableDefinitions);
+            const protocolType = device.definition?.connection.protocol.type ?? definitionSummary?.protocolType ?? null;
+            const isPassiveBroadcast = protocolType === 'ble-advertisement';
             const isTransportSupported = definitionSummary?.isTransportSupported ?? true;
             const requiresTransport = requiresTransportIdentifier(device, availableDefinitions);
             const hasTransportTarget = !requiresTransport || Boolean(device.transportPortName?.trim());
@@ -1370,9 +1383,9 @@ export function DevicesPage() {
               {
                 key: 'transport-defaults',
                 title: 'Transport defaults',
-                description: 'Serial or BLE transport settings stored with this device.',
+                description: transportType === 'ble' ? 'BLE transport settings stored with this device.' : 'Serial transport settings stored with this device.',
                 path: ['connection', 'transport', 'defaults'],
-                value: device.definition?.connection.transport.defaults,
+                value: filterTransportDefaults(device.definition?.connection.transport.defaults as Record<string, unknown> | undefined, transportType),
               },
               {
                 key: 'protocol-settings',
@@ -1404,7 +1417,7 @@ export function DevicesPage() {
                       {manufacturerAndModel || device.deviceId}
                     </div>
                     <div className='text-xs text-muted-foreground/70'>
-                      Connection: {getConnectionLabel(transportType)} · Effective poll: {effectivePollInterval} ms
+                      Connection: {getConnectionLabel(transportType)}{isPassiveBroadcast ? ' · Passive broadcast' : ` · Effective poll: ${effectivePollInterval} ms`}
                     </div>
                   </div>
 
@@ -1482,10 +1495,12 @@ export function DevicesPage() {
                     </select>
                   </label>
 
-                  <label className='space-y-2 text-sm text-foreground'>
-                    <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Effective poll interval</span>
-                    <Input value={`${effectivePollInterval} ms`} disabled />
-                  </label>
+                  {!isPassiveBroadcast ? (
+                    <label className='space-y-2 text-sm text-foreground'>
+                      <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Effective poll interval</span>
+                      <Input value={`${effectivePollInterval} ms`} disabled />
+                    </label>
+                  ) : null}
 
                   {transportType === 'serial' ? (
                     <label className='space-y-2 text-sm text-foreground'>
@@ -1597,7 +1612,7 @@ export function DevicesPage() {
                     </label>
                   ) : null}
 
-                  {transportType === 'ble' ? (
+                  {transportType === 'ble' && !isPassiveBroadcast ? (
                     <label className='space-y-2 text-sm text-foreground'>
                       <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>BLE settings PIN</span>
                       <Input
