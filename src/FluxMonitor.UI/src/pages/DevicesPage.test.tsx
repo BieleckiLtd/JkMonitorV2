@@ -342,6 +342,43 @@ describe('DevicesPage', () => {
     expect(screen.getByRole('button', { name: /start/i })).toBeEnabled();
   });
 
+  it('does not show BLE devices that are already added for the same definition', async () => {
+    initialDevicesResponse = [
+      {
+        deviceId: 'device-1',
+        displayName: 'JK Inverter BMS',
+        definitionId: 'jk-inverter-bms-ble',
+        transportPortName: 'AA:BB:CC:DD:EE:FF',
+        address: 1,
+        isMaster: false,
+        pollIntervalMilliseconds: 1000,
+        enabled: false,
+        cellVoltageSmoothingFactor: 0,
+        cellVoltageSmoothingBreakoutMillivolts: 0,
+        displayPrecision: {
+          voltage: 2,
+          cellVoltage: 3,
+          current: 1,
+          power: 0,
+          temperature: 1,
+          soc: 0,
+          deltaVoltage: 3,
+        },
+      },
+    ];
+
+    render(<DevicesPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /add device/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using bluetooth/i }));
+
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /select ble device aa:bb:cc:dd:ee:ff/i })).not.toBeInTheDocument();
+    });
+
+    expect(await screen.findByRole('button', { name: /select ble device 11:22:33:44:55:66/i })).toBeInTheDocument();
+  });
+
   it('lets a stopped device switch connection without changing its device id', async () => {
     render(<DevicesPage />);
 

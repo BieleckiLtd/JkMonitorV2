@@ -210,6 +210,44 @@ function mergeBleScanDevices(current: BleScanDevice[], incoming: BleScanDevice[]
   return sortBleScanDevices([...merged.values()]);
 }
 
+function normalizeBleIdentifier(value: string | null | undefined) {
+  return (value ?? '')
+    .trim()
+    .replace(/[^a-fA-F0-9]/g, '')
+    .toUpperCase();
+}
+
+function getAssignedBleTargets(
+  devices: DeviceConfiguration[],
+  definitionId: string,
+  excludeClientKey?: string,
+) {
+  const assigned = new Set<string>();
+  for (const device of devices) {
+    if (device.clientKey === excludeClientKey) {
+      continue;
+    }
+
+    if (device.definitionId !== definitionId) {
+      continue;
+    }
+
+    const normalized = normalizeBleIdentifier(device.transportPortName);
+    if (normalized) {
+      assigned.add(normalized);
+    }
+  }
+
+  return assigned;
+}
+
+function filterAssignedBleCandidates(
+  candidates: BleScanDevice[],
+  assignedTargets: Set<string>,
+) {
+  return candidates.filter((candidate) => !assignedTargets.has(normalizeBleIdentifier(candidate.address)));
+}
+
 function formatPreviewValue(value: number | null | undefined, digits = 0, suffix = '') {
   if (value == null || Number.isNaN(value)) {
     return 'N/A';
@@ -808,6 +846,25 @@ export function DevicesPage() {
     return deviceClientKey ? { deviceClientKey, fieldKey } : null;
   }, []);
 
+  const libraryAssignedBleTargets = libraryBleSelection
+    ? getAssignedBleTargets(devices, libraryBleSelection.definition.id)
+    : new Set<string>();
+  const visibleLibraryBleDevices = activeLibraryBleScanKey
+    ? filterAssignedBleCandidates(bleScanResults[activeLibraryBleScanKey] ?? [], libraryAssignedBleTargets)
+    : [];
+
+  useEffect(() => {
+    if (!libraryBleSelection) {
+      return;
+    }
+
+    const visibleAddresses = new Set(visibleLibraryBleDevices.map((candidate) => candidate.address));
+    setSelectedLibraryBleAddresses((current) => {
+      const next = current.filter((address) => visibleAddresses.has(address));
+      return next.length === current.length ? current : next;
+    });
+  }, [libraryBleSelection, visibleLibraryBleDevices]);
+
   const loadPorts = useCallback(async () => {
     try {
       const response = await fetch('/api/devices/ports');
@@ -1190,8 +1247,7 @@ export function DevicesPage() {
     }
 
     const definitionSnapshot = await loadDefinitionSnapshot(libraryBleSelection.definition.id);
-    const scanKey = `library:${libraryBleSelection.definition.id}`;
-    const selectedDevices = (bleScanResults[scanKey] ?? [])
+    const selectedDevices = visibleLibraryBleDevices
       .filter((candidate) => selectedLibraryBleAddresses.includes(candidate.address));
     if (selectedDevices.length === 0) {
       return;
@@ -1217,7 +1273,7 @@ export function DevicesPage() {
     setShowAddPicker(false);
     setUploadError(null);
     markDirty();
-  }, [bleScanResults, libraryBleSelection, loadDefinitionSnapshot, markDirty, selectedLibraryBleAddresses]);
+  }, [libraryBleSelection, loadDefinitionSnapshot, markDirty, selectedLibraryBleAddresses, visibleLibraryBleDevices]);
 
   const addManualBleDevice = useCallback(async () => {
     if (!libraryBleSelection) {
@@ -1461,7 +1517,7 @@ export function DevicesPage() {
 
                 {(bleScanResults[activeLibraryBleScanKey] ?? []).length > 0 ? (
                   <div className='mt-4 space-y-2'>
-                    {(bleScanResults[activeLibraryBleScanKey] ?? []).map((candidate) => {
+                    {visibleLibraryBleDevices.map((candidate) => {
                       const isSelected = selectedLibraryBleAddresses.includes(candidate.address);
                       return (
                         <BleCandidateCard
@@ -1476,6 +1532,11 @@ export function DevicesPage() {
                         />
                       );
                     })}
+                  </div>
+                ) : null}
+                {(bleScanResults[activeLibraryBleScanKey] ?? []).length > 0 && visibleLibraryBleDevices.length === 0 ? (
+                  <div className='mt-4 rounded-lg border border-border/70 bg-background/50 px-3 py-3 text-sm text-muted-foreground'>
+                    All nearby compatible devices are already added.
                   </div>
                 ) : null}
               </div>
@@ -1518,7 +1579,8 @@ export function DevicesPage() {
             const requiresTransport = requiresTransportIdentifier(device, availableDefinitions);
             const hasTransportTarget = !requiresTransport || Boolean(device.transportPortName?.trim());
             const action = deviceActions[device.clientKey];
-            const bleDevices = bleScanResults[device.clientKey] ?? [];
+            const assignedBleTargets = getAssignedBleTargets(devices, device.definitionId, device.clientKey);
+            const bleDevices = filterAssignedBleCandidates(bleScanResults[device.clientKey] ?? [], assignedBleTargets);
             const bleIsScanning = bleScanLoading[device.clientKey] ?? false;
             const bleIsScanningForMore = bleScanFollowUpLoading[device.clientKey] ?? false;
             const bleScanError = bleScanErrors[device.clientKey];
@@ -1722,6 +1784,11 @@ export function DevicesPage() {
                                 />
                               );
                             })}
+                          </div>
+                        ) : null}
+                        {(bleScanResults[device.clientKey] ?? []).length > 0 && bleDevices.length === 0 ? (
+                          <div className='rounded-lg border border-border/70 bg-background/50 px-3 py-3 text-xs text-muted-foreground'>
+                            All nearby compatible devices are already assigned.
                           </div>
                         ) : null}
                       </div>
