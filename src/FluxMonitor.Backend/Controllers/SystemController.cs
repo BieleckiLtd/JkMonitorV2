@@ -19,6 +19,7 @@ public sealed class SystemController(
     SshManagementService sshManagementService,
     WebTerminalService webTerminalService,
     DirectAccessService directAccessService,
+    ModbusScannerService modbusScannerService,
     HostServicesCatalogService hostServicesCatalogService,
     ILogger<SystemController> logger) : ControllerBase
 {
@@ -416,6 +417,22 @@ public sealed class SystemController(
         };
 
         return Ok(result);
+    }
+
+    [HttpPost("modbus-scanner/read")]
+    public async Task<ActionResult<ModbusScannerReadResult>> ReadModbusScanner(
+        [FromBody] ModbusScannerReadRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var result = await modbusScannerService.ReadAsync(request, cancellationToken);
+            return Ok(result);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { error = exception.Message });
+        }
     }
 
     private static List<SerialPortInfo> DiscoverSerialPorts()

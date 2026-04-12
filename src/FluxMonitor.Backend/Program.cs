@@ -56,6 +56,7 @@ builder.Services.AddSingleton<FluxMonitor.Backend.Services.IWebTerminalAccessSto
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.WebTerminalService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.DirectAccessStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.DirectAccessService>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.ModbusScannerService>();
 builder.Services.AddHostedService<FluxMonitor.Backend.Services.DirectAccessBackgroundService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.HostServicesCatalogService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.ICommandRunner, FluxMonitor.Backend.Services.ProcessCommandRunner>();

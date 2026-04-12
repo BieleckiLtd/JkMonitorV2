@@ -492,9 +492,41 @@ describe('SystemPage', () => {
         return {
           ok: true,
           json: async () => ({
-            serialPorts: [],
+            serialPorts: [{ name: 'COM3', description: 'USB serial adapter' }],
             blockDevices: [],
             networkInterfaces: [],
+          }),
+        } as Response;
+      }
+
+      if (url === '/api/system/modbus-scanner/read') {
+        return {
+          ok: true,
+          json: async () => ({
+            portName: 'COM3',
+            slaveAddress: 1,
+            baudRate: 9600,
+            parity: 'None',
+            dataBits: 8,
+            stopBits: 1,
+            responseTimeoutMs: 1000,
+            retryCount: 1,
+            registerKind: 'holding',
+            startRegister: 0,
+            registerCount: 4,
+            registersPerRequest: 2,
+            collectedAtUtc: '2026-03-31T10:05:00Z',
+            totalRequests: 2,
+            blocks: [
+              { startAddress: 0, registerCount: 2, attempts: 1 },
+              { startAddress: 2, registerCount: 2, attempts: 1 },
+            ],
+            registers: [
+              { address: 0, highByte: 0x41, lowByte: 0x42, unsignedValue: 0x4142, hexValue: '0x4142' },
+              { address: 1, highByte: 0x43, lowByte: 0x44, unsignedValue: 0x4344, hexValue: '0x4344' },
+              { address: 2, highByte: 0x3F, lowByte: 0x80, unsignedValue: 0x3F80, hexValue: '0x3F80' },
+              { address: 3, highByte: 0x00, lowByte: 0x00, unsignedValue: 0x0000, hexValue: '0x0000' },
+            ],
           }),
         } as Response;
       }
@@ -533,11 +565,13 @@ describe('SystemPage', () => {
 
     const notificationsButton = screen.getByRole('button', { name: /notifications/i });
     const themeButton = screen.getByRole('button', { name: /theme/i });
+    const toolsButton = screen.getByRole('button', { name: /tools/i });
     const terminalButton = screen.getByRole('button', { name: /terminal/i });
     const logsButton = screen.getByRole('button', { name: /logs/i });
 
     expect(notificationsButton).toBeInTheDocument();
     expect(themeButton).toBeInTheDocument();
+    expect(toolsButton).toBeInTheDocument();
     expect(terminalButton).toBeInTheDocument();
     expect(logsButton).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /internet speed/i })).not.toBeInTheDocument();
@@ -596,6 +630,28 @@ describe('SystemPage', () => {
     expect(screen.queryByText(/application logs/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/browse captured log entries filtered by severity and time range/i)).not.toBeInTheDocument();
     expect(screen.getByTestId('location-display')).toHaveTextContent('/system/logs');
+  });
+
+  it('opens the tools page and scans Modbus registers', async () => {
+    renderSystemRoute();
+
+    fireEvent.click(await screen.findByRole('button', { name: /tools/i }));
+
+    expect(await screen.findByText(/probe rtu devices, inspect raw register bytes/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /connect & scan/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /connect & scan/i }));
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalledWith('/api/system/modbus-scanner/read', expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }));
+    });
+
+    expect(await screen.findByText(/connected to COM3 and read 4 holding registers/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /0x41/i })).toBeInTheDocument();
+    expect(screen.getByText(/select 2 registers for float32 or 4 registers for float64/i)).toBeInTheDocument();
   });
 
   it('redirects legacy tunnel and internet speed routes to connectivity', async () => {

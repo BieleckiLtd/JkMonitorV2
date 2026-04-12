@@ -20,6 +20,7 @@ import { InternetSpeedMenuItem } from './system-page/InternetSpeedMenuItem';
 import { TunnelMenuItem } from './system-page/TunnelMenuItem';
 import { HardwareInterfacesSection } from './system-page/HardwareInterfacesSection';
 import { DatabaseSection } from './system-page/DatabaseSection';
+import { ModbusScannerSection } from './system-page/ModbusScannerSection';
 import { TerminalSection } from './system-page/TerminalSection';
 
 type DeviceTelemetrySnapshot = {
@@ -2086,6 +2087,10 @@ export function SystemPage() {
 
               {activeSystemSection === 'hardware-interfaces' ? (
                 <HardwareInterfacesSection interfaces={interfaces} />
+              ) : null}
+
+              {activeSystemSection === 'tools' ? (
+                <ModbusScannerSection interfaces={interfaces} />
               ) : null}
 
               {activeSystemSection === 'database' ? (

@@ -460,3 +460,53 @@ export type WifiConnectDialogState = {
   allowSsidEdit: boolean;
   title: string;
 };
+
+export type ModbusRegisterKind = 'holding' | 'input';
+
+export type ModbusScannerReadRequest = {
+  portName: string;
+  slaveAddress: number;
+  baudRate: number;
+  parity: string;
+  dataBits: number;
+  stopBits: number;
+  responseTimeoutMs: number;
+  retryCount: number;
+  startRegister: number;
+  registerCount: number;
+  registersPerRequest: number;
+  registerKind: ModbusRegisterKind;
+};
+
+export type ModbusScannerReadBlock = {
+  startAddress: number;
+  registerCount: number;
+  attempts: number;
+};
+
+export type ModbusScannerRegisterValue = {
+  address: number;
+  highByte: number;
+  lowByte: number;
+  unsignedValue: number;
+  hexValue: string;
+};
+
+export type ModbusScannerReadResult = {
+  portName: string;
+  slaveAddress: number;
+  baudRate: number;
+  parity: string;
+  dataBits: number;
+  stopBits: number;
+  responseTimeoutMs: number;
+  retryCount: number;
+  registerKind: ModbusRegisterKind;
+  startRegister: number;
+  registerCount: number;
+  registersPerRequest: number;
+  collectedAtUtc: string;
+  totalRequests: number;
+  blocks: ModbusScannerReadBlock[];
+  registers: ModbusScannerRegisterValue[];
+};

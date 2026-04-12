@@ -1,9 +1,10 @@
-import { Bell, Cpu, Database, List, Palette, RefreshCcw, SquareTerminal, Usb, Wifi, type LucideIcon } from 'lucide-react';
+import { Bell, Cpu, Database, List, Palette, RefreshCcw, SquareTerminal, Usb, Wifi, Wrench, type LucideIcon } from 'lucide-react';
 
 export type SystemSection =
   | 'resource-usage'
   | 'software-update'
   | 'connectivity'
+  | 'tools'
   | 'hardware-interfaces'
   | 'database'
   | 'terminal'
@@ -13,6 +14,7 @@ export const systemSectionRouteSegments: SystemSection[] = [
   'resource-usage',
   'software-update',
   'connectivity',
+  'tools',
   'hardware-interfaces',
   'database',
   'terminal',
@@ -30,6 +32,7 @@ export const systemSectionItems: readonly SystemSectionItem[] = [
   { id: 'resource-usage', label: 'Resource usage', description: 'CPU, memory, and storage', icon: Cpu },
   { id: 'software-update', label: 'Software update', description: 'Check and install releases', icon: RefreshCcw },
   { id: 'connectivity', label: 'Connectivity', description: 'Wi-Fi, Bluetooth, and Ethernet', icon: Wifi },
+  { id: 'tools', label: 'Tools', description: 'Utilities for direct device inspection', icon: Wrench },
   { id: 'hardware-interfaces', label: 'Hardware interfaces', description: 'Serial ports and block devices', icon: Usb },
   { id: 'database', label: 'Database', description: 'Storage size, backup, and restore', icon: Database },
   { id: 'terminal', label: 'Terminal', description: 'Interactive host shell', icon: SquareTerminal },

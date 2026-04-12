@@ -29,13 +29,18 @@ internal static class ModbusRtu
     }
 
     /// <summary>
-    /// Build a Modbus RTU "Read Holding Registers" (function code 0x03) request.
+    /// Build a Modbus RTU read request for function codes 0x03 or 0x04.
     /// </summary>
-    public static byte[] BuildReadHoldingRegistersRequest(byte slaveAddress, ushort startRegister, ushort registerCount)
+    public static byte[] BuildReadRegistersRequest(byte slaveAddress, byte functionCode, ushort startRegister, ushort registerCount)
     {
+        if (functionCode is not (0x03 or 0x04))
+        {
+            throw new ArgumentOutOfRangeException(nameof(functionCode), functionCode, "Only Modbus read function codes 0x03 and 0x04 are supported.");
+        }
+
         var request = new byte[8];
         request[0] = slaveAddress;
-        request[1] = 0x03;
+        request[1] = functionCode;
         request[2] = (byte)(startRegister >> 8);
         request[3] = (byte)(startRegister & 0xFF);
         request[4] = (byte)(registerCount >> 8);
@@ -45,6 +50,12 @@ internal static class ModbusRtu
         request[7] = (byte)((crc >> 8) & 0xFF);
         return request;
     }
+
+    /// <summary>
+    /// Build a Modbus RTU "Read Holding Registers" (function code 0x03) request.
+    /// </summary>
+    public static byte[] BuildReadHoldingRegistersRequest(byte slaveAddress, ushort startRegister, ushort registerCount)
+        => BuildReadRegistersRequest(slaveAddress, 0x03, startRegister, registerCount);
 
     /// <summary>
     /// Build a Modbus RTU "Write Multiple Registers" (function code 0x10) request.
