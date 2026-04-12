@@ -83,4 +83,5 @@ export type EntityOption = {
 export type DeviceOption = {
   id: string;
   name: string;
+  entities: EntityOption[];
 };

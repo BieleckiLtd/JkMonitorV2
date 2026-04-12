@@ -4,7 +4,6 @@ import type {
   NotificationChannelConfig,
   NotificationRuleConfig,
   NotificationLogEntry,
-  EntityOption,
   DeviceOption,
   TestChannelResponse,
 } from '../types/notification';
@@ -89,22 +88,17 @@ export function useNotificationLog() {
 }
 
 export function useNotificationMetadata() {
-  const [entities, setEntities] = useState<EntityOption[]>([]);
   const [devices, setDevices] = useState<DeviceOption[]>([]);
 
   useEffect(() => {
     const loadMeta = async () => {
       try {
-        const [entRes, devRes] = await Promise.all([
-          fetch('/api/notifications/entities'),
-          fetch('/api/notifications/devices'),
-        ]);
-        if (entRes.ok) setEntities((await entRes.json()) as EntityOption[]);
+        const devRes = await fetch('/api/notifications/devices');
         if (devRes.ok) setDevices((await devRes.json()) as DeviceOption[]);
       } catch { /* ignore */ }
     };
     void loadMeta();
   }, []);
 
-  return { entities, devices };
+  return { devices };
 }

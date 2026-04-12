@@ -68,7 +68,7 @@ const defaultRule = (): NotificationRuleConfig => ({
   name: 'New rule',
   enabled: true,
   deviceId: '',
-  entityId: 'state_of_charge',
+  entityId: '',
   expression: 'value == 100',
   channelIds: [],
   messageTemplate: '{name}: {entity} is {value} on {device}',
@@ -113,7 +113,7 @@ function TabButton({ active, label, icon: Icon, onClick }: { active: boolean; la
 export function NotificationsPage({ hideHeader = false }: { hideHeader?: boolean }) {
   const { config, isLoading, error, saveChannels, saveRules, testChannel } = useNotificationConfig();
   const { log } = useNotificationLog();
-  const { entities, devices } = useNotificationMetadata();
+  const { devices } = useNotificationMetadata();
   const [tab, setTab] = useState<Tab>('channels');
 
   const [channels, setChannels] = useState<NotificationChannelConfig[]>([]);
@@ -369,16 +369,16 @@ export function NotificationsPage({ hideHeader = false }: { hideHeader?: boolean
           <div className='rounded-xl border border-border bg-muted/30 px-4 py-3'>
             <div className='text-xs font-semibold uppercase tracking-widest text-muted-foreground'>Expression help</div>
             <div className='mt-2 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2'>
-              <div><code className='text-foreground'>value == 100</code> — SOC reaches 100%</div>
+              <div><code className='text-foreground'>value == 100</code> — reaches 100</div>
               <div><code className='text-foreground'>value &lt; 10</code> — below threshold</div>
               <div><code className='text-foreground'>prev &gt;= 90 &amp;&amp; value == 100</code> — transition from ≥90 to 100</div>
-              <div><code className='text-foreground'>value == 50</code> — equals 50 (any direction)</div>
+              <div><code className='text-foreground'>value &gt; 30</code> — exceeds 30</div>
               <div><code className='text-foreground'>Abs(value - prev) &gt; 5</code> — change &gt; 5</div>
-              <div><code className='text-foreground'>soc &lt; 20 &amp;&amp; current &lt; 0</code> — low SOC while discharging</div>
+              <div><code className='text-foreground'>value &lt; 2 &amp;&amp; prev &gt;= 2</code> — drops below 2</div>
             </div>
             <div className='mt-2 text-[11px] text-muted-foreground'>
-              Variables: <code>value</code>, <code>prev</code> (previous value of the observed entity), plus all snapshot fields (
-              <code>soc</code>, <code>total_voltage</code>, <code>current</code>, <code>power</code>, <code>mos_temperature</code>, etc.)
+              Variables: <code>value</code>, <code>prev</code> (previous value of the observed entity), plus all snapshot fields
+              from the selected device.
             </div>
           </div>
 
@@ -416,7 +416,10 @@ export function NotificationsPage({ hideHeader = false }: { hideHeader?: boolean
                   <select
                     className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
                     value={rule.deviceId}
-                    onChange={(e) => updateRule(index, 'deviceId', e.target.value)}
+                    onChange={(e) => {
+                      updateRule(index, 'deviceId', e.target.value);
+                      updateRule(index, 'entityId', '');
+                    }}
                   >
                     <option value=''>Select device...</option>
                     {devices.map((d) => (
@@ -435,7 +438,7 @@ export function NotificationsPage({ hideHeader = false }: { hideHeader?: boolean
                     onChange={(e) => updateRule(index, 'entityId', e.target.value)}
                   >
                     <option value=''>Select entity...</option>
-                    {entities.map((en) => (
+                    {(devices.find((d) => d.id === rule.deviceId)?.entities ?? []).map((en) => (
                       <option key={en.id} value={en.id}>
                         {en.name} {en.unit ? `(${en.unit})` : ''}
                       </option>

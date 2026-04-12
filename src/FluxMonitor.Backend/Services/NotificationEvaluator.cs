@@ -239,6 +239,16 @@ public sealed class NotificationEvaluator(
         if (snapshot.MinCellVoltageVolts.HasValue) expression.Parameters["min_cell_voltage"] = (double)snapshot.MinCellVoltageVolts.Value;
         if (snapshot.MaxCellVoltageVolts.HasValue) expression.Parameters["max_cell_voltage"] = (double)snapshot.MaxCellVoltageVolts.Value;
         if (snapshot.AverageCellVoltageVolts.HasValue) expression.Parameters["avg_cell_voltage"] = (double)snapshot.AverageCellVoltageVolts.Value;
+
+        // Expose all dynamic parameters so expressions can reference any device entity.
+        if (snapshot.Parameters is not null)
+        {
+            foreach (var p in snapshot.Parameters)
+            {
+                if (p.NumericValue.HasValue && !expression.Parameters.ContainsKey(p.Key))
+                    expression.Parameters[p.Key] = (double)p.NumericValue.Value;
+            }
+        }
     }
 
     private static string RenderTemplate(string template, NotificationRuleConfig rule, string deviceId, string deviceName, double value, double prev)

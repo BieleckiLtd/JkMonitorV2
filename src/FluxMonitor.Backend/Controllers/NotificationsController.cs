@@ -11,6 +11,8 @@ public sealed class NotificationsController(
     NotificationDispatcher dispatcher,
     NotificationEvaluator evaluator,
     DeviceStateStore deviceStateStore,
+    DeviceConfigStore deviceConfigStore,
+    DeviceDefinitionLoader definitionLoader,
     IHostEnvironment environment) : ControllerBase
 {
     [HttpGet]
@@ -69,25 +71,31 @@ public sealed class NotificationsController(
     }
 
     [HttpGet("entities")]
-    public IActionResult GetAvailableEntities()
+    public IActionResult GetAvailableEntities([FromQuery] string? deviceId = null)
     {
-        // Return known entity IDs and their friendly names for the rule editor
-        var entities = new[]
+        if (!string.IsNullOrWhiteSpace(deviceId))
         {
-            new { id = "total_voltage", name = "Total Voltage", unit = "V" },
-            new { id = "current", name = "Current", unit = "A" },
-            new { id = "power", name = "Power", unit = "W" },
-            new { id = "state_of_charge", name = "State of Charge", unit = "%" },
-            new { id = "mos_temperature", name = "MOS Temperature", unit = "°C" },
-            new { id = "battery_temp_1", name = "Battery Temp 1", unit = "°C" },
-            new { id = "battery_temp_2", name = "Battery Temp 2", unit = "°C" },
-            new { id = "delta_cell_voltage", name = "Cell Delta", unit = "V" },
-            new { id = "min_cell_voltage", name = "Min Cell Voltage", unit = "V" },
-            new { id = "max_cell_voltage", name = "Max Cell Voltage", unit = "V" },
-            new { id = "avg_cell_voltage", name = "Avg Cell Voltage", unit = "V" },
-            new { id = "cycle_count", name = "Cycle Count", unit = "" },
-            new { id = "alarm_flags", name = "Alarm Flags", unit = "" },
-        };
+            var definition = ResolveDefinitionForDevice(deviceId);
+            if (definition is not null)
+                return Ok(BuildEntityList(definition));
+        }
+
+        // No device specified – return union of entities across all configured devices.
+        var devices = deviceConfigStore.GetDevices();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var entities = new List<object>();
+
+        foreach (var device in devices)
+        {
+            if (!device.TryResolveDefinition(definitionLoader, out var def) || def is null)
+                continue;
+
+            foreach (var entry in BuildEntityList(def))
+            {
+                if (seen.Add(entry.id))
+                    entities.Add(entry);
+            }
+        }
 
         return Ok(entities);
     }
@@ -96,7 +104,52 @@ public sealed class NotificationsController(
     public IActionResult GetAvailableDevices()
     {
         var status = deviceStateStore.GetStatus(environment.EnvironmentName);
-        var devices = status.Devices.Select(d => new { id = d.DeviceId, name = d.DisplayName }).ToArray();
+        var devices = status.Devices.Select(d =>
+        {
+            var definition = ResolveDefinitionForDevice(d.DeviceId);
+            return new
+            {
+                id = d.DeviceId,
+                name = d.DisplayName,
+                entities = definition is not null ? BuildEntityList(definition) : [],
+            };
+        }).ToArray();
         return Ok(devices);
     }
+
+    private Contracts.DeviceDefinition.DeviceDefinition? ResolveDefinitionForDevice(string deviceId)
+    {
+        var device = deviceConfigStore.GetDevices()
+            .FirstOrDefault(d => string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase));
+
+        if (device is null)
+            return null;
+
+        return device.TryResolveDefinition(definitionLoader, out var definition) ? definition : null;
+    }
+
+    private static List<EntityListItem> BuildEntityList(Contracts.DeviceDefinition.DeviceDefinition definition)
+    {
+        var list = new List<EntityListItem>();
+
+        foreach (var entity in definition.Entities)
+        {
+            if (entity.Hidden || entity.Type == "cell_array")
+                continue;
+
+            list.Add(new EntityListItem(entity.Id, entity.Name, entity.Source.Unit ?? ""));
+        }
+
+        foreach (var computed in definition.ComputedEntities)
+        {
+            if (computed.Hidden)
+                continue;
+
+            list.Add(new EntityListItem(computed.Id, computed.Name, computed.Unit ?? ""));
+        }
+
+        return list;
+    }
+
+    private sealed record EntityListItem(string id, string name, string unit);
 }
