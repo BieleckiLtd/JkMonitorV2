@@ -140,6 +140,11 @@ public sealed class DefinitionDrivenTelemetryBuilder(ExpressionEvaluator express
 
             entityValues[computed.Id] = result;
 
+            if (computed.Hidden)
+            {
+                continue;
+            }
+
             if (computed.Type == "binary_sensor")
             {
                 parameters.Add(new DeviceParameter

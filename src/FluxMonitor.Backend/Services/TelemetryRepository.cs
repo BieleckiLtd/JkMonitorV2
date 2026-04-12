@@ -34,6 +34,15 @@ public interface ITelemetryRepository
 
     Task<IReadOnlyList<CellHistoryDataPoint>> QueryCellHistoryAsync(string deviceId, int cellIndex, string resolution, BucketValueKind bucketValueKind, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken);
 
+    Task<IReadOnlyList<SeriesHistoryDataPoint>> QuerySeriesHistoryAsync(
+        string deviceId,
+        IReadOnlyList<string> sensorNames,
+        string resolution,
+        BucketValueKind bucketValueKind,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken);
+
     Task ApplyRetentionAsync(CancellationToken cancellationToken);
 
     Task FlushBufferedAsync(bool includeActiveBucket, CancellationToken cancellationToken);
@@ -77,6 +86,10 @@ public sealed record CellHistoryDataPoint(
     DateTimeOffset Timestamp,
     double? VoltageVolts);
 
+public sealed record SeriesHistoryDataPoint(
+    DateTimeOffset Timestamp,
+    IReadOnlyDictionary<string, double?> Values);
+
 public sealed class NoOpTelemetryRepository : ITelemetryRepository
 {
     public Task InitializeAsync(CancellationToken cancellationToken) => Task.CompletedTask;
@@ -96,6 +109,16 @@ public sealed class NoOpTelemetryRepository : ITelemetryRepository
 
     public Task<IReadOnlyList<CellHistoryDataPoint>> QueryCellHistoryAsync(string deviceId, int cellIndex, string resolution, BucketValueKind bucketValueKind, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
         => Task.FromResult<IReadOnlyList<CellHistoryDataPoint>>([]);
+
+    public Task<IReadOnlyList<SeriesHistoryDataPoint>> QuerySeriesHistoryAsync(
+        string deviceId,
+        IReadOnlyList<string> sensorNames,
+        string resolution,
+        BucketValueKind bucketValueKind,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken)
+        => Task.FromResult<IReadOnlyList<SeriesHistoryDataPoint>>([]);
 
     public Task ApplyRetentionAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
@@ -348,6 +371,35 @@ public sealed class TimescaleTelemetryRepository(
         return ShouldUseMinuteHistoryCache(resolution)
             ? QueryBufferedMinuteCellHistory(deviceId, sensorName, bucketValueKind, from, to)
             : await QueryPersistedCellHistoryAsync(deviceId, sensorName, resolution, bucketValueKind, from, to, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<SeriesHistoryDataPoint>> QuerySeriesHistoryAsync(
+        string deviceId,
+        IReadOnlyList<string> sensorNames,
+        string resolution,
+        BucketValueKind bucketValueKind,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken)
+    {
+        await InitializeAsync(cancellationToken);
+
+        var sanitizedSensorNames = sensorNames
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Select(name => name.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (sanitizedSensorNames.Length == 0)
+            return [];
+
+        if (string.Equals(resolution, "1s", StringComparison.Ordinal))
+        {
+            return QueryBufferedSeriesHistory(deviceId, sanitizedSensorNames, bucketValueKind, from, to);
+        }
+
+        return ShouldUseMinuteHistoryCache(resolution)
+            ? QueryBufferedMinuteSeriesHistory(deviceId, sanitizedSensorNames, bucketValueKind, from, to)
+            : await QueryPersistedSeriesHistoryAsync(deviceId, sanitizedSensorNames, resolution, bucketValueKind, from, to, cancellationToken);
     }
 
     public async Task ApplyRetentionAsync(CancellationToken cancellationToken)
@@ -1415,6 +1467,148 @@ public sealed class TimescaleTelemetryRepository(
             .ToArray();
     }
 
+    private IReadOnlyList<SeriesHistoryDataPoint> QueryBufferedSeriesHistory(
+        string deviceId,
+        IReadOnlyCollection<string> sensorNames,
+        BucketValueKind bucketValueKind,
+        DateTimeOffset from,
+        DateTimeOffset to)
+    {
+        List<BufferedSnapshot> samples;
+
+        lock (_stateGate)
+        {
+            if (!_recentSamples.TryGetValue(deviceId, out var queue))
+                return [];
+
+            samples = queue
+                .Where(sample => sample.Timestamp >= from && sample.Timestamp <= to)
+                .ToList();
+        }
+
+        if (samples.Count == 0)
+            return [];
+
+        var points = new SortedDictionary<DateTimeOffset, SeriesPointAccumulator>();
+        foreach (var sample in samples)
+        {
+            var secondBucket = AlignToBucketBoundaryFloor(sample.Timestamp, "1s");
+            if (!points.TryGetValue(secondBucket, out var accumulator))
+            {
+                accumulator = new SeriesPointAccumulator();
+                points[secondBucket] = accumulator;
+            }
+
+            foreach (var sensorName in sensorNames)
+            {
+                if (sample.Measurements.TryGetValue(sensorName, out var value))
+                    accumulator.Add(sensorName, sample.Timestamp, value);
+            }
+        }
+
+        return points
+            .Select(entry => entry.Value.ToSeriesHistoryDataPoint(entry.Key, bucketValueKind))
+            .ToArray();
+    }
+
+    private IReadOnlyList<SeriesHistoryDataPoint> QueryBufferedMinuteSeriesHistory(
+        string deviceId,
+        IReadOnlyCollection<string> sensorNames,
+        BucketValueKind bucketValueKind,
+        DateTimeOffset from,
+        DateTimeOffset to)
+    {
+        List<MeasurementValueRow> rows = [];
+        var sensorNameSet = sensorNames.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        lock (_stateGate)
+        {
+            var now = DateTimeOffset.UtcNow;
+            PromoteCompletedMinuteBucketsLocked(AlignToBucketBoundaryFloor(now, "1m"));
+            TrimRecentMinuteHistoryLocked(now.Subtract(MinuteHistoryWindow));
+
+            if (_recentMinuteHistory.TryGetValue(deviceId, out var queue))
+            {
+                rows.AddRange(queue.Where(row =>
+                    sensorNameSet.Contains(row.SensorName) &&
+                    row.Time >= from &&
+                    row.Time <= to));
+            }
+
+            rows.AddRange(_pendingMinuteBuckets
+                .Where(entry =>
+                    string.Equals(entry.Key.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase) &&
+                    sensorNameSet.Contains(entry.Key.SensorName) &&
+                    entry.Key.Time >= from &&
+                    entry.Key.Time <= to &&
+                    entry.Value.HasValue)
+                .OrderBy(entry => entry.Key.Time)
+                .ThenBy(entry => entry.Key.SensorName, StringComparer.OrdinalIgnoreCase)
+                .Select(entry => new MeasurementValueRow(
+                    entry.Key.BucketMinutes,
+                    entry.Key.Time,
+                    entry.Key.DeviceId,
+                    entry.Key.SensorName,
+                    entry.Value.Min,
+                    entry.Value.Max,
+                    entry.Value.Average,
+                    entry.Value.Last)));
+        }
+
+        if (rows.Count == 0)
+            return [];
+
+        var points = new SortedDictionary<DateTimeOffset, SeriesPointAccumulator>();
+        foreach (var row in rows.OrderBy(row => row.Time).ThenBy(row => row.SensorName, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!points.TryGetValue(row.Time, out var accumulator))
+            {
+                accumulator = new SeriesPointAccumulator();
+                points[row.Time] = accumulator;
+            }
+
+            accumulator.Add(row.SensorName, row.Time, row.GetValue(bucketValueKind));
+        }
+
+        return points
+            .Select(entry => entry.Value.ToSeriesHistoryDataPoint(entry.Key, bucketValueKind))
+            .ToArray();
+    }
+
+    private async Task<IReadOnlyList<SeriesHistoryDataPoint>> QueryPersistedSeriesHistoryAsync(
+        string deviceId,
+        IReadOnlyList<string> sensorNames,
+        string resolution,
+        BucketValueKind bucketValueKind,
+        DateTimeOffset from,
+        DateTimeOffset to,
+        CancellationToken cancellationToken)
+    {
+        var bucketMinutes = GetBucketMinutes(resolution);
+        var effectiveFrom = AlignToBucketBoundaryFloor(from, resolution);
+        var rows = await LoadPersistedMeasurementRowsAsync(deviceId, bucketMinutes, sensorNames, effectiveFrom, to, cancellationToken);
+        rows.AddRange(GetPendingMeasurementRows(deviceId, bucketMinutes, sensorNames, effectiveFrom, to));
+
+        if (rows.Count == 0)
+            return [];
+
+        var points = new SortedDictionary<DateTimeOffset, SeriesPointAccumulator>();
+        foreach (var row in rows.OrderBy(row => row.Time).ThenBy(row => row.SensorName, StringComparer.OrdinalIgnoreCase))
+        {
+            if (!points.TryGetValue(row.Time, out var accumulator))
+            {
+                accumulator = new SeriesPointAccumulator();
+                points[row.Time] = accumulator;
+            }
+
+            accumulator.Add(row.SensorName, row.Time, row.GetValue(bucketValueKind));
+        }
+
+        return points
+            .Select(entry => entry.Value.ToSeriesHistoryDataPoint(entry.Key, bucketValueKind))
+            .ToArray();
+    }
+
     private async Task<List<MeasurementValueRow>> LoadPersistedMeasurementRowsAsync(
         string deviceId,
         int bucketMinutes,
@@ -2012,6 +2206,32 @@ public sealed class TimescaleTelemetryRepository(
             {
                 accumulator.Add(timestamp, value);
             }
+        }
+    }
+
+    private sealed class SeriesPointAccumulator
+    {
+        private readonly Dictionary<string, NumericAccumulator> _accumulators = new(StringComparer.OrdinalIgnoreCase);
+
+        public void Add(string sensorName, DateTimeOffset timestamp, double value)
+        {
+            if (!_accumulators.TryGetValue(sensorName, out var accumulator))
+            {
+                accumulator = new NumericAccumulator();
+                _accumulators[sensorName] = accumulator;
+            }
+
+            accumulator.Add(timestamp, value);
+        }
+
+        public SeriesHistoryDataPoint ToSeriesHistoryDataPoint(DateTimeOffset timestamp, BucketValueKind bucketValueKind)
+        {
+            var values = _accumulators.ToDictionary(
+                entry => entry.Key,
+                entry => entry.Value.GetValue(bucketValueKind),
+                StringComparer.OrdinalIgnoreCase);
+
+            return new SeriesHistoryDataPoint(timestamp, values);
         }
     }
 

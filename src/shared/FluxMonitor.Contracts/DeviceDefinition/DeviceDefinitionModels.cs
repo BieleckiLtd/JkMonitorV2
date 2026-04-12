@@ -153,6 +153,55 @@ public sealed class ProtocolSettings
     /// request/response messages with configurable length and checksum rules.
     /// </summary>
     public AsciiHexFrameSettings? AsciiHexFrame { get; init; }
+
+    /// <summary>
+    /// Optional settings for passive BLE advertisement-based protocols.
+    /// </summary>
+    public BleAdvertisementSettings? Advertisement { get; init; }
+}
+
+public sealed class BleAdvertisementSettings
+{
+    /// <summary>
+    /// Advertisement payload source: "manufacturer-data" or "service-data".
+    /// </summary>
+    public string PayloadSource { get; init; } = "manufacturer-data";
+
+    /// <summary>
+    /// Manufacturer/company ID used when <see cref="PayloadSource"/> is "manufacturer-data".
+    /// </summary>
+    public int? ManufacturerId { get; init; }
+
+    /// <summary>
+    /// Service-data UUID used when <see cref="PayloadSource"/> is "service-data".
+    /// </summary>
+    public string? ServiceDataUuid { get; init; }
+
+    /// <summary>
+    /// Optional device-name prefix used to identify likely candidates during discovery.
+    /// </summary>
+    public string? LocalNamePrefix { get; init; }
+
+    /// <summary>
+    /// Number of bytes to skip at the start of the selected advertisement payload.
+    /// </summary>
+    public int PayloadOffset { get; init; }
+
+    /// <summary>
+    /// Number of payload bytes to keep after <see cref="PayloadOffset"/>.
+    /// A value of 0 keeps the remaining bytes.
+    /// </summary>
+    public int PayloadLength { get; init; }
+
+    /// <summary>
+    /// How long to wait for a fresh advertisement when polling, in milliseconds.
+    /// </summary>
+    public int ScanWindowMs { get; init; } = 3000;
+
+    /// <summary>
+    /// How long a captured advertisement remains fresh enough to reuse, in milliseconds.
+    /// </summary>
+    public int FreshnessMs { get; init; } = 10000;
 }
 
 public sealed class AsciiHexFrameSettings
@@ -370,6 +419,8 @@ public sealed class ComputedEntityDefinition
     public string? Role { get; init; }
 
     public string? FallbackFor { get; init; }
+
+    public bool Hidden { get; init; }
 }
 
 public sealed class AlarmDefinition
@@ -617,6 +668,9 @@ public sealed class ResponseLayoutDefinition
 ///   <item><c>firstOf</c> — read count from <see cref="Var"/>, execute <see cref="Steps"/> for first item only.</item>
 ///   <item><c>branch</c> — if variable <see cref="Var"/> satisfies condition (<see cref="Gt"/>/<see cref="Lt"/>/<see cref="Eq"/>),
 ///         execute <see cref="Then"/>, otherwise <see cref="Else"/>.</item>
+///   <item><c>mathAdd</c>/<c>mathSub</c>/<c>mathMul</c>/<c>mathDiv</c>/<c>mathMod</c>/<c>mathAnd</c>/<c>mathXor</c> —
+///         apply arithmetic or bitwise math to <see cref="Var"/> using <see cref="Value"/> or <see cref="OtherVar"/>,
+///         storing the result in <see cref="TargetVar"/> (or back into <see cref="Var"/> when omitted).</item>
 /// </list>
 /// </summary>
 public sealed class ResponseLayoutStep
@@ -641,6 +695,15 @@ public sealed class ResponseLayoutStep
 
     /// <summary>Name of a stored variable holding the element count for array operations.</summary>
     public string? Count { get; init; }
+
+    /// <summary>Optional second variable name used by math operations.</summary>
+    public string? OtherVar { get; init; }
+
+    /// <summary>Optional destination variable for math operations. Defaults to <see cref="Var"/>.</summary>
+    public string? TargetVar { get; init; }
+
+    /// <summary>Optional constant value used by math operations.</summary>
+    public int? Value { get; init; }
 
     /// <summary>Byte size of each element in array operations.</summary>
     public int ElementSize { get; init; }

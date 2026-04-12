@@ -46,6 +46,16 @@ public sealed class TelemetryShutdownFlushServiceTests
         public Task<IReadOnlyList<CellHistoryDataPoint>> QueryCellHistoryAsync(string deviceId, int cellIndex, string resolution, BucketValueKind bucketValueKind, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
             => Task.FromResult<IReadOnlyList<CellHistoryDataPoint>>([]);
 
+        public Task<IReadOnlyList<SeriesHistoryDataPoint>> QuerySeriesHistoryAsync(
+            string deviceId,
+            IReadOnlyList<string> sensorNames,
+            string resolution,
+            BucketValueKind bucketValueKind,
+            DateTimeOffset from,
+            DateTimeOffset to,
+            CancellationToken cancellationToken)
+            => Task.FromResult<IReadOnlyList<SeriesHistoryDataPoint>>([]);
+
         public Task ApplyRetentionAsync(CancellationToken cancellationToken) => Task.CompletedTask;
 
         public Task FlushBufferedAsync(bool includeActiveBucket, CancellationToken cancellationToken)

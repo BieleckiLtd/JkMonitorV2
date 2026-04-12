@@ -9,6 +9,7 @@ namespace FluxMonitor.Backend.Services;
 public sealed class PollingClientDispatcher(
     GenericSerialPollingClient serialClient,
     GenericBlePollingClient bleClient,
+    GenericBleAdvertisementPollingClient bleAdvertisementClient,
     DeviceDefinitionLoader definitionLoader) : IDevicePollingClient
 {
     private static readonly HashSet<string> SupportedTransports =
@@ -32,8 +33,12 @@ public sealed class PollingClientDispatcher(
         if (!IsTransportSupported(transportType))
             return false;
 
-        return !string.Equals(transportType, "ble", StringComparison.OrdinalIgnoreCase) ||
-               GenericBlePollingClient.IsDefinitionSupported(definition);
+        if (!string.Equals(transportType, "ble", StringComparison.OrdinalIgnoreCase))
+            return true;
+
+        return string.Equals(definition.Connection.Protocol.Type, "ble-advertisement", StringComparison.OrdinalIgnoreCase)
+            ? GenericBleAdvertisementPollingClient.IsDefinitionSupported(definition)
+            : GenericBlePollingClient.IsDefinitionSupported(definition);
     }
 
     public string? GetUnsupportedDefinitionMessage(FluxMonitor.Contracts.DeviceDefinition.DeviceDefinition definition)
@@ -43,7 +48,11 @@ public sealed class PollingClientDispatcher(
             return GetUnsupportedTransportMessage(transportType);
 
         if (string.Equals(transportType, "ble", StringComparison.OrdinalIgnoreCase))
-            return GenericBlePollingClient.GetUnsupportedDefinitionMessage(definition);
+        {
+            return string.Equals(definition.Connection.Protocol.Type, "ble-advertisement", StringComparison.OrdinalIgnoreCase)
+                ? GenericBleAdvertisementPollingClient.GetUnsupportedDefinitionMessage(definition)
+                : GenericBlePollingClient.GetUnsupportedDefinitionMessage(definition);
+        }
 
         return null;
     }
@@ -77,6 +86,9 @@ public sealed class PollingClientDispatcher(
         return transport switch
         {
             "serial" => serialClient.PollAsync(device, definition, cancellationToken),
+            "ble" when string.Equals(definition.Connection.Protocol.Type, "ble-advertisement", StringComparison.OrdinalIgnoreCase) &&
+                       GenericBleAdvertisementPollingClient.IsDefinitionSupported(definition)
+                => bleAdvertisementClient.PollAsync(device, definition, cancellationToken),
             "ble" when GenericBlePollingClient.IsDefinitionSupported(definition)
                 => bleClient.PollAsync(device, definition, cancellationToken),
             _ => throw new NotSupportedException(

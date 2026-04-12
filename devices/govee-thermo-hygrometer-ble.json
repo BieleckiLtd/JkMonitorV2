@@ -1,0 +1,234 @@
+{
+  "$schema": "https://FluxMonitor.local/schemas/device-definition-v1.json",
+  "version": "1",
+  "device": {
+    "id": "govee-thermo-hygrometer-ble",
+    "name": "Govee Thermo-Hygrometer (BLE)",
+    "manufacturer": "Govee",
+    "model": "H5075 family",
+    "category": "environment",
+    "description": "Passive BLE broadcaster profile for Govee thermo-hygrometers that advertise temperature, humidity, and battery values in manufacturer data.",
+    "icon": "data:image/png;base64,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",
+    "documentationUrl": "https://github.com/BieleckiLtd/JkMonitorV2"
+  },
+  "connection": {
+    "transport": {
+      "type": "ble",
+      "defaults": {}
+    },
+    "protocol": {
+      "type": "ble-advertisement",
+      "settings": {
+        "advertisement": {
+          "payloadSource": "manufacturer-data",
+          "manufacturerId": 60552,
+          "localNamePrefix": "GVH",
+          "payloadOffset": 0,
+          "payloadLength": 0,
+          "scanWindowMs": 4000,
+          "freshnessMs": 15000
+        }
+      }
+    }
+  },
+  "dataSources": [
+    {
+      "id": "broadcast",
+      "name": "Broadcast payload",
+      "pollGroup": "fast",
+      "responseLayout": {
+        "bufferSize": 5,
+        "steps": [
+          { "op": "skip", "size": 1 },
+          { "op": "readVar", "type": "u24", "var": "encoded" },
+          { "op": "readVar", "type": "u8", "var": "battery", "writeTo": 4, "writeAs": "u8" },
+          { "op": "mathAnd", "var": "encoded", "value": 8388608, "targetVar": "sign_bit" },
+          {
+            "op": "branch",
+            "var": "sign_bit",
+            "gt": 0,
+            "then": [
+              { "op": "mathXor", "var": "encoded", "value": 8388608, "targetVar": "encoded_unsigned" },
+              { "op": "mathDiv", "var": "encoded_unsigned", "value": 1000, "targetVar": "temperature_tenths" },
+              { "op": "mathMul", "var": "temperature_tenths", "value": -1 },
+              { "op": "mathMod", "var": "encoded_unsigned", "value": 1000, "targetVar": "humidity_tenths" }
+            ],
+            "else": [
+              { "op": "mathDiv", "var": "encoded", "value": 1000, "targetVar": "temperature_tenths" },
+              { "op": "mathMod", "var": "encoded", "value": 1000, "targetVar": "humidity_tenths" }
+            ]
+          },
+          { "op": "writeVar", "var": "temperature_tenths", "writeTo": 0, "writeAs": "i16" },
+          { "op": "writeVar", "var": "humidity_tenths", "writeTo": 2, "writeAs": "u16" }
+        ]
+      }
+    }
+  ],
+  "pollGroups": {
+    "fast": {
+      "intervalMs": 5000,
+      "description": "Passive BLE advertisements sampled from the nearby broadcaster."
+    }
+  },
+  "entities": [
+    {
+      "id": "temperature_c",
+      "type": "sensor",
+      "name": "Temperature",
+      "category": "Environment",
+      "icon": "thermometer",
+      "source": {
+        "bank": "broadcast",
+        "byteOffset": 0,
+        "dataType": "int16",
+        "scale": 0.1,
+        "unit": "°C"
+      },
+      "display": { "precision": 1 },
+      "role": "temperature"
+    },
+    {
+      "id": "humidity_pct",
+      "type": "sensor",
+      "name": "Humidity",
+      "category": "Environment",
+      "source": {
+        "bank": "broadcast",
+        "byteOffset": 2,
+        "dataType": "uint16",
+        "scale": 0.1,
+        "unit": "%"
+      },
+      "display": { "precision": 1 }
+    },
+    {
+      "id": "battery_pct",
+      "type": "sensor",
+      "name": "Battery",
+      "category": "Status",
+      "source": {
+        "bank": "broadcast",
+        "byteOffset": 4,
+        "dataType": "uint8",
+        "unit": "%"
+      },
+      "display": { "precision": 0 }
+    }
+  ],
+  "computedEntities": [
+    {
+      "id": "dew_point_c",
+      "type": "sensor",
+      "name": "Dew Point",
+      "category": "Environment",
+      "expression": "(243.04 * (ln(humidity_pct / 100) + ((17.625 * temperature_c) / (243.04 + temperature_c)))) / (17.625 - (ln(humidity_pct / 100) + ((17.625 * temperature_c) / (243.04 + temperature_c))))",
+      "unit": "°C",
+      "display": { "precision": 1 }
+    },
+    {
+      "id": "vpd_kpa",
+      "type": "sensor",
+      "name": "VPD",
+      "category": "Environment",
+      "expression": "(1 - (humidity_pct / 100)) * 0.6108 * exp((17.27 * temperature_c) / (temperature_c + 237.3))",
+      "unit": "kPa",
+      "display": { "precision": 2 }
+    }
+  ],
+  "storage": {
+    "database": {
+      "provider": "timescaledb",
+      "defaultNamePattern": "FluxMonitor_{deviceId}"
+    },
+    "timeSeries": [
+      { "entity": "temperature_c", "aggregate": "avg", "column": "temperature_c" },
+      { "entity": "humidity_pct", "aggregate": "avg", "column": "humidity_pct" },
+      { "entity": "dew_point_c", "aggregate": "avg", "column": "dew_point_c" },
+      { "entity": "vpd_kpa", "aggregate": "avg", "column": "vpd_kpa" },
+      { "entity": "battery_pct", "aggregate": "last", "column": "battery_pct" }
+    ],
+    "retention": {
+      "raw": { "window": "24h" },
+      "1m": { "window": "1y" },
+      "5m": { "window": "2y" },
+      "1h": { "window": "10y" }
+    }
+  },
+  "ui": {
+    "pages": {
+      "monitor": {
+        "sections": [
+          {
+            "type": "hero-metrics",
+            "metrics": [
+              { "entity": "temperature_c", "icon": "thermometer", "color": "orange" },
+              { "entity": "humidity_pct", "icon": "activity", "color": "blue" },
+              { "entity": "dew_point_c", "icon": "thermometer", "color": "teal" },
+              { "entity": "vpd_kpa", "icon": "gauge", "color": "emerald" }
+            ]
+          },
+          {
+            "type": "parameter-table",
+            "title": "Environment",
+            "filter": { "categories": ["Environment"] }
+          },
+          {
+            "type": "parameter-table",
+            "title": "Status",
+            "filter": { "categories": ["Status"] }
+          }
+        ]
+      },
+      "history": {
+        "resolutions": [
+          { "id": "1s", "label": "1 Second", "defaultWindow": "10m" },
+          { "id": "1m", "label": "1 Minute", "defaultWindow": "1h" },
+          { "id": "5m", "label": "5 Minutes", "defaultWindow": "24h" },
+          { "id": "1h", "label": "1 Hour", "defaultWindow": "7d" }
+        ],
+        "charts": [
+          {
+            "title": "Temperature",
+            "type": "line-chart",
+            "traces": [
+              { "entity": "temperature_c", "label": "Temperature", "color": "orange" },
+              { "entity": "dew_point_c", "label": "Dew Point", "color": "teal" }
+            ],
+            "yAxis": { "unit": "°C", "label": "Temperature" }
+          },
+          {
+            "title": "Humidity",
+            "type": "line-chart",
+            "traces": [
+              { "entity": "humidity_pct", "label": "Humidity", "color": "blue" }
+            ],
+            "yAxis": { "unit": "%", "label": "Humidity", "domain": [0, 100] }
+          },
+          {
+            "title": "VPD",
+            "type": "line-chart",
+            "traces": [
+              { "entity": "vpd_kpa", "label": "VPD", "color": "emerald" }
+            ],
+            "yAxis": { "unit": "kPa", "label": "VPD" }
+          },
+          {
+            "title": "Battery",
+            "type": "line-chart",
+            "traces": [
+              { "entity": "battery_pct", "label": "Battery", "color": "amber" }
+            ],
+            "yAxis": { "unit": "%", "label": "Battery", "domain": [0, 100] }
+          }
+        ]
+      },
+      "dashboard": {
+        "card": {
+          "primaryMetric": "temperature_c",
+          "secondaryMetrics": ["humidity_pct", "dew_point_c", "vpd_kpa"],
+          "statusEntities": []
+        }
+      }
+    }
+  }
+}

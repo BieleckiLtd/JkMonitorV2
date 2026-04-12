@@ -6,6 +6,12 @@ import { cn } from '../lib/utils';
 import { getBatteryStateFromCurrent } from '../lib/batteryStatus';
 import { useDeviceDefinition } from '../hooks/useDeviceDefinition';
 import type { DeviceDefinition, UiSectionDefinition } from '../types/deviceDefinition';
+import {
+  convertTemperatureValue,
+  getTemperatureDisplayUnit,
+  isCelsiusUnit,
+  type TemperatureUnit,
+} from '../lib/temperatureUnits';
 
 type DeviceParameter = {
   key: string;
@@ -100,6 +106,13 @@ export function MonitorPage() {
   const [devices, setDevices] = useState<DeviceRuntimeState[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [temperatureUnit, setTemperatureUnit] = useState<TemperatureUnit>(() => {
+    if (typeof window === 'undefined') {
+      return 'c';
+    }
+
+    return window.localStorage.getItem('FluxMonitor-temperature-unit') === 'f' ? 'f' : 'c';
+  });
 
   useEffect(() => {
     let isMounted = true;
@@ -216,13 +229,45 @@ export function MonitorPage() {
     };
   }, []);
 
+  useEffect(() => {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    window.localStorage.setItem('FluxMonitor-temperature-unit', temperatureUnit);
+  }, [temperatureUnit]);
+
   return (
     <div className='space-y-3 pb-4 sm:space-y-6 sm:pb-8'>
       <section data-slot='page-hero-shell' className='page-hero-shell rounded-3xl border border-border bg-card/80 p-4 shadow-sm backdrop-blur sm:p-6 md:p-8'>
         <div className='space-y-3'>
-          <div className='inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.24em] text-primary'>
-            <Activity className='h-3.5 w-3.5' />
-            Live Telemetry
+          <div className='flex flex-wrap items-center justify-between gap-3'>
+            <div className='inline-flex items-center gap-2 rounded-full border border-primary/20 bg-primary/10 px-3 py-1 text-xs font-medium uppercase tracking-[0.24em] text-primary'>
+              <Activity className='h-3.5 w-3.5' />
+              Live Telemetry
+            </div>
+            <div className='inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/70 p-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
+              <button
+                type='button'
+                onClick={() => setTemperatureUnit('c')}
+                className={cn(
+                  'rounded-full px-3 py-1 transition-colors',
+                  temperatureUnit === 'c' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted/70',
+                )}
+              >
+                Celsius
+              </button>
+              <button
+                type='button'
+                onClick={() => setTemperatureUnit('f')}
+                className={cn(
+                  'rounded-full px-3 py-1 transition-colors',
+                  temperatureUnit === 'f' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted/70',
+                )}
+              >
+                Fahrenheit
+              </button>
+            </div>
           </div>
           <div>
             <h2 className='text-3xl font-bold tracking-tight text-foreground md:text-4xl'>Device Monitor</h2>
@@ -257,13 +302,13 @@ export function MonitorPage() {
       )}
 
       {devices.map((device) => (
-        <DevicePanel key={device.deviceId} device={device} />
+        <DevicePanel key={device.deviceId} device={device} temperatureUnit={temperatureUnit} />
       ))}
     </div>
   );
 }
 
-function DevicePanel({ device }: { device: DeviceRuntimeState }) {
+function DevicePanel({ device, temperatureUnit }: { device: DeviceRuntimeState; temperatureUnit: TemperatureUnit }) {
   const definition = useDeviceDefinition(device.definitionId);
   const telemetry = device.latestTelemetry;
   const parameters = telemetry?.parameters ?? [];
@@ -352,14 +397,14 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
         <>
           {/* Hero metrics — driven by definition */}
           {monitorSections ? (
-            renderDefinitionSections(monitorSections, paramByKey, telemetry, dp, cells, selectedCellIndices, setSelectedCellIndices, device.deviceId, definition)
+            renderDefinitionSections(monitorSections, paramByKey, telemetry, dp, cells, selectedCellIndices, setSelectedCellIndices, device.deviceId, definition, temperatureUnit)
           ) : (
             <>
               {cells.length > 0 && (
                 <CellVoltageChart cells={cells} minV={telemetry.minCellVoltageVolts} maxV={telemetry.maxCellVoltageVolts} avgV={telemetry.averageCellVoltageVolts} selectedCellIndices={selectedCellIndices} onCellClick={(idx) => setSelectedCellIndices(prev => prev.includes(idx) ? prev.filter(i => i !== idx) : [...prev, idx])} />
               )}
 
-              <HistoryCharts deviceId={device.deviceId} precision={dp} selectedCellIndices={selectedCellIndices} onClearCellSelection={() => setSelectedCellIndices([])} />
+              <HistoryCharts deviceId={device.deviceId} precision={dp} selectedCellIndices={selectedCellIndices} onClearCellSelection={() => setSelectedCellIndices([])} temperatureUnit={temperatureUnit} />
             </>
           )}
 
@@ -372,18 +417,18 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
                 if (section.groupBy === 'category') {
                   const catGroups = groupByCategory(params);
                   return Array.from(catGroups.entries()).map(([cat, catParams]) => (
-                    <ParameterCategoryCard key={`${idx}-${cat}`} category={cat} params={catParams} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} />
+                    <ParameterCategoryCard key={`${idx}-${cat}`} category={cat} params={catParams} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} temperatureUnit={temperatureUnit} />
                   ));
                 }
                 return (
-                  <ParameterCategoryCard key={idx} category={section.title ?? 'Parameters'} params={params} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} />
+                  <ParameterCategoryCard key={idx} category={section.title ?? 'Parameters'} params={params} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} temperatureUnit={temperatureUnit} />
                 );
               })}
             </div>
           ) : (
             <div className='grid gap-3 sm:gap-4 lg:grid-cols-2'>
               {sortedCategories.filter(c => c !== 'Cell Voltages').map((category) => (
-                <ParameterCategoryCard key={category} category={category} params={grouped.get(category)!} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} />
+                <ParameterCategoryCard key={category} category={category} params={grouped.get(category)!} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} temperatureUnit={temperatureUnit} />
               ))}
             </div>
           )}
@@ -498,11 +543,13 @@ function ParameterRow({
   deviceId,
   telemetry,
   paramByKey,
+  temperatureUnit,
 }: {
   param: DeviceParameter;
   deviceId: string;
   telemetry: DeviceTelemetrySnapshot;
   paramByKey: Map<string, DeviceParameter>;
+  temperatureUnit: TemperatureUnit;
 }) {
   const [isEditing, setIsEditing] = useState(false);
   const [editValue, setEditValue] = useState('');
@@ -510,7 +557,8 @@ function ParameterRow({
   const [writeResult, setWriteResult] = useState<{ success: boolean; message: string } | null>(null);
   const isSwitchSetting = isSwitchSettingParam(param.key);
   const statusChip = getSwitchStatusChip(param, telemetry, paramByKey);
-  const value = formatParamValue(param, isSwitchSetting ? 'enabled-disabled' : 'yes-no');
+  const value = formatParamValue(param, temperatureUnit, isSwitchSetting ? 'enabled-disabled' : 'yes-no');
+  const displayUnit = getTemperatureDisplayUnit(param.unit, temperatureUnit) ?? param.unit;
 
   const startEdit = useCallback(() => {
     if (!param.isWritable) return;
@@ -598,7 +646,7 @@ function ParameterRow({
             <>
               <span className='text-sm font-semibold text-foreground'>
                 {value}
-                {param.unit && <span className='ml-1 text-xs font-normal text-muted-foreground'>{param.unit}</span>}
+                {displayUnit && <span className='ml-1 text-xs font-normal text-muted-foreground'>{displayUnit}</span>}
               </span>
               {param.isWritable && (
                 <button onClick={startEdit} className='rounded p-1 text-muted-foreground/60 hover:text-primary hover:bg-primary/10 transition-colors'
@@ -625,12 +673,14 @@ function ParameterCategoryCard({
   deviceId,
   telemetry,
   paramByKey,
+  temperatureUnit,
 }: {
   category: string;
   params: DeviceParameter[];
   deviceId: string;
   telemetry: DeviceTelemetrySnapshot;
   paramByKey: Map<string, DeviceParameter>;
+  temperatureUnit: TemperatureUnit;
 }) {
   return (
     <Card className='border border-border/80 bg-card/85 shadow-sm'>
@@ -643,7 +693,7 @@ function ParameterCategoryCard({
       <CardContent className='pt-3'>
         <div className='grid gap-2'>
           {params.map((param) => (
-            <ParameterRow key={param.key} param={param} deviceId={deviceId} telemetry={telemetry} paramByKey={paramByKey} />
+            <ParameterRow key={param.key} param={param} deviceId={deviceId} telemetry={telemetry} paramByKey={paramByKey} temperatureUnit={temperatureUnit} />
           ))}
         </div>
       </CardContent>
@@ -662,6 +712,7 @@ function renderDefinitionSections(
   setSelectedCellIndices: React.Dispatch<React.SetStateAction<number[]>>,
   deviceId: string,
   definition: DeviceDefinition | null,
+  temperatureUnit: TemperatureUnit,
 ) {
   const elements: React.ReactNode[] = [];
   const capacityAh = paramByKey.get('nominal_battery_capacity')?.numericValue;
@@ -679,8 +730,12 @@ function renderDefinitionSections(
                 const param = paramByKey.get(m.entity);
                 const entity = definition?.entities.find(e => e.id === m.entity) ?? definition?.computedEntities?.find(e => e.id === m.entity);
                 const value = param?.numericValue;
-                const unit = param?.unit ?? (entity && 'source' in entity ? entity.source?.unit : undefined) ?? (entity && 'unit' in entity ? (entity as { unit?: string }).unit : '') ?? '';
+                const sourceUnit = param?.unit ?? (entity && 'source' in entity ? entity.source?.unit : undefined) ?? (entity && 'unit' in entity ? (entity as { unit?: string }).unit : '') ?? '';
+                const unit = getTemperatureDisplayUnit(sourceUnit, temperatureUnit) ?? '';
                 const prec = entity?.display?.precision ?? 2;
+                const displayValue = isCelsiusUnit(sourceUnit)
+                  ? convertTemperatureValue(value != null ? Number(value) : null, temperatureUnit)
+                  : value != null ? Number(value) : null;
                 const isSoc = m.entity === 'state_of_charge';
                 const isCurrent = m.entity === 'current';
                 const isPower = m.entity === 'power';
@@ -721,7 +776,7 @@ function renderDefinitionSections(
                     key={m.entity}
                     icon={resolveIcon(m.icon)}
                     label={param?.displayName ?? entity?.name ?? m.entity}
-                    value={fmt(value, prec)}
+                    value={fmt(displayValue, prec)}
                     unit={unit}
                     accent={accent}
                     subtitle={heroSubtitle}
@@ -761,6 +816,7 @@ function renderDefinitionSections(
               onClearCellSelection={() => setSelectedCellIndices([])}
               definition={definition ?? undefined}
               capacityAh={capacityAh}
+              temperatureUnit={temperatureUnit}
             />
           );
         }
@@ -781,6 +837,7 @@ function renderDefinitionSections(
         onClearCellSelection={() => setSelectedCellIndices([])}
         definition={definition ?? undefined}
         capacityAh={capacityAh}
+        temperatureUnit={temperatureUnit}
       />
     );
   }
@@ -805,6 +862,10 @@ function resolveIcon(name?: string): typeof Zap {
 }
 
 function DeviceIcon({ name, className }: { name?: string; className?: string }) {
+  if (name && (name.startsWith('data:image/') || name.startsWith('/') || name.startsWith('./') || name.startsWith('../'))) {
+    return <img src={name} alt='' className={cn(className, 'rounded-md object-cover')} />;
+  }
+
   const Icon = resolveIcon(name);
   return <Icon className={className} />;
 }
@@ -963,6 +1024,7 @@ function getSwitchStatusChip(
 
 function formatParamValue(
   param: DeviceParameter,
+  temperatureUnit: TemperatureUnit,
   booleanStyle: 'yes-no' | 'enabled-disabled' = 'yes-no',
 ): string {
   if (param.booleanValue != null) {
@@ -972,9 +1034,16 @@ function formatParamValue(
     return param.booleanValue ? 'Yes' : 'No';
   }
   if (param.numericValue != null) {
-    const v = param.numericValue;
-    if (Number.isInteger(v)) return v.toLocaleString();
-    return v.toFixed(Math.abs(v) >= 100 ? 1 : 3);
+    const sourceValue = Number(param.numericValue);
+    const displayValue = isCelsiusUnit(param.unit)
+      ? convertTemperatureValue(sourceValue, temperatureUnit)
+      : sourceValue;
+    if (displayValue == null || !Number.isFinite(displayValue)) {
+      return nd;
+    }
+
+    if (Number.isInteger(displayValue)) return displayValue.toLocaleString();
+    return displayValue.toFixed(Math.abs(displayValue) >= 100 ? 1 : 3);
   }
   if (param.stringValue != null) {
     return param.stringValue;

@@ -71,6 +71,11 @@ type BleScanResponse = {
   error?: string;
 };
 
+type LibraryBleSelection = {
+  definition: DeviceDefinitionSummary;
+  familyName: string;
+};
+
 type StartStopResult = {
   deviceId: string;
   started?: boolean;
@@ -431,6 +436,47 @@ const defaultDevice = (
   definition: definitionSnapshot,
 });
 
+function slugifyDeviceId(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    || 'device';
+}
+
+function createUniqueDeviceId(base: string, devices: DeviceConfiguration[]) {
+  const existingIds = new Set(devices.map((device) => device.deviceId.trim().toLowerCase()).filter((entry) => entry.length > 0));
+  let candidate = base;
+  let suffix = 2;
+
+  while (existingIds.has(candidate.toLowerCase())) {
+    candidate = `${base}-${suffix}`;
+    suffix += 1;
+  }
+
+  return candidate;
+}
+
+function createBleDeviceFromCandidate(
+  definition: DeviceDefinitionSummary,
+  definitionSnapshot: DeviceDefinition,
+  candidate: BleScanDevice,
+  devices: DeviceConfiguration[],
+  familyName?: string,
+) {
+  const addressSuffix = candidate.address.replace(/[^A-Fa-f0-9]/g, '').slice(-4).toLowerCase();
+  const preferredId = slugifyDeviceId(`${familyName ?? stripConnectionSuffix(definition.name)}-${candidate.displayName || addressSuffix}`);
+  const deviceId = createUniqueDeviceId(preferredId, devices);
+
+  return {
+    ...defaultDevice(devices.length + 1, definition, definitionSnapshot, familyName),
+    deviceId,
+    displayName: candidate.displayName || familyName || stripConnectionSuffix(definition.name),
+    transportPortName: candidate.address,
+  } satisfies DeviceConfiguration;
+}
+
 function getTransportType(device: DeviceConfiguration, definitions: DeviceDefinitionSummary[]) {
   return device.definition?.connection.transport.type
     ?? definitions.find((definition) => definition.id === device.definitionId)?.transportType
@@ -572,6 +618,8 @@ export function DevicesPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [showAddPicker, setShowAddPicker] = useState(false);
+  const [libraryBleSelection, setLibraryBleSelection] = useState<LibraryBleSelection | null>(null);
+  const [selectedLibraryBleAddresses, setSelectedLibraryBleAddresses] = useState<string[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle');
   const [saveDirty, setSaveDirty] = useState(0);
@@ -582,6 +630,7 @@ export function DevicesPage() {
   const [bleScanErrors, setBleScanErrors] = useState<Record<string, string | null>>({});
   const definitionsRef = useRef<DeviceDefinitionSummary[]>([]);
   const bleScanSequenceRef = useRef<Record<string, number>>({});
+  const activeLibraryBleScanKey = libraryBleSelection ? `library:${libraryBleSelection.definition.id}` : null;
 
   useEffect(() => {
     definitionsRef.current = availableDefinitions;
@@ -643,6 +692,8 @@ export function DevicesPage() {
 
   useEffect(() => {
     if (!showAddPicker) {
+      setLibraryBleSelection(null);
+      setSelectedLibraryBleAddresses([]);
       return;
     }
 
@@ -934,6 +985,64 @@ export function DevicesPage() {
     markDirty();
   }, [loadDefinitionSnapshot, markDirty]);
 
+  const openLibraryBleSelection = useCallback((definition: DeviceDefinitionSummary, familyName: string) => {
+    const nextSelection = { definition, familyName } satisfies LibraryBleSelection;
+    setLibraryBleSelection(nextSelection);
+    setSelectedLibraryBleAddresses([]);
+    setBleScanResults((current) => ({ ...current, [`library:${definition.id}`]: current[`library:${definition.id}`] ?? [] }));
+    setBleScanErrors((current) => ({ ...current, [`library:${definition.id}`]: null }));
+    void scanBleDevices(`library:${definition.id}`, definition.id);
+  }, [scanBleDevices]);
+
+  const addSelectedLibraryBleDevices = useCallback(async () => {
+    if (!libraryBleSelection || selectedLibraryBleAddresses.length === 0) {
+      return;
+    }
+
+    const definitionSnapshot = await loadDefinitionSnapshot(libraryBleSelection.definition.id);
+    const scanKey = `library:${libraryBleSelection.definition.id}`;
+    const selectedDevices = (bleScanResults[scanKey] ?? [])
+      .filter((candidate) => selectedLibraryBleAddresses.includes(candidate.address));
+    if (selectedDevices.length === 0) {
+      return;
+    }
+
+    setDevices((current) => {
+      const nextDevices = [...current];
+      for (const candidate of selectedDevices) {
+        nextDevices.push(createBleDeviceFromCandidate(
+          libraryBleSelection.definition,
+          definitionSnapshot,
+          candidate,
+          nextDevices,
+          libraryBleSelection.familyName,
+        ));
+      }
+
+      return nextDevices;
+    });
+
+    setLibraryBleSelection(null);
+    setSelectedLibraryBleAddresses([]);
+    setShowAddPicker(false);
+    setUploadError(null);
+    markDirty();
+  }, [bleScanResults, libraryBleSelection, loadDefinitionSnapshot, markDirty, selectedLibraryBleAddresses]);
+
+  const addManualBleDevice = useCallback(async () => {
+    if (!libraryBleSelection) {
+      return;
+    }
+
+    await addDeviceFromDefinition(
+      libraryBleSelection.definition.id,
+      libraryBleSelection.definition,
+      libraryBleSelection.familyName,
+    );
+    setLibraryBleSelection(null);
+    setSelectedLibraryBleAddresses([]);
+  }, [addDeviceFromDefinition, libraryBleSelection]);
+
   const handleUploadDefinition = useCallback(async (file: File) => {
     setUploadError(null);
 
@@ -1090,9 +1199,16 @@ export function DevicesPage() {
                                   : 'cursor-not-allowed border-amber-500/30 bg-amber-500/10 text-amber-700 opacity-70 dark:text-amber-300',
                               )}
                               disabled={!definition.isTransportSupported}
-                              onClick={() => addDeviceFromDefinition(definition.id, definition, family.name)}
+                              onClick={() => {
+                                if (definition.transportType === 'ble') {
+                                  openLibraryBleSelection(definition, family.name);
+                                  return;
+                                }
+
+                                void addDeviceFromDefinition(definition.id, definition, family.name);
+                              }}
                             >
-                              {connectionLabel}
+                              {definition.transportType === 'ble' ? `Scan ${connectionLabel}` : connectionLabel}
                             </button>
                           );
                         })}
@@ -1110,6 +1226,101 @@ export function DevicesPage() {
           </div>
 
           <div>
+            {libraryBleSelection && activeLibraryBleScanKey ? (
+              <div className='mb-6 rounded-2xl border border-border/70 bg-background/50 p-4'>
+                <div className='flex flex-wrap items-start justify-between gap-3'>
+                  <div>
+                    <div className='text-sm font-semibold text-foreground'>{libraryBleSelection.familyName} nearby</div>
+                    <div className='mt-1 text-xs text-muted-foreground'>
+                      Scan nearby BLE broadcasters and select every device you want to add now. You can still add one manually if the device is not advertising yet.
+                    </div>
+                  </div>
+                  <div className='flex flex-wrap gap-2'>
+                    <Button
+                      type='button'
+                      variant='outline'
+                      size='sm'
+                      disabled={bleScanLoading[activeLibraryBleScanKey]}
+                      onClick={() => void scanBleDevices(activeLibraryBleScanKey, libraryBleSelection.definition.id)}
+                    >
+                      {bleScanLoading[activeLibraryBleScanKey] ? <LoaderCircle className='h-4 w-4 animate-spin' /> : null}
+                      {bleScanLoading[activeLibraryBleScanKey] ? 'Scanning...' : 'Scan nearby'}
+                    </Button>
+                    <Button
+                      type='button'
+                      size='sm'
+                      disabled={selectedLibraryBleAddresses.length === 0}
+                      onClick={() => void addSelectedLibraryBleDevices()}
+                    >
+                      Add selected
+                    </Button>
+                    <Button
+                      type='button'
+                      variant='ghost'
+                      size='sm'
+                      onClick={() => void addManualBleDevice()}
+                    >
+                      Add manually
+                    </Button>
+                  </div>
+                </div>
+
+                {bleScanFollowUpLoading[activeLibraryBleScanKey] ? (
+                  <p className='mt-3 text-xs text-muted-foreground'>Quick matches are shown first while the scan keeps listening for more devices.</p>
+                ) : null}
+                {bleScanErrors[activeLibraryBleScanKey] ? (
+                  <div className='mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-700 dark:text-amber-300'>
+                    {bleScanErrors[activeLibraryBleScanKey]}
+                  </div>
+                ) : null}
+
+                {(bleScanResults[activeLibraryBleScanKey] ?? []).length > 0 ? (
+                  <div className='mt-4 space-y-2'>
+                    {(bleScanResults[activeLibraryBleScanKey] ?? []).map((candidate) => {
+                      const isSelected = selectedLibraryBleAddresses.includes(candidate.address);
+                      return (
+                        <button
+                          key={candidate.address}
+                          type='button'
+                          aria-label={`Select BLE device ${candidate.address}`}
+                          aria-pressed={isSelected}
+                          onClick={() => setSelectedLibraryBleAddresses((current) => current.includes(candidate.address)
+                            ? current.filter((address) => address !== candidate.address)
+                            : [...current, candidate.address])}
+                          className={cn(
+                            'w-full rounded-xl border px-3 py-3 text-left transition',
+                            isSelected
+                              ? 'border-primary/50 bg-primary/10'
+                              : 'border-border bg-muted/20 hover:border-primary/30 hover:bg-muted/40',
+                          )}
+                        >
+                          <div className='flex items-start justify-between gap-3'>
+                            <div className='space-y-1'>
+                              <div className='flex flex-wrap items-center gap-2'>
+                                <div className='text-sm font-semibold text-foreground'>{candidate.displayName}</div>
+                                {candidate.isDefinitionVerified ? <span className='rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-500'>{candidate.verificationLabel ?? 'Matched'}</span> : null}
+                                {candidate.rssi != null ? <span className='rounded-full border border-border bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>{candidate.rssi} dBm</span> : null}
+                              </div>
+                              <div className='font-mono text-xs text-muted-foreground'>{candidate.address}</div>
+                              {candidate.verificationDetails ? <div className='text-xs text-muted-foreground'>{candidate.verificationDetails}</div> : null}
+                            </div>
+                            <span className={cn(
+                              'rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]',
+                              isSelected
+                                ? 'border-primary/40 bg-primary/15 text-primary'
+                                : 'border-border bg-background/70 text-muted-foreground',
+                            )}>
+                              {isSelected ? 'Selected' : 'Select'}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+
             <span className='mb-3 block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Upload definition JSON</span>
             <input
               ref={fileInputRef}

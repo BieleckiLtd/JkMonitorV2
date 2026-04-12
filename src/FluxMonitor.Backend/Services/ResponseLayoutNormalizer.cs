@@ -35,7 +35,7 @@ internal static class ResponseLayoutNormalizer
     {
         foreach (var step in steps)
         {
-            if (reader.IsExhausted && step.Op is not "writeVar" and not "writeBit" and not "branch")
+            if (reader.IsExhausted && step.Op is not "writeVar" and not "writeBit" and not "branch" and not "mathAdd" and not "mathSub" and not "mathMul" and not "mathDiv" and not "mathMod" and not "mathAnd" and not "mathXor")
                 break;
 
             switch (step.Op)
@@ -156,6 +156,43 @@ internal static class ResponseLayoutNormalizer
                         ExecuteSteps(step.Else, reader, buffer, vars);
                     break;
                 }
+
+                case "mathAdd":
+                case "mathSub":
+                case "mathMul":
+                case "mathDiv":
+                case "mathMod":
+                case "mathAnd":
+                case "mathXor":
+                {
+                    if (step.Var is null)
+                        break;
+
+                    var left = vars.TryGetValue(step.Var, out var currentValue) ? currentValue : 0;
+                    var right = ResolveOperand(step, vars);
+                    var result = step.Op switch
+                    {
+                        "mathAdd" => left + right,
+                        "mathSub" => left - right,
+                        "mathMul" => left * right,
+                        "mathDiv" => right == 0 ? left : left / right,
+                        "mathMod" => right == 0 ? left : left % right,
+                        "mathAnd" => left & right,
+                        "mathXor" => left ^ right,
+                        _ => left
+                    };
+
+                    var targetVar = step.TargetVar ?? step.Var;
+                    vars[targetVar] = result;
+
+                    if (step.WriteTo.HasValue)
+                    {
+                        var writeType = step.WriteAs ?? "u16";
+                        WriteTypedValue(buffer, step.WriteTo.Value, result, writeType);
+                    }
+
+                    break;
+                }
             }
         }
     }
@@ -164,6 +201,17 @@ internal static class ResponseLayoutNormalizer
     {
         if (countRef is null) return 0;
         return vars.TryGetValue(countRef, out var c) ? c : 0;
+    }
+
+    private static int ResolveOperand(ResponseLayoutStep step, Dictionary<string, int> vars)
+    {
+        if (step.Value.HasValue)
+            return step.Value.Value;
+
+        if (step.OtherVar is not null && vars.TryGetValue(step.OtherVar, out var other))
+            return other;
+
+        return 0;
     }
 
     private static int ReadTypedValue(PayloadReader reader, string type)
@@ -187,10 +235,24 @@ internal static class ResponseLayoutNormalizer
                 buffer[offset] = (byte)(value & 0xFF);
                 break;
             case "u16" or "i16" when offset + 1 < buffer.Length:
-                BinaryPrimitives.WriteUInt16BigEndian(buffer.AsSpan(offset, 2), (ushort)(value & 0xFFFF));
+                if (string.Equals(type, "i16", StringComparison.OrdinalIgnoreCase))
+                {
+                    BinaryPrimitives.WriteInt16BigEndian(buffer.AsSpan(offset, 2), (short)value);
+                }
+                else
+                {
+                    BinaryPrimitives.WriteUInt16BigEndian(buffer.AsSpan(offset, 2), (ushort)(value & 0xFFFF));
+                }
                 break;
-            case "u32" when offset + 3 < buffer.Length:
-                BinaryPrimitives.WriteUInt32BigEndian(buffer.AsSpan(offset, 4), (uint)value);
+            case "u32" or "i32" when offset + 3 < buffer.Length:
+                if (string.Equals(type, "i32", StringComparison.OrdinalIgnoreCase))
+                {
+                    BinaryPrimitives.WriteInt32BigEndian(buffer.AsSpan(offset, 4), value);
+                }
+                else
+                {
+                    BinaryPrimitives.WriteUInt32BigEndian(buffer.AsSpan(offset, 4), (uint)value);
+                }
                 break;
         }
     }

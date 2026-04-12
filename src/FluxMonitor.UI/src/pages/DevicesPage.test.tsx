@@ -287,7 +287,7 @@ describe('DevicesPage', () => {
     vi.restoreAllMocks();
   });
 
-  it('renders a BLE address input for supported BLE definitions', async () => {
+  it('renders the BLE scan picker for supported BLE definitions and can fall back to manual add', async () => {
     render(<DevicesPage />);
 
     fireEvent.click(await screen.findByRole('button', { name: /add first device/i }));
@@ -296,8 +296,13 @@ describe('DevicesPage', () => {
 
     fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using bluetooth/i }));
 
-    expect(await screen.findByText(/scan and choose a nearby ble device/i)).toBeInTheDocument();
-    expect(screen.getByPlaceholderText(/aa:bb:cc:dd:ee:ff or device alias/i)).toBeInTheDocument();
+    expect(await screen.findByText(/jk inverter bms nearby/i)).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /add selected/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /add manually/i })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /add manually/i }));
+
+    expect(await screen.findByPlaceholderText(/aa:bb:cc:dd:ee:ff or device alias/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /start/i })).toBeDisabled();
   });
 
@@ -309,8 +314,6 @@ describe('DevicesPage', () => {
     fireEvent.click(await screen.findByRole('button', { name: /add first device/i }));
     fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using bluetooth/i }));
 
-    fireEvent.click(await screen.findByRole('button', { name: /scan nearby/i }));
-
     await waitFor(() => {
       const scanRequests = vi.mocked(globalThis.fetch).mock.calls
         .map(([input]) => String(input))
@@ -321,7 +324,7 @@ describe('DevicesPage', () => {
 
     expect(await screen.findByText(/verified jk bms/i)).toBeInTheDocument();
     expect(screen.getByText(/-54 dBm/i)).toBeInTheDocument();
-    expect(screen.getByText(/quick results shown\. looking for more nearby candidates/i)).toBeInTheDocument();
+    expect(screen.getByText(/quick matches are shown first while the scan keeps listening for more devices/i)).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /select ble device 11:22:33:44:55:66/i })).not.toBeInTheDocument();
 
     await waitFor(() => {
@@ -333,8 +336,9 @@ describe('DevicesPage', () => {
     expect(await screen.findByRole('button', { name: /select ble device 11:22:33:44:55:66/i })).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /select ble device aa:bb:cc:dd:ee:ff/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add selected/i }));
 
-    expect(screen.getByPlaceholderText(/aa:bb:cc:dd:ee:ff or device alias/i)).toHaveValue('AA:BB:CC:DD:EE:FF');
+    expect(await screen.findByDisplayValue('AA:BB:CC:DD:EE:FF')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /start/i })).toBeEnabled();
   });
 
@@ -363,6 +367,7 @@ describe('DevicesPage', () => {
 
     fireEvent.click(await screen.findByRole('button', { name: /add first device/i }));
     fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using bluetooth/i }));
+    fireEvent.click(await screen.findByRole('button', { name: /add manually/i }));
 
     fireEvent.change(await screen.findByPlaceholderText(/aa:bb:cc:dd:ee:ff or device alias/i), {
       target: { value: 'C8:47:80:3A:5C:05' }

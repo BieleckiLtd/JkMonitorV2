@@ -18,6 +18,7 @@ public sealed class DevicesController(
     DeviceConfigStore deviceConfigStore,
     GenericSerialPollingClient genericModbusPollingClient,
     GenericBlePollingClient genericBlePollingClient,
+    GenericBleAdvertisementPollingClient genericBleAdvertisementPollingClient,
     PollingClientDispatcher pollingClientDispatcher,
     DeviceDefinitionLoader definitionLoader,
     ITelemetryRepository telemetryRepository,
@@ -146,6 +147,56 @@ public sealed class DevicesController(
             bucketView = TimescaleTelemetryRepository.FormatBucketValueKind(bucketValueKind),
             from = fromValue,
             to = toValue,
+            points
+        });
+    }
+
+    [HttpGet("{deviceId}/history/series")]
+    public async Task<IActionResult> GetSeriesHistory(
+        string deviceId,
+        [FromQuery(Name = "entity")] string[] entities,
+        [FromQuery] string resolution = "5m",
+        [FromQuery] string bucketView = "avg",
+        [FromQuery] DateTimeOffset? from = null,
+        [FromQuery] DateTimeOffset? to = null,
+        CancellationToken cancellationToken = default)
+    {
+        var persistedResolution = TimescaleTelemetryRepository.GetPersistedResolution(GetCurrentRetention().PersistedBucketMinutes);
+        var allowed = new HashSet<string>(StringComparer.Ordinal) { "1s", "1m", "5m", "1h", persistedResolution };
+        if (!allowed.Contains(resolution))
+            return BadRequest(new { message = $"Invalid resolution '{resolution}'. Use 1s, 1m, or {persistedResolution}. Legacy 5m and 1h inputs are accepted as persisted-history aliases." });
+
+        if (!TimescaleTelemetryRepository.TryParseBucketValueKind(bucketView, out var bucketValueKind))
+            return BadRequest(new { message = $"Invalid bucket view '{bucketView}'. Use avg, min, max, or last." });
+
+        var requestedEntities = entities
+            .Where(entity => !string.IsNullOrWhiteSpace(entity))
+            .Select(entity => entity.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (requestedEntities.Length == 0)
+            return BadRequest(new { message = "Specify at least one entity query value." });
+
+        var toValue = to ?? DateTimeOffset.UtcNow;
+        var fromValue = from ?? GetDefaultHistoryFrom(resolution, toValue);
+        var normalizedResolution = NormalizeHistoryResolution(resolution, persistedResolution);
+        var points = await telemetryRepository.QuerySeriesHistoryAsync(
+            deviceId,
+            requestedEntities,
+            normalizedResolution,
+            bucketValueKind,
+            fromValue,
+            toValue,
+            cancellationToken);
+
+        return Ok(new
+        {
+            deviceId,
+            resolution = normalizedResolution,
+            bucketView = TimescaleTelemetryRepository.FormatBucketValueKind(bucketValueKind),
+            from = fromValue,
+            to = toValue,
+            entities = requestedEntities,
             points
         });
     }
@@ -298,7 +349,10 @@ public sealed class DevicesController(
                 ? TimeSpan.FromMilliseconds(Math.Clamp(timeoutMs.Value, 1000, 15000))
                 : (TimeSpan?)null;
 
-            var devices = await genericBlePollingClient.DiscoverDevicesAsync(definition, timeout, cancellationToken, returnOnFirstMatch);
+            var devices = definition is not null &&
+                          string.Equals(definition.Connection.Protocol.Type, "ble-advertisement", StringComparison.OrdinalIgnoreCase)
+                ? await genericBleAdvertisementPollingClient.DiscoverDevicesAsync(definition, timeout, cancellationToken)
+                : await genericBlePollingClient.DiscoverDevicesAsync(definition, timeout, cancellationToken, returnOnFirstMatch);
             logger.LogInformation(
                 "BLE scan completed. DefinitionFilterApplied={DefinitionFilterApplied}, ResultCount={ResultCount}, ReturnOnFirstMatch={ReturnOnFirstMatch}.",
                 definition is not null,

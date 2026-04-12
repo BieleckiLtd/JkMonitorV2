@@ -75,6 +75,18 @@ export type ProtocolSettings = {
   writeValueLengthOffset?: number;
   writeValueOffset?: number;
   writeValueByteOrder?: 'big-endian' | 'little-endian';
+  advertisement?: BleAdvertisementSettings;
+};
+
+export type BleAdvertisementSettings = {
+  payloadSource?: 'manufacturer-data' | 'service-data';
+  manufacturerId?: number;
+  serviceDataUuid?: string;
+  localNamePrefix?: string;
+  payloadOffset?: number;
+  payloadLength?: number;
+  scanWindowMs?: number;
+  freshnessMs?: number;
 };
 
 export type DataSourceDefinition = {
@@ -113,10 +125,13 @@ export type EntityDefinition = {
   type: string;
   name: string;
   category: string;
+  icon?: string;
   source: EntitySourceDefinition;
   write?: EntityWriteDefinition;
   display?: EntityDisplayDefinition;
-  roles?: string[];
+  role?: string;
+  hidden?: boolean;
+  writable?: boolean;
 };
 
 export type EntityWriteDefinition = {
@@ -148,12 +163,16 @@ export type EntityDisplayDefinition = {
 
 export type ComputedEntityDefinition = {
   id: string;
+  type: string;
   name: string;
   category: string;
   expression: string;
   unit?: string;
   display?: EntityDisplayDefinition;
   roles?: string[];
+  role?: string;
+  fallbackFor?: string;
+  hidden?: boolean;
 };
 
 export type AlarmDefinition = {

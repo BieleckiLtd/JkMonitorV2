@@ -17,18 +17,15 @@ import {
 import { computeBatteryStatus } from '../lib/batteryStatus';
 import { TrendingUp } from 'lucide-react';
 import type { DeviceDefinition, UiChartDefinition } from '../types/deviceDefinition';
+import {
+  convertTemperatureValue,
+  getTemperatureDisplayUnit,
+  isCelsiusUnit,
+  type TemperatureUnit,
+} from '../lib/temperatureUnits';
 
-type HistoryPoint = {
+type HistoryPoint = Record<string, unknown> & {
   timestamp: string;
-  totalVoltageVolts?: number | null;
-  currentAmps?: number | null;
-  powerWatts?: number | null;
-  stateOfChargePercent?: number | null;
-  minCellVoltageVolts?: number | null;
-  maxCellVoltageVolts?: number | null;
-  deltaCellVoltageVolts?: number | null;
-  mosTemperatureCelsius?: number | null;
-  batteryTemperatureCelsius?: number | null;
 };
 
 type CellHistoryPoint = {
@@ -42,6 +39,20 @@ type HistoryResponse = {
   from: string;
   to: string;
   points: HistoryPoint[];
+};
+
+type SeriesHistoryPoint = {
+  timestamp: string;
+  values: Record<string, number | null>;
+};
+
+type SeriesHistoryResponse = {
+  deviceId: string;
+  resolution: string;
+  from: string;
+  to: string;
+  entities: string[];
+  points: SeriesHistoryPoint[];
 };
 
 type CellHistoryResponse = {
@@ -67,13 +78,18 @@ type DisplayPrecision = {
   deltaVoltage: number;
 };
 
+type ChartDataPoint = Record<string, unknown> & {
+  timestamp: string;
+  time?: string;
+};
+
 type CachedHistoryEntry = {
-  points: HistoryPoint[];
+  points: ChartDataPoint[];
   resolution: Resolution;
 };
 
 type CachedCellEntry = {
-  points: Record<string, unknown>[];
+  points: ChartDataPoint[];
   resolution: Resolution;
 };
 
@@ -111,7 +127,12 @@ const keyUnitSuffix: Record<string, string> = {
   batteryTemperatureCelsius: '°C',
 };
 
-function formatActiveValues(point: Record<string, unknown> | null, lines: LineSpec[], precision: DisplayPrecision): string | null {
+function formatActiveValues(
+  point: Record<string, unknown> | null,
+  lines: LineSpec[],
+  getDecimalsForKey: (key: string) => number,
+  getUnitForKey: (key: string) => string,
+): string | null {
   if (!point) return null;
   const parts: string[] = [];
   for (const l of lines) {
@@ -119,9 +140,8 @@ function formatActiveValues(point: Record<string, unknown> | null, lines: LineSp
     if (raw == null) continue;
     const num = typeof raw === 'number' ? raw : Number(raw);
     if (Number.isNaN(num)) continue;
-    const precKey = keyPrecisionMap[l.key];
-    const decimals = precKey != null ? precision[precKey] : 2;
-    const unit = keyUnitSuffix[l.key] ?? '';
+    const decimals = getDecimalsForKey(l.key);
+    const unit = getUnitForKey(l.key);
     parts.push(`${num.toFixed(decimals)}${unit}`);
   }
   return parts.length > 0 ? parts.join(' · ') : null;
@@ -144,29 +164,92 @@ function resolveChartColor(name: string): string {
   return definitionColorMap[name.toLowerCase()] ?? name;
 }
 
-/** Converts definition chart declarations into LineSpec arrays keyed by the snapshot field names.
- *  Entity IDs are mapped to the snake_case→camelCase naming the backend uses for the history response. */
-const entityToHistoryKey: Record<string, string> = {
-  total_voltage: 'totalVoltageVolts',
-  current: 'currentAmps',
-  power: 'powerWatts',
-  state_of_charge: 'stateOfChargePercent',
-  min_cell_voltage: 'minCellVoltageVolts',
-  max_cell_voltage: 'maxCellVoltageVolts',
-  avg_cell_voltage: 'avgCellVoltageVolts',
-  delta_cell_voltage: 'deltaCellVoltageVolts',
-  mos_temperature: 'mosTemperatureCelsius',
-  battery_temp_1: 'batteryTemperatureCelsius',
-  battery_temp_2: 'batteryTemperatureCelsius',
-};
+function getDefinitionEntity(definition: DeviceDefinition | undefined, entityId: string) {
+  return definition?.entities.find((entity) => entity.id === entityId)
+    ?? definition?.computedEntities?.find((entity) => entity.id === entityId);
+}
 
-export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClearCellSelection, definition, capacityAh }: {
+function resolveHistoryEntities(definition?: DeviceDefinition) {
+  const chartEntities = (definition?.ui?.pages?.history?.charts ?? [])
+    .flatMap((chart) => chart.traces?.map((trace) => trace.entity) ?? [])
+    .filter((entity): entity is string => Boolean(entity));
+
+  return [...new Set(chartEntities)];
+}
+
+function buildLegacyAliases(
+  values: Record<string, number | null>,
+  definition?: DeviceDefinition,
+): Record<string, number | null> {
+  const aliases: Record<string, number | null> = {};
+
+  const attachAlias = (entityId: string | undefined, aliasKey: string) => {
+    if (!entityId) {
+      return;
+    }
+
+    const value = values[entityId];
+    if (value != null) {
+      aliases[aliasKey] = value;
+    }
+  };
+
+  const roleEntity = (role: string) =>
+    definition?.entities.find((entity) => entity.role === role)?.id
+    ?? definition?.computedEntities?.find((entity) => entity.role === role)?.id;
+
+  attachAlias(roleEntity('total-voltage') ?? 'total_voltage', 'totalVoltageVolts');
+  attachAlias(roleEntity('current') ?? 'current', 'currentAmps');
+  attachAlias(roleEntity('power') ?? 'power', 'powerWatts');
+  attachAlias(roleEntity('state-of-charge') ?? 'state_of_charge', 'stateOfChargePercent');
+  attachAlias('min_cell_voltage', 'minCellVoltageVolts');
+  attachAlias('max_cell_voltage', 'maxCellVoltageVolts');
+  attachAlias('delta_cell_voltage', 'deltaCellVoltageVolts');
+  attachAlias('mos_temperature', 'mosTemperatureCelsius');
+  attachAlias('battery_temp_1', 'batteryTemperatureCelsius');
+
+  return aliases;
+}
+
+function applyTemperatureUnitToPoint(
+  point: Record<string, unknown>,
+  definition: DeviceDefinition | undefined,
+  temperatureUnit: TemperatureUnit,
+): Record<string, unknown> {
+  if (temperatureUnit === 'c') {
+    return point;
+  }
+
+  const converted: Record<string, unknown> = { ...point };
+  for (const [key, rawValue] of Object.entries(point)) {
+    if (key === 'timestamp' || key === 'time') {
+      continue;
+    }
+
+    const value = typeof rawValue === 'number' ? rawValue : Number(rawValue);
+    if (!Number.isFinite(value)) {
+      continue;
+    }
+
+    const entity = getDefinitionEntity(definition, key);
+    const unit = entity
+      ? ('source' in entity ? entity.source?.unit : entity.unit)
+      : keyUnitSuffix[key];
+    if (isCelsiusUnit(unit)) {
+      converted[key] = convertTemperatureValue(value, temperatureUnit);
+    }
+  }
+
+  return converted;
+}
+
+export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClearCellSelection, definition, capacityAh, temperatureUnit = 'c' }: {
   deviceId: string; precision: DisplayPrecision; selectedCellIndices?: number[]; onClearCellSelection?: () => void;
-  definition?: DeviceDefinition; capacityAh?: number | null;
+  definition?: DeviceDefinition; capacityAh?: number | null; temperatureUnit?: TemperatureUnit;
 }) {
   const [selectedRange, setSelectedRange] = useState<HistoryRangeId>('24h');
-  const [data, setData] = useState<HistoryPoint[]>([]);
-  const [multiCellData, setMultiCellData] = useState<Record<string, unknown>[]>([]);
+  const [data, setData] = useState<ChartDataPoint[]>([]);
+  const [multiCellData, setMultiCellData] = useState<ChartDataPoint[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [timeRange, setTimeRange] = useState<'range' | 'today'>('today');
   // Shared hover/selection state across all chart sections (synchronised by timestamp)
@@ -183,6 +266,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
 
   // Extract chart definitions from device definition (if available)
   const definitionCharts = definition?.ui?.pages?.history?.charts;
+  const definitionHistoryEntities = resolveHistoryEntities(definition);
 
   // Per-resolution data cache — survives resolution switches so toggling back is instant
   const historyCacheRef = useRef(new Map<string, CachedHistoryEntry>());
@@ -220,20 +304,30 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
       : windowFrom;
 
     try {
-      const resp = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/history?resolution=${requestedResolution}&from=${encodeURIComponent(fetchFrom)}`);
+      const historyUrl = definition && definitionCharts && definitionHistoryEntities.length > 0
+        ? `/api/devices/${encodeURIComponent(deviceId)}/history/series?resolution=${requestedResolution}&from=${encodeURIComponent(fetchFrom)}&${definitionHistoryEntities.map((entity) => `entity=${encodeURIComponent(entity)}`).join('&')}`
+        : `/api/devices/${encodeURIComponent(deviceId)}/history?resolution=${requestedResolution}&from=${encodeURIComponent(fetchFrom)}`;
+      const resp = await fetch(historyUrl);
       if (!resp.ok) return;
-      const json = (await resp.json()) as HistoryResponse;
+      const json = await resp.json() as HistoryResponse | SeriesHistoryResponse;
+      const normalizedPoints = 'entities' in json
+        ? json.points.map((point) => ({
+          timestamp: point.timestamp,
+          ...point.values,
+          ...buildLegacyAliases(point.values, definition),
+        }))
+        : json.points;
       const responseResolution = normalizeResolution(json.resolution, requestedResolution);
 
-      let points: HistoryPoint[];
+      let points: ChartDataPoint[];
       if (cachedPoints.length > 0 && fetchFrom !== windowFrom) {
         // Merge: keep cached points still inside the sliding window, add/overwrite new
-        const merged = new Map<string, HistoryPoint>();
+        const merged = new Map<string, ChartDataPoint>();
         for (const p of cachedPoints) if (p.timestamp >= windowFrom) merged.set(p.timestamp, p);
-        for (const p of json.points) merged.set(p.timestamp, p);
+        for (const p of normalizedPoints) merged.set(String(p.timestamp), p);
         points = [...merged.values()].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
       } else {
-        points = json.points;
+        points = normalizedPoints as ChartDataPoint[];
       }
 
       historyCacheRef.current.set(key, { points, resolution: responseResolution });
@@ -241,7 +335,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
       setData(points);
     } catch { /* ignore */ }
     finally { setIsLoading(false); }
-  }, [deviceId, getFromIso, requestedResolution, selectedRange, timeRange]);
+  }, [definition, definitionCharts, definitionHistoryEntities, deviceId, getFromIso, requestedResolution, selectedRange, timeRange]);
 
   const loadCells = useCallback(async () => {
     if (selectedCells.length === 0) { setMultiCellData([]); return; }
@@ -268,7 +362,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
       );
       const responseResolution = results.find((result) => result)?.resolution ?? cached?.resolution ?? requestedResolution;
 
-      const timeMap = new Map<string, Record<string, unknown>>();
+      const timeMap = new Map<string, ChartDataPoint>();
       // Seed with cached data still within the window
       if (cachedPoints.length > 0 && fetchFrom !== windowFrom) {
         for (const row of cachedPoints) {
@@ -286,7 +380,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
         }
       }
 
-      const merged = [...timeMap.values()].sort((a, b) => String(a.timestamp).localeCompare(String(b.timestamp)));
+      const merged = [...timeMap.values()].sort((a, b) => a.timestamp.localeCompare(b.timestamp));
       cellCacheRef.current.set(key, { points: merged, resolution: responseResolution });
       setResolvedResolution(responseResolution);
       setMultiCellData(merged);
@@ -325,7 +419,31 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
     return () => window.clearInterval(id);
   }, [cellKey, deviceId, load, loadCells, requestedResolution, selectedRange, timeRange]);
 
-  const formatted = data.map((p) => ({
+  const getDecimalsForKey = useCallback((key: string) => {
+    const entity = getDefinitionEntity(definition, key);
+    if (entity?.display?.precision != null) {
+      return entity.display.precision;
+    }
+
+    const precisionKey = keyPrecisionMap[key];
+    return precisionKey != null ? precision[precisionKey] : 2;
+  }, [definition, precision]);
+
+  const getUnitForKey = useCallback((key: string) => {
+    const entity = getDefinitionEntity(definition, key);
+    const sourceUnit = entity
+      ? ('source' in entity ? entity.source?.unit : entity.unit)
+      : keyUnitSuffix[key];
+
+    return getTemperatureDisplayUnit(sourceUnit, temperatureUnit) ?? '';
+  }, [definition, temperatureUnit]);
+
+  const displayData = useMemo(
+    () => data.map((point) => applyTemperatureUnitToPoint(point, definition, temperatureUnit) as ChartDataPoint),
+    [data, definition, temperatureUnit],
+  );
+
+  const formatted: ChartDataPoint[] = displayData.map((p) => ({
     ...p,
     time: fmtTime(p.timestamp, resolvedResolution, displayMode),
   }));
@@ -451,38 +569,46 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
                 onSelect={setSharedSelectedTime}
               />
             ) : (
-              <ChartSection title='Voltage' unit='V' data={chartData} precision={precision}
+              <ChartSection title='Voltage' data={chartData}
                 lines={[{ key: 'totalVoltageVolts', color: '#38bdf8', name: 'Pack Voltage' }]}
+                getDecimalsForKey={getDecimalsForKey}
+                getUnitForKey={getUnitForKey}
                 hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
                 onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
                 todayXTicks={todayXTicks} />
             )}
-            {definitionCharts ? renderDefinitionCharts(definitionCharts, chartData, precision, resolvedResolution, displayMode, sharedHoveredTime, sharedSelectedTime, setSharedHoveredTime, setSharedSelectedTime, todayXTicks, batteryStatusSubtitle) : (
+            {definitionCharts ? renderDefinitionCharts(definitionCharts, chartData, resolvedResolution, displayMode, sharedHoveredTime, sharedSelectedTime, setSharedHoveredTime, setSharedSelectedTime, todayXTicks, batteryStatusSubtitle, getDecimalsForKey, getUnitForKey) : (
               <>
                 <EnergyChartSection data={chartData} resolution={resolvedResolution} displayMode={displayMode}
                   hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
                   onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
                   todayXTicks={todayXTicks} />
-                <ChartSection title='State of Charge' unit='%' data={chartData} precision={precision}
+                <ChartSection title='State of Charge' data={chartData}
                   lines={[{ key: 'stateOfChargePercent', color: '#fbbf24', name: 'SOC' }]}
+                  getDecimalsForKey={getDecimalsForKey}
+                  getUnitForKey={getUnitForKey}
               domain={[0, 100]}
               hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
               onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
               todayXTicks={todayXTicks}
               subtitle={batteryStatusSubtitle} />
-            <ChartSection title='Cell Voltage Spread' unit='V' data={chartData} precision={precision}
+            <ChartSection title='Cell Voltage Spread' data={chartData}
               lines={[
                 { key: 'minCellVoltageVolts', color: '#f87171', name: 'Min Cell' },
                 { key: 'maxCellVoltageVolts', color: '#34d399', name: 'Max Cell' },
               ]}
+              getDecimalsForKey={getDecimalsForKey}
+              getUnitForKey={getUnitForKey}
               hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
               onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
               todayXTicks={todayXTicks} />
-            <ChartSection title='Temperature' unit='°C' data={chartData} precision={precision}
+            <ChartSection title='Temperature' data={chartData}
               lines={[
                 { key: 'mosTemperatureCelsius', color: '#fb923c', name: 'MOS' },
                 { key: 'batteryTemperatureCelsius', color: '#38bdf8', name: 'Battery' },
               ]}
+              getDecimalsForKey={getDecimalsForKey}
+              getUnitForKey={getUnitForKey}
               hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
               onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
               todayXTicks={todayXTicks} />
@@ -504,8 +630,7 @@ type ChartInteractionState = {
 /** Renders history charts from the device definition's chart declarations. */
 function renderDefinitionCharts(
   charts: UiChartDefinition[],
-  chartData: Record<string, unknown>[],
-  precision: DisplayPrecision,
+  chartData: ChartDataPoint[],
   resolution: Resolution,
   displayMode: HistoryDisplayMode,
   hoveredTime: string | null,
@@ -514,6 +639,8 @@ function renderDefinitionCharts(
   onSelect: (time: string | null) => void,
   todayXTicks?: string[],
   batteryStatusSubtitle?: React.ReactNode,
+  getDecimalsForKey?: (key: string) => number,
+  getUnitForKey?: (key: string) => string,
 ): React.ReactNode {
   return charts.filter(c => c.type !== 'multi-cell-chart').map((chart, i) => {
     if (chart.type === 'area-chart' && chart.showEnergyTotals) {
@@ -533,7 +660,7 @@ function renderDefinitionCharts(
     }
 
     const lines: LineSpec[] = (chart.traces ?? []).map(t => ({
-      key: entityToHistoryKey[t.entity] ?? t.entity,
+      key: t.entity,
       color: resolveChartColor(t.color),
       name: t.label ?? t.entity,
     }));
@@ -541,13 +668,13 @@ function renderDefinitionCharts(
     const isSocChart = chart.traces?.some(t => t.entity === 'state_of_charge');
 
     return (
-      <ChartSection
-        key={`def-chart-${i}`}
-        title={chart.title}
-        unit={chart.yAxis?.unit ?? ''}
-        data={chartData}
-        precision={precision}
-        lines={lines}
+        <ChartSection
+          key={`def-chart-${i}`}
+          title={chart.title}
+          data={chartData}
+          lines={lines}
+          getDecimalsForKey={getDecimalsForKey ?? (() => 2)}
+          getUnitForKey={getUnitForKey ?? (() => '')}
         domain={chart.yAxis?.domain}
         hoveredTime={hoveredTime}
         selectedTime={selectedTime}
@@ -567,9 +694,11 @@ const tooltipContentStyle = { backgroundColor: 'var(--card)', border: '1px solid
 const tooltipLabelStyle = { color: 'var(--muted-foreground)' };
 const legendStyle = { fontSize: 11, paddingTop: 4, color: 'var(--muted-foreground)' };
 
-function ChartSection({ title, data, lines, domain, precision, hoveredTime, selectedTime, onHover, onSelect, todayXTicks, subtitle }: {
-  title: string; unit: string; data: Record<string, unknown>[]; lines: LineSpec[];
-  domain?: [number, number]; precision: DisplayPrecision;
+function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitForKey, hoveredTime, selectedTime, onHover, onSelect, todayXTicks, subtitle }: {
+  title: string; data: ChartDataPoint[]; lines: LineSpec[];
+  domain?: [number, number];
+  getDecimalsForKey: (key: string) => number;
+  getUnitForKey: (key: string) => string;
   hoveredTime: string | null; selectedTime: string | null;
   onHover: (time: string | null) => void; onSelect: (time: string | null) => void;
   todayXTicks?: string[];
@@ -581,14 +710,13 @@ function ChartSection({ title, data, lines, domain, precision, hoveredTime, sele
     const num = typeof value === 'number' ? value : Number(value);
     if (Number.isNaN(num)) return [String(value), name];
     const key = String(props.dataKey ?? '');
-    const precKey = keyPrecisionMap[key];
-    const decimals = precKey != null ? precision[precKey] : 2;
-    const suffix = key === 'stateOfChargePercent' ? ' %' : '';
+    const decimals = getDecimalsForKey(key);
+    const suffix = getUnitForKey(key);
     return [`${num.toFixed(decimals)}${suffix}`, name];
-  }, [precision]);
+  }, [getDecimalsForKey, getUnitForKey]);
 
   const activePoint = getActivePoint(data, hoveredTime, selectedTime);
-  const activeValueText = lines.length === 1 ? formatActiveValues(activePoint, lines, precision) : null;
+  const activeValueText = lines.length === 1 ? formatActiveValues(activePoint, lines, getDecimalsForKey, getUnitForKey) : null;
 
   const handleChartMove = useCallback((state: unknown) => {
     const idx = extractActiveIndex(state);
