@@ -291,7 +291,7 @@ public sealed class GenericBleAdvertisementPollingClient(
             snapshot.ManufacturerDataDescriptions,
             snapshot.AdvertisedServiceUuids,
             verified,
-            verified ? "Advertisement match" : null,
+            verified ? "Compatible" : null,
             details,
             snapshot.LastSeen,
             ConvertRssiToSignalStrengthPercent(snapshot.Rssi),
@@ -523,8 +523,15 @@ public sealed class GenericBleAdvertisementPollingClient(
     private static Dictionary<string, byte[]> CreateBankData(DeviceDefinition definition, byte[] payload)
     {
         var bankData = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+        var hasGoveePayload = TryDecodeGoveeH5075Payload(payload, out var goveeBuffer);
         foreach (var bank in definition.DataSources)
         {
+            if (IsGoveeH5075Definition(definition) && hasGoveePayload)
+            {
+                bankData[bank.Id] = goveeBuffer!;
+                continue;
+            }
+
             var buffer = payload.ToArray();
             if (bank.ResponseLayout is not null)
                 buffer = ResponseLayoutNormalizer.Normalize(buffer, bank.ResponseLayout);
@@ -638,6 +645,49 @@ public sealed class GenericBleAdvertisementPollingClient(
 
         var bounded = Math.Clamp((rssi.Value - minRssi) / (double)(maxRssi - minRssi), 0d, 1d);
         return (int)Math.Round(bounded * 100d, MidpointRounding.AwayFromZero);
+    }
+
+    private static bool IsGoveeH5075Definition(DeviceDefinition definition)
+    {
+        return string.Equals(definition.Device.Id, "govee-thermo-hygrometer-ble", StringComparison.OrdinalIgnoreCase);
+    }
+
+    internal static bool TryDecodeGoveeH5075Payload(byte[] payload, out byte[]? normalizedBuffer)
+    {
+        normalizedBuffer = null;
+
+        if (payload.Length < 4)
+            return false;
+
+        ReadOnlySpan<byte> tempHum;
+        var battery = 0;
+
+        if (payload.Length >= 6 && payload[0] == 0x00)
+        {
+            tempHum = payload.AsSpan(1, 3);
+            battery = payload[4] & 0x7F;
+        }
+        else
+        {
+            tempHum = payload.AsSpan(0, 3);
+            battery = payload[^1] & 0x7F;
+        }
+
+        var raw = (tempHum[0] << 16) | (tempHum[1] << 8) | tempHum[2];
+        var isNegative = (raw & 0x800000) != 0;
+        raw &= 0x7FFFFF;
+
+        var temperatureTenths = raw / 1000;
+        if (isNegative)
+            temperatureTenths *= -1;
+
+        var humidityTenths = raw % 1000;
+
+        normalizedBuffer = new byte[5];
+        System.Buffers.Binary.BinaryPrimitives.WriteInt16BigEndian(normalizedBuffer.AsSpan(0, 2), (short)temperatureTenths);
+        System.Buffers.Binary.BinaryPrimitives.WriteUInt16BigEndian(normalizedBuffer.AsSpan(2, 2), (ushort)humidityTenths);
+        normalizedBuffer[4] = (byte)battery;
+        return true;
     }
 
     private static string[] DescribePayloads(IReadOnlyDictionary<int, byte[]> payloads)

@@ -307,7 +307,6 @@ function BleCandidateCard({
               <div className='mt-0.5 text-[11px] text-muted-foreground'>{formatRelativeSeen(candidate.lastSeenAt, nowMs)}</div>
             </div>
           </div>
-          {candidate.verificationDetails ? <div className='text-xs text-muted-foreground'>{candidate.verificationDetails}</div> : null}
         </div>
         <span className={cn(
           'rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]',
