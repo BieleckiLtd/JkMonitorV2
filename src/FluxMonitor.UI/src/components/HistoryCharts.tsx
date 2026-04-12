@@ -266,7 +266,11 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
 
   // Extract chart definitions from device definition (if available)
   const definitionCharts = definition?.ui?.pages?.history?.charts;
-  const definitionHistoryEntities = resolveHistoryEntities(definition);
+  const definitionHistoryEntities = useMemo(() => resolveHistoryEntities(definition), [definition]);
+  const definitionHistoryQuery = useMemo(
+    () => definitionHistoryEntities.map((entity) => `entity=${encodeURIComponent(entity)}`).join('&'),
+    [definitionHistoryEntities],
+  );
 
   // Per-resolution data cache — survives resolution switches so toggling back is instant
   const historyCacheRef = useRef(new Map<string, CachedHistoryEntry>());
@@ -304,8 +308,8 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
       : windowFrom;
 
     try {
-      const historyUrl = definition && definitionCharts && definitionHistoryEntities.length > 0
-        ? `/api/devices/${encodeURIComponent(deviceId)}/history/series?resolution=${requestedResolution}&from=${encodeURIComponent(fetchFrom)}&${definitionHistoryEntities.map((entity) => `entity=${encodeURIComponent(entity)}`).join('&')}`
+      const historyUrl = definition && definitionHistoryQuery.length > 0
+        ? `/api/devices/${encodeURIComponent(deviceId)}/history/series?resolution=${requestedResolution}&from=${encodeURIComponent(fetchFrom)}&${definitionHistoryQuery}`
         : `/api/devices/${encodeURIComponent(deviceId)}/history?resolution=${requestedResolution}&from=${encodeURIComponent(fetchFrom)}`;
       const resp = await fetch(historyUrl);
       if (!resp.ok) return;
@@ -335,7 +339,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
       setData(points);
     } catch { /* ignore */ }
     finally { setIsLoading(false); }
-  }, [definition, definitionCharts, definitionHistoryEntities, deviceId, getFromIso, requestedResolution, selectedRange, timeRange]);
+  }, [definition, definitionHistoryQuery, deviceId, getFromIso, requestedResolution, selectedRange, timeRange]);
 
   const loadCells = useCallback(async () => {
     if (selectedCells.length === 0) { setMultiCellData([]); return; }
