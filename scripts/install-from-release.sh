@@ -889,6 +889,38 @@ install_timescaledb_package_for_local_postgres() {
   return 1
 }
 
+ensure_timescaledb_preloaded() {
+  local postgres_major="$1"
+  local conf_dir="/etc/postgresql/$postgres_major/main"
+  local conf_file="$conf_dir/postgresql.conf"
+
+  if [ ! -f "$conf_file" ]; then
+    conf_file="$(run_as_postgres "psql -Atq -d postgres -c 'SHOW config_file;'" | tr -d '[:space:]')"
+    if [ -z "$conf_file" ] || [ ! -f "$conf_file" ]; then
+      warn 'Could not locate postgresql.conf to configure shared_preload_libraries.' >&2
+      return 1
+    fi
+  fi
+
+  if grep -Eq "^\s*shared_preload_libraries\s*=.*timescaledb" "$conf_file"; then
+    return 0
+  fi
+
+  info "Adding timescaledb to shared_preload_libraries in $conf_file" >&2
+  if grep -Eq "^\s*shared_preload_libraries\s*=" "$conf_file"; then
+    run_elevated sed -i -E "s/^(\s*shared_preload_libraries\s*=\s*')/\1timescaledb,/" "$conf_file"
+  elif grep -Eq "^#\s*shared_preload_libraries\s*=" "$conf_file"; then
+    run_elevated sed -i -E "s/^#\s*shared_preload_libraries\s*=.*/shared_preload_libraries = 'timescaledb'/" "$conf_file"
+  else
+    printf "shared_preload_libraries = 'timescaledb'\n" | run_elevated tee -a "$conf_file" >/dev/null
+  fi
+
+  if command -v systemctl >/dev/null 2>&1; then
+    info 'Restarting PostgreSQL to apply shared_preload_libraries change.' >&2
+    run_elevated systemctl restart postgresql >/dev/null 2>&1 || true
+  fi
+}
+
 ensure_timescaledb_for_local_database() {
   local database_name="$1"
   local postgres_major
@@ -909,6 +941,8 @@ ensure_timescaledb_for_local_database() {
   fi
 
   install_timescaledb_package_for_local_postgres "$postgres_major" || return 1
+
+  ensure_timescaledb_preloaded "$postgres_major" || return 1
 
   if timescaledb_is_enabled_for_database "$database_name"; then
     success "TimescaleDB is already enabled for database '$database_name'." >&2

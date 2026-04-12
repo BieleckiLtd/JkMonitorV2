@@ -192,6 +192,14 @@ public sealed class TimescaleTelemetryRepository(
             await connection.OpenAsync(cancellationToken);
 
             var useTimescale = await TryEnableTimescaleAsync(connection, cancellationToken);
+
+            // A PostgreSQL FATAL error (e.g. timescaledb not preloaded) kills the
+            // backend process and closes the connection.  Re-open before continuing.
+            if (connection.State != System.Data.ConnectionState.Open)
+            {
+                await connection.OpenAsync(cancellationToken);
+            }
+
             useTimescale = await EnsureTelemetrySchemaAsync(connection, useTimescale, cancellationToken);
 
             _timescaleMetadataAvailable = useTimescale;
