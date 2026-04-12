@@ -17,6 +17,7 @@ INSTALL_SCRIPT=''
 SERVICE_NAME='fluxmonitor.service'
 SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
 NETWORKMANAGER_POLKIT_RULE_PATH='/etc/polkit-1/rules.d/50-fluxmonitor-networkmanager.rules'
+NETWORKMANAGER_WIFI_POWERSAVE_CONFIG_PATH='/etc/NetworkManager/conf.d/50-fluxmonitor-wifi-powersave-off.conf'
 SYSTEMD_POLKIT_RULE_PATH='/etc/polkit-1/rules.d/51-fluxmonitor-systemd.rules'
 TUNNEL_SERVICE_NAME='cloudflared.service'
 TUNNEL_SERVICE_PATH="/etc/systemd/system/$TUNNEL_SERVICE_NAME"
@@ -1295,6 +1296,55 @@ WantedBy=multi-user.target
 EOF
 }
 
+build_networkmanager_wifi_powersave_config() {
+  cat <<'EOF'
+[connection]
+wifi.powersave=2
+EOF
+}
+
+disable_wifi_powersave_now() {
+  local interfaces
+  local interface_name
+
+  if ! command -v iw >/dev/null 2>&1; then
+    return 0
+  fi
+
+  interfaces="$(iw dev 2>/dev/null | awk '$1 == "Interface" { print $2 }' || true)"
+  if [ -z "$interfaces" ]; then
+    return 0
+  fi
+
+  while IFS= read -r interface_name; do
+    if [ -z "$interface_name" ]; then
+      continue
+    fi
+
+    run_elevated iw dev "$interface_name" set power_save off >/dev/null 2>&1 || true
+  done <<EOF
+$interfaces
+EOF
+}
+
+configure_persistent_wifi_powersave_off() {
+  local config_changed='false'
+  local temp_path="$TEMP_ROOT/networkmanager-wifi-powersave-off.conf"
+
+  build_networkmanager_wifi_powersave_config > "$temp_path"
+  if write_elevated_file_if_changed "$temp_path" "$NETWORKMANAGER_WIFI_POWERSAVE_CONFIG_PATH" 0644; then
+    config_changed='true'
+  fi
+
+  disable_wifi_powersave_now
+
+  if [ "$config_changed" = 'true' ]; then
+    info 'Configured NetworkManager to keep Wi-Fi power save disabled persistently.'
+  else
+    info 'NetworkManager Wi-Fi power-save override is already in place.'
+  fi
+}
+
 write_configure_script() {
   cat > "$CONFIGURE_SCRIPT_PATH" <<'EOF'
 #!/usr/bin/env bash
@@ -1721,6 +1771,10 @@ fi
 if [ "$reused_existing_configuration" = 'false' ] || [ ! -f "$ENV_PATH" ]; then
   write_env_file "$ENVIRONMENT"
 fi
+
+section 'Configuring Wi-Fi'
+configure_persistent_wifi_powersave_off
+
 ACCESS_URL="$(get_access_url 2>/dev/null)" || ACCESS_URL="$APP_LOCAL_URL"
 ACCESS_URL="${ACCESS_URL:-$APP_LOCAL_URL}"
 
