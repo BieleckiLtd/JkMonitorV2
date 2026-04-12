@@ -27,7 +27,7 @@ type DatabaseSectionProps = {
   dbSettingsFeedback: InlineFeedback | null;
   importing: boolean;
   importResult: string | null;
-  fileInputRef: RefObject<HTMLInputElement | null>;
+  fileInputRef: RefObject<HTMLInputElement>;
   onRawWindowChange: (value: string) => void;
   onPersistedBucketChange: (value: string) => void;
   onSaveSettings: () => void | Promise<void>;
