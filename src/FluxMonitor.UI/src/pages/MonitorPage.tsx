@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Activity, AlertTriangle, Battery, BatteryCharging, Check, Edit2, Gauge, LoaderCircle, Shield, Thermometer, X, Zap } from 'lucide-react';
+import { Activity, AlertTriangle, Battery, BatteryCharging, Check, ChevronDown, ChevronUp, Edit2, Gauge, LoaderCircle, Shield, Thermometer, X, Zap } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { HistoryCharts } from '../components/HistoryCharts';
 import { cn } from '../lib/utils';
@@ -283,6 +283,8 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
   const isFailing = device.lastOutcome === 'Failed';
   const dp = device.displayPrecision ?? defaultPrecision;
   const [selectedCellIndices, setSelectedCellIndices] = useState<number[]>([]);
+  const isEnvironment = definition?.device.category === 'environment';
+  const [isExpanded, setIsExpanded] = useState(false);
 
   // Build a fast lookup by entity key for definition-driven rendering
   const paramByKey = new Map(parameters.map(p => [p.key, p]));
@@ -296,6 +298,145 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
     const cat = param.category;
     if (!grouped.has(cat)) grouped.set(cat, []);
     grouped.get(cat)!.push(param);
+  }
+
+  // Environment devices (e.g. Govee thermometer) use a compact expandable card
+  if (isEnvironment && telemetry) {
+    const heroSection = monitorSections?.find(s => s.type === 'hero-metrics');
+    const heroMetrics = heroSection?.metrics ?? [];
+    const batteryParam = paramByKey.get('battery_pct');
+    const batteryValue = batteryParam?.numericValue;
+    const capacityAh = paramByKey.get('nominal_battery_capacity')?.numericValue;
+
+    return (
+      <div className='space-y-3 sm:space-y-4'>
+        <div className='rounded-2xl border border-border/80 bg-card/85 shadow-sm overflow-hidden'>
+          {/* Compact header */}
+          <button
+            type='button'
+            onClick={() => setIsExpanded(prev => !prev)}
+            className='flex w-full items-center justify-between gap-3 px-4 py-3 sm:px-5 sm:py-4 text-left transition-colors hover:bg-muted/30'
+          >
+            <div className='flex items-center gap-3 min-w-0'>
+              <div className={cn(
+                'flex h-9 w-9 shrink-0 items-center justify-center rounded-xl border',
+                isHealthy ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' :
+                isFailing ? 'border-rose-500/30 bg-rose-500/10 text-rose-400' :
+                'border-border bg-muted/50 text-muted-foreground'
+              )}>
+                <DeviceIcon name={definition?.device.icon} className='h-4 w-4' />
+              </div>
+              <div className='min-w-0'>
+                <h3 className='text-base font-semibold text-foreground truncate'>{device.displayName}</h3>
+                <div className='text-[10px] font-mono text-muted-foreground/70 truncate'>
+                  {device.deviceId}
+                </div>
+              </div>
+            </div>
+            <div className='flex items-center gap-3 shrink-0'>
+              {batteryValue != null && (
+                <div className={cn(
+                  'flex items-center gap-1.5 text-xs font-semibold tabular-nums',
+                  batteryValue <= 10 ? 'text-rose-400' : batteryValue <= 30 ? 'text-amber-400' : 'text-muted-foreground'
+                )}>
+                  <Battery className='h-4 w-4' />
+                  {batteryValue.toFixed(0)}%
+                </div>
+              )}
+              <div className='text-muted-foreground/60'>
+                {isExpanded ? <ChevronUp className='h-4 w-4' /> : <ChevronDown className='h-4 w-4' />}
+              </div>
+            </div>
+          </button>
+
+          {/* Compact hero metrics row */}
+          <div className='border-t border-border/60 px-4 py-3 sm:px-5 sm:py-4'>
+            <div className='grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4'>
+              {heroMetrics.map((m) => {
+                const param = paramByKey.get(m.entity);
+                const entity = definition?.entities.find(e => e.id === m.entity) ?? definition?.computedEntities?.find(e => e.id === m.entity);
+                const value = param?.numericValue;
+                const sourceUnit = param?.unit ?? (entity && 'source' in entity ? entity.source?.unit : undefined) ?? (entity && 'unit' in entity ? (entity as { unit?: string }).unit : '') ?? '';
+                const unit = getTemperatureDisplayUnit(sourceUnit, temperatureUnit) ?? '';
+                const prec = entity?.display?.precision ?? 2;
+                const displayValue = isCelsiusUnit(sourceUnit)
+                  ? convertTemperatureValue(value != null ? Number(value) : null, temperatureUnit)
+                  : value != null ? Number(value) : null;
+
+                return (
+                  <div key={m.entity} className='min-w-0'>
+                    <div className='text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground/70'>
+                      {param?.displayName ?? entity?.name ?? m.entity}
+                    </div>
+                    <div className='mt-1 flex items-baseline gap-1'>
+                      <span className={cn('text-xl font-bold tracking-tight tabular-nums sm:text-2xl', resolveColorClass(m.color))}>
+                        {fmt(displayValue, prec)}
+                      </span>
+                      <span className='text-xs font-medium text-muted-foreground/70'>{unit}</span>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
+          {/* Accent bar at bottom of collapsed card */}
+          {!isExpanded && (
+            <div className={cn(
+              'h-0.5',
+              isHealthy ? 'bg-emerald-500/40' : isFailing ? 'bg-rose-500/40' : 'bg-border/60'
+            )} />
+          )}
+
+          {/* Expanded content: history charts + parameter tables */}
+          {isExpanded && (
+            <div className='border-t border-border/60 px-4 pb-4 pt-3 sm:px-5 sm:pb-5 sm:pt-4 space-y-4'>
+              <HistoryCharts
+                deviceId={device.deviceId}
+                precision={dp}
+                selectedCellIndices={selectedCellIndices}
+                onClearCellSelection={() => setSelectedCellIndices([])}
+                definition={definition ?? undefined}
+                capacityAh={capacityAh}
+                temperatureUnit={temperatureUnit}
+              />
+              {/* Parameter tables */}
+              {monitorSections?.filter(s => s.type === 'parameter-table').map((section, idx) => {
+                const params = filterParams(parameters, section);
+                if (params.length === 0) return null;
+                return (
+                  <ParameterCategoryCard
+                    key={idx}
+                    category={section.title ?? 'Parameters'}
+                    params={params}
+                    deviceId={device.deviceId}
+                    telemetry={telemetry}
+                    paramByKey={paramByKey}
+                    temperatureUnit={temperatureUnit}
+                  />
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {device.lastError && (
+          <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300'>
+            {device.lastError}
+          </div>
+        )}
+
+        {warnings.length > 0 && (
+          <div className='flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-3 sm:px-4'>
+            <AlertTriangle className='mt-0.5 h-4 w-4 shrink-0 text-amber-400' />
+            <div className='text-sm text-amber-300'>
+              <span className='font-semibold'>Active warnings: </span>
+              {warnings.join(', ')}
+            </div>
+          </div>
+        )}
+      </div>
+    );
   }
 
   // Category rendering order — derived from entity order in definition, fallback to legacy
