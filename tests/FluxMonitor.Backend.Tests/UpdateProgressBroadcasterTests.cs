@@ -62,4 +62,50 @@ public class UpdateProgressBroadcasterTests
         Assert.Equal(18, received.PercentComplete);
         Assert.NotSame(progress, received);
     }
+
+    [Fact]
+    public async Task Publish_SlowSubscribersKeepOnlyTheLatestSnapshot()
+    {
+        var broadcaster = new UpdateProgressBroadcaster();
+        await using var subscription = broadcaster.Subscribe(new UpdateProgress
+        {
+            SessionId = "initial",
+            Status = "running",
+            IsRunning = true,
+            Stage = "Initial",
+            CanCancel = true,
+            StartedAt = DateTimeOffset.UtcNow.AddSeconds(-10),
+            UpdatedAt = DateTimeOffset.UtcNow.AddSeconds(-10)
+        });
+
+        broadcaster.Publish(new UpdateProgress
+        {
+            SessionId = "session-1",
+            Status = "running",
+            IsRunning = true,
+            Stage = "Stale",
+            CanCancel = true,
+            PercentComplete = 10,
+            StartedAt = DateTimeOffset.UtcNow.AddSeconds(-5),
+            UpdatedAt = DateTimeOffset.UtcNow.AddSeconds(-5)
+        });
+
+        broadcaster.Publish(new UpdateProgress
+        {
+            SessionId = "session-1",
+            Status = "running",
+            IsRunning = true,
+            Stage = "Latest",
+            CanCancel = true,
+            PercentComplete = 75,
+            StartedAt = DateTimeOffset.UtcNow.AddSeconds(-5),
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
+
+        Assert.True(subscription.Reader.TryRead(out var received));
+        Assert.NotNull(received);
+        Assert.Equal("Latest", received!.Stage);
+        Assert.Equal(75, received.PercentComplete);
+        Assert.False(subscription.Reader.TryRead(out _));
+    }
 }

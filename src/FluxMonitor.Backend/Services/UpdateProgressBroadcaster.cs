@@ -10,10 +10,11 @@ public sealed class UpdateProgressBroadcaster
     public UpdateProgressSubscription Subscribe(UpdateProgress? currentProgress)
     {
         var subscriptionId = Guid.NewGuid();
-        var channel = Channel.CreateUnbounded<UpdateProgress?>(new UnboundedChannelOptions
+        var channel = Channel.CreateBounded<UpdateProgress?>(new BoundedChannelOptions(1)
         {
             SingleReader = true,
-            SingleWriter = false
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.DropOldest
         });
 
         _subscriptions[subscriptionId] = channel;

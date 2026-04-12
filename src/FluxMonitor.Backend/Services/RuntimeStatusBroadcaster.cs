@@ -11,10 +11,11 @@ public sealed class RuntimeStatusBroadcaster
     public RuntimeStatusSubscription Subscribe(MonitorRuntimeStatus currentStatus)
     {
         var subscriptionId = Guid.NewGuid();
-        var channel = Channel.CreateUnbounded<MonitorRuntimeStatus>(new UnboundedChannelOptions
+        var channel = Channel.CreateBounded<MonitorRuntimeStatus>(new BoundedChannelOptions(1)
         {
             SingleReader = true,
-            SingleWriter = false
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.DropOldest
         });
 
         _subscriptions[subscriptionId] = channel;

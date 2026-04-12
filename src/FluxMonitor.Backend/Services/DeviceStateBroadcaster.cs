@@ -11,10 +11,11 @@ public sealed class DeviceStateBroadcaster
     public DeviceStateSubscription Subscribe(IReadOnlyList<DeviceRuntimeState> currentDevices)
     {
         var subscriptionId = Guid.NewGuid();
-        var channel = Channel.CreateUnbounded<IReadOnlyList<DeviceRuntimeState>>(new UnboundedChannelOptions
+        var channel = Channel.CreateBounded<IReadOnlyList<DeviceRuntimeState>>(new BoundedChannelOptions(1)
         {
             SingleReader = true,
-            SingleWriter = false
+            SingleWriter = false,
+            FullMode = BoundedChannelFullMode.DropOldest
         });
 
         _subscriptions[subscriptionId] = channel;
