@@ -185,15 +185,17 @@ public sealed class DeviceStateStore
 
     public void MarkPollFailed(DeviceConfiguration device, DateTimeOffset startedAt, Exception exception)
     {
+        var userFacingError = BluetoothFailureHints.Describe(exception);
+
         _states.AddOrUpdate(
             device.DeviceId,
-            _ => CreateState(device, startedAt, DateTimeOffset.UtcNow, "Failed", exception.Message),
+            _ => CreateState(device, startedAt, DateTimeOffset.UtcNow, "Failed", userFacingError),
             (_, current) => current with
             {
                 LastPollStartedAt = startedAt,
                 LastPollCompletedAt = DateTimeOffset.UtcNow,
                 LastOutcome = "Failed",
-                LastError = exception.Message
+                LastError = userFacingError
             });
 
         PublishCurrentDevices();

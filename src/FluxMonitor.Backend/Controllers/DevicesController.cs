@@ -376,7 +376,7 @@ public sealed class DevicesController(
         catch (Exception ex)
         {
             logger.LogError(ex, "BLE scan failed. HasDefinitionFilter={HasDefinitionFilter}.", !string.IsNullOrWhiteSpace(definitionId));
-            return Ok(new { devices = Array.Empty<object>(), error = ex.Message });
+            return Ok(new { devices = Array.Empty<object>(), error = BluetoothFailureHints.Describe(ex) });
         }
     }
 
@@ -589,7 +589,7 @@ public sealed class DevicesController(
 
         return string.IsNullOrWhiteSpace(lastError)
             ? "The first poll did not complete successfully."
-            : lastError.Trim();
+            : BluetoothFailureHints.Describe(lastError);
     }
 
     internal static string BuildStartOutcomeMessage(string? outcome, string? lastError)

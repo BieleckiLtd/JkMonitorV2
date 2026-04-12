@@ -84,7 +84,17 @@ public sealed class DevicesControllerStartTests
         var message = DevicesController.BuildStartTimeoutMessage("Failed", "org.bluez.Error.Failed: le-connection-abort-by-local");
 
         Assert.Equal(
-            "Device started, but no successful poll completed within 8 seconds. Last error: org.bluez.Error.Failed: le-connection-abort-by-local",
+            "Device started, but no successful poll completed within 8 seconds. Last error: Bluetooth connection was interrupted. Check that Bluetooth is on, the device is awake, and within range, then try again.",
             message);
+    }
+
+    [Fact]
+    public void GetStartOutcomeError_UsesBluetoothUnavailableHint_ForOpaqueBlueZFailure()
+    {
+        var error = DevicesController.GetStartOutcomeError("Failed", "org.bluez.Error.Failed: Failed");
+
+        Assert.Equal(
+            "Bluetooth is unavailable. It may be turned off or blocked by rfkill. Open System > Bluetooth, turn it on, then try again.",
+            error);
     }
 }

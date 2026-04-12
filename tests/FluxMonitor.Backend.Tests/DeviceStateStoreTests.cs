@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using System.Net.Http;
 using System.Reflection;
+using Tmds.DBus;
 using Xunit;
 
 namespace FluxMonitor.Backend.Tests;
@@ -83,6 +84,34 @@ public class DeviceStateStoreTests
         Assert.Collection(
             status.Devices,
             device => Assert.Equal("device-2", device.DeviceId));
+    }
+
+    [Fact]
+    public void MarkPollFailed_UsesBluetoothUnavailableHint_ForOpaqueBlueZFailures()
+    {
+        var device = new DeviceConfiguration
+        {
+            DeviceId = "device-01",
+            DisplayName = "Device 01",
+            DefinitionId = "jk-inverter-bms"
+        };
+
+        var store = CreateStore(
+            new BuildRuntimeInfo(),
+            CreateDefaultConfiguration(),
+            [device]);
+
+        store.MarkPollFailed(
+            device,
+            DateTimeOffset.UtcNow,
+            new DBusException("org.bluez.Error.Failed", "Failed"));
+
+        var state = store.GetDeviceState(device.DeviceId);
+
+        Assert.NotNull(state);
+        Assert.Equal(
+            "Bluetooth is unavailable. It may be turned off or blocked by rfkill. Open System > Bluetooth, turn it on, then try again.",
+            state!.LastError);
     }
 
     private static DeviceStateStore CreateStore(

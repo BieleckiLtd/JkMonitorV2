@@ -239,11 +239,12 @@ public sealed class DeviceOrchestrator(
             {
                 stateStore.MarkPollFailed(device, startedAt, exception);
                 logger.LogError(exception, "Polling failed for device {DeviceId}.", device.DeviceId);
+                var userFacingError = BluetoothFailureHints.Describe(exception);
 
                 // Record communication failure so it appears in the notification history log.
                 try
                 {
-                    notificationEvaluator.RecordPollFailure(device.DeviceId, device.DisplayName, exception.Message);
+                    notificationEvaluator.RecordPollFailure(device.DeviceId, device.DisplayName, userFacingError);
                 }
                 catch (Exception nfEx)
                 {
