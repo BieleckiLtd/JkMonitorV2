@@ -98,18 +98,17 @@ const reconnectDelayMs = 2000;
 const fallbackRefreshIntervalMs = 2000;
 const nd = 'N/D';
 
-function formatRelativeAdvertisementAge(collectedAt: string | null | undefined, nowMs: number) {
+function getRelativeAdvertisementAgeSeconds(collectedAt: string | null | undefined, nowMs: number) {
   if (!collectedAt) {
-    return 'Waiting for advertisement';
+    return null;
   }
 
   const collectedMs = Date.parse(collectedAt);
   if (Number.isNaN(collectedMs)) {
-    return 'Seen recently';
+    return null;
   }
 
-  const deltaSeconds = Math.max(0, Math.round((nowMs - collectedMs) / 1000));
-  return deltaSeconds <= 1 ? 'Seen just now' : `Seen ${deltaSeconds}s ago`;
+  return Math.max(0, Math.round((nowMs - collectedMs) / 1000));
 }
 
 type SwitchStatusChip = {
@@ -328,7 +327,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
     const batteryValue = batteryParam?.numericValue;
     const signalValue = paramByKey.get('signal_strength_pct')?.numericValue;
     const capacityAh = paramByKey.get('nominal_battery_capacity')?.numericValue;
-    const lastSeenLabel = formatRelativeAdvertisementAge(telemetry.collectedAt, nowMs);
+    const advertisementAgeSeconds = getRelativeAdvertisementAgeSeconds(telemetry.collectedAt, nowMs);
 
     return (
       <div className='space-y-3 sm:space-y-4'>
@@ -355,16 +354,29 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                 </div>
               </div>
             </div>
-            <div className='flex items-center gap-3 shrink-0'>
+            <div className='flex items-center gap-1.5 shrink-0'>
               {batteryValue != null && (
-                <div className={cn(
-                  'flex items-center gap-1.5 text-xs font-semibold tabular-nums',
-                  batteryValue <= 10 ? 'text-rose-400' : batteryValue <= 30 ? 'text-amber-400' : 'text-muted-foreground'
-                )}>
-                  <Battery className='h-4 w-4' />
-                  {batteryValue.toFixed(0)}%
-                </div>
+                <StatusGlyph
+                  title={`Battery ${Math.round(batteryValue)}%`}
+                  toneClassName={getBatteryStatusToneClassName(batteryValue)}
+                >
+                  <BatteryStatusGlyph percent={batteryValue} />
+                </StatusGlyph>
               )}
+              {signalValue != null && (
+                <StatusGlyph
+                  title={`Signal ${Math.round(signalValue)}%`}
+                  toneClassName={getSignalStatusToneClassName(signalValue)}
+                >
+                  <SignalStatusGlyph percent={signalValue} />
+                </StatusGlyph>
+              )}
+              <StatusGlyph
+                title={formatAdvertisementStatusTitle(telemetry.collectedAt, nowMs)}
+                toneClassName={getAdvertisementStatusToneClassName(advertisementAgeSeconds)}
+              >
+                <SeenStatusGlyph />
+              </StatusGlyph>
               <div className='text-muted-foreground/60'>
                 {isExpanded ? <ChevronUp className='h-4 w-4' /> : <ChevronDown className='h-4 w-4' />}
               </div>
@@ -373,14 +385,6 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
 
           {/* Compact hero metrics row */}
           <div className='border-t border-border/60 px-4 py-3 sm:px-5 sm:py-4'>
-            <div className='mb-3 flex flex-wrap gap-2 text-[11px] font-medium text-muted-foreground'>
-              <span className='rounded-full border border-border/70 bg-background/60 px-2.5 py-1'>{lastSeenLabel}</span>
-              {signalValue != null ? (
-                <span className='rounded-full border border-border/70 bg-background/60 px-2.5 py-1'>
-                  Signal {signalValue.toFixed(0)}%
-                </span>
-              ) : null}
-            </div>
             <div className='grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4'>
               {heroMetrics.map((m) => {
                 const param = paramByKey.get(m.entity);
@@ -1004,6 +1008,174 @@ function DeviceIcon({ name, className }: { name?: string; className?: string }) 
 
   const Icon = resolveIcon(name);
   return <Icon className={className} />;
+}
+
+function StatusGlyph({
+  title,
+  toneClassName,
+  children,
+}: {
+  title: string;
+  toneClassName: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <span
+      title={title}
+      aria-label={title}
+      className={cn(
+        'inline-flex h-7 w-7 items-center justify-center rounded-full border border-border/70 bg-background/45',
+        toneClassName
+      )}
+    >
+      {children}
+    </span>
+  );
+}
+
+function BatteryStatusGlyph({ percent }: { percent: number | null | undefined }) {
+  const normalizedPercent = normalizeStatusPercent(percent);
+  const activeSegments = normalizedPercent == null
+    ? 0
+    : normalizedPercent >= 88
+      ? 4
+      : normalizedPercent >= 63
+        ? 3
+        : normalizedPercent >= 38
+          ? 2
+          : normalizedPercent >= 13
+            ? 1
+            : 0;
+
+  return (
+    <svg viewBox='0 0 18 18' className='h-4 w-4 fill-current' aria-hidden='true'>
+      <rect x='2.25' y='4.5' width='12' height='9' rx='1.5' fill='none' stroke='currentColor' strokeWidth='1.5' />
+      <rect x='14.75' y='7' width='1.75' height='4' rx='0.75' />
+      {[0, 1, 2, 3].map((segment) => (
+        <rect
+          key={segment}
+          x={3.5 + (segment * 2.5)}
+          y='6'
+          width='1.75'
+          height='6'
+          rx='0.5'
+          className={segment < activeSegments ? 'opacity-100' : 'opacity-15'}
+        />
+      ))}
+    </svg>
+  );
+}
+
+function SignalStatusGlyph({ percent }: { percent: number | null | undefined }) {
+  const normalizedPercent = normalizeStatusPercent(percent);
+  const activeBars = normalizedPercent == null
+    ? 0
+    : normalizedPercent >= 75
+      ? 4
+      : normalizedPercent >= 50
+        ? 3
+        : normalizedPercent >= 25
+          ? 2
+          : normalizedPercent > 0
+            ? 1
+            : 0;
+
+  return (
+    <svg viewBox='0 0 18 18' className='h-4 w-4 fill-current' aria-hidden='true'>
+      {[0, 1, 2, 3].map((bar) => (
+        <rect
+          key={bar}
+          x={3 + (bar * 3)}
+          y={11 - (bar * 2)}
+          width='2'
+          height={3 + (bar * 2)}
+          rx='0.75'
+          className={bar < activeBars ? 'opacity-100' : 'opacity-15'}
+        />
+      ))}
+    </svg>
+  );
+}
+
+function SeenStatusGlyph() {
+  return (
+    <svg viewBox='0 0 18 18' className='h-4 w-4 fill-none stroke-current' aria-hidden='true'>
+      <circle cx='9' cy='9' r='5.25' strokeWidth='1.5' />
+      <path d='M9 6.25v3.1l2.3 1.5' strokeWidth='1.5' strokeLinecap='round' strokeLinejoin='round' />
+    </svg>
+  );
+}
+
+function normalizeStatusPercent(percent: number | null | undefined) {
+  if (percent == null || !Number.isFinite(percent)) {
+    return null;
+  }
+
+  return Math.max(0, Math.min(100, Math.round(percent)));
+}
+
+function getBatteryStatusToneClassName(percent: number | null | undefined) {
+  const normalizedPercent = normalizeStatusPercent(percent);
+  if (normalizedPercent == null) {
+    return 'text-muted-foreground/55';
+  }
+
+  if (normalizedPercent <= 15) {
+    return 'text-rose-400';
+  }
+
+  if (normalizedPercent <= 35) {
+    return 'text-amber-400';
+  }
+
+  return 'text-emerald-400';
+}
+
+function getSignalStatusToneClassName(percent: number | null | undefined) {
+  const normalizedPercent = normalizeStatusPercent(percent);
+  if (normalizedPercent == null) {
+    return 'text-muted-foreground/55';
+  }
+
+  if (normalizedPercent < 25) {
+    return 'text-rose-400';
+  }
+
+  if (normalizedPercent < 55) {
+    return 'text-amber-400';
+  }
+
+  return 'text-sky-400';
+}
+
+function getAdvertisementStatusToneClassName(ageSeconds: number | null) {
+  if (ageSeconds == null) {
+    return 'text-muted-foreground/55';
+  }
+
+  if (ageSeconds <= 3) {
+    return 'text-emerald-400';
+  }
+
+  if (ageSeconds <= 10) {
+    return 'text-amber-400';
+  }
+
+  return 'text-rose-400';
+}
+
+function formatAdvertisementStatusTitle(collectedAt: string | null | undefined, nowMs: number) {
+  const ageSeconds = getRelativeAdvertisementAgeSeconds(collectedAt, nowMs);
+  if (ageSeconds == null || !collectedAt) {
+    return 'Waiting for advertisement';
+  }
+
+  const collectedMs = Date.parse(collectedAt);
+  if (Number.isNaN(collectedMs)) {
+    return 'Waiting for advertisement';
+  }
+
+  return `Last advertisement ${ageSeconds <= 1 ? 'just now' : `${ageSeconds}s ago`} (${new Date(collectedMs).toISOString()})`;
 }
 
 /** Maps color name strings from the device definition to Tailwind text-color classes. */

@@ -189,6 +189,8 @@ public sealed class GenericBleAdvertisementPollingClient(
             if (!await adapter.GetAsync<bool>("Powered"))
                 await adapter.SetAsync("Powered", true);
 
+            await ConfigureDiscoveryFilterAsync(adapter);
+
             foreach (var device in await adapter.GetDevicesAsync())
                 await CaptureSnapshotAsync(device);
 
@@ -209,6 +211,24 @@ public sealed class GenericBleAdvertisementPollingClient(
         finally
         {
             _scannerLock.Release();
+        }
+    }
+
+    private async Task ConfigureDiscoveryFilterAsync(Adapter adapter)
+    {
+        try
+        {
+            await adapter.SetDiscoveryFilterAsync(new Dictionary<string, object>
+            {
+                ["Transport"] = "le",
+                ["DuplicateData"] = true
+            });
+        }
+        catch (Exception exception)
+        {
+            logger.LogDebug(
+                exception,
+                "Unable to enable duplicate BLE advertisement updates on the active adapter.");
         }
     }
 

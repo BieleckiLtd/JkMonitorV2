@@ -1,9 +1,14 @@
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MonitorPage } from './MonitorPage';
+import type { DeviceDefinition } from '../types/deviceDefinition';
+
+const { useDeviceDefinitionMock } = vi.hoisted(() => ({
+  useDeviceDefinitionMock: vi.fn<() => DeviceDefinition | null>(),
+}));
 
 vi.mock('../hooks/useDeviceDefinition', () => ({
-  useDeviceDefinition: () => null,
+  useDeviceDefinition: useDeviceDefinitionMock,
 }));
 
 describe('MonitorPage', () => {
@@ -11,6 +16,7 @@ describe('MonitorPage', () => {
 
   beforeEach(() => {
     vi.useRealTimers();
+    useDeviceDefinitionMock.mockReturnValue(null);
   });
 
   afterEach(() => {
@@ -115,5 +121,120 @@ describe('MonitorPage', () => {
     await new Promise((resolve) => window.setTimeout(resolve, 2100));
     expect(FakeEventSource.instances).toHaveLength(2);
     expect(FakeEventSource.instances[1]?.url).toBe('/api/devices/current/stream');
+  }, 10000);
+
+  it('shows environment device battery, signal, and last advertisement as icon tooltips in the header', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-04-12T12:00:02.000Z').getTime());
+
+    useDeviceDefinitionMock.mockReturnValue({
+      version: '1',
+      device: {
+        id: 'govee-thermo-hygrometer-ble',
+        name: 'Govee',
+        manufacturer: 'Govee',
+        model: 'H5075',
+        category: 'environment',
+      },
+      connection: {
+        transport: { type: 'ble', defaults: {} },
+        protocol: { type: 'ble-advertisement', settings: {} },
+      },
+      dataSources: [],
+      pollGroups: {},
+      entities: [
+        {
+          id: 'temperature_c',
+          type: 'number',
+          name: 'Temperature',
+          category: 'Environment',
+          source: { bank: 'advertisement', byteOffset: 0, unit: 'C' },
+          display: { precision: 1 },
+        },
+        {
+          id: 'humidity_pct',
+          type: 'number',
+          name: 'Humidity',
+          category: 'Environment',
+          source: { bank: 'advertisement', byteOffset: 0, unit: '%' },
+          display: { precision: 1 },
+        },
+      ],
+      computedEntities: [],
+      ui: {
+        pages: {
+          monitor: {
+            sections: [
+              {
+                type: 'hero-metrics',
+                metrics: [
+                  { entity: 'temperature_c', color: 'amber' },
+                  { entity: 'humidity_pct', color: 'blue' },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    } satisfies DeviceDefinition);
+
+    class FakeEventSource {
+      static instances: FakeEventSource[] = [];
+
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      close = vi.fn();
+
+      constructor(public readonly url: string) {
+        FakeEventSource.instances.push(this);
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }));
+      }
+    }
+
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    render(<MonitorPage />);
+
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(1);
+    });
+
+    FakeEventSource.instances[0]?.emit({
+      devices: [
+        {
+          deviceId: 'govee-1',
+          displayName: 'GVH5075_47C0',
+          definitionId: 'govee-thermo-hygrometer-ble',
+          enabled: true,
+          isMaster: true,
+          pollIntervalMilliseconds: 1000,
+          lastOutcome: 'Succeeded',
+          latestTelemetry: {
+            collectedAt: '2026-04-12T12:00:00.000Z',
+            cells: [],
+            activeWarnings: [],
+            parameters: [
+              { key: 'battery_pct', displayName: 'Battery', category: 'Status', numericValue: 88, sortOrder: 0, unit: '%' },
+              { key: 'signal_strength_pct', displayName: 'Signal', category: 'Status', numericValue: 64, sortOrder: 1, unit: '%' },
+              { key: 'temperature_c', displayName: 'Temperature', category: 'Environment', numericValue: 14.9, sortOrder: 2, unit: 'C' },
+              { key: 'humidity_pct', displayName: 'Relative Humidity', category: 'Environment', numericValue: 75.5, sortOrder: 3, unit: '%' },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(await screen.findByText('GVH5075_47C0')).toBeInTheDocument();
+    expect(screen.getByTitle('Battery 88%')).toBeInTheDocument();
+    expect(screen.getByTitle('Signal 64%')).toBeInTheDocument();
+    expect(screen.getByTitle('Last advertisement 2s ago (2026-04-12T12:00:00.000Z)')).toBeInTheDocument();
+    expect(screen.queryByText(/Signal 64%/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Seen 2s ago/i)).not.toBeInTheDocument();
   }, 10000);
 });
