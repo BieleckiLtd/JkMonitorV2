@@ -98,6 +98,20 @@ const reconnectDelayMs = 2000;
 const fallbackRefreshIntervalMs = 2000;
 const nd = 'N/D';
 
+function formatRelativeAdvertisementAge(collectedAt: string | null | undefined, nowMs: number) {
+  if (!collectedAt) {
+    return 'Waiting for advertisement';
+  }
+
+  const collectedMs = Date.parse(collectedAt);
+  if (Number.isNaN(collectedMs)) {
+    return 'Seen recently';
+  }
+
+  const deltaSeconds = Math.max(0, Math.round((nowMs - collectedMs) / 1000));
+  return deltaSeconds <= 1 ? 'Seen just now' : `Seen ${deltaSeconds}s ago`;
+}
+
 type SwitchStatusChip = {
   label: string;
   className: string;
@@ -107,6 +121,7 @@ export function MonitorPage() {
   const [devices, setDevices] = useState<DeviceRuntimeState[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [nowMs, setNowMs] = useState(() => Date.now());
 
   useEffect(() => {
     let isMounted = true;
@@ -223,6 +238,11 @@ export function MonitorPage() {
     };
   }, []);
 
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   return (
     <div className='space-y-3 pb-4 sm:space-y-6 sm:pb-8'>
       <section data-slot='page-hero-shell' className='page-hero-shell rounded-3xl border border-border bg-card/80 p-4 shadow-sm backdrop-blur sm:p-6 md:p-8'>
@@ -266,13 +286,13 @@ export function MonitorPage() {
       )}
 
       {devices.map((device) => (
-        <DevicePanel key={device.deviceId} device={device} />
+        <DevicePanel key={device.deviceId} device={device} nowMs={nowMs} />
       ))}
     </div>
   );
 }
 
-function DevicePanel({ device }: { device: DeviceRuntimeState }) {
+function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: number }) {
   const definition = useDeviceDefinition(device.definitionId);
   const temperatureUnit: TemperatureUnit = device.temperatureUnit === 'f' ? 'f' : 'c';
   const telemetry = device.latestTelemetry;
@@ -306,7 +326,9 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
     const heroMetrics = heroSection?.metrics ?? [];
     const batteryParam = paramByKey.get('battery_pct');
     const batteryValue = batteryParam?.numericValue;
+    const signalValue = paramByKey.get('signal_strength_pct')?.numericValue;
     const capacityAh = paramByKey.get('nominal_battery_capacity')?.numericValue;
+    const lastSeenLabel = formatRelativeAdvertisementAge(telemetry.collectedAt, nowMs);
 
     return (
       <div className='space-y-3 sm:space-y-4'>
@@ -351,6 +373,14 @@ function DevicePanel({ device }: { device: DeviceRuntimeState }) {
 
           {/* Compact hero metrics row */}
           <div className='border-t border-border/60 px-4 py-3 sm:px-5 sm:py-4'>
+            <div className='mb-3 flex flex-wrap gap-2 text-[11px] font-medium text-muted-foreground'>
+              <span className='rounded-full border border-border/70 bg-background/60 px-2.5 py-1'>{lastSeenLabel}</span>
+              {signalValue != null ? (
+                <span className='rounded-full border border-border/70 bg-background/60 px-2.5 py-1'>
+                  Signal {signalValue.toFixed(0)}%
+                </span>
+              ) : null}
+            </div>
             <div className='grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4'>
               {heroMetrics.map((m) => {
                 const param = paramByKey.get(m.entity);

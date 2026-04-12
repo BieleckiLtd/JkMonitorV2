@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import { Check, LoaderCircle, Play, Plus, RotateCcw, Square, Trash2, Upload, X } from 'lucide-react';
+import { Battery, Check, Droplets, LoaderCircle, Play, Plus, RotateCcw, Square, Thermometer, Trash2, Upload, X } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { useDeviceDefinitions } from '../hooks/useDeviceDefinition';
@@ -66,6 +66,11 @@ type BleScanDevice = {
   isDefinitionVerified: boolean;
   verificationLabel?: string | null;
   verificationDetails?: string | null;
+  lastSeenAt?: string | null;
+  signalStrengthPercent?: number | null;
+  temperatureCelsius?: number | null;
+  humidityPercent?: number | null;
+  batteryPercent?: number | null;
 };
 
 type BleScanResponse = {
@@ -203,6 +208,118 @@ function mergeBleScanDevices(current: BleScanDevice[], incoming: BleScanDevice[]
   }
 
   return sortBleScanDevices([...merged.values()]);
+}
+
+function formatPreviewValue(value: number | null | undefined, digits = 0, suffix = '') {
+  if (value == null || Number.isNaN(value)) {
+    return 'N/A';
+  }
+
+  return `${value.toFixed(digits)}${suffix}`;
+}
+
+function formatRelativeSeen(lastSeenAt: string | null | undefined, nowMs: number) {
+  if (!lastSeenAt) {
+    return 'Not seen yet';
+  }
+
+  const lastSeenMs = Date.parse(lastSeenAt);
+  if (Number.isNaN(lastSeenMs)) {
+    return 'Seen recently';
+  }
+
+  const deltaSeconds = Math.max(0, Math.round((nowMs - lastSeenMs) / 1000));
+  return deltaSeconds <= 1 ? 'Seen just now' : `Seen ${deltaSeconds}s ago`;
+}
+
+function getBatteryTone(batteryPercent: number | null | undefined) {
+  if (batteryPercent == null) {
+    return 'text-muted-foreground';
+  }
+
+  if (batteryPercent <= 15) {
+    return 'text-rose-500';
+  }
+
+  if (batteryPercent <= 35) {
+    return 'text-amber-500';
+  }
+
+  return 'text-emerald-500';
+}
+
+function BleCandidateCard({
+  candidate,
+  selected,
+  onClick,
+  actionLabel,
+  disabled = false,
+  nowMs,
+}: {
+  candidate: BleScanDevice;
+  selected: boolean;
+  onClick: () => void;
+  actionLabel: string;
+  disabled?: boolean;
+  nowMs: number;
+}) {
+  return (
+    <button
+      type='button'
+      aria-label={`Select BLE device ${candidate.address}`}
+      aria-pressed={selected}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        'w-full rounded-xl border px-3 py-3 text-left transition',
+        selected
+          ? 'border-primary/50 bg-primary/10'
+          : 'border-border bg-muted/20 hover:border-primary/30 hover:bg-muted/40',
+        disabled ? 'cursor-not-allowed opacity-80' : undefined,
+      )}
+    >
+      <div className='flex items-start justify-between gap-3'>
+        <div className='min-w-0 space-y-2'>
+          <div className='flex flex-wrap items-center gap-2'>
+            <div className='text-sm font-semibold text-foreground'>{candidate.displayName}</div>
+            {candidate.isDefinitionVerified ? <span className='rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-500'>{candidate.verificationLabel ?? 'Matched'}</span> : null}
+            {candidate.rssi != null ? <span className='rounded-full border border-border bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>{candidate.rssi} dBm</span> : null}
+          </div>
+          <div className='font-mono text-xs text-muted-foreground'>{candidate.address}</div>
+          {candidate.alias && candidate.name && candidate.alias !== candidate.name ? (
+            <div className='text-xs text-muted-foreground'>Alias: {candidate.alias} · Name: {candidate.name}</div>
+          ) : null}
+          <div className='grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 xl:grid-cols-4'>
+            <div className='flex items-center gap-2 rounded-lg border border-border/70 bg-background/60 px-2.5 py-2'>
+              <Thermometer className='h-3.5 w-3.5 text-orange-500' />
+              <span>{formatPreviewValue(candidate.temperatureCelsius, 1, '°C')}</span>
+            </div>
+            <div className='flex items-center gap-2 rounded-lg border border-border/70 bg-background/60 px-2.5 py-2'>
+              <Droplets className='h-3.5 w-3.5 text-sky-500' />
+              <span>{formatPreviewValue(candidate.humidityPercent, 1, '%')}</span>
+            </div>
+            <div className='flex items-center gap-2 rounded-lg border border-border/70 bg-background/60 px-2.5 py-2'>
+              <Battery className={cn('h-3.5 w-3.5', getBatteryTone(candidate.batteryPercent))} />
+              <span>{formatPreviewValue(candidate.batteryPercent, 0, '%')}</span>
+            </div>
+            <div className='rounded-lg border border-border/70 bg-background/60 px-2.5 py-2'>
+              <div className='font-medium text-foreground'>Signal {formatPreviewValue(candidate.signalStrengthPercent, 0, '%')}</div>
+              <div className='mt-0.5 text-[11px] text-muted-foreground'>{formatRelativeSeen(candidate.lastSeenAt, nowMs)}</div>
+            </div>
+          </div>
+          {candidate.verificationDetails ? <div className='text-xs text-muted-foreground'>{candidate.verificationDetails}</div> : null}
+        </div>
+        <span className={cn(
+          'rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]',
+          selected
+            ? 'border-primary/40 bg-primary/15 text-primary'
+            : 'border-border bg-background/70 text-muted-foreground',
+        )}>
+          {actionLabel}
+        </span>
+      </div>
+    </button>
+  );
 }
 
 function getFamilyName(definitions: DeviceDefinitionSummary[]) {
@@ -660,6 +777,7 @@ export function DevicesPage() {
   const [bleScanLoading, setBleScanLoading] = useState<Record<string, boolean>>({});
   const [bleScanFollowUpLoading, setBleScanFollowUpLoading] = useState<Record<string, boolean>>({});
   const [bleScanErrors, setBleScanErrors] = useState<Record<string, string | null>>({});
+  const [scanNowMs, setScanNowMs] = useState(() => Date.now());
   const definitionsRef = useRef<DeviceDefinitionSummary[]>([]);
   const autoSaveFieldRef = useRef<SaveFieldTarget | null>(null);
   const bleScanSequenceRef = useRef<Record<string, number>>({});
@@ -668,6 +786,12 @@ export function DevicesPage() {
   useEffect(() => {
     definitionsRef.current = availableDefinitions;
   }, [availableDefinitions]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setScanNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   const [deviceActions, setDeviceActions] = useState<Record<string, { loading: boolean; result?: StartStopResult }>>({});
   const devicesRef = useRef<DeviceConfiguration[]>([]);
   const initialLoadDone = useRef(false);
@@ -1292,9 +1416,9 @@ export function DevicesPage() {
               <div className='mb-6 rounded-2xl border border-border/70 bg-background/50 p-4'>
                 <div className='flex flex-wrap items-start justify-between gap-3'>
                   <div>
-                    <div className='text-sm font-semibold text-foreground'>{libraryBleSelection.familyName} nearby</div>
+                    <div className='text-sm font-semibold text-foreground'>{libraryBleSelection.familyName} nearby and compatible</div>
                     <div className='mt-1 text-xs text-muted-foreground'>
-                      Scan nearby BLE broadcasters and select every device you want to add now. You can still add one manually if the device is not advertising yet.
+                      Nearby matching broadcasters show live advert status while the shared scanner keeps listening. You can still add one manually if a device is quiet right now.
                     </div>
                   </div>
                   <div className='flex flex-wrap gap-2'>
@@ -1341,41 +1465,16 @@ export function DevicesPage() {
                     {(bleScanResults[activeLibraryBleScanKey] ?? []).map((candidate) => {
                       const isSelected = selectedLibraryBleAddresses.includes(candidate.address);
                       return (
-                        <button
+                        <BleCandidateCard
                           key={candidate.address}
-                          type='button'
-                          aria-label={`Select BLE device ${candidate.address}`}
-                          aria-pressed={isSelected}
+                          candidate={candidate}
+                          selected={isSelected}
+                          nowMs={scanNowMs}
                           onClick={() => setSelectedLibraryBleAddresses((current) => current.includes(candidate.address)
                             ? current.filter((address) => address !== candidate.address)
                             : [...current, candidate.address])}
-                          className={cn(
-                            'w-full rounded-xl border px-3 py-3 text-left transition',
-                            isSelected
-                              ? 'border-primary/50 bg-primary/10'
-                              : 'border-border bg-muted/20 hover:border-primary/30 hover:bg-muted/40',
-                          )}
-                        >
-                          <div className='flex items-start justify-between gap-3'>
-                            <div className='space-y-1'>
-                              <div className='flex flex-wrap items-center gap-2'>
-                                <div className='text-sm font-semibold text-foreground'>{candidate.displayName}</div>
-                                {candidate.isDefinitionVerified ? <span className='rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-500'>{candidate.verificationLabel ?? 'Matched'}</span> : null}
-                                {candidate.rssi != null ? <span className='rounded-full border border-border bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>{candidate.rssi} dBm</span> : null}
-                              </div>
-                              <div className='font-mono text-xs text-muted-foreground'>{candidate.address}</div>
-                              {candidate.verificationDetails ? <div className='text-xs text-muted-foreground'>{candidate.verificationDetails}</div> : null}
-                            </div>
-                            <span className={cn(
-                              'rounded-full border px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em]',
-                              isSelected
-                                ? 'border-primary/40 bg-primary/15 text-primary'
-                                : 'border-border bg-background/70 text-muted-foreground',
-                            )}>
-                              {isSelected ? 'Selected' : 'Select'}
-                            </span>
-                          </div>
-                        </button>
+                          actionLabel={isSelected ? 'Selected' : 'Select'}
+                        />
                       );
                     })}
                   </div>
@@ -1613,35 +1712,15 @@ export function DevicesPage() {
                             {bleDevices.map((candidate) => {
                               const isSelected = candidate.address === (device.transportPortName ?? '');
                               return (
-                                <button
+                                <BleCandidateCard
                                   key={candidate.address}
-                                  type='button'
-                                  aria-label={`Select BLE device ${candidate.address}`}
+                                  candidate={candidate}
+                                  selected={isSelected}
                                   disabled={device.enabled || bleIsScanning}
+                                  nowMs={scanNowMs}
                                   onClick={() => updateDevice(index, 'transportPortName', candidate.address)}
-                                  className={cn(
-                                    'w-full rounded-xl border px-3 py-3 text-left transition',
-                                    isSelected
-                                      ? 'border-primary/50 bg-primary/10'
-                                      : 'border-border bg-muted/20 hover:border-primary/30 hover:bg-muted/40',
-                                  )}
-                                >
-                                  <div className='flex items-start justify-between gap-3'>
-                                    <div className='space-y-1'>
-                                      <div className='flex flex-wrap items-center gap-2'>
-                                        <div className='text-sm font-semibold text-foreground'>{candidate.displayName}</div>
-                                        {candidate.isDefinitionVerified ? <span className='rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-500'>{candidate.verificationLabel ?? 'Verified'}</span> : null}
-                                        {candidate.rssi != null ? <span className='rounded-full border border-border bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>{candidate.rssi} dBm</span> : null}
-                                      </div>
-                                      <div className='font-mono text-xs text-muted-foreground'>{candidate.address}</div>
-                                      {candidate.alias && candidate.name && candidate.alias !== candidate.name ? (
-                                        <div className='text-xs text-muted-foreground'>Alias: {candidate.alias} · Name: {candidate.name}</div>
-                                      ) : null}
-                                      {candidate.verificationDetails ? <div className='text-xs text-muted-foreground'>{candidate.verificationDetails}</div> : null}
-                                    </div>
-                                    {isSelected ? <span className='rounded-full border border-primary/40 bg-primary/15 px-2 py-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-primary'>Selected</span> : null}
-                                  </div>
-                                </button>
+                                  actionLabel={isSelected ? 'Selected' : 'Use device'}
+                                />
                               );
                             })}
                           </div>

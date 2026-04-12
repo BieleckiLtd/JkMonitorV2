@@ -15,11 +15,15 @@ namespace FluxMonitor.Backend.Services;
 /// </summary>
 public sealed class GenericBleAdvertisementPollingClient(
     DefinitionDrivenTelemetryBuilder telemetryBuilder,
+    DeviceConfigStore deviceConfigStore,
+    DeviceDefinitionLoader definitionLoader,
+    DeviceStateStore stateStore,
     ILogger<GenericBleAdvertisementPollingClient> logger) : IDevicePollingClient, IDisposable
 {
     private readonly SemaphoreSlim _scannerLock = new(1, 1);
     private readonly object _cacheGate = new();
     private readonly Dictionary<string, AdvertisementDeviceSnapshot> _snapshots = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly TimeSpan SnapshotMetadataRefreshInterval = TimeSpan.FromSeconds(15);
     private Adapter? _adapter;
     private DeviceChangeEventHandlerAsync? _deviceFoundHandler;
     private bool _disposed;
@@ -128,21 +132,13 @@ public sealed class GenericBleAdvertisementPollingClient(
 
     private DevicePollResult BuildResultFromPayload(AdvertisementPayloadSnapshot payloadSnapshot, DeviceDefinition definition)
     {
-        var bankData = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
-        foreach (var bank in definition.DataSources)
-        {
-            var buffer = payloadSnapshot.Payload.ToArray();
-            if (bank.ResponseLayout is not null)
-                buffer = ResponseLayoutNormalizer.Normalize(buffer, bank.ResponseLayout);
-
-            bankData[bank.Id] = buffer;
-        }
-
-        return telemetryBuilder.BuildPollResult(
+        var result = telemetryBuilder.BuildPollResult(
             definition,
-            bankData,
-            DateTimeOffset.UtcNow,
+            CreateBankData(definition, payloadSnapshot.Payload),
+            payloadSnapshot.CapturedAt,
             Convert.ToHexString(payloadSnapshot.Payload));
+
+        return EnrichResultWithAdvertisementMetadata(result, payloadSnapshot);
     }
 
     public async Task<IReadOnlyList<BleDiscoveredDevice>> DiscoverDevicesAsync(
@@ -269,13 +265,19 @@ public sealed class GenericBleAdvertisementPollingClient(
         }
     }
 
-    private static BleDiscoveredDevice MapDiscoveredDevice(
+    private BleDiscoveredDevice MapDiscoveredDevice(
         AdvertisementDeviceSnapshot snapshot,
         DeviceDefinition? definition)
     {
         var verified = definition is not null && IsDefinitionSupported(definition) && MatchesDefinition(snapshot, definition);
         var details = verified
             ? BuildVerificationDetails(snapshot, definition!)
+            : null;
+        var payloadSnapshot = definition is not null && verified && TryExtractPayload(snapshot, definition, out var payload)
+            ? payload
+            : default;
+        var preview = definition is not null && verified && payloadSnapshot.Payload is not null
+            ? BuildPreviewMetrics(definition, payloadSnapshot)
             : null;
 
         return new BleDiscoveredDevice(
@@ -290,7 +292,12 @@ public sealed class GenericBleAdvertisementPollingClient(
             snapshot.AdvertisedServiceUuids,
             verified,
             verified ? "Advertisement match" : null,
-            details);
+            details,
+            snapshot.LastSeen,
+            ConvertRssiToSignalStrengthPercent(snapshot.Rssi),
+            preview?.TemperatureCelsius,
+            preview?.HumidityPercent,
+            preview?.BatteryPercent);
     }
 
     private static bool MatchesDefinition(AdvertisementDeviceSnapshot snapshot, DeviceDefinition definition)
@@ -386,14 +393,27 @@ public sealed class GenericBleAdvertisementPollingClient(
         }
 
         payload = new AdvertisementPayloadSnapshot(
+            snapshot.Address,
             rawPayload.Skip(offset).Take(length).ToArray(),
-            snapshot.LastSeen);
+            snapshot.LastSeen,
+            snapshot.Rssi,
+            ConvertRssiToSignalStrengthPercent(snapshot.Rssi));
         return true;
     }
 
     private async Task CaptureSnapshotAsync(Device device)
     {
-        var snapshot = await BuildSnapshotAsync(device);
+        var address = await SafeGetStringAsync(() => device.GetAddressAsync()) ?? string.Empty;
+        if (string.IsNullOrWhiteSpace(address))
+            return;
+
+        AdvertisementDeviceSnapshot? previousSnapshot;
+        lock (_cacheGate)
+        {
+            _snapshots.TryGetValue(address, out previousSnapshot);
+        }
+
+        var snapshot = await BuildSnapshotAsync(device, address, previousSnapshot);
         if (string.IsNullOrWhiteSpace(snapshot.Address))
             return;
 
@@ -401,19 +421,42 @@ public sealed class GenericBleAdvertisementPollingClient(
         {
             _snapshots[snapshot.Address] = snapshot;
         }
+
+        await PublishAdvertisementObservationsAsync(snapshot);
     }
 
-    private static async Task<AdvertisementDeviceSnapshot> BuildSnapshotAsync(Device device)
+    private static async Task<AdvertisementDeviceSnapshot> BuildSnapshotAsync(
+        Device device,
+        string address,
+        AdvertisementDeviceSnapshot? previousSnapshot)
     {
-        var address = await SafeGetStringAsync(() => device.GetAddressAsync()) ?? string.Empty;
-        var alias = await SafeGetStringAsync(() => device.GetAliasAsync());
-        var name = await SafeGetStringAsync(() => device.GetNameAsync());
-        var isConnected = await SafeGetValueAsync(() => device.GetAsync<bool>("Connected"));
-        var isPaired = await SafeGetValueAsync(() => device.GetAsync<bool>("Paired"));
+        var shouldRefreshMetadata = previousSnapshot is null ||
+            DateTimeOffset.UtcNow - previousSnapshot.MetadataRefreshedAt >= SnapshotMetadataRefreshInterval;
+
+        var alias = previousSnapshot?.Alias;
+        if (string.IsNullOrWhiteSpace(alias) || shouldRefreshMetadata)
+            alias = await SafeGetStringAsync(() => device.GetAliasAsync()) ?? alias;
+
+        var name = previousSnapshot?.Name;
+        if (string.IsNullOrWhiteSpace(name) || shouldRefreshMetadata)
+            name = await SafeGetStringAsync(() => device.GetNameAsync()) ?? name;
+
+        var isConnected = shouldRefreshMetadata
+            ? await SafeGetValueAsync(() => device.GetAsync<bool>("Connected"))
+            : previousSnapshot?.IsConnected ?? false;
+        var isPaired = shouldRefreshMetadata
+            ? await SafeGetValueAsync(() => device.GetAsync<bool>("Paired"))
+            : previousSnapshot?.IsPaired ?? false;
         var rssi = ConvertToNullableInt(await SafeGetObjectAsync(() => device.GetRSSIAsync()));
-        var manufacturerData = ExtractKeyedPayloads(await SafeGetObjectAsync(() => device.GetManufacturerDataAsync()));
-        var serviceData = ExtractServicePayloads(await SafeGetObjectAsync(() => device.GetServiceDataAsync()));
-        var advertisedServiceUuids = DescribeStringSequence(await SafeGetObjectAsync(() => device.GetUUIDsAsync()));
+        var manufacturerData = ExtractKeyedPayloads(
+            await SafeGetObjectAsync(() => device.GetManufacturerDataAsync()),
+            previousSnapshot?.ManufacturerData);
+        var serviceData = ExtractServicePayloads(
+            await SafeGetObjectAsync(() => device.GetServiceDataAsync()),
+            previousSnapshot?.ServiceData);
+        var advertisedServiceUuids = shouldRefreshMetadata || previousSnapshot is null || previousSnapshot.AdvertisedServiceUuids.Length == 0
+            ? DescribeStringSequence(await SafeGetObjectAsync(() => device.GetUUIDsAsync()))
+            : previousSnapshot.AdvertisedServiceUuids;
 
         var displayName = alias;
         if (string.IsNullOrWhiteSpace(displayName))
@@ -433,16 +476,199 @@ public sealed class GenericBleAdvertisementPollingClient(
             serviceData,
             manufacturerData.Descriptions,
             advertisedServiceUuids,
-            DateTimeOffset.UtcNow);
+            DateTimeOffset.UtcNow,
+            shouldRefreshMetadata ? DateTimeOffset.UtcNow : previousSnapshot?.MetadataRefreshedAt ?? DateTimeOffset.UtcNow);
     }
 
-    private static ExtractedPayloadMap ExtractKeyedPayloads(object? value)
+    private Task PublishAdvertisementObservationsAsync(AdvertisementDeviceSnapshot snapshot)
+    {
+        foreach (var device in deviceConfigStore.GetDevices())
+        {
+            if (!device.Enabled || string.IsNullOrWhiteSpace(device.TransportPortName))
+            {
+                continue;
+            }
+
+            DeviceDefinition? definition = null;
+            if (!device.TryResolveDefinition(definitionLoader, out definition) || definition is null)
+            {
+                continue;
+            }
+
+            if (!string.Equals(definition.Connection.Transport.Type, "ble", StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(definition.Connection.Protocol.Type, "ble-advertisement", StringComparison.OrdinalIgnoreCase) ||
+                !GenericBlePollingClient.IdentifierMatches(device.TransportPortName, snapshot.Address, snapshot.Alias, snapshot.Name) ||
+                !TryExtractPayload(snapshot, definition, out var payloadSnapshot))
+            {
+                continue;
+            }
+
+            try
+            {
+                var result = BuildResultFromPayload(payloadSnapshot, definition);
+                stateStore.MarkAdvertisementObserved(device, result.Snapshot);
+            }
+            catch (Exception exception)
+            {
+                logger.LogDebug(
+                    exception,
+                    "Skipping live advertisement update for device {DeviceId}.",
+                    device.DeviceId);
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private static Dictionary<string, byte[]> CreateBankData(DeviceDefinition definition, byte[] payload)
+    {
+        var bankData = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+        foreach (var bank in definition.DataSources)
+        {
+            var buffer = payload.ToArray();
+            if (bank.ResponseLayout is not null)
+                buffer = ResponseLayoutNormalizer.Normalize(buffer, bank.ResponseLayout);
+
+            bankData[bank.Id] = buffer;
+        }
+
+        return bankData;
+    }
+
+    private static DevicePollResult EnrichResultWithAdvertisementMetadata(
+        DevicePollResult result,
+        AdvertisementPayloadSnapshot payloadSnapshot)
+    {
+        var parameters = result.Snapshot.Parameters.ToList();
+        AppendOrReplaceParameter(
+            parameters,
+            new FluxMonitor.Contracts.Status.DeviceParameter
+            {
+                Key = "signal_strength_pct",
+                DisplayName = "Signal",
+                Category = "Status",
+                NumericValue = payloadSnapshot.SignalStrengthPercent,
+                Unit = "%",
+                SortOrder = parameters.Count
+            });
+
+        if (payloadSnapshot.Rssi.HasValue)
+        {
+            AppendOrReplaceParameter(
+                parameters,
+                new FluxMonitor.Contracts.Status.DeviceParameter
+                {
+                    Key = "rssi_dbm",
+                    DisplayName = "RSSI",
+                    Category = "Status",
+                    NumericValue = payloadSnapshot.Rssi.Value,
+                    Unit = "dBm",
+                    SortOrder = parameters.Count
+                });
+        }
+
+        return result with
+        {
+            Snapshot = result.Snapshot with
+            {
+                Parameters = parameters
+            }
+        };
+    }
+
+    private static void AppendOrReplaceParameter(
+        List<FluxMonitor.Contracts.Status.DeviceParameter> parameters,
+        FluxMonitor.Contracts.Status.DeviceParameter parameter)
+    {
+        var existingIndex = parameters.FindIndex(existing =>
+            string.Equals(existing.Key, parameter.Key, StringComparison.OrdinalIgnoreCase));
+        if (existingIndex >= 0)
+        {
+            parameters[existingIndex] = parameter with { SortOrder = parameters[existingIndex].SortOrder };
+            return;
+        }
+
+        parameters.Add(parameter);
+    }
+
+    private BlePreviewMetrics? BuildPreviewMetrics(
+        DeviceDefinition definition,
+        AdvertisementPayloadSnapshot payloadSnapshot)
+    {
+        var preview = BuildResultFromPayload(payloadSnapshot, definition).Snapshot;
+        return new BlePreviewMetrics(
+            FindNumericParameter(preview, ResolveEntityId(definition, role: "temperature", fallbackId: "temperature_c")),
+            FindNumericParameter(preview, ResolveEntityId(definition, fallbackId: "humidity_pct")),
+            FindNumericParameter(preview, ResolveEntityId(definition, fallbackId: "battery_pct")) is { } battery
+                ? decimal.ToInt32(decimal.Round(battery, 0))
+                : null);
+    }
+
+    private static decimal? FindNumericParameter(
+        FluxMonitor.Contracts.Status.DeviceTelemetrySnapshot snapshot,
+        string? parameterKey)
+    {
+        if (string.IsNullOrWhiteSpace(parameterKey))
+            return null;
+
+        return snapshot.Parameters.FirstOrDefault(parameter =>
+            string.Equals(parameter.Key, parameterKey, StringComparison.OrdinalIgnoreCase))?.NumericValue;
+    }
+
+    private static string? ResolveEntityId(
+        DeviceDefinition definition,
+        string? role = null,
+        string? fallbackId = null)
+    {
+        if (!string.IsNullOrWhiteSpace(role))
+        {
+            var roleMatch = definition.Entities.FirstOrDefault(entity =>
+                string.Equals(entity.Role, role, StringComparison.OrdinalIgnoreCase));
+            if (roleMatch is not null)
+                return roleMatch.Id;
+        }
+
+        return fallbackId;
+    }
+
+    internal static int? ConvertRssiToSignalStrengthPercent(int? rssi, int minRssi = -95, int maxRssi = -45)
+    {
+        if (!rssi.HasValue)
+            return null;
+
+        var bounded = Math.Clamp((rssi.Value - minRssi) / (double)(maxRssi - minRssi), 0d, 1d);
+        return (int)Math.Round(bounded * 100d, MidpointRounding.AwayFromZero);
+    }
+
+    private static string[] DescribePayloads(IReadOnlyDictionary<int, byte[]> payloads)
+    {
+        return payloads
+            .Select(entry =>
+            {
+                var payloadText = FormatPayload(entry.Value);
+                return string.IsNullOrWhiteSpace(payloadText)
+                    ? null
+                    : $"0x{entry.Key:X4}: {payloadText}";
+            })
+            .Where(description => !string.IsNullOrWhiteSpace(description))
+            .Select(description => description!)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+    }
+
+    private static ExtractedPayloadMap ExtractKeyedPayloads(
+        object? value,
+        IReadOnlyDictionary<int, byte[]>? previousPayloads = null)
     {
         if (value is not IEnumerable enumerable)
-            return new ExtractedPayloadMap(new Dictionary<int, byte[]>(), []);
+        {
+            var fallbackPayloads = previousPayloads is null
+                ? new Dictionary<int, byte[]>()
+                : new Dictionary<int, byte[]>(previousPayloads, EqualityComparer<int>.Default);
+            return new ExtractedPayloadMap(fallbackPayloads, DescribePayloads(fallbackPayloads));
+        }
 
         var payloads = new Dictionary<int, byte[]>();
-        var descriptions = new List<string>();
         foreach (var entry in enumerable)
         {
             if (entry is null)
@@ -456,20 +682,22 @@ public sealed class GenericBleAdvertisementPollingClient(
             var keyValue = TryConvertInt32(key);
             if (keyValue.HasValue && normalizedPayload is not null)
                 payloads[keyValue.Value] = normalizedPayload;
-
-            var keyText = keyValue.HasValue ? $"0x{keyValue.Value:X4}" : key?.ToString()?.Trim() ?? "Manufacturer";
-            var payloadText = normalizedPayload is null ? null : FormatPayload(normalizedPayload);
-            if (!string.IsNullOrWhiteSpace(payloadText))
-                descriptions.Add($"{keyText}: {payloadText}");
         }
 
-        return new ExtractedPayloadMap(payloads, descriptions.Distinct(StringComparer.OrdinalIgnoreCase).ToArray());
+        if (payloads.Count == 0 && previousPayloads is not null)
+            payloads = new Dictionary<int, byte[]>(previousPayloads, EqualityComparer<int>.Default);
+
+        return new ExtractedPayloadMap(payloads, DescribePayloads(payloads));
     }
 
-    private static Dictionary<string, byte[]> ExtractServicePayloads(object? value)
+    private static Dictionary<string, byte[]> ExtractServicePayloads(
+        object? value,
+        IReadOnlyDictionary<string, byte[]>? previousPayloads = null)
     {
         if (value is not IEnumerable enumerable)
-            return new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            return previousPayloads is null
+                ? new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase)
+                : new Dictionary<string, byte[]>(previousPayloads, StringComparer.OrdinalIgnoreCase);
 
         var payloads = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
         foreach (var entry in enumerable)
@@ -484,6 +712,9 @@ public sealed class GenericBleAdvertisementPollingClient(
             if (!string.IsNullOrWhiteSpace(normalizedKey) && payload is not null)
                 payloads[normalizedKey] = payload;
         }
+
+        if (payloads.Count == 0 && previousPayloads is not null)
+            return new Dictionary<string, byte[]>(previousPayloads, StringComparer.OrdinalIgnoreCase);
 
         return payloads;
     }
@@ -635,13 +866,22 @@ public sealed class GenericBleAdvertisementPollingClient(
         IReadOnlyDictionary<string, byte[]> ServiceData,
         string[] ManufacturerDataDescriptions,
         string[] AdvertisedServiceUuids,
-        DateTimeOffset LastSeen);
+        DateTimeOffset LastSeen,
+        DateTimeOffset MetadataRefreshedAt);
 
     private readonly record struct AdvertisementPayloadSnapshot(
+        string Address,
         byte[] Payload,
-        DateTimeOffset CapturedAt);
+        DateTimeOffset CapturedAt,
+        int? Rssi,
+        int? SignalStrengthPercent);
 
     private sealed record ExtractedPayloadMap(
         Dictionary<int, byte[]> Payloads,
         string[] Descriptions);
+
+    private sealed record BlePreviewMetrics(
+        decimal? TemperatureCelsius,
+        decimal? HumidityPercent,
+        int? BatteryPercent);
 }

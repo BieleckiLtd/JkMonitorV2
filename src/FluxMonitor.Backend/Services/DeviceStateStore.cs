@@ -160,6 +160,29 @@ public sealed class DeviceStateStore
         PublishCurrentDevices();
     }
 
+    public void MarkAdvertisementObserved(
+        DeviceConfiguration device,
+        DeviceTelemetrySnapshot latestTelemetry)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+        ArgumentNullException.ThrowIfNull(latestTelemetry);
+
+        _states.AddOrUpdate(
+            device.DeviceId,
+            _ => CreateState(
+                device,
+                latestTelemetry.CollectedAt,
+                null,
+                "NotStarted",
+                latestTelemetry: latestTelemetry),
+            (_, current) => current with
+            {
+                LatestTelemetry = SelectNewerTelemetry(current.LatestTelemetry, latestTelemetry)
+            });
+
+        PublishCurrentDevices();
+    }
+
     public void MarkPollFailed(DeviceConfiguration device, DateTimeOffset startedAt, Exception exception)
     {
         _states.AddOrUpdate(
@@ -207,5 +230,17 @@ public sealed class DeviceStateStore
             LastPersistedAt = lastPersistedAt,
             LatestTelemetry = latestTelemetry
         };
+    }
+
+    private static DeviceTelemetrySnapshot? SelectNewerTelemetry(
+        DeviceTelemetrySnapshot? current,
+        DeviceTelemetrySnapshot incoming)
+    {
+        if (current is null)
+            return incoming;
+
+        return incoming.CollectedAt >= current.CollectedAt
+            ? incoming
+            : current;
     }
 }

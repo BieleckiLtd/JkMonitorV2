@@ -353,6 +353,14 @@ public sealed class DevicesController(
                           string.Equals(definition.Connection.Protocol.Type, "ble-advertisement", StringComparison.OrdinalIgnoreCase)
                 ? await genericBleAdvertisementPollingClient.DiscoverDevicesAsync(definition, timeout, cancellationToken)
                 : await genericBlePollingClient.DiscoverDevicesAsync(definition, timeout, cancellationToken, returnOnFirstMatch);
+
+            if (definition is not null && devices.Any(device => device.IsDefinitionVerified))
+            {
+                devices = devices
+                    .Where(device => device.IsDefinitionVerified)
+                    .ToArray();
+            }
+
             logger.LogInformation(
                 "BLE scan completed. DefinitionFilterApplied={DefinitionFilterApplied}, ResultCount={ResultCount}, ReturnOnFirstMatch={ReturnOnFirstMatch}.",
                 definition is not null,

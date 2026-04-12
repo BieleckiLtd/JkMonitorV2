@@ -1812,7 +1812,12 @@ public sealed record BleDiscoveredDevice(
     string[] AdvertisedServiceUuids,
     bool IsDefinitionVerified,
     string? VerificationLabel,
-    string? VerificationDetails);
+    string? VerificationDetails,
+    DateTimeOffset? LastSeenAt = null,
+    int? SignalStrengthPercent = null,
+    decimal? TemperatureCelsius = null,
+    decimal? HumidityPercent = null,
+    int? BatteryPercent = null);
 
 public sealed record BleProbeResult(
     bool IsDefinitionVerified,
