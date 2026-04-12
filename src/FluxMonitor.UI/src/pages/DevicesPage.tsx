@@ -1583,17 +1583,19 @@ export function DevicesPage() {
                     </label>
                   ) : null}
 
-                  <label className='space-y-2 text-sm text-foreground'>
-                    <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Is master</span>
-                    <div className='flex h-10 items-center rounded-md border border-input bg-background px-3'>
-                      <input
-                        type='checkbox'
-                        checked={device.isMaster}
-                        disabled={device.enabled}
-                        onChange={(event) => updateDevice(index, 'isMaster', event.target.checked)}
-                      />
-                    </div>
-                  </label>
+                  {definitionFamily?.category === 'energy-storage' ? (
+                    <label className='space-y-2 text-sm text-foreground'>
+                      <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Is master</span>
+                      <div className='flex h-10 items-center rounded-md border border-input bg-background px-3'>
+                        <input
+                          type='checkbox'
+                          checked={device.isMaster}
+                          disabled={device.enabled}
+                          onChange={(event) => updateDevice(index, 'isMaster', event.target.checked)}
+                        />
+                      </div>
+                    </label>
+                  ) : null}
 
                   {transportType === 'ble' ? (
                     <label className='space-y-2 text-sm text-foreground'>
@@ -1608,6 +1610,7 @@ export function DevicesPage() {
                   ) : null}
                 </div>
 
+                {definitionFamily?.category === 'energy-storage' ? (
                 <details className='mt-4 rounded-2xl border border-border/70 bg-background/40 p-4'>
                   <summary className='cursor-pointer list-none text-sm font-semibold text-foreground'>Runtime tuning</summary>
                   <div className='mt-4 space-y-4'>
@@ -1667,6 +1670,7 @@ export function DevicesPage() {
                     </div>
                   </div>
                 </details>
+                ) : null}
 
                 <details className='mt-4 rounded-2xl border border-border/70 bg-background/40 p-4'>
                   <summary className='cursor-pointer list-none text-sm font-semibold text-foreground'>Definition overrides</summary>
