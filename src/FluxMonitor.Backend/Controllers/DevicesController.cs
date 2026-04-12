@@ -354,7 +354,7 @@ public sealed class DevicesController(
                 ? await genericBleAdvertisementPollingClient.DiscoverDevicesAsync(definition, timeout, cancellationToken)
                 : await genericBlePollingClient.DiscoverDevicesAsync(definition, timeout, cancellationToken, returnOnFirstMatch);
 
-            if (definition is not null && devices.Any(device => device.IsDefinitionVerified))
+            if (definition is not null)
             {
                 devices = devices
                     .Where(device => device.IsDefinitionVerified)
