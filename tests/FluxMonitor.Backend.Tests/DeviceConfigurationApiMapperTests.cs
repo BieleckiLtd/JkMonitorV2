@@ -16,6 +16,7 @@ public sealed class DeviceConfigurationApiMapperTests
             PersistedId = 42,
             DeviceId = "battery-1",
             DisplayName = "Battery 1",
+            SortOrder = 3,
             DefinitionId = "jk-inverter-bms",
             DefinitionVersion = "1.0.0",
             TransportPortName = "COM3",
@@ -27,6 +28,7 @@ public sealed class DeviceConfigurationApiMapperTests
             CellVoltageSmoothingFactor = 0.25m,
             CellVoltageSmoothingBreakoutMillivolts = 5,
             DisplayPrecision = new DisplayPrecisionConfiguration(),
+            TemperatureUnit = "f",
             HasDefinitionOverride = true,
             Definition = CreateDefinition(2500)
         };
@@ -35,6 +37,8 @@ public sealed class DeviceConfigurationApiMapperTests
 
         Assert.Equal("battery-1", configuration.DeviceId);
         Assert.Equal("jk-inverter-bms", configuration.DefinitionId);
+        Assert.Equal(3, configuration.SortOrder);
+        Assert.Equal("f", configuration.TemperatureUnit);
         Assert.Contains(@"""intervalMs"":2500", configuration.DefinitionJson);
     }
 
@@ -45,6 +49,7 @@ public sealed class DeviceConfigurationApiMapperTests
         {
             DeviceId = "battery-1",
             DisplayName = "Battery 1",
+            SortOrder = 2,
             DefinitionId = "jk-inverter-bms",
             DefinitionVersion = "1.0.0",
             TransportPortName = "COM3",
@@ -55,6 +60,7 @@ public sealed class DeviceConfigurationApiMapperTests
             CellVoltageSmoothingFactor = 0.25m,
             CellVoltageSmoothingBreakoutMillivolts = 5,
             DisplayPrecision = new DisplayPrecisionConfiguration(),
+            TemperatureUnit = "f",
             HasDefinitionOverride = true,
             DefinitionJson = "{}"
         };
@@ -64,6 +70,8 @@ public sealed class DeviceConfigurationApiMapperTests
         Assert.Equal(42, apiModel.PersistedId);
         Assert.True(apiModel.HasDefinitionOverride);
         Assert.NotNull(apiModel.Definition);
+        Assert.Equal(2, apiModel.SortOrder);
+        Assert.Equal("f", apiModel.TemperatureUnit);
         Assert.Equal(2500, apiModel.Definition!.PollGroups["fast"].IntervalMs);
     }
 

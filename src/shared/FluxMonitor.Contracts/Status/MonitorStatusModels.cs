@@ -8,6 +8,8 @@ public sealed record class DeviceRuntimeState
 
     public required string DisplayName { get; init; }
 
+    public int SortOrder { get; init; }
+
     public required string DefinitionId { get; init; }
 
     public string? ProtocolHandler { get; init; }

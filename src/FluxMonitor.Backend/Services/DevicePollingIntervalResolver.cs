@@ -47,6 +47,7 @@ public static class DevicePollingIntervalResolver
         {
             DeviceId = device.DeviceId,
             DisplayName = device.DisplayName,
+            SortOrder = device.SortOrder,
             DefinitionId = device.DefinitionId,
             TransportPortName = device.TransportPortName,
             BleSettingsPin = device.BleSettingsPin,
@@ -57,6 +58,7 @@ public static class DevicePollingIntervalResolver
             CellVoltageSmoothingFactor = device.CellVoltageSmoothingFactor,
             CellVoltageSmoothingBreakoutMillivolts = device.CellVoltageSmoothingBreakoutMillivolts,
             DisplayPrecision = device.DisplayPrecision,
+            TemperatureUnit = device.TemperatureUnit,
             HasDefinitionOverride = device.HasDefinitionOverride,
             DefinitionVersion = device.DefinitionVersion,
             DefinitionJson = device.DefinitionJson,

@@ -75,6 +75,7 @@ const defaultPrecision: DisplayPrecision = { voltage: 2, cellVoltage: 3, current
 type DeviceRuntimeState = {
   deviceId: string;
   displayName: string;
+  sortOrder?: number;
   definitionId: string;
   protocolHandler?: string | null;
   enabled: boolean;

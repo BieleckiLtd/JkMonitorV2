@@ -123,6 +123,53 @@ describe('MonitorPage', () => {
     expect(FakeEventSource.instances[1]?.url).toBe('/api/devices/current/stream');
   }, 10000);
 
+  it('renders devices in the order provided by the runtime snapshot', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify([
+      {
+        deviceId: 'device-2',
+        displayName: 'Battery 2',
+        sortOrder: 0,
+        definitionId: 'jk-inverter-bms',
+        enabled: true,
+        isMaster: false,
+        pollIntervalMilliseconds: 500,
+        lastOutcome: 'Succeeded',
+        latestTelemetry: null,
+      },
+      {
+        deviceId: 'device-1',
+        displayName: 'Battery 1',
+        sortOrder: 1,
+        definitionId: 'jk-inverter-bms',
+        enabled: true,
+        isMaster: true,
+        pollIntervalMilliseconds: 500,
+        lastOutcome: 'Succeeded',
+        latestTelemetry: null,
+      },
+    ]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    class FakeEventSource {
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      close = vi.fn();
+
+      constructor(public readonly url: string) {}
+    }
+
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+
+    render(<MonitorPage />);
+
+    const battery2 = await screen.findByText('Battery 2');
+    const battery1 = await screen.findByText('Battery 1');
+
+    expect(battery2.compareDocumentPosition(battery1) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
   it('shows environment device last seen, signal, and battery icon tooltips in the header order', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-04-12T12:00:02.000Z').getTime());
 

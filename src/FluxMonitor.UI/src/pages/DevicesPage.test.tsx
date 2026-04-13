@@ -575,4 +575,80 @@ describe('DevicesPage', () => {
       expect(body.devices[0]?.definition.pollGroups.fast.intervalMs).toBe(2500);
     });
   });
+
+  it('saves the configured monitor order when a device is moved', async () => {
+    initialDevicesResponse = [
+      {
+        persistedId: 1,
+        deviceId: 'device-1',
+        displayName: 'Battery 1',
+        sortOrder: 0,
+        definitionId: 'jk-inverter-bms',
+        definitionVersion: '1.0.0',
+        transportPortName: 'COM3',
+        bleSettingsPin: null,
+        address: 1,
+        isMaster: false,
+        pollIntervalMilliseconds: 1000,
+        enabled: false,
+        cellVoltageSmoothingFactor: 0,
+        cellVoltageSmoothingBreakoutMillivolts: 0,
+        displayPrecision: {
+          voltage: 2,
+          cellVoltage: 3,
+          current: 1,
+          power: 0,
+          temperature: 1,
+          soc: 0,
+          deltaVoltage: 3,
+        },
+        hasDefinitionOverride: false,
+        definition: definitionDetailsById['jk-inverter-bms'],
+      },
+      {
+        persistedId: 2,
+        deviceId: 'device-2',
+        displayName: 'Battery 2',
+        sortOrder: 1,
+        definitionId: 'jk-inverter-bms',
+        definitionVersion: '1.0.0',
+        transportPortName: 'COM4',
+        bleSettingsPin: null,
+        address: 2,
+        isMaster: false,
+        pollIntervalMilliseconds: 1000,
+        enabled: false,
+        cellVoltageSmoothingFactor: 0,
+        cellVoltageSmoothingBreakoutMillivolts: 0,
+        displayPrecision: {
+          voltage: 2,
+          cellVoltage: 3,
+          current: 1,
+          power: 0,
+          temperature: 1,
+          soc: 0,
+          deltaVoltage: 3,
+        },
+        hasDefinitionOverride: false,
+        definition: definitionDetailsById['jk-inverter-bms'],
+      },
+    ];
+
+    render(<DevicesPage />);
+
+    fireEvent.click(await screen.findByRole('button', { name: /move battery 1 down/i }));
+
+    await waitFor(() => {
+      const putCall = vi.mocked(globalThis.fetch).mock.calls.find(([input, init]) =>
+        String(input) === '/api/devices/config' && init?.method === 'PUT');
+      expect(putCall).toBeDefined();
+
+      const body = JSON.parse(String(putCall?.[1]?.body)) as {
+        devices: Array<{ deviceId: string; sortOrder: number }>;
+      };
+
+      expect(body.devices.map((device) => device.deviceId)).toEqual(['device-2', 'device-1']);
+      expect(body.devices.map((device) => device.sortOrder)).toEqual([0, 1]);
+    });
+  });
 });

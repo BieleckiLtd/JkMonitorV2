@@ -26,6 +26,7 @@ internal static class DeviceConfigurationApiMapper
             PersistedId = persistedId,
             DeviceId = device.DeviceId,
             DisplayName = device.DisplayName,
+            SortOrder = device.SortOrder,
             DefinitionId = device.DefinitionId,
             DefinitionVersion = device.DefinitionVersion,
             TransportPortName = device.TransportPortName,
@@ -37,6 +38,7 @@ internal static class DeviceConfigurationApiMapper
             CellVoltageSmoothingFactor = device.CellVoltageSmoothingFactor,
             CellVoltageSmoothingBreakoutMillivolts = device.CellVoltageSmoothingBreakoutMillivolts,
             DisplayPrecision = device.DisplayPrecision,
+            TemperatureUnit = device.TemperatureUnit,
             HasDefinitionOverride = device.HasDefinitionOverride,
             Definition = definition
         };
@@ -48,6 +50,7 @@ internal static class DeviceConfigurationApiMapper
         {
             DeviceId = device.DeviceId,
             DisplayName = device.DisplayName,
+            SortOrder = device.SortOrder,
             DefinitionId = device.DefinitionId,
             DefinitionVersion = device.DefinitionVersion,
             TransportPortName = device.TransportPortName,
@@ -59,6 +62,7 @@ internal static class DeviceConfigurationApiMapper
             CellVoltageSmoothingFactor = device.CellVoltageSmoothingFactor,
             CellVoltageSmoothingBreakoutMillivolts = device.CellVoltageSmoothingBreakoutMillivolts,
             DisplayPrecision = device.DisplayPrecision,
+            TemperatureUnit = device.TemperatureUnit,
             DefinitionJson = SerializeDefinition(device.Definition)
         };
     }

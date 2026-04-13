@@ -425,6 +425,7 @@ public sealed class DevicesController(
                     ? new DeviceConfiguration
                     {
                         DeviceId = d.DeviceId, DisplayName = d.DisplayName,
+                        SortOrder = d.SortOrder,
                         DefinitionId = d.DefinitionId, TransportPortName = d.TransportPortName,
                         BleSettingsPin = d.BleSettingsPin,
                         Address = d.Address, IsMaster = d.IsMaster,
@@ -432,6 +433,7 @@ public sealed class DevicesController(
                         CellVoltageSmoothingFactor = d.CellVoltageSmoothingFactor,
                         CellVoltageSmoothingBreakoutMillivolts = d.CellVoltageSmoothingBreakoutMillivolts,
                         DisplayPrecision = d.DisplayPrecision,
+                        TemperatureUnit = d.TemperatureUnit,
                         HasDefinitionOverride = d.HasDefinitionOverride,
                         DefinitionVersion = d.DefinitionVersion,
                         DefinitionJson = d.DefinitionJson,
@@ -524,6 +526,7 @@ public sealed class DevicesController(
                     ? new DeviceConfiguration
                     {
                         DeviceId = d.DeviceId, DisplayName = d.DisplayName,
+                        SortOrder = d.SortOrder,
                         DefinitionId = d.DefinitionId, TransportPortName = d.TransportPortName,
                         BleSettingsPin = d.BleSettingsPin,
                         Address = d.Address, IsMaster = d.IsMaster,
@@ -531,6 +534,7 @@ public sealed class DevicesController(
                         CellVoltageSmoothingFactor = d.CellVoltageSmoothingFactor,
                         CellVoltageSmoothingBreakoutMillivolts = d.CellVoltageSmoothingBreakoutMillivolts,
                         DisplayPrecision = d.DisplayPrecision,
+                        TemperatureUnit = d.TemperatureUnit,
                         HasDefinitionOverride = d.HasDefinitionOverride,
                         DefinitionVersion = d.DefinitionVersion,
                         DefinitionJson = d.DefinitionJson,

@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
-import { Battery, Check, Droplets, LoaderCircle, Play, Plus, RotateCcw, Square, Thermometer, Trash2, Upload, X } from 'lucide-react';
+import { ArrowDown, ArrowUp, Battery, Check, Droplets, LoaderCircle, Play, Plus, RotateCcw, Square, Thermometer, Trash2, Upload, X } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { useDeviceDefinitions } from '../hooks/useDeviceDefinition';
@@ -20,6 +20,7 @@ type DeviceConfigurationWire = {
   persistedId?: number | null;
   deviceId: string;
   displayName: string;
+  sortOrder?: number;
   definitionId: string;
   definitionVersion?: string | null;
   transportPortName?: string | null;
@@ -511,7 +512,7 @@ function mergeDeviceConfigurations(
     previousKeysByDeviceId.set(device.deviceId.toLowerCase(), device.clientKey);
   }
 
-  return incomingDevices.map((device) => {
+  return incomingDevices.map((device, index) => {
     const clientKey = device.persistedId != null
       ? (previousKeysByPersistedId.get(device.persistedId) ?? previousKeysByDeviceId.get(device.deviceId.toLowerCase()) ?? createDeviceClientKey())
       : (previousKeysByDeviceId.get(device.deviceId.toLowerCase()) ?? createDeviceClientKey());
@@ -521,6 +522,7 @@ function mergeDeviceConfigurations(
       persistedId: device.persistedId ?? null,
       deviceId: device.deviceId,
       displayName: device.displayName,
+      sortOrder: device.sortOrder ?? index,
       definitionId: device.definitionId,
       definitionVersion: device.definitionVersion ?? null,
       transportPortName: device.transportPortName ?? '',
@@ -544,6 +546,7 @@ function serializeDevice(device: DeviceConfiguration): DeviceConfigurationWire {
     persistedId: device.persistedId ?? null,
     deviceId: device.deviceId,
     displayName: device.displayName,
+    sortOrder: device.sortOrder ?? 0,
     definitionId: device.definitionId,
     definitionVersion: device.definitionVersion ?? null,
     transportPortName: device.transportPortName?.trim() ? device.transportPortName.trim() : null,
@@ -595,6 +598,7 @@ const defaultDevice = (
   persistedId: null,
   deviceId: `device-${index}`,
   displayName: familyName ?? stripConnectionSuffix(definition.name),
+  sortOrder: index - 1,
   definitionId: definition.id,
   definitionVersion: definitionSnapshot.version,
   transportPortName: '',
@@ -926,7 +930,11 @@ export function DevicesPage() {
   const saveDevicesNow = useCallback(async (devicesToSave?: DeviceConfiguration[]) => {
     try {
       setAutoSaveStatus('saving');
-      const devicesPayload = (devicesToSave ?? devicesRef.current).map(serializeDevice);
+      const orderedDevices = (devicesToSave ?? devicesRef.current).map((device, index) => ({
+        ...device,
+        sortOrder: index,
+      }));
+      const devicesPayload = orderedDevices.map(serializeDevice);
       const response = await fetch('/api/devices/config', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
@@ -1339,9 +1347,26 @@ export function DevicesPage() {
   }, [loadDefinitionSnapshot, markDirty, refreshDefinitions]);
 
   const removeDevice = useCallback((index: number) => {
-    setDevices((current) => current.filter((_, deviceIndex) => deviceIndex !== index));
-    markDirty();
-  }, [markDirty]);
+    setDevices((current) => current
+      .filter((_, deviceIndex) => deviceIndex !== index)
+      .map((device, deviceIndex) => ({ ...device, sortOrder: deviceIndex })));
+    markDirty(getSaveFieldTarget(index, 'sortOrder'));
+  }, [getSaveFieldTarget, markDirty]);
+
+  const moveDevice = useCallback((index: number, direction: -1 | 1) => {
+    const nextIndex = index + direction;
+    if (nextIndex < 0 || nextIndex >= devicesRef.current.length) {
+      return;
+    }
+
+    setDevices((current) => {
+      const next = [...current];
+      const [movedDevice] = next.splice(index, 1);
+      next.splice(nextIndex, 0, movedDevice);
+      return next.map((device, deviceIndex) => ({ ...device, sortOrder: deviceIndex }));
+    });
+    markDirty(getSaveFieldTarget(index, 'sortOrder'));
+  }, [getSaveFieldTarget, markDirty]);
 
   const startDevice = useCallback(async (clientKey: string, deviceId: string) => {
     setDeviceActions((current) => ({ ...current, [clientKey]: { loading: true } }));
@@ -1633,6 +1658,33 @@ export function DevicesPage() {
                   </div>
 
                   <div className='flex flex-wrap gap-2'>
+                    <div className='flex items-center gap-2 rounded-lg border border-border/70 bg-background/60 px-2 py-1.5 text-xs text-muted-foreground'>
+                      <span className='font-medium uppercase tracking-[0.18em]'>Monitor order</span>
+                      <span>{index + 1} / {devices.length}</span>
+                      {renderFieldSaveState(device.clientKey, 'sortOrder')}
+                      <div className='flex items-center gap-1'>
+                        <Button
+                          type='button'
+                          variant='ghost'
+                          size='icon-sm'
+                          aria-label={`Move ${device.displayName || device.deviceId} up`}
+                          disabled={index === 0}
+                          onClick={() => moveDevice(index, -1)}
+                        >
+                          <ArrowUp className='h-4 w-4' />
+                        </Button>
+                        <Button
+                          type='button'
+                          variant='ghost'
+                          size='icon-sm'
+                          aria-label={`Move ${device.displayName || device.deviceId} down`}
+                          disabled={index === devices.length - 1}
+                          onClick={() => moveDevice(index, 1)}
+                        >
+                          <ArrowDown className='h-4 w-4' />
+                        </Button>
+                      </div>
+                    </div>
                     {device.enabled ? (
                       <Button type='button' variant='outline' onClick={() => void stopDevice(device.clientKey, device.deviceId)} disabled={action?.loading}>
                         {action?.loading ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Square className='h-4 w-4' />}

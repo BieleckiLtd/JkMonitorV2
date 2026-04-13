@@ -61,6 +61,12 @@ public sealed class DeviceConfiguration
     public required string DisplayName { get; init; }
 
     /// <summary>
+    /// Persisted presentation order for device lists in the UI.
+    /// Lower values appear first.
+    /// </summary>
+    public int SortOrder { get; init; }
+
+    /// <summary>
     /// ID of the device definition JSON (maps to device.id in the JSON file).
     /// Drives polling, rendering, and storage via the definition-driven pipeline.
     /// </summary>

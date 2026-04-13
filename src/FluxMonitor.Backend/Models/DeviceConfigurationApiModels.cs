@@ -11,6 +11,8 @@ public sealed record class DeviceConfigurationApiModel
 
     public required string DisplayName { get; init; }
 
+    public int SortOrder { get; init; }
+
     public required string DefinitionId { get; init; }
 
     public string? DefinitionVersion { get; init; }
@@ -32,6 +34,8 @@ public sealed record class DeviceConfigurationApiModel
     public int CellVoltageSmoothingBreakoutMillivolts { get; init; }
 
     public DisplayPrecisionConfiguration DisplayPrecision { get; init; } = new();
+
+    public string TemperatureUnit { get; init; } = "c";
 
     public bool HasDefinitionOverride { get; init; }
 

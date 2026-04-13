@@ -87,6 +87,39 @@ public class DeviceStateStoreTests
     }
 
     [Fact]
+    public void GetCurrentDevices_UsesConfiguredSortOrder()
+    {
+        var store = CreateStore(
+            new BuildRuntimeInfo(),
+            CreateDefaultConfiguration(),
+            [
+                new DeviceConfiguration
+                {
+                    DeviceId = "device-b",
+                    DisplayName = "Bravo",
+                    SortOrder = 1,
+                    DefinitionId = "jk-inverter-bms",
+                    IsMaster = true
+                },
+                new DeviceConfiguration
+                {
+                    DeviceId = "device-a",
+                    DisplayName = "Alpha",
+                    SortOrder = 0,
+                    DefinitionId = "jk-inverter-bms",
+                    IsMaster = false
+                }
+            ]);
+
+        var devices = store.GetCurrentDevices();
+
+        Assert.Collection(
+            devices,
+            device => Assert.Equal("device-a", device.DeviceId),
+            device => Assert.Equal("device-b", device.DeviceId));
+    }
+
+    [Fact]
     public void MarkPollFailed_UsesBluetoothUnavailableHint_ForOpaqueBlueZFailures()
     {
         var device = new DeviceConfiguration

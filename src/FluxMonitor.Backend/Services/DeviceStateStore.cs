@@ -46,6 +46,7 @@ public sealed class DeviceStateStore
         {
             DeviceId = device.DeviceId,
             DisplayName = device.DisplayName,
+            SortOrder = device.SortOrder,
             DefinitionId = device.DefinitionId,
             ProtocolHandler = protocolHandler,
             Enabled = device.Enabled,
@@ -98,7 +99,7 @@ public sealed class DeviceStateStore
     public IReadOnlyList<DeviceRuntimeState> GetCurrentDevices()
     {
         return _states.Values
-            .OrderByDescending(device => device.IsMaster)
+            .OrderBy(device => device.SortOrder)
             .ThenBy(device => device.DisplayName, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
@@ -219,6 +220,7 @@ public sealed class DeviceStateStore
         {
             DeviceId = device.DeviceId,
             DisplayName = device.DisplayName,
+            SortOrder = device.SortOrder,
             DefinitionId = device.DefinitionId,
             Enabled = device.Enabled,
             IsMaster = device.IsMaster,
