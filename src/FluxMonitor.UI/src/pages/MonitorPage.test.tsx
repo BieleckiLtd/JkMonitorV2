@@ -1,4 +1,4 @@
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MonitorPage } from './MonitorPage';
 import type { DeviceDefinition } from '../types/deviceDefinition';
@@ -9,6 +9,10 @@ const { useDeviceDefinitionMock } = vi.hoisted(() => ({
 
 vi.mock('../hooks/useDeviceDefinition', () => ({
   useDeviceDefinition: useDeviceDefinitionMock,
+}));
+
+vi.mock('../components/HistoryCharts', () => ({
+  HistoryCharts: ({ deviceId }: { deviceId: string }) => <div data-testid='history-charts'>History for {deviceId}</div>,
 }));
 
 describe('MonitorPage', () => {
@@ -290,4 +294,154 @@ describe('MonitorPage', () => {
     expect(screen.queryByText(/Signal 64%/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/Last advertisement/i)).not.toBeInTheDocument();
   }, 10000);
+
+  it('renders JK BMS cards collapsed by default and expands them on demand', async () => {
+    useDeviceDefinitionMock.mockReturnValue({
+      version: '1',
+      device: {
+        id: 'jk-inverter-bms',
+        name: 'JK Inverter BMS',
+        manufacturer: 'JK',
+        model: 'JK-PB2A16S20P',
+        category: 'energy-storage',
+        icon: 'battery',
+      },
+      connection: {
+        transport: { type: 'serial', defaults: {} },
+        protocol: { type: 'modbus-rtu', settings: {} },
+      },
+      dataSources: [],
+      pollGroups: {},
+      entities: [
+        {
+          id: 'total_voltage',
+          type: 'number',
+          name: 'Total Voltage',
+          category: 'Pack Status',
+          source: { bank: 'live', byteOffset: 0, unit: 'V' },
+          display: { precision: 2 },
+        },
+        {
+          id: 'current',
+          type: 'number',
+          name: 'Current',
+          category: 'Pack Status',
+          source: { bank: 'live', byteOffset: 0, unit: 'A' },
+          display: { precision: 1 },
+        },
+        {
+          id: 'power',
+          type: 'number',
+          name: 'Power',
+          category: 'Pack Status',
+          source: { bank: 'live', byteOffset: 0, unit: 'W' },
+          display: { precision: 0 },
+        },
+        {
+          id: 'state_of_charge',
+          type: 'number',
+          name: 'State of Charge',
+          category: 'Pack Status',
+          source: { bank: 'live', byteOffset: 0, unit: '%' },
+          display: { precision: 0 },
+        },
+        {
+          id: 'charge_switch',
+          type: 'number',
+          name: 'Charge Switch',
+          category: 'Configuration',
+          source: { bank: 'config', byteOffset: 0, unit: '' },
+          display: { precision: 0 },
+        },
+      ],
+      computedEntities: [],
+      ui: {
+        pages: {
+          monitor: {
+            sections: [
+              {
+                type: 'hero-metrics',
+                metrics: [
+                  { entity: 'total_voltage', color: 'emerald' },
+                  { entity: 'current', color: 'blue' },
+                  { entity: 'power', color: 'amber' },
+                  { entity: 'state_of_charge', color: 'green' },
+                ],
+              },
+              {
+                type: 'parameter-table',
+                title: 'Configuration',
+                filter: { writable: true },
+              },
+            ],
+          },
+        },
+      },
+    } satisfies DeviceDefinition);
+
+    class FakeEventSource {
+      static instances: FakeEventSource[] = [];
+
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      close = vi.fn();
+
+      constructor(public readonly url: string) {
+        FakeEventSource.instances.push(this);
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }));
+      }
+    }
+
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    render(<MonitorPage />);
+
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(1);
+    });
+
+    FakeEventSource.instances[0]?.emit({
+      devices: [
+        {
+          deviceId: 'jk-1',
+          displayName: 'House Battery',
+          definitionId: 'jk-inverter-bms',
+          protocolHandler: 'modbus-rtu',
+          enabled: true,
+          isMaster: true,
+          pollIntervalMilliseconds: 1000,
+          lastOutcome: 'Succeeded',
+          latestTelemetry: {
+            collectedAt: '2026-04-12T12:00:00.000Z',
+            cells: [],
+            activeWarnings: [],
+            parameters: [
+              { key: 'total_voltage', displayName: 'Total Voltage', category: 'Pack Status', numericValue: 53.21, sortOrder: 0, unit: 'V' },
+              { key: 'current', displayName: 'Current', category: 'Pack Status', numericValue: -12.3, sortOrder: 1, unit: 'A' },
+              { key: 'power', displayName: 'Power', category: 'Pack Status', numericValue: 654, sortOrder: 2, unit: 'W' },
+              { key: 'state_of_charge', displayName: 'State of Charge', category: 'Pack Status', numericValue: 78, sortOrder: 3, unit: '%' },
+              { key: 'charge_switch', displayName: 'Charge Switch', category: 'Configuration', numericValue: 1, rawValue: 1, sortOrder: 4, isWritable: true, unit: '' },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(await screen.findByText('House Battery')).toBeInTheDocument();
+    expect(screen.getByText('53.21')).toBeInTheDocument();
+    expect(screen.queryByTestId('history-charts')).not.toBeInTheDocument();
+    expect(screen.queryByText('Charge Switch')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /house battery/i }));
+
+    expect(await screen.findByTestId('history-charts')).toHaveTextContent('History for jk-1');
+    expect(screen.getByText('Charge Switch')).toBeInTheDocument();
+  });
 });

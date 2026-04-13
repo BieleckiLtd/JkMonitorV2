@@ -304,6 +304,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
   const dp = device.displayPrecision ?? defaultPrecision;
   const [selectedCellIndices, setSelectedCellIndices] = useState<number[]>([]);
   const isEnvironment = definition?.device.category === 'environment';
+  const isJkBms = definition?.device.manufacturer?.toLowerCase() === 'jk';
   const [isExpanded, setIsExpanded] = useState(false);
 
   // Build a fast lookup by entity key for definition-driven rendering
@@ -320,8 +321,14 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
     grouped.get(cat)!.push(param);
   }
 
-  // Environment devices (e.g. Govee thermometer) use a compact expandable card
-  if (isEnvironment && telemetry) {
+  // Category rendering order — derived from entity order in definition, fallback to legacy
+  const sortedCategories = getSortedCategories(grouped, definition);
+
+  // Determine which sections to render for parameters
+  const paramTableSections = monitorSections?.filter(s => s.type === 'parameter-table');
+
+  // Environment devices and JK BMS units use a compact expandable card.
+  if ((isEnvironment || isJkBms) && telemetry) {
     const heroSection = monitorSections?.find(s => s.type === 'hero-metrics');
     const heroMetrics = heroSection?.metrics ?? [];
     const batteryParam = paramByKey.get('battery_pct');
@@ -329,6 +336,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
     const signalValue = paramByKey.get('signal_strength_pct')?.numericValue;
     const capacityAh = paramByKey.get('nominal_battery_capacity')?.numericValue;
     const advertisementAgeSeconds = getRelativeAdvertisementAgeSeconds(telemetry.collectedAt, nowMs);
+    const compactSections = monitorSections?.filter(section => section.type !== 'hero-metrics' && section.type !== 'parameter-table') ?? [];
 
     return (
       <div className='space-y-3 sm:space-y-4'>
@@ -350,33 +358,53 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
               </div>
               <div className='min-w-0'>
                 <h3 className='text-base font-semibold text-foreground truncate'>{device.displayName}</h3>
-                <div className='text-[10px] font-mono text-muted-foreground/70 truncate'>
-                  {device.deviceId}
-                </div>
+                {isEnvironment ? (
+                  <div className='text-[10px] font-mono text-muted-foreground/70 truncate'>
+                    {device.deviceId}
+                  </div>
+                ) : (
+                  <div className='text-[10px] font-mono text-muted-foreground/70 truncate'>
+                    {device.deviceId} {device.protocolHandler ? `• ${device.protocolHandler}` : ''} • {device.pollIntervalMilliseconds}ms
+                  </div>
+                )}
               </div>
             </div>
             <div className='flex items-center gap-1.5 shrink-0'>
-              <StatusGlyph
-                title={formatAdvertisementStatusTitle(telemetry.collectedAt, nowMs)}
-                toneClassName={getAdvertisementStatusToneClassName(advertisementAgeSeconds)}
-              >
-                <SeenStatusGlyph />
-              </StatusGlyph>
-              {signalValue != null && (
-                <StatusGlyph
-                  title={`Signal ${Math.round(signalValue)}%`}
-                  toneClassName={getSignalStatusToneClassName(signalValue)}
-                >
-                  <SignalStatusGlyph percent={signalValue} />
-                </StatusGlyph>
-              )}
-              {batteryValue != null && (
-                <StatusGlyph
-                  title={`Battery ${Math.round(batteryValue)}%`}
-                  toneClassName={getBatteryStatusToneClassName(batteryValue)}
-                >
-                  <BatteryStatusGlyph percent={batteryValue} />
-                </StatusGlyph>
+              {isEnvironment ? (
+                <>
+                  <StatusGlyph
+                    title={formatAdvertisementStatusTitle(telemetry.collectedAt, nowMs)}
+                    toneClassName={getAdvertisementStatusToneClassName(advertisementAgeSeconds)}
+                  >
+                    <SeenStatusGlyph />
+                  </StatusGlyph>
+                  {signalValue != null && (
+                    <StatusGlyph
+                      title={`Signal ${Math.round(signalValue)}%`}
+                      toneClassName={getSignalStatusToneClassName(signalValue)}
+                    >
+                      <SignalStatusGlyph percent={signalValue} />
+                    </StatusGlyph>
+                  )}
+                  {batteryValue != null && (
+                    <StatusGlyph
+                      title={`Battery ${Math.round(batteryValue)}%`}
+                      toneClassName={getBatteryStatusToneClassName(batteryValue)}
+                    >
+                      <BatteryStatusGlyph percent={batteryValue} />
+                    </StatusGlyph>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className='hidden text-right sm:block'>
+                    <div className='text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60'>Last update</div>
+                    <div className='text-xs font-medium text-muted-foreground'>{new Date(telemetry.collectedAt).toLocaleTimeString()}</div>
+                  </div>
+                  <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em]', getOutcomeClass(device.lastOutcome))}>
+                    {device.lastOutcome}
+                  </span>
+                </>
               )}
               <div className='text-muted-foreground/60'>
                 {isExpanded ? <ChevronUp className='h-4 w-4' /> : <ChevronDown className='h-4 w-4' />}
@@ -397,6 +425,18 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                 const displayValue = isCelsiusUnit(sourceUnit)
                   ? convertTemperatureValue(value != null ? Number(value) : null, temperatureUnit)
                   : value != null ? Number(value) : null;
+                const chargeState = getBatteryStateFromCurrent(telemetry.currentAmps);
+                const isCurrentMetric = m.entity === 'current';
+                const isPowerMetric = m.entity === 'power';
+                const accentClass = (isCurrentMetric || isPowerMetric)
+                  ? chargeState === 'CHARGING'
+                    ? 'text-emerald-400'
+                    : chargeState === 'DISCHARGING'
+                      ? 'text-rose-400'
+                      : resolveColorClass(m.color)
+                  : m.entity === 'total_voltage'
+                    ? 'text-sky-400'
+                    : resolveColorClass(m.color);
 
                 return (
                   <div key={m.entity} className='min-w-0'>
@@ -404,7 +444,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                       {param?.displayName ?? entity?.name ?? m.entity}
                     </div>
                     <div className='mt-1 flex items-baseline gap-1'>
-                      <span className={cn('text-xl font-bold tracking-tight tabular-nums sm:text-2xl', resolveColorClass(m.color))}>
+                      <span className={cn('text-xl font-bold tracking-tight tabular-nums sm:text-2xl', accentClass)}>
                         {fmt(displayValue, prec)}
                       </span>
                       <span className='text-xs font-medium text-muted-foreground/70'>{unit}</span>
@@ -426,31 +466,61 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
           {/* Expanded content: history charts + parameter tables */}
           {isExpanded && (
             <div className='border-t border-border/60 px-4 pb-4 pt-3 sm:px-5 sm:pb-5 sm:pt-4 space-y-4'>
-              <HistoryCharts
-                deviceId={device.deviceId}
-                precision={dp}
-                selectedCellIndices={selectedCellIndices}
-                onClearCellSelection={() => setSelectedCellIndices([])}
-                definition={definition ?? undefined}
-                capacityAh={capacityAh}
-                temperatureUnit={temperatureUnit}
-              />
-              {/* Parameter tables */}
-              {monitorSections?.filter(s => s.type === 'parameter-table').map((section, idx) => {
-                const params = filterParams(parameters, section);
-                if (params.length === 0) return null;
-                return (
-                  <ParameterCategoryCard
-                    key={idx}
-                    category={section.title ?? 'Parameters'}
-                    params={params}
+              {isEnvironment ? (
+                <>
+                  <HistoryCharts
                     deviceId={device.deviceId}
-                    telemetry={telemetry}
-                    paramByKey={paramByKey}
+                    precision={dp}
+                    selectedCellIndices={selectedCellIndices}
+                    onClearCellSelection={() => setSelectedCellIndices([])}
+                    definition={definition ?? undefined}
+                    capacityAh={capacityAh}
                     temperatureUnit={temperatureUnit}
                   />
-                );
-              })}
+                  {monitorSections?.filter(s => s.type === 'parameter-table').map((section, idx) => {
+                    const params = filterParams(parameters, section);
+                    if (params.length === 0) return null;
+                    return (
+                      <ParameterCategoryCard
+                        key={idx}
+                        category={section.title ?? 'Parameters'}
+                        params={params}
+                        deviceId={device.deviceId}
+                        telemetry={telemetry}
+                        paramByKey={paramByKey}
+                        temperatureUnit={temperatureUnit}
+                      />
+                    );
+                  })}
+                </>
+              ) : (
+                <>
+                  {renderDefinitionSections(compactSections, paramByKey, telemetry, dp, cells, selectedCellIndices, setSelectedCellIndices, device.deviceId, definition, temperatureUnit)}
+                  {paramTableSections && paramTableSections.length > 0 ? (
+                    <div className='grid gap-3 sm:gap-4 lg:grid-cols-2'>
+                      {paramTableSections.map((section, idx) => {
+                        const params = filterParams(parameters, section);
+                        if (params.length === 0) return null;
+                        if (section.groupBy === 'category') {
+                          const catGroups = groupByCategory(params);
+                          return Array.from(catGroups.entries()).map(([cat, catParams]) => (
+                            <ParameterCategoryCard key={`${idx}-${cat}`} category={cat} params={catParams} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} temperatureUnit={temperatureUnit} />
+                          ));
+                        }
+                        return (
+                          <ParameterCategoryCard key={idx} category={section.title ?? 'Parameters'} params={params} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} temperatureUnit={temperatureUnit} />
+                        );
+                      })}
+                    </div>
+                  ) : (
+                    <div className='grid gap-3 sm:gap-4 lg:grid-cols-2'>
+                      {sortedCategories.filter(c => c !== 'Cell Voltages').map((category) => (
+                        <ParameterCategoryCard key={category} category={category} params={grouped.get(category)!} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} temperatureUnit={temperatureUnit} />
+                      ))}
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           )}
         </div>
@@ -473,12 +543,6 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
       </div>
     );
   }
-
-  // Category rendering order — derived from entity order in definition, fallback to legacy
-  const sortedCategories = getSortedCategories(grouped, definition);
-
-  // Determine which sections to render for parameters
-  const paramTableSections = monitorSections?.filter(s => s.type === 'parameter-table');
 
   return (
     <div className='space-y-3 sm:space-y-4'>
