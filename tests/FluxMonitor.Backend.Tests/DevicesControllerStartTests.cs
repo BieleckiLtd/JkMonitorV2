@@ -94,7 +94,7 @@ public sealed class DevicesControllerStartTests
         var error = DevicesController.GetStartOutcomeError("Failed", "org.bluez.Error.Failed: Failed");
 
         Assert.Equal(
-            "Bluetooth is unavailable. It may be turned off or blocked by rfkill. Open System > Bluetooth, turn it on, then try again.",
+            "Bluetooth operation failed. Check System > Bluetooth and the device connection, then try again.",
             error);
     }
 }

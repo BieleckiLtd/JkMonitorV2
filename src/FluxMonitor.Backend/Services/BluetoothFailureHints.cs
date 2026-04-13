@@ -7,6 +7,9 @@ internal static class BluetoothFailureHints
     private const string BluetoothUnavailableHint =
         "Bluetooth is unavailable. It may be turned off or blocked by rfkill. Open System > Bluetooth, turn it on, then try again.";
 
+    private const string BluetoothOperationFailedHint =
+        "Bluetooth operation failed. Check System > Bluetooth and the device connection, then try again.";
+
     private const string BluetoothConnectionInterruptedHint =
         "Bluetooth connection was interrupted. Check that Bluetooth is on, the device is awake, and within range, then try again.";
 
@@ -32,6 +35,12 @@ internal static class BluetoothFailureHints
         var trimmedMessage = message.Trim();
         var normalizedMessage = StripBlueZErrorPrefix(trimmedMessage);
 
+        if (string.Equals(errorName, "org.bluez.Error.NotReady", StringComparison.OrdinalIgnoreCase) ||
+            normalizedMessage.Contains("not ready", StringComparison.OrdinalIgnoreCase))
+        {
+            return BluetoothNotReadyHint;
+        }
+
         if (LooksLikeBluetoothUnavailable(trimmedMessage, errorName, normalizedMessage))
         {
             return BluetoothUnavailableHint;
@@ -43,10 +52,9 @@ internal static class BluetoothFailureHints
             return BluetoothConnectionInterruptedHint;
         }
 
-        if (string.Equals(errorName, "org.bluez.Error.NotReady", StringComparison.OrdinalIgnoreCase) ||
-            normalizedMessage.Contains("not ready", StringComparison.OrdinalIgnoreCase))
+        if (LooksLikeOpaqueBlueZFailure(trimmedMessage, errorName, normalizedMessage))
         {
-            return BluetoothNotReadyHint;
+            return BluetoothOperationFailedHint;
         }
 
         return trimmedMessage.StartsWith("org.bluez.Error.", StringComparison.OrdinalIgnoreCase)
@@ -56,11 +64,14 @@ internal static class BluetoothFailureHints
 
     private static bool LooksLikeBluetoothUnavailable(string rawMessage, string? errorName, string normalizedMessage)
     {
-        if (string.Equals(errorName, "org.bluez.Error.NotReady", StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
+        return normalizedMessage.Contains("powered off", StringComparison.OrdinalIgnoreCase)
+               || normalizedMessage.Contains("power off", StringComparison.OrdinalIgnoreCase)
+               || normalizedMessage.Contains("operation currently not available", StringComparison.OrdinalIgnoreCase)
+               || normalizedMessage.Contains("resource temporarily unavailable", StringComparison.OrdinalIgnoreCase);
+    }
 
+    private static bool LooksLikeOpaqueBlueZFailure(string rawMessage, string? errorName, string normalizedMessage)
+    {
         if (string.Equals(errorName, "org.bluez.Error.Failed", StringComparison.OrdinalIgnoreCase) &&
             string.Equals(normalizedMessage, "Failed", StringComparison.OrdinalIgnoreCase))
         {
@@ -73,10 +84,7 @@ internal static class BluetoothFailureHints
             return true;
         }
 
-        return normalizedMessage.Contains("powered off", StringComparison.OrdinalIgnoreCase)
-               || normalizedMessage.Contains("power off", StringComparison.OrdinalIgnoreCase)
-               || normalizedMessage.Contains("operation currently not available", StringComparison.OrdinalIgnoreCase)
-               || normalizedMessage.Contains("resource temporarily unavailable", StringComparison.OrdinalIgnoreCase);
+        return false;
     }
 
     private static string StripBlueZErrorPrefix(string message)

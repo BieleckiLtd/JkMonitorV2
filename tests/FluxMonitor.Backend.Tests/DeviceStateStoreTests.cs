@@ -143,7 +143,7 @@ public class DeviceStateStoreTests
 
         Assert.NotNull(state);
         Assert.Equal(
-            "Bluetooth is unavailable. It may be turned off or blocked by rfkill. Open System > Bluetooth, turn it on, then try again.",
+            "Bluetooth operation failed. Check System > Bluetooth and the device connection, then try again.",
             state!.LastError);
     }
 
