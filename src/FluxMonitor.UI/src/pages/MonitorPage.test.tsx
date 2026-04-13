@@ -123,7 +123,7 @@ describe('MonitorPage', () => {
     expect(FakeEventSource.instances[1]?.url).toBe('/api/devices/current/stream');
   }, 10000);
 
-  it('shows environment device battery, signal, and last advertisement as icon tooltips in the header', async () => {
+  it('shows environment device last seen, signal, and battery icon tooltips in the header order', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-04-12T12:00:02.000Z').getTime());
 
     useDeviceDefinitionMock.mockReturnValue({
@@ -231,10 +231,16 @@ describe('MonitorPage', () => {
     });
 
     expect(await screen.findByText('GVH5075_47C0')).toBeInTheDocument();
-    expect(screen.getByTitle('Battery 88%')).toBeInTheDocument();
-    expect(screen.getByTitle('Signal 64%')).toBeInTheDocument();
-    expect(screen.getByTitle('Last advertisement 2s ago (2026-04-12T12:00:00.000Z)')).toBeInTheDocument();
+    const lastSeenIcon = screen.getByTitle('Last seen less than a minute ago (2026-04-12T12:00:00.000Z)');
+    const signalIcon = screen.getByTitle('Signal 64%');
+    const batteryIcon = screen.getByTitle('Battery 88%');
+
+    expect(lastSeenIcon).toBeInTheDocument();
+    expect(signalIcon).toBeInTheDocument();
+    expect(batteryIcon).toBeInTheDocument();
+    expect(lastSeenIcon.compareDocumentPosition(signalIcon) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(signalIcon.compareDocumentPosition(batteryIcon) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByText(/Signal 64%/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/Seen 2s ago/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/Last advertisement/i)).not.toBeInTheDocument();
   }, 10000);
 });

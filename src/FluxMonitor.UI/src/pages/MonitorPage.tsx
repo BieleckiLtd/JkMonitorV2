@@ -355,14 +355,12 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
               </div>
             </div>
             <div className='flex items-center gap-1.5 shrink-0'>
-              {batteryValue != null && (
-                <StatusGlyph
-                  title={`Battery ${Math.round(batteryValue)}%`}
-                  toneClassName={getBatteryStatusToneClassName(batteryValue)}
-                >
-                  <BatteryStatusGlyph percent={batteryValue} />
-                </StatusGlyph>
-              )}
+              <StatusGlyph
+                title={formatAdvertisementStatusTitle(telemetry.collectedAt, nowMs)}
+                toneClassName={getAdvertisementStatusToneClassName(advertisementAgeSeconds)}
+              >
+                <SeenStatusGlyph />
+              </StatusGlyph>
               {signalValue != null && (
                 <StatusGlyph
                   title={`Signal ${Math.round(signalValue)}%`}
@@ -371,12 +369,14 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                   <SignalStatusGlyph percent={signalValue} />
                 </StatusGlyph>
               )}
-              <StatusGlyph
-                title={formatAdvertisementStatusTitle(telemetry.collectedAt, nowMs)}
-                toneClassName={getAdvertisementStatusToneClassName(advertisementAgeSeconds)}
-              >
-                <SeenStatusGlyph />
-              </StatusGlyph>
+              {batteryValue != null && (
+                <StatusGlyph
+                  title={`Battery ${Math.round(batteryValue)}%`}
+                  toneClassName={getBatteryStatusToneClassName(batteryValue)}
+                >
+                  <BatteryStatusGlyph percent={batteryValue} />
+                </StatusGlyph>
+              )}
               <div className='text-muted-foreground/60'>
                 {isExpanded ? <ChevronUp className='h-4 w-4' /> : <ChevronDown className='h-4 w-4' />}
               </div>
@@ -1100,8 +1100,12 @@ function SignalStatusGlyph({ percent }: { percent: number | null | undefined }) 
 function SeenStatusGlyph() {
   return (
     <svg viewBox='0 0 18 18' className='h-4 w-4 fill-none stroke-current' aria-hidden='true'>
-      <circle cx='9' cy='9' r='5.25' strokeWidth='1.5' />
-      <path d='M9 6.25v3.1l2.3 1.5' strokeWidth='1.5' strokeLinecap='round' strokeLinejoin='round' />
+      <path
+        d='M2.25 9h2.4l1.35-2.6 2.1 5.2 2.15-5.05 1.55 2.45h3.95'
+        strokeWidth='1.5'
+        strokeLinecap='round'
+        strokeLinejoin='round'
+      />
     </svg>
   );
 }
@@ -1153,11 +1157,11 @@ function getAdvertisementStatusToneClassName(ageSeconds: number | null) {
     return 'text-muted-foreground/55';
   }
 
-  if (ageSeconds <= 3) {
+  if (ageSeconds < 60) {
     return 'text-emerald-400';
   }
 
-  if (ageSeconds <= 10) {
+  if (ageSeconds < 300) {
     return 'text-amber-400';
   }
 
@@ -1167,15 +1171,21 @@ function getAdvertisementStatusToneClassName(ageSeconds: number | null) {
 function formatAdvertisementStatusTitle(collectedAt: string | null | undefined, nowMs: number) {
   const ageSeconds = getRelativeAdvertisementAgeSeconds(collectedAt, nowMs);
   if (ageSeconds == null || !collectedAt) {
-    return 'Waiting for advertisement';
+    return 'Last seen unavailable';
   }
 
   const collectedMs = Date.parse(collectedAt);
   if (Number.isNaN(collectedMs)) {
-    return 'Waiting for advertisement';
+    return 'Last seen unavailable';
   }
 
-  return `Last advertisement ${ageSeconds <= 1 ? 'just now' : `${ageSeconds}s ago`} (${new Date(collectedMs).toISOString()})`;
+  const ageDescription = ageSeconds < 60
+    ? 'less than a minute ago'
+    : ageSeconds < 300
+      ? 'less than 5 minutes ago'
+      : 'more than 5 minutes ago';
+
+  return `Last seen ${ageDescription} (${new Date(collectedMs).toISOString()})`;
 }
 
 /** Maps color name strings from the device definition to Tailwind text-color classes. */
