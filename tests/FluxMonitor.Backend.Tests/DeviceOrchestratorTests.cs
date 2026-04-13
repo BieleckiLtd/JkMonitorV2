@@ -78,6 +78,71 @@ public sealed class DeviceOrchestratorTests
         Assert.Equal(2, pollingClient.PollCount);
     }
 
+    [Fact]
+    public async Task ApplyConfigurationAsync_UpdatesRuntimeOrderForEnabledDevices()
+    {
+        var pollingClient = new TestPollingClient();
+        var store = CreateStateStore([]);
+        var orchestrator = CreateOrchestrator(store, pollingClient);
+
+        var initialDevices = new[]
+        {
+            new DeviceConfiguration
+            {
+                DeviceId = "device-1",
+                DisplayName = "Battery 1",
+                SortOrder = 0,
+                DefinitionId = "jk-inverter-bms",
+                PollIntervalMilliseconds = 60000,
+                Enabled = true
+            },
+            new DeviceConfiguration
+            {
+                DeviceId = "device-2",
+                DisplayName = "Battery 2",
+                SortOrder = 1,
+                DefinitionId = "jk-inverter-bms",
+                PollIntervalMilliseconds = 60000,
+                Enabled = true
+            }
+        };
+
+        await orchestrator.ApplyConfigurationAsync(initialDevices, TestContext.Current.CancellationToken);
+
+        var reorderedDevices = new[]
+        {
+            new DeviceConfiguration
+            {
+                DeviceId = "device-1",
+                DisplayName = "Battery 1",
+                SortOrder = 1,
+                DefinitionId = "jk-inverter-bms",
+                PollIntervalMilliseconds = 60000,
+                Enabled = true
+            },
+            new DeviceConfiguration
+            {
+                DeviceId = "device-2",
+                DisplayName = "Battery 2",
+                SortOrder = 0,
+                DefinitionId = "jk-inverter-bms",
+                PollIntervalMilliseconds = 60000,
+                Enabled = true
+            }
+        };
+
+        await orchestrator.ApplyConfigurationAsync(reorderedDevices, TestContext.Current.CancellationToken);
+
+        var devices = store.GetCurrentDevices();
+
+        Assert.Collection(
+            devices,
+            device => Assert.Equal("device-2", device.DeviceId),
+            device => Assert.Equal("device-1", device.DeviceId));
+
+        await orchestrator.StopAllAsync();
+    }
+
     private static DeviceOrchestrator CreateOrchestrator(
         DeviceStateStore stateStore,
         IDevicePollingClient pollingClient,

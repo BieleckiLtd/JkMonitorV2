@@ -283,7 +283,9 @@ public sealed class DeviceOrchestrator(
             || a.Address != b.Address
             || a.PollIntervalMilliseconds != b.PollIntervalMilliseconds
             || a.DisplayName != b.DisplayName
+            || a.SortOrder != b.SortOrder
             || a.IsMaster != b.IsMaster
+            || a.TemperatureUnit != b.TemperatureUnit
             || a.BleSettingsPin != b.BleSettingsPin;
     }
 
