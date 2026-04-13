@@ -598,26 +598,28 @@ public sealed class DeviceConfigStore(
         return !string.IsNullOrWhiteSpace(device.DefinitionJson);
     }
 
-    private sealed record StoredDeviceRow(
-        int DeviceId,
-        string DeviceKey,
-        string DisplayName,
-        string DefinitionId,
-        string? DefinitionVersion,
-        string DefinitionJson,
-        string DefinitionHash,
-        bool HasDefinitionOverride,
-        string? TransportPortName,
-        string? BleSettingsPin,
-        short Address,
-        int SortOrder,
-        bool IsMaster,
-        int PollIntervalMilliseconds,
-        bool Enabled,
-        decimal CellVoltageSmoothingFactor,
-        int CellVoltageSmoothingBreakoutMillivolts,
-        string? DisplayPrecisionJson,
-        string TemperatureUnit);
+    private sealed class StoredDeviceRow
+    {
+        public int DeviceId { get; set; }
+        public string DeviceKey { get; set; } = string.Empty;
+        public string DisplayName { get; set; } = string.Empty;
+        public int SortOrder { get; set; }
+        public string DefinitionId { get; set; } = string.Empty;
+        public string? DefinitionVersion { get; set; }
+        public string DefinitionJson { get; set; } = string.Empty;
+        public string DefinitionHash { get; set; } = string.Empty;
+        public bool HasDefinitionOverride { get; set; }
+        public string? TransportPortName { get; set; }
+        public string? BleSettingsPin { get; set; }
+        public short Address { get; set; }
+        public bool IsMaster { get; set; }
+        public int PollIntervalMilliseconds { get; set; }
+        public bool Enabled { get; set; }
+        public decimal CellVoltageSmoothingFactor { get; set; }
+        public int CellVoltageSmoothingBreakoutMillivolts { get; set; }
+        public string? DisplayPrecisionJson { get; set; }
+        public string TemperatureUnit { get; set; } = "c";
+    }
 
     private sealed record LoadedDevices(
         IReadOnlyList<DeviceConfiguration> Devices,
