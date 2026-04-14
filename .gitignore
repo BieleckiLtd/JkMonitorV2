@@ -22,7 +22,11 @@ artifacts/
 .tools/postgresql-*.exe
 appsettings.Local.json
 appsettings.*.Local.json
-Docs/
+Docs/*
+!Docs/jk ble/
+Docs/jk ble/*
+!Docs/jk ble/jk.cs
+!Docs/jk ble/README.md
 
 # Local CodeQL CLI and analysis artifacts
 .codeql-db/
