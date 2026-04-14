@@ -86,6 +86,34 @@ public sealed class DefinitionDrivenTelemetryBuilder(ExpressionEvaluator express
                 continue;
             }
 
+            // select: enum with labeled options
+            if (entity.Type == "select" && entity.Options is { Count: > 0 })
+            {
+                var rawUint = ReadRawUint(entity, data, isLittleEndian);
+                entityValues[entity.Id] = rawUint.HasValue ? (decimal)rawUint.Value : null;
+
+                if (!entity.Hidden)
+                {
+                    var label = rawUint.HasValue
+                        ? entity.Options.FirstOrDefault(o => o.Value == (int)rawUint.Value)?.Label
+                        : null;
+                    parameters.Add(new DeviceParameter
+                    {
+                        Key = entity.Id,
+                        DisplayName = entity.Name,
+                        NumericValue = rawUint.HasValue ? (decimal)rawUint.Value : null,
+                        StringValue = label,
+                        Category = entity.Category,
+                        SortOrder = sortOrder++,
+                        IsWritable = entity.Writable,
+                        RawValue = rawUint.HasValue ? (long)rawUint.Value : null,
+                        Options = entity.Options.Select(o => new SelectOptionModel(o.Value, o.Label)).ToList()
+                    });
+                }
+
+                continue;
+            }
+
             var numericValue = ParseNumericEntity(entity, data, isLittleEndian);
             entityValues[entity.Id] = numericValue;
 

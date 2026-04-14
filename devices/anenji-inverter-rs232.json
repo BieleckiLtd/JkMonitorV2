@@ -1,0 +1,951 @@
+{
+  "$schema": "https://FluxMonitor.local/schemas/device-definition-v1.json",
+  "version": "1",
+
+  "device": {
+    "id": "anenji-inverter-rs232",
+    "name": "Anenji / Easun SMG-II Inverter",
+    "manufacturer": "Anenji / Easun",
+    "model": "ANJ-HHS-11000W-48V / ISolar-SMG-II-11KW-48V",
+    "category": "inverter",
+    "description": "Anenji ANJ-HHS-11000W-48V and Easun ISolar-SMG-II-11KW-48V-WiFi hybrid solar inverters. Uses Modbus RTU over RS232 (MAX3232 level converter on Pi GPIO UART). Register layout is firmware-specific: settings at 600+ range, live battery at 277-281, live AC at 338-349.",
+    "icon": "zap",
+    "documentationUrl": "https://github.com/BieleckiLtd/JkMonitorV2"
+  },
+
+  "connection": {
+    "transport": {
+      "type": "serial",
+      "defaults": {
+        "baudRate": 9600,
+        "dataBits": 8,
+        "parity": "none",
+        "stopBits": 1,
+        "readTimeoutMs": 2000,
+        "writeTimeoutMs": 1000
+      }
+    },
+    "protocol": {
+      "type": "modbus-rtu",
+      "settings": {
+        "defaultSlaveAddress": 1,
+        "interFrameDelayMs": 100,
+        "retries": 1
+      }
+    }
+  },
+
+  "dataSources": [
+    {
+      "_comment": "Regs 196-212: operating mode, frequency, grid power, AC charging power",
+      "id": "live_main",
+      "name": "Live – Status & Frequency",
+      "address": 196,
+      "count": 17,
+      "functionCode": 3,
+      "pollGroup": "fast"
+    },
+    {
+      "_comment": "Regs 223-232: PV power, load%, output freq, INV temperature",
+      "id": "live_solar",
+      "name": "Live – Solar & Load",
+      "address": 223,
+      "count": 10,
+      "functionCode": 3,
+      "pollGroup": "fast"
+    },
+    {
+      "_comment": "Regs 277-281: battery V/I/P/SOC/DC temp",
+      "id": "live_battery",
+      "name": "Live – Battery",
+      "address": 277,
+      "count": 5,
+      "functionCode": 3,
+      "pollGroup": "fast"
+    },
+    {
+      "_comment": "Reg 305: PV temperature",
+      "id": "live_pv_temp",
+      "name": "Live – PV Temperature",
+      "address": 305,
+      "count": 1,
+      "functionCode": 3,
+      "pollGroup": "fast"
+    },
+    {
+      "_comment": "Regs 338-349: grid voltage, grid power, output V/I/P/VA",
+      "id": "live_ac",
+      "name": "Live – AC Measurements",
+      "address": 338,
+      "count": 12,
+      "functionCode": 3,
+      "pollGroup": "fast"
+    },
+    {
+      "_comment": "Regs 601-689: all user-configurable settings (output/charge priority, voltages, currents, mode toggles)",
+      "id": "settings",
+      "name": "Settings",
+      "address": 601,
+      "count": 89,
+      "functionCode": 3,
+      "pollGroup": "slow",
+      "write": {
+        "functionCode": 16,
+        "registersPerWrite": 1
+      }
+    },
+    {
+      "_comment": "Regs 171-192: equipment type (171), serial number ASCII (186-192)",
+      "id": "info_id",
+      "name": "Device Identity",
+      "address": 171,
+      "count": 22,
+      "functionCode": 3,
+      "pollGroup": "slow"
+    },
+    {
+      "_comment": "Regs 691-761: rated power (691), firmware version ASCII (754-761)",
+      "id": "info_fw",
+      "name": "Device Firmware",
+      "address": 691,
+      "count": 71,
+      "functionCode": 3,
+      "pollGroup": "slow"
+    }
+  ],
+
+  "pollGroups": {
+    "fast": {
+      "intervalMs": 5000,
+      "description": "Live measurements — battery, grid, output, temperatures"
+    },
+    "slow": {
+      "intervalMs": 30000,
+      "description": "Settings, device info (slow-changing)"
+    }
+  },
+
+  "entities": [
+
+    {
+      "_comment": "=== LIVE_MAIN — Status (addr 196, regs 196-212) ===",
+      "id": "operating_mode",
+      "type": "select",
+      "name": "Operating Mode",
+      "category": "Status",
+      "icon": "activity",
+      "source": {
+        "bank": "live_main",
+        "byteOffset": 10,
+        "dataType": "uint16"
+      },
+      "options": [
+        { "value": 0, "label": "Power on" },
+        { "value": 1, "label": "Standby" },
+        { "value": 2, "label": "Mains" },
+        { "value": 3, "label": "Off-grid" },
+        { "value": 4, "label": "Bypass" },
+        { "value": 5, "label": "Charging" },
+        { "value": 6, "label": "Fault" }
+      ],
+      "role": "operating-mode",
+      "display": { "format": "text" }
+    },
+    {
+      "id": "mains_frequency",
+      "type": "sensor",
+      "name": "Mains Frequency",
+      "category": "Grid",
+      "icon": "activity",
+      "source": {
+        "bank": "live_main",
+        "byteOffset": 14,
+        "dataType": "int16",
+        "scale": 0.01,
+        "unit": "Hz"
+      },
+      "display": { "precision": 2 }
+    },
+    {
+      "id": "grid_power_alt",
+      "type": "sensor",
+      "name": "Grid Power (alt)",
+      "category": "Grid",
+      "source": {
+        "bank": "live_main",
+        "byteOffset": 16,
+        "dataType": "int16",
+        "unit": "W"
+      },
+      "display": { "precision": 0 },
+      "hidden": true
+    },
+    {
+      "id": "ac_charging_power",
+      "type": "sensor",
+      "name": "AC Charging Power",
+      "category": "Battery",
+      "source": {
+        "bank": "live_main",
+        "byteOffset": 26,
+        "dataType": "int16",
+        "unit": "W"
+      },
+      "display": { "precision": 0 }
+    },
+
+    {
+      "_comment": "=== LIVE_SOLAR — PV & Load (addr 223, regs 223-232) ===",
+      "id": "pv_power",
+      "type": "sensor",
+      "name": "PV Power",
+      "category": "Solar",
+      "icon": "zap",
+      "source": {
+        "bank": "live_solar",
+        "byteOffset": 0,
+        "dataType": "int16",
+        "unit": "W"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "pv_charging_power",
+      "type": "sensor",
+      "name": "PV Charging Power",
+      "category": "Solar",
+      "source": {
+        "bank": "live_solar",
+        "byteOffset": 2,
+        "dataType": "int16",
+        "unit": "W"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "load_percent",
+      "type": "sensor",
+      "name": "Load",
+      "category": "Output",
+      "source": {
+        "bank": "live_solar",
+        "byteOffset": 4,
+        "dataType": "int16",
+        "unit": "%"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "output_frequency",
+      "type": "sensor",
+      "name": "Output Frequency",
+      "category": "Output",
+      "source": {
+        "bank": "live_solar",
+        "byteOffset": 8,
+        "dataType": "int16",
+        "scale": 0.01,
+        "unit": "Hz"
+      },
+      "display": { "precision": 2 }
+    },
+    {
+      "id": "inv_temperature",
+      "type": "sensor",
+      "name": "INV Temperature",
+      "category": "Temperatures",
+      "icon": "thermometer",
+      "source": {
+        "bank": "live_solar",
+        "byteOffset": 16,
+        "dataType": "int16",
+        "unit": "°C"
+      },
+      "display": { "precision": 0 },
+      "role": "temperature"
+    },
+
+    {
+      "_comment": "=== LIVE_BATTERY — Battery (addr 277, regs 277-281) ===",
+      "id": "battery_voltage",
+      "type": "sensor",
+      "name": "Battery Voltage",
+      "category": "Battery",
+      "icon": "battery",
+      "source": {
+        "bank": "live_battery",
+        "byteOffset": 0,
+        "dataType": "int16",
+        "scale": 0.1,
+        "unit": "V"
+      },
+      "display": { "precision": 1 },
+      "role": "total-voltage"
+    },
+    {
+      "id": "battery_current",
+      "type": "sensor",
+      "name": "Battery Current",
+      "category": "Battery",
+      "icon": "activity",
+      "source": {
+        "bank": "live_battery",
+        "byteOffset": 2,
+        "dataType": "int16",
+        "scale": 0.1,
+        "unit": "A"
+      },
+      "display": { "precision": 1 },
+      "role": "current"
+    },
+    {
+      "id": "battery_power",
+      "type": "sensor",
+      "name": "Battery Power",
+      "category": "Battery",
+      "icon": "gauge",
+      "source": {
+        "bank": "live_battery",
+        "byteOffset": 4,
+        "dataType": "int16",
+        "unit": "W"
+      },
+      "display": { "precision": 0 },
+      "role": "power"
+    },
+    {
+      "id": "state_of_charge",
+      "type": "sensor",
+      "name": "State of Charge",
+      "category": "Battery",
+      "icon": "battery",
+      "source": {
+        "bank": "live_battery",
+        "byteOffset": 6,
+        "dataType": "uint16",
+        "unit": "%"
+      },
+      "display": { "precision": 0 },
+      "role": "state-of-charge"
+    },
+    {
+      "id": "dc_temperature",
+      "type": "sensor",
+      "name": "DC Module Temperature",
+      "category": "Temperatures",
+      "icon": "thermometer",
+      "source": {
+        "bank": "live_battery",
+        "byteOffset": 8,
+        "dataType": "int16",
+        "unit": "°C"
+      },
+      "display": { "precision": 0 }
+    },
+
+    {
+      "_comment": "=== LIVE_PV_TEMP — PV temperature (addr 305) ===",
+      "id": "pv_temperature",
+      "type": "sensor",
+      "name": "PV Temperature",
+      "category": "Temperatures",
+      "icon": "thermometer",
+      "source": {
+        "bank": "live_pv_temp",
+        "byteOffset": 0,
+        "dataType": "int16",
+        "unit": "°C"
+      },
+      "display": { "precision": 0 }
+    },
+
+    {
+      "_comment": "=== LIVE_AC — Grid/Output (addr 338, regs 338-349) ===",
+      "id": "grid_voltage",
+      "type": "sensor",
+      "name": "Grid Voltage",
+      "category": "Grid",
+      "icon": "zap",
+      "source": {
+        "bank": "live_ac",
+        "byteOffset": 0,
+        "dataType": "int16",
+        "scale": 0.1,
+        "unit": "V"
+      },
+      "display": { "precision": 1 }
+    },
+    {
+      "id": "grid_power",
+      "type": "sensor",
+      "name": "Grid Power",
+      "category": "Grid",
+      "source": {
+        "bank": "live_ac",
+        "byteOffset": 4,
+        "dataType": "int16",
+        "unit": "W"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "output_voltage",
+      "type": "sensor",
+      "name": "Output Voltage",
+      "category": "Output",
+      "icon": "zap",
+      "source": {
+        "bank": "live_ac",
+        "byteOffset": 16,
+        "dataType": "int16",
+        "scale": 0.1,
+        "unit": "V"
+      },
+      "display": { "precision": 1 }
+    },
+    {
+      "id": "output_current",
+      "type": "sensor",
+      "name": "Output Current",
+      "category": "Output",
+      "source": {
+        "bank": "live_ac",
+        "byteOffset": 18,
+        "dataType": "int16",
+        "scale": 0.1,
+        "unit": "A"
+      },
+      "display": { "precision": 1 }
+    },
+    {
+      "id": "output_active_power",
+      "type": "sensor",
+      "name": "Output Active Power",
+      "category": "Output",
+      "icon": "gauge",
+      "source": {
+        "bank": "live_ac",
+        "byteOffset": 20,
+        "dataType": "int16",
+        "unit": "W"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "output_apparent_power",
+      "type": "sensor",
+      "name": "Output Apparent Power",
+      "category": "Output",
+      "source": {
+        "bank": "live_ac",
+        "byteOffset": 22,
+        "dataType": "uint16",
+        "unit": "VA"
+      },
+      "display": { "precision": 0 }
+    },
+
+    {
+      "_comment": "=== SETTINGS — Output & Charge Priority (addr 601) ===",
+      "id": "output_priority",
+      "type": "select",
+      "name": "Output Priority",
+      "category": "Power Management",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 0,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": { "address": 601 },
+      "options": [
+        { "value": 0, "label": "Utility first (UTI)" },
+        { "value": 1, "label": "PV first (SOL)" },
+        { "value": 2, "label": "PV → Battery → Utility (SBU)" },
+        { "value": 3, "label": "PV → Utility → Battery (SUB)" }
+      ]
+    },
+    {
+      "id": "charge_priority",
+      "type": "select",
+      "name": "Charge Priority",
+      "category": "Power Management",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 8,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": { "address": 605 },
+      "options": [
+        { "value": 0, "label": "Utility priority" },
+        { "value": 1, "label": "PV priority" },
+        { "value": 2, "label": "PV and mains" },
+        { "value": 3, "label": "PV only" }
+      ]
+    },
+    {
+      "id": "output_voltage_setting",
+      "type": "number",
+      "name": "Output Voltage Setting",
+      "category": "Power Management",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 10,
+        "dataType": "uint16",
+        "scale": 0.1,
+        "unit": "V"
+      },
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": { "address": 606 }
+    },
+    {
+      "id": "output_frequency_setting",
+      "type": "number",
+      "name": "Output Frequency Setting",
+      "category": "Power Management",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 12,
+        "dataType": "uint16",
+        "scale": 0.01,
+        "unit": "Hz"
+      },
+      "display": { "precision": 2 },
+      "writable": true,
+      "write": { "address": 607 }
+    },
+
+    {
+      "_comment": "=== SETTINGS — Battery Type & Voltages (regs 630-650) ===",
+      "id": "battery_type",
+      "type": "select",
+      "name": "Battery Type",
+      "category": "Battery Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 58,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": { "address": 630 },
+      "options": [
+        { "value": 0, "label": "AGM" },
+        { "value": 1, "label": "Flooded" },
+        { "value": 2, "label": "User Defined" },
+        { "value": 3, "label": "Li1 / Pylontech" },
+        { "value": 4, "label": "LiFePO4" },
+        { "value": 5, "label": "Li3" },
+        { "value": 6, "label": "Li4" },
+        { "value": 8, "label": "Lib" }
+      ]
+    },
+    {
+      "id": "battery_ovp",
+      "type": "number",
+      "name": "Battery Overvoltage Protection",
+      "category": "Battery Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 60,
+        "dataType": "uint16",
+        "scale": 0.1,
+        "unit": "V"
+      },
+      "display": { "precision": 1 },
+      "writable": true,
+      "write": { "address": 631 }
+    },
+    {
+      "id": "max_charge_voltage",
+      "type": "number",
+      "name": "Max Charging Voltage",
+      "category": "Battery Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 72,
+        "dataType": "uint16",
+        "scale": 0.1,
+        "unit": "V"
+      },
+      "display": { "precision": 1 },
+      "writable": true,
+      "write": { "address": 637 }
+    },
+    {
+      "id": "float_charge_voltage",
+      "type": "number",
+      "name": "Float Charge Voltage",
+      "category": "Battery Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 74,
+        "dataType": "uint16",
+        "scale": 0.1,
+        "unit": "V"
+      },
+      "display": { "precision": 1 },
+      "writable": true,
+      "write": { "address": 638 }
+    },
+    {
+      "id": "max_charge_current",
+      "type": "number",
+      "name": "Max Charging Current",
+      "category": "Battery Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 78,
+        "dataType": "uint16",
+        "scale": 0.1,
+        "unit": "A"
+      },
+      "display": { "precision": 1 },
+      "writable": true,
+      "write": { "address": 640 }
+    },
+    {
+      "id": "max_mains_charge_current",
+      "type": "number",
+      "name": "Max Mains Charging Current",
+      "category": "Battery Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 80,
+        "dataType": "uint16",
+        "scale": 0.1,
+        "unit": "A"
+      },
+      "display": { "precision": 1 },
+      "writable": true,
+      "write": { "address": 641 }
+    },
+    {
+      "id": "max_discharge_current",
+      "type": "number",
+      "name": "Max Discharge Current Protection",
+      "category": "Battery Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 82,
+        "dataType": "uint16",
+        "unit": "A"
+      },
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": { "address": 642 }
+    },
+    {
+      "id": "mains_discharge_recovery_v",
+      "type": "number",
+      "name": "Mains Mode Discharge Recovery",
+      "category": "Battery Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 84,
+        "dataType": "uint16",
+        "scale": 0.1,
+        "unit": "V"
+      },
+      "display": { "precision": 1 },
+      "writable": true,
+      "write": { "address": 643 }
+    },
+    {
+      "id": "mains_low_voltage_v",
+      "type": "number",
+      "name": "Mains Mode Low Voltage Protection",
+      "category": "Battery Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 86,
+        "dataType": "uint16",
+        "scale": 0.1,
+        "unit": "V"
+      },
+      "display": { "precision": 1 },
+      "writable": true,
+      "write": { "address": 644 }
+    },
+    {
+      "id": "offgrid_low_voltage_v",
+      "type": "number",
+      "name": "Off-grid Low Voltage Protection",
+      "category": "Battery Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 90,
+        "dataType": "uint16",
+        "scale": 0.1,
+        "unit": "V"
+      },
+      "display": { "precision": 1 },
+      "writable": true,
+      "write": { "address": 646 }
+    },
+    {
+      "id": "low_dc_protection_soc",
+      "type": "number",
+      "name": "Low DC Protection SOC (AC mode)",
+      "category": "Battery Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 92,
+        "dataType": "uint16",
+        "unit": "%"
+      },
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": { "address": 647 }
+    },
+    {
+      "id": "low_dc_recovery_soc",
+      "type": "number",
+      "name": "Low DC Recovery SOC (AC mode)",
+      "category": "Battery Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 94,
+        "dataType": "uint16",
+        "unit": "%"
+      },
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": { "address": 648 }
+    },
+    {
+      "id": "battery_cutoff_soc",
+      "type": "number",
+      "name": "Battery Low Cut-off SOC",
+      "category": "Battery Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 98,
+        "dataType": "uint16",
+        "unit": "%"
+      },
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": { "address": 650 }
+    },
+
+    {
+      "_comment": "=== SETTINGS — Mode Switches (regs 677-689) ===",
+      "id": "energy_saving_mode",
+      "type": "select",
+      "name": "Energy Saving Mode (Eco)",
+      "category": "Power Management",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 160,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": { "address": 681 },
+      "options": [
+        { "value": 0, "label": "Off" },
+        { "value": 1, "label": "On" }
+      ]
+    },
+    {
+      "id": "input_mode",
+      "type": "select",
+      "name": "Input Mode",
+      "category": "Power Management",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 152,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": { "address": 677 },
+      "options": [
+        { "value": 0, "label": "APL (Appliance)" },
+        { "value": 1, "label": "UPS" },
+        { "value": 2, "label": "Generator (GNT)" }
+      ]
+    },
+    {
+      "id": "lcd_backlight",
+      "type": "select",
+      "name": "LCD Backlight",
+      "category": "Power Management",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 156,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": { "address": 679 },
+      "options": [
+        { "value": 0, "label": "Timed off" },
+        { "value": 1, "label": "Always on" }
+      ]
+    },
+
+    {
+      "_comment": "=== INFO_ID — Device Identity (addr 171) ===",
+      "id": "equipment_type",
+      "type": "sensor",
+      "name": "Equipment Type",
+      "category": "Device Info",
+      "source": {
+        "bank": "info_id",
+        "byteOffset": 0,
+        "dataType": "uint16"
+      },
+      "hidden": true
+    },
+    {
+      "id": "serial_number",
+      "type": "text",
+      "name": "Serial Number",
+      "category": "Device Info",
+      "source": {
+        "bank": "info_id",
+        "byteOffset": 30,
+        "dataType": "ascii",
+        "length": 14
+      }
+    },
+
+    {
+      "_comment": "=== INFO_FW — Firmware (addr 691) ===",
+      "id": "rated_power",
+      "type": "sensor",
+      "name": "Rated Power",
+      "category": "Device Info",
+      "source": {
+        "bank": "info_fw",
+        "byteOffset": 0,
+        "dataType": "uint16",
+        "unit": "W"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "firmware_version",
+      "type": "text",
+      "name": "Firmware Version",
+      "category": "Device Info",
+      "source": {
+        "bank": "info_fw",
+        "byteOffset": 126,
+        "dataType": "ascii",
+        "length": 16
+      }
+    }
+
+  ],
+
+  "storage": {
+    "database": {
+      "provider": "timescaledb",
+      "defaultNamePattern": "FluxMonitor_{deviceId}"
+    },
+    "timeSeries": [
+      { "entity": "battery_voltage",    "aggregate": "avg",  "column": "battery_voltage_v" },
+      { "entity": "battery_current",    "aggregate": "avg",  "column": "battery_current_a" },
+      { "entity": "battery_power",      "aggregate": "avg",  "column": "battery_power_w" },
+      { "entity": "state_of_charge",    "aggregate": "last", "column": "soc_pct" },
+      { "entity": "output_active_power","aggregate": "avg",  "column": "output_power_w" },
+      { "entity": "grid_voltage",       "aggregate": "avg",  "column": "grid_voltage_v" },
+      { "entity": "pv_power",           "aggregate": "avg",  "column": "pv_power_w" },
+      { "entity": "inv_temperature",    "aggregate": "avg",  "column": "inv_temp_c" }
+    ],
+    "retention": {
+      "raw":  { "window": "24h" },
+      "1m":   { "window": "1y" },
+      "5m":   { "window": "1y" },
+      "1h":   { "window": "10y" }
+    }
+  },
+
+  "ui": {
+    "pages": {
+      "monitor": {
+        "card": {
+          "statusGlyphs": [
+            {
+              "type": "last-seen",
+              "icon": "pulse",
+              "levels": [
+                { "maxAgeSeconds": 10, "color": "green",  "label": "less than 10 seconds ago" },
+                { "maxAgeSeconds": 300, "color": "orange", "label": "less than 5 minutes ago" },
+                { "color": "red", "label": "more than 5 minutes ago" }
+              ]
+            }
+          ]
+        },
+        "sections": [
+          {
+            "type": "hero-metrics",
+            "metrics": [
+              { "entity": "battery_voltage",    "icon": "battery",  "color": "emerald" },
+              { "entity": "state_of_charge",    "icon": "battery",  "color": "green" },
+              { "entity": "output_active_power","icon": "gauge",    "color": "amber" },
+              { "entity": "pv_power",           "icon": "zap",      "color": "sky" }
+            ]
+          },
+          {
+            "type": "parameter-table",
+            "title": "Settings",
+            "filter": { "writable": true },
+            "groupBy": "category"
+          },
+          {
+            "type": "parameter-table",
+            "title": "Device Info",
+            "filter": { "categories": ["Device Info"] }
+          }
+        ]
+      },
+      "history": {
+        "resolutions": [
+          { "id": "1s", "label": "1 Second",  "defaultWindow": "10m" },
+          { "id": "1m", "label": "1 Minute",  "defaultWindow": "1h" },
+          { "id": "5m", "label": "5 Minutes", "defaultWindow": "24h" },
+          { "id": "1h", "label": "1 Hour",    "defaultWindow": "7d" }
+        ],
+        "charts": [
+          {
+            "title": "Battery",
+            "type": "line-chart",
+            "traces": [
+              { "entity": "battery_voltage", "label": "Voltage", "color": "emerald" }
+            ],
+            "yAxis": { "unit": "V", "label": "Battery Voltage" }
+          },
+          {
+            "title": "State of Charge",
+            "type": "line-chart",
+            "traces": [
+              { "entity": "state_of_charge", "label": "SOC", "color": "green" }
+            ],
+            "yAxis": { "unit": "%", "label": "SOC" }
+          },
+          {
+            "title": "Power",
+            "type": "line-chart",
+            "traces": [
+              { "entity": "battery_power",       "label": "Battery",  "color": "blue" },
+              { "entity": "output_active_power",  "label": "Output",   "color": "amber" },
+              { "entity": "pv_power",             "label": "PV",       "color": "sky" }
+            ],
+            "yAxis": { "unit": "W", "label": "Power" }
+          },
+          {
+            "title": "Temperature",
+            "type": "line-chart",
+            "traces": [
+              { "entity": "inv_temperature", "label": "INV", "color": "orange" },
+              { "entity": "dc_temperature",  "label": "DC",  "color": "red",    "dashed": true }
+            ],
+            "yAxis": { "unit": "°C", "label": "Temperature" }
+          }
+        ]
+      }
+    }
+  }
+}

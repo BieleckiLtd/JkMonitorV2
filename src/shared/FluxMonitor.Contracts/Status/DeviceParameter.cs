@@ -21,4 +21,9 @@ public sealed record DeviceParameter
     public bool IsWritable { get; init; }
 
     public long? RawValue { get; init; }
+
+    public IReadOnlyList<SelectOptionModel>? Options { get; init; }
 }
+
+/// <summary>Represents one choice in a <c>select</c>-type entity.</summary>
+public sealed record SelectOptionModel(long Value, string Label);

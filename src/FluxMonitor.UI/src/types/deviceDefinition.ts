@@ -132,6 +132,7 @@ export type EntityDefinition = {
   role?: string;
   hidden?: boolean;
   writable?: boolean;
+  options?: { value: number; label: string }[];
 };
 
 export type EntityWriteDefinition = {

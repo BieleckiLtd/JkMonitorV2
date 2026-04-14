@@ -59,26 +59,49 @@ internal static class ModbusRtu
 
     /// <summary>
     /// Build a Modbus RTU "Write Multiple Registers" (function code 0x10) request.
-    /// Writes a UINT32 value (2 registers) at the specified address.
+    /// When <paramref name="registerCount"/> is 1, writes only the lower 16 bits.
+    /// When 2 (default), writes all 32 bits across two consecutive registers.
     /// </summary>
-    public static byte[] BuildWriteMultipleRegistersRequest(byte slaveAddress, ushort startRegister, uint value)
+    public static byte[] BuildWriteMultipleRegistersRequest(byte slaveAddress, ushort startRegister, uint value, int registerCount = 2)
     {
-        var request = new byte[13];
-        request[0] = slaveAddress;
-        request[1] = 0x10;
-        request[2] = (byte)(startRegister >> 8);
-        request[3] = (byte)(startRegister & 0xFF);
-        request[4] = 0x00;
-        request[5] = 0x02;
-        request[6] = 0x04;
-        request[7] = (byte)(value >> 24);
-        request[8] = (byte)(value >> 16);
-        request[9] = (byte)(value >> 8);
-        request[10] = (byte)(value & 0xFF);
-        var crc = ComputeCrc16(request.AsSpan(0, 11));
-        request[11] = (byte)(crc & 0xFF);
-        request[12] = (byte)((crc >> 8) & 0xFF);
-        return request;
+        if (registerCount == 1)
+        {
+            // FC 0x10, 1 register, 2 data bytes
+            var request = new byte[11];
+            request[0] = slaveAddress;
+            request[1] = 0x10;
+            request[2] = (byte)(startRegister >> 8);
+            request[3] = (byte)(startRegister & 0xFF);
+            request[4] = 0x00;
+            request[5] = 0x01;
+            request[6] = 0x02;
+            request[7] = (byte)((value >> 8) & 0xFF);
+            request[8] = (byte)(value & 0xFF);
+            var crc = ComputeCrc16(request.AsSpan(0, 9));
+            request[9] = (byte)(crc & 0xFF);
+            request[10] = (byte)((crc >> 8) & 0xFF);
+            return request;
+        }
+
+        // Default: 2 registers, 4 data bytes
+        {
+            var request = new byte[13];
+            request[0] = slaveAddress;
+            request[1] = 0x10;
+            request[2] = (byte)(startRegister >> 8);
+            request[3] = (byte)(startRegister & 0xFF);
+            request[4] = 0x00;
+            request[5] = 0x02;
+            request[6] = 0x04;
+            request[7] = (byte)(value >> 24);
+            request[8] = (byte)(value >> 16);
+            request[9] = (byte)(value >> 8);
+            request[10] = (byte)(value & 0xFF);
+            var crc = ComputeCrc16(request.AsSpan(0, 11));
+            request[11] = (byte)(crc & 0xFF);
+            request[12] = (byte)((crc >> 8) & 0xFF);
+            return request;
+        }
     }
 
     /// <summary>

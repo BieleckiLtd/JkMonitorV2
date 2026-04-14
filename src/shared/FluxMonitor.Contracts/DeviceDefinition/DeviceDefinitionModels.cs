@@ -350,6 +350,19 @@ public sealed class EntityDefinition
     public bool Hidden { get; init; }
 
     public bool Writable { get; init; }
+
+    /// <summary>
+    /// For <c>select</c>-type entities: the list of allowable raw-value/label pairs.
+    /// </summary>
+    public IReadOnlyList<SelectOptionDefinition>? Options { get; init; }
+}
+
+/// <summary>One allowable choice for a <c>select</c>-type entity.</summary>
+public sealed class SelectOptionDefinition
+{
+    public int Value { get; init; }
+
+    public required string Label { get; init; }
 }
 
 public sealed class EntityWriteDefinition

@@ -176,7 +176,8 @@ public sealed class GenericSerialPollingClient(
 
             logger.LogInformation("Writing a configured register value. Register=0x{Register:X4}.", registerAddress);
 
-            var writeRequest = ModbusRtu.BuildWriteMultipleRegistersRequest(slaveAddress, registerAddress, rawValue);
+            var registersPerWrite = bank.Write.RegistersPerWrite > 0 ? bank.Write.RegistersPerWrite : 2;
+            var writeRequest = ModbusRtu.BuildWriteMultipleRegistersRequest(slaveAddress, registerAddress, rawValue, registersPerWrite);
             var writeResponse = await SendAndReceiveModbusAsync(serialPort, writeRequest,
                 ModbusRtu.WriteResponseLength, readTimeout, cancellationToken);
             ModbusRtu.ValidateAndExtractData(writeResponse, slaveAddress, bank.Write.FunctionCode);
@@ -185,14 +186,18 @@ public sealed class GenericSerialPollingClient(
             await Task.Delay(50, writeToken);
             serialPort.DiscardInBuffer();
 
-            var readRequest = ModbusRtu.BuildReadHoldingRegistersRequest(slaveAddress, registerAddress, (ushort)bank.Write.RegistersPerWrite);
+            var readRequest = ModbusRtu.BuildReadHoldingRegistersRequest(slaveAddress, registerAddress, (ushort)registersPerWrite);
             var readResponse = await SendAndReceiveModbusAsync(serialPort, readRequest,
-                ModbusRtu.ExpectedReadResponseLength((ushort)bank.Write.RegistersPerWrite), readTimeout, cancellationToken);
+                ModbusRtu.ExpectedReadResponseLength((ushort)registersPerWrite), readTimeout, cancellationToken);
 
             var frame = readResponse;
-            if (frame.Length >= 9 && frame[1] == 0x03 && frame[2] == 4)
+            var expectedDataBytes = registersPerWrite * 2;
+            var minFrameLength = 3 + expectedDataBytes + 2;
+            if (frame.Length >= minFrameLength && frame[1] == 0x03 && frame[2] == expectedDataBytes)
             {
-                var readBack = (uint)((frame[3] << 24) | (frame[4] << 16) | (frame[5] << 8) | frame[6]);
+                var readBack = registersPerWrite == 1
+                    ? (uint)((frame[3] << 8) | frame[4])
+                    : (uint)((frame[3] << 24) | (frame[4] << 16) | (frame[5] << 8) | frame[6]);
                 var success = readBack == rawValue;
                 logger.LogInformation("Write verification completed. Success={Success}.", success);
 

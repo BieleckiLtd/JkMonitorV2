@@ -24,6 +24,7 @@ type DeviceParameter = {
   sortOrder: number;
   isWritable?: boolean;
   rawValue?: number | null;
+  options?: { value: number; label: string }[] | null;
 };
 
 type CellVoltageSnapshot = {
@@ -871,16 +872,32 @@ function ParameterRow({
         <div className='flex items-center gap-2'>
           {isEditing ? (
             <div className='flex items-center gap-1'>
-              <span className='text-[10px] text-muted-foreground/60'>raw:</span>
-              <input
-                type='number'
-                className='w-24 rounded border border-border bg-background px-2 py-0.5 text-sm font-semibold text-foreground outline-none focus:border-primary'
-                value={editValue}
-                onChange={e => setEditValue(e.target.value)}
-                onKeyDown={e => { if (e.key === 'Enter') void saveValue(); if (e.key === 'Escape') cancelEdit(); }}
-                disabled={isSaving}
-                autoFocus
-              />
+              {param.options?.length ? (
+                <select
+                  className='rounded border border-border bg-background px-2 py-0.5 text-sm font-semibold text-foreground outline-none focus:border-primary'
+                  value={editValue}
+                  onChange={e => setEditValue(e.target.value)}
+                  disabled={isSaving}
+                  autoFocus
+                >
+                  {param.options.map(opt => (
+                    <option key={opt.value} value={opt.value}>{opt.label}</option>
+                  ))}
+                </select>
+              ) : (
+                <>
+                  <span className='text-[10px] text-muted-foreground/60'>raw:</span>
+                  <input
+                    type='number'
+                    className='w-24 rounded border border-border bg-background px-2 py-0.5 text-sm font-semibold text-foreground outline-none focus:border-primary'
+                    value={editValue}
+                    onChange={e => setEditValue(e.target.value)}
+                    onKeyDown={e => { if (e.key === 'Enter') void saveValue(); if (e.key === 'Escape') cancelEdit(); }}
+                    disabled={isSaving}
+                    autoFocus
+                  />
+                </>
+              )}
               <button onClick={() => void saveValue()} disabled={isSaving}
                 className='rounded p-1 text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50'>
                 {isSaving ? <LoaderCircle className='h-3.5 w-3.5 animate-spin' /> : <Check className='h-3.5 w-3.5' />}
@@ -1730,6 +1747,10 @@ function formatParamValue(
       return param.booleanValue ? 'Enabled' : 'Disabled';
     }
     return param.booleanValue ? 'Yes' : 'No';
+  }
+  // For select-type entities, prefer the label over the raw number
+  if (param.options?.length && param.stringValue != null) {
+    return param.stringValue;
   }
   if (param.numericValue != null) {
     const sourceValue = Number(param.numericValue);
