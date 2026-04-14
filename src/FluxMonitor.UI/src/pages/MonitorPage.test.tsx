@@ -513,8 +513,8 @@ describe('MonitorPage', () => {
                 {
                   type: 'state',
                   states: [
-                    { entity: 'charging_enabled', equals: true, icon: 'battery-charging', color: 'green', title: 'Charging' },
-                    { entity: 'discharging_enabled', equals: true, icon: 'battery-discharging', color: 'orange', title: 'Discharging' },
+                    { entity: 'charging_active', equals: true, icon: 'battery-charging', color: 'green', title: 'Charging' },
+                    { entity: 'discharging_active', equals: true, icon: 'battery-discharging', color: 'orange', title: 'Discharging' },
                   ],
                 },
               ],
@@ -588,6 +588,7 @@ describe('MonitorPage', () => {
               { key: 'current', displayName: 'Current', category: 'Pack Status', numericValue: -12.3, sortOrder: 1, unit: 'A' },
               { key: 'power', displayName: 'Power', category: 'Pack Status', numericValue: 654, sortOrder: 2, unit: 'W' },
               { key: 'state_of_charge', displayName: 'State of Charge', category: 'Pack Status', numericValue: 78, sortOrder: 3, unit: '%' },
+              { key: 'charging_enabled', displayName: 'Charging', category: 'Status', booleanValue: true, sortOrder: 3, unit: '' },
               { key: 'discharging_enabled', displayName: 'Discharging', category: 'Status', booleanValue: true, sortOrder: 3, unit: '' },
               { key: 'charge_switch', displayName: 'Charge Switch', category: 'Configuration', numericValue: 1, rawValue: 1, sortOrder: 4, isWritable: true, unit: '' },
             ],

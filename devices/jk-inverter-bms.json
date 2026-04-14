@@ -845,8 +845,8 @@
             {
               "type": "state",
               "states": [
-                { "entity": "charging_enabled", "equals": true, "icon": "battery-charging", "color": "green", "title": "Charging" },
-                { "entity": "discharging_enabled", "equals": true, "icon": "battery-discharging", "color": "orange", "title": "Discharging" }
+                { "entity": "charging_active", "equals": true, "icon": "battery-charging", "color": "green", "title": "Charging" },
+                { "entity": "discharging_active", "equals": true, "icon": "battery-discharging", "color": "orange", "title": "Discharging" }
               ]
             }
           ]

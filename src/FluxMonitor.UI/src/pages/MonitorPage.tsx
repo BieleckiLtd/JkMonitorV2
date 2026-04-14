@@ -457,7 +457,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                 const displayValue = isCelsiusUnit(sourceUnit)
                   ? convertTemperatureValue(value != null ? Number(value) : null, temperatureUnit)
                   : value != null ? Number(value) : null;
-                const chargeState = getBatteryStateFromCurrent(compactTelemetry.currentAmps);
+                const chargeState = getRealtimeBatteryState(compactTelemetry, compactParamByKey);
                 const isCurrentMetric = m.entity === 'current';
                 const isPowerMetric = m.entity === 'power';
                 const accentClass = (isCurrentMetric || isPowerMetric)
@@ -971,7 +971,7 @@ function renderDefinitionSections(
       case 'hero-metrics':
         if (section.metrics) {
           const capacityAh = paramByKey.get('nominal_battery_capacity')?.numericValue;
-          const chargeState = getBatteryStateFromCurrent(telemetry.currentAmps);
+          const chargeState = getRealtimeBatteryState(telemetry, paramByKey);
           elements.push(
             <div key={`section-${i}`} className='grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4'>
               {section.metrics.map((m) => {
@@ -1008,8 +1008,9 @@ function renderDefinitionSections(
                     : chargeState === 'DISCHARGING' ? 'text-rose-400'
                     : 'text-muted-foreground';
                   let rateStr = '';
-                  if (capacityAh && capacityAh > 0 && telemetry.currentAmps != null) {
-                    const rate = (telemetry.currentAmps / capacityAh) * 100;
+                  const currentAmps = getRealtimeCurrentAmps(telemetry, paramByKey);
+                  if (capacityAh && capacityAh > 0 && currentAmps != null) {
+                    const rate = (currentAmps / capacityAh) * 100;
                     const sign = rate >= 0 ? '+' : '';
                     rateStr = ` ${sign}${rate.toFixed(0)} %/h`;
                   }
@@ -1289,15 +1290,17 @@ function resolveBooleanStatusEntityValue(
     return paramValue;
   }
 
-  const batteryState = telemetry.currentAmps == null || !Number.isFinite(telemetry.currentAmps)
-    ? null
-    : getBatteryStateFromCurrent(telemetry.currentAmps);
+  const batteryState = getRealtimeBatteryState(telemetry, paramByKey);
 
   switch (entityId) {
+    case 'charging_active':
+      return batteryState == null ? null : batteryState === 'CHARGING';
+    case 'discharging_active':
+      return batteryState == null ? null : batteryState === 'DISCHARGING';
     case 'charging_enabled':
-      return telemetry.chargingEnabled ?? (batteryState == null ? null : batteryState === 'CHARGING');
+      return telemetry.chargingEnabled ?? (batteryState === 'CHARGING');
     case 'discharging_enabled':
-      return telemetry.dischargingEnabled ?? (batteryState == null ? null : batteryState === 'DISCHARGING');
+      return telemetry.dischargingEnabled ?? (batteryState === 'DISCHARGING');
     case 'balancing_enabled':
       return telemetry.balancingEnabled ?? null;
     default:
@@ -1363,6 +1366,30 @@ function renderStatusGlyphIcon(
     default:
       return <DeviceIcon name={name} className='h-4 w-4' />;
   }
+}
+
+function getRealtimeCurrentAmps(
+  telemetry: DeviceTelemetrySnapshot,
+  paramByKey: Map<string, DeviceParameter>,
+): number | null {
+  if (telemetry.currentAmps != null && Number.isFinite(telemetry.currentAmps)) {
+    return telemetry.currentAmps;
+  }
+
+  const currentValue = paramByKey.get('current')?.numericValue;
+  return currentValue != null && Number.isFinite(currentValue)
+    ? currentValue
+    : null;
+}
+
+function getRealtimeBatteryState(
+  telemetry: DeviceTelemetrySnapshot,
+  paramByKey: Map<string, DeviceParameter>,
+) {
+  const currentAmps = getRealtimeCurrentAmps(telemetry, paramByKey);
+  return currentAmps == null
+    ? 'IDLE'
+    : getBatteryStateFromCurrent(currentAmps);
 }
 
 function BatteryStatusGlyph({ percent }: { percent: number | null | undefined }) {
@@ -1667,21 +1694,19 @@ function getSwitchStatusChip(
   telemetry: DeviceTelemetrySnapshot,
   paramByKey: Map<string, DeviceParameter>,
 ): SwitchStatusChip | null {
-  const batteryState = telemetry.currentAmps == null || !Number.isFinite(telemetry.currentAmps)
-    ? null
-    : getBatteryStateFromCurrent(telemetry.currentAmps);
+  const batteryState = getRealtimeBatteryState(telemetry, paramByKey);
 
   switch (param.key) {
     case 'charge_switch': {
       const isActive = paramByKey.get('charging_enabled')?.booleanValue
         ?? telemetry.chargingEnabled
-        ?? (batteryState == null ? null : batteryState === 'CHARGING');
+        ?? (batteryState === 'CHARGING');
       return buildSwitchStatusChip(isActive, 'Charging now', 'Not charging');
     }
     case 'discharge_switch': {
       const isActive = paramByKey.get('discharging_enabled')?.booleanValue
         ?? telemetry.dischargingEnabled
-        ?? (batteryState == null ? null : batteryState === 'DISCHARGING');
+        ?? (batteryState === 'DISCHARGING');
       return buildSwitchStatusChip(isActive, 'Discharging now', 'Not discharging');
     }
     case 'balancer_switch': {
