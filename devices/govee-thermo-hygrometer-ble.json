@@ -156,6 +156,39 @@
   "ui": {
     "pages": {
       "monitor": {
+        "card": {
+          "statusGlyphs": [
+            {
+              "type": "last-seen",
+              "icon": "pulse",
+              "levels": [
+                { "maxAgeSeconds": 60, "color": "green", "label": "less than a minute ago" },
+                { "maxAgeSeconds": 300, "color": "orange", "label": "less than 5 minutes ago" },
+                { "color": "red", "label": "more than 5 minutes ago" }
+              ]
+            },
+            {
+              "type": "signal-strength",
+              "entity": "signal_strength_pct",
+              "icon": "signal",
+              "levels": [
+                { "minValue": 55, "color": "green" },
+                { "minValue": 25, "color": "orange" },
+                { "color": "red" }
+              ]
+            },
+            {
+              "type": "battery-level",
+              "entity": "battery_pct",
+              "icon": "battery",
+              "levels": [
+                { "minValue": 36, "color": "green" },
+                { "minValue": 16, "color": "orange" },
+                { "color": "red" }
+              ]
+            }
+          ]
+        },
         "sections": [
           {
             "type": "hero-metrics",

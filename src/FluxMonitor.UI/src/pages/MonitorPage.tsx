@@ -5,7 +5,7 @@ import { HistoryCharts } from '../components/HistoryCharts';
 import { cn } from '../lib/utils';
 import { getBatteryStateFromCurrent } from '../lib/batteryStatus';
 import { useDeviceDefinition } from '../hooks/useDeviceDefinition';
-import type { DeviceDefinition, UiSectionDefinition } from '../types/deviceDefinition';
+import type { DeviceDefinition, UiSectionDefinition, UiStatusGlyphDefinition, UiStatusGlyphLevelDefinition } from '../types/deviceDefinition';
 import {
   convertTemperatureValue,
   getTemperatureDisplayUnit,
@@ -121,6 +121,13 @@ function getRelativeAdvertisementAgeSeconds(collectedAt: string | null | undefin
 type SwitchStatusChip = {
   label: string;
   className: string;
+};
+
+type ResolvedStatusGlyph = {
+  key: string;
+  title: string;
+  toneClassName: string;
+  icon: React.ReactNode;
 };
 
 export function MonitorPage() {
@@ -350,6 +357,10 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
     const capacityAh = compactParamByKey.get('nominal_battery_capacity')?.numericValue;
     const advertisementAgeSeconds = getRelativeAdvertisementAgeSeconds(telemetry?.collectedAt, nowMs);
     const compactSections = monitorSections?.filter(section => section.type !== 'hero-metrics' && section.type !== 'parameter-table') ?? [];
+    const statusGlyphDefinitions = definition?.ui?.pages?.monitor?.card?.statusGlyphs;
+    const headerStatusGlyphs = statusGlyphDefinitions != null
+      ? resolveConfiguredStatusGlyphs(statusGlyphDefinitions, compactTelemetry, compactParamByKey, nowMs, isPassiveAdvertisement)
+      : [];
 
     return (
       <div className='space-y-3 sm:space-y-4'>
@@ -383,7 +394,15 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
               </div>
             </div>
             <div className='flex items-center gap-1.5 shrink-0'>
-              {isEnvironment ? (
+              {headerStatusGlyphs.length > 0 ? (
+                <>
+                  {headerStatusGlyphs.map((glyph) => (
+                    <StatusGlyph key={glyph.key} title={glyph.title} toneClassName={glyph.toneClassName}>
+                      {glyph.icon}
+                    </StatusGlyph>
+                  ))}
+                </>
+              ) : isEnvironment ? (
                 <>
                   <StatusGlyph
                     title={telemetry ? formatAdvertisementStatusTitle(telemetry.collectedAt, nowMs) : 'Listening for a first signal'}
@@ -1122,6 +1141,230 @@ function StatusGlyph({
   );
 }
 
+function resolveConfiguredStatusGlyphs(
+  statusGlyphs: UiStatusGlyphDefinition[],
+  telemetry: DeviceTelemetrySnapshot,
+  paramByKey: Map<string, DeviceParameter>,
+  nowMs: number,
+  isPassiveAdvertisement: boolean,
+): ResolvedStatusGlyph[] {
+  return statusGlyphs
+    .map((statusGlyph, index) => resolveConfiguredStatusGlyph(statusGlyph, index, telemetry, paramByKey, nowMs, isPassiveAdvertisement))
+    .filter((statusGlyph): statusGlyph is ResolvedStatusGlyph => statusGlyph != null);
+}
+
+function resolveConfiguredStatusGlyph(
+  statusGlyph: UiStatusGlyphDefinition,
+  index: number,
+  telemetry: DeviceTelemetrySnapshot,
+  paramByKey: Map<string, DeviceParameter>,
+  nowMs: number,
+  isPassiveAdvertisement: boolean,
+): ResolvedStatusGlyph | null {
+  switch (statusGlyph.type) {
+    case 'last-seen':
+      return resolveLastSeenStatusGlyph(statusGlyph, index, telemetry.collectedAt, nowMs, isPassiveAdvertisement);
+    case 'signal-strength':
+      return resolveNumericStatusGlyph(statusGlyph, index, 'Signal', statusGlyph.entity, paramByKey, statusGlyph.icon ?? 'signal');
+    case 'battery-level':
+      return resolveNumericStatusGlyph(statusGlyph, index, 'Battery', statusGlyph.entity, paramByKey, statusGlyph.icon ?? 'battery');
+    case 'state':
+      return resolveStateStatusGlyph(statusGlyph, index, telemetry, paramByKey);
+    default:
+      return null;
+  }
+}
+
+function resolveLastSeenStatusGlyph(
+  statusGlyph: UiStatusGlyphDefinition,
+  index: number,
+  collectedAt: string | null | undefined,
+  nowMs: number,
+  isPassiveAdvertisement: boolean,
+): ResolvedStatusGlyph {
+  const ageSeconds = getRelativeAdvertisementAgeSeconds(collectedAt, nowMs);
+  if (ageSeconds == null || !collectedAt) {
+    return {
+      key: `status-${index}`,
+      title: isPassiveAdvertisement ? 'Listening for a first signal' : 'Last seen unavailable',
+      toneClassName: 'text-muted-foreground/55',
+      icon: renderStatusGlyphIcon(statusGlyph.icon ?? 'pulse'),
+    };
+  }
+
+  const collectedMs = Date.parse(collectedAt);
+  if (Number.isNaN(collectedMs)) {
+    return {
+      key: `status-${index}`,
+      title: 'Last seen unavailable',
+      toneClassName: 'text-muted-foreground/55',
+      icon: renderStatusGlyphIcon(statusGlyph.icon ?? 'pulse'),
+    };
+  }
+
+  const matchedLevel = findMatchingAgeLevel(ageSeconds, statusGlyph.levels);
+  const ageDescription = matchedLevel?.label ?? describeAdvertisementAge(ageSeconds);
+
+  return {
+    key: `status-${index}`,
+    title: `Last seen ${ageDescription} (${new Date(collectedMs).toISOString()})`,
+    toneClassName: resolveStatusGlyphToneClassName(matchedLevel?.color),
+    icon: renderStatusGlyphIcon(statusGlyph.icon ?? 'pulse'),
+  };
+}
+
+function resolveNumericStatusGlyph(
+  statusGlyph: UiStatusGlyphDefinition,
+  index: number,
+  fallbackLabel: string,
+  entityId: string | undefined,
+  paramByKey: Map<string, DeviceParameter>,
+  iconName: string,
+): ResolvedStatusGlyph | null {
+  if (!entityId) {
+    return null;
+  }
+
+  const param = paramByKey.get(entityId);
+  const value = param?.numericValue;
+  if (value == null || !Number.isFinite(value)) {
+    return null;
+  }
+
+  const matchedLevel = findMatchingNumericLevel(value, statusGlyph.levels);
+  const normalizedPercent = normalizeStatusPercent(value);
+
+  return {
+    key: `status-${index}`,
+    title: `${param?.displayName ?? fallbackLabel} ${Math.round(value)}%`,
+    toneClassName: matchedLevel != null
+      ? resolveStatusGlyphToneClassName(matchedLevel.color)
+      : iconName === 'battery'
+        ? getBatteryStatusToneClassName(value)
+        : getSignalStatusToneClassName(value),
+    icon: renderStatusGlyphIcon(iconName, normalizedPercent == null ? undefined : { percent: normalizedPercent }),
+  };
+}
+
+function resolveStateStatusGlyph(
+  statusGlyph: UiStatusGlyphDefinition,
+  index: number,
+  telemetry: DeviceTelemetrySnapshot,
+  paramByKey: Map<string, DeviceParameter>,
+): ResolvedStatusGlyph | null {
+  for (const state of statusGlyph.states ?? []) {
+    const entityValue = resolveBooleanStatusEntityValue(state.entity, telemetry, paramByKey);
+    const expectedValue = state.equals ?? true;
+    if (entityValue !== expectedValue) {
+      continue;
+    }
+
+    return {
+      key: `status-${index}-${state.entity}`,
+      title: state.title ?? state.entity,
+      toneClassName: resolveStatusGlyphToneClassName(state.color),
+      icon: renderStatusGlyphIcon(state.icon ?? statusGlyph.icon ?? 'activity'),
+    };
+  }
+
+  if (!statusGlyph.defaultIcon && !statusGlyph.defaultTitle) {
+    return null;
+  }
+
+  return {
+    key: `status-${index}`,
+    title: statusGlyph.defaultTitle ?? 'Status unavailable',
+    toneClassName: resolveStatusGlyphToneClassName(statusGlyph.defaultColor),
+    icon: renderStatusGlyphIcon(statusGlyph.defaultIcon ?? statusGlyph.icon ?? 'activity'),
+  };
+}
+
+function resolveBooleanStatusEntityValue(
+  entityId: string,
+  telemetry: DeviceTelemetrySnapshot,
+  paramByKey: Map<string, DeviceParameter>,
+): boolean | null {
+  const paramValue = paramByKey.get(entityId)?.booleanValue;
+  if (paramValue != null) {
+    return paramValue;
+  }
+
+  const batteryState = telemetry.currentAmps == null || !Number.isFinite(telemetry.currentAmps)
+    ? null
+    : getBatteryStateFromCurrent(telemetry.currentAmps);
+
+  switch (entityId) {
+    case 'charging_enabled':
+      return telemetry.chargingEnabled ?? (batteryState == null ? null : batteryState === 'CHARGING');
+    case 'discharging_enabled':
+      return telemetry.dischargingEnabled ?? (batteryState == null ? null : batteryState === 'DISCHARGING');
+    case 'balancing_enabled':
+      return telemetry.balancingEnabled ?? null;
+    default:
+      return null;
+  }
+}
+
+function findMatchingNumericLevel(
+  value: number,
+  levels: UiStatusGlyphLevelDefinition[] | undefined,
+): UiStatusGlyphLevelDefinition | null {
+  if (!levels || levels.length === 0) {
+    return null;
+  }
+
+  return levels.find((level) => {
+    const matchesMin = level.minValue == null || value >= level.minValue;
+    const matchesMax = level.maxValue == null || value <= level.maxValue;
+    return matchesMin && matchesMax;
+  }) ?? null;
+}
+
+function findMatchingAgeLevel(
+  ageSeconds: number,
+  levels: UiStatusGlyphLevelDefinition[] | undefined,
+): UiStatusGlyphLevelDefinition | null {
+  if (!levels || levels.length === 0) {
+    return null;
+  }
+
+  return levels.find((level) => level.maxAgeSeconds == null || ageSeconds <= level.maxAgeSeconds) ?? null;
+}
+
+function describeAdvertisementAge(ageSeconds: number) {
+  if (ageSeconds < 60) {
+    return 'less than a minute ago';
+  }
+
+  if (ageSeconds < 300) {
+    return 'less than 5 minutes ago';
+  }
+
+  return 'more than 5 minutes ago';
+}
+
+function resolveStatusGlyphToneClassName(color?: string) {
+  return color ? resolveColorClass(color) : 'text-muted-foreground/55';
+}
+
+function renderStatusGlyphIcon(
+  name: string,
+  options?: { percent?: number },
+): React.ReactNode {
+  switch (name.toLowerCase()) {
+    case 'battery':
+      return <BatteryStatusGlyph percent={options?.percent} />;
+    case 'signal':
+      return <SignalStatusGlyph percent={options?.percent} />;
+    case 'pulse':
+      return <SeenStatusGlyph />;
+    case 'battery-discharging':
+      return <BatteryDischargingStatusGlyph />;
+    default:
+      return <DeviceIcon name={name} className='h-4 w-4' />;
+  }
+}
+
 function BatteryStatusGlyph({ percent }: { percent: number | null | undefined }) {
   const normalizedPercent = normalizeStatusPercent(percent);
   const activeSegments = normalizedPercent == null
@@ -1195,6 +1438,17 @@ function SeenStatusGlyph() {
         strokeLinecap='round'
         strokeLinejoin='round'
       />
+    </svg>
+  );
+}
+
+function BatteryDischargingStatusGlyph() {
+  return (
+    <svg viewBox='0 0 18 18' className='h-4 w-4 fill-none stroke-current' aria-hidden='true'>
+      <rect x='2.25' y='4.5' width='12' height='9' rx='1.5' strokeWidth='1.5' />
+      <rect x='14.75' y='7' width='1.75' height='4' rx='0.75' fill='currentColor' stroke='none' />
+      <path d='M8.25 6.5v4.25' strokeWidth='1.5' strokeLinecap='round' strokeLinejoin='round' />
+      <path d='M6.75 9.5 8.25 11l1.5-1.5' strokeWidth='1.5' strokeLinecap='round' strokeLinejoin='round' />
     </svg>
   );
 }

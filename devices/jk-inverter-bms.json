@@ -831,6 +831,26 @@
   "ui": {
     "pages": {
       "monitor": {
+        "card": {
+          "statusGlyphs": [
+            {
+              "type": "last-seen",
+              "icon": "pulse",
+              "levels": [
+                { "maxAgeSeconds": 5, "color": "green", "label": "less than 5 seconds ago" },
+                { "maxAgeSeconds": 300, "color": "orange", "label": "less than 5 minutes ago" },
+                { "color": "red", "label": "more than 5 minutes ago" }
+              ]
+            },
+            {
+              "type": "state",
+              "states": [
+                { "entity": "charging_enabled", "equals": true, "icon": "battery-charging", "color": "green", "title": "Charging" },
+                { "entity": "discharging_enabled", "equals": true, "icon": "battery-discharging", "color": "orange", "title": "Discharging" }
+              ]
+            }
+          ]
+        },
         "sections": [
           {
             "type": "hero-metrics",

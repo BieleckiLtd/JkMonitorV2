@@ -214,6 +214,39 @@ describe('MonitorPage', () => {
       ui: {
         pages: {
           monitor: {
+            card: {
+              statusGlyphs: [
+                {
+                  type: 'last-seen',
+                  icon: 'pulse',
+                  levels: [
+                    { maxAgeSeconds: 60, color: 'green', label: 'less than a minute ago' },
+                    { maxAgeSeconds: 300, color: 'orange', label: 'less than 5 minutes ago' },
+                    { color: 'red', label: 'more than 5 minutes ago' },
+                  ],
+                },
+                {
+                  type: 'signal-strength',
+                  entity: 'signal_strength_pct',
+                  icon: 'signal',
+                  levels: [
+                    { minValue: 55, color: 'green' },
+                    { minValue: 25, color: 'orange' },
+                    { color: 'red' },
+                  ],
+                },
+                {
+                  type: 'battery-level',
+                  entity: 'battery_pct',
+                  icon: 'battery',
+                  levels: [
+                    { minValue: 36, color: 'green' },
+                    { minValue: 16, color: 'orange' },
+                    { color: 'red' },
+                  ],
+                },
+              ],
+            },
             sections: [
               {
                 type: 'hero-metrics',
@@ -289,6 +322,7 @@ describe('MonitorPage', () => {
     expect(lastSeenIcon).toBeInTheDocument();
     expect(signalIcon).toBeInTheDocument();
     expect(batteryIcon).toBeInTheDocument();
+    expect(signalIcon).toHaveClass('text-emerald-400');
     expect(lastSeenIcon.compareDocumentPosition(signalIcon) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(signalIcon.compareDocumentPosition(batteryIcon) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByText(/Signal 64%/i)).not.toBeInTheDocument();
@@ -325,6 +359,19 @@ describe('MonitorPage', () => {
       ui: {
         pages: {
           monitor: {
+            card: {
+              statusGlyphs: [
+                {
+                  type: 'last-seen',
+                  icon: 'pulse',
+                  levels: [
+                    { maxAgeSeconds: 60, color: 'green', label: 'less than a minute ago' },
+                    { maxAgeSeconds: 300, color: 'orange', label: 'less than 5 minutes ago' },
+                    { color: 'red', label: 'more than 5 minutes ago' },
+                  ],
+                },
+              ],
+            },
             sections: [
               {
                 type: 'hero-metrics',
@@ -388,6 +435,8 @@ describe('MonitorPage', () => {
   }, 10000);
 
   it('renders JK BMS cards collapsed by default and expands them on demand', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-04-12T12:00:02.000Z').getTime());
+
     useDeviceDefinitionMock.mockReturnValue({
       version: '1',
       device: {
@@ -450,6 +499,26 @@ describe('MonitorPage', () => {
       ui: {
         pages: {
           monitor: {
+            card: {
+              statusGlyphs: [
+                {
+                  type: 'last-seen',
+                  icon: 'pulse',
+                  levels: [
+                    { maxAgeSeconds: 5, color: 'green', label: 'less than 5 seconds ago' },
+                    { maxAgeSeconds: 300, color: 'orange', label: 'less than 5 minutes ago' },
+                    { color: 'red', label: 'more than 5 minutes ago' },
+                  ],
+                },
+                {
+                  type: 'state',
+                  states: [
+                    { entity: 'charging_enabled', equals: true, icon: 'battery-charging', color: 'green', title: 'Charging' },
+                    { entity: 'discharging_enabled', equals: true, icon: 'battery-discharging', color: 'orange', title: 'Discharging' },
+                  ],
+                },
+              ],
+            },
             sections: [
               {
                 type: 'hero-metrics',
@@ -519,6 +588,7 @@ describe('MonitorPage', () => {
               { key: 'current', displayName: 'Current', category: 'Pack Status', numericValue: -12.3, sortOrder: 1, unit: 'A' },
               { key: 'power', displayName: 'Power', category: 'Pack Status', numericValue: 654, sortOrder: 2, unit: 'W' },
               { key: 'state_of_charge', displayName: 'State of Charge', category: 'Pack Status', numericValue: 78, sortOrder: 3, unit: '%' },
+              { key: 'discharging_enabled', displayName: 'Discharging', category: 'Status', booleanValue: true, sortOrder: 3, unit: '' },
               { key: 'charge_switch', displayName: 'Charge Switch', category: 'Configuration', numericValue: 1, rawValue: 1, sortOrder: 4, isWritable: true, unit: '' },
             ],
           },
@@ -527,6 +597,9 @@ describe('MonitorPage', () => {
     });
 
     expect(await screen.findByText('House Battery')).toBeInTheDocument();
+    expect(screen.getByTitle('Last seen less than 5 seconds ago (2026-04-12T12:00:00.000Z)')).toBeInTheDocument();
+    expect(screen.getByTitle('Discharging')).toBeInTheDocument();
+    expect(screen.queryByText('Succeeded')).not.toBeInTheDocument();
     expect(screen.getByText('53.21')).toBeInTheDocument();
     expect(screen.queryByTestId('history-charts')).not.toBeInTheDocument();
     expect(screen.queryByText('Charge Switch')).not.toBeInTheDocument();

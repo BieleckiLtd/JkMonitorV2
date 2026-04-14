@@ -274,6 +274,34 @@ export type UiDashboardCard = {
   primaryMetric: string;
   secondaryMetrics: string[];
   statusEntities: string[];
+  statusGlyphs?: UiStatusGlyphDefinition[];
+};
+
+export type UiStatusGlyphDefinition = {
+  type: 'last-seen' | 'signal-strength' | 'battery-level' | 'state';
+  entity?: string;
+  icon?: string;
+  levels?: UiStatusGlyphLevelDefinition[];
+  states?: UiStatusGlyphStateDefinition[];
+  defaultIcon?: string;
+  defaultColor?: string;
+  defaultTitle?: string;
+};
+
+export type UiStatusGlyphLevelDefinition = {
+  minValue?: number;
+  maxValue?: number;
+  maxAgeSeconds?: number;
+  color?: string;
+  label?: string;
+};
+
+export type UiStatusGlyphStateDefinition = {
+  entity: string;
+  equals?: boolean;
+  icon?: string;
+  color?: string;
+  title?: string;
 };
 
 export type NotificationDefinition = {

@@ -605,6 +605,54 @@ public sealed class UiDashboardCard
     public IReadOnlyList<string>? SecondaryMetrics { get; init; }
 
     public IReadOnlyList<string>? StatusEntities { get; init; }
+
+    public IReadOnlyList<UiStatusGlyphDefinition>? StatusGlyphs { get; init; }
+}
+
+public sealed class UiStatusGlyphDefinition
+{
+    public required string Type { get; init; }
+
+    public string? Entity { get; init; }
+
+    public string? Icon { get; init; }
+
+    public IReadOnlyList<UiStatusGlyphLevelDefinition>? Levels { get; init; }
+
+    public IReadOnlyList<UiStatusGlyphStateDefinition>? States { get; init; }
+
+    public string? DefaultIcon { get; init; }
+
+    public string? DefaultColor { get; init; }
+
+    public string? DefaultTitle { get; init; }
+}
+
+public sealed class UiStatusGlyphLevelDefinition
+{
+    public double? MinValue { get; init; }
+
+    public double? MaxValue { get; init; }
+
+    public int? MaxAgeSeconds { get; init; }
+
+    public string? Color { get; init; }
+
+    public string? Label { get; init; }
+}
+
+public sealed class UiStatusGlyphStateDefinition
+{
+    public required string Entity { get; init; }
+
+    [JsonPropertyName("equals")]
+    public bool? EqualsValue { get; init; }
+
+    public string? Icon { get; init; }
+
+    public string? Color { get; init; }
+
+    public string? Title { get; init; }
 }
 
 public sealed class NotificationDefinition
