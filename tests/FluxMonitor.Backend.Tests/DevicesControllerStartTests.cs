@@ -10,6 +10,7 @@ public sealed class DevicesControllerStartTests
     [InlineData("", false)]
     [InlineData("NotStarted", false)]
     [InlineData("Started", false)]
+    [InlineData("Listening", true)]
     [InlineData("Succeeded", true)]
     [InlineData("Failed", true)]
     [InlineData("PersistFailed", true)]
@@ -23,6 +24,7 @@ public sealed class DevicesControllerStartTests
     [Theory]
     [InlineData(null, false)]
     [InlineData("Failed", false)]
+    [InlineData("Listening", true)]
     [InlineData("Succeeded", true)]
     public void IsSuccessfulStartOutcome_ReturnsExpectedValue(string? outcome, bool expected)
     {
@@ -68,6 +70,14 @@ public sealed class DevicesControllerStartTests
         var message = DevicesController.BuildStartOutcomeMessage("Succeeded", null);
 
         Assert.Equal("Device started and responding.", message);
+    }
+
+    [Fact]
+    public void BuildStartOutcomeMessage_ReturnsListeningMessageForPassiveBleDevices()
+    {
+        var message = DevicesController.BuildStartOutcomeMessage("Listening", null);
+
+        Assert.Equal("Device started and listening for broadcast updates.", message);
     }
 
     [Fact]

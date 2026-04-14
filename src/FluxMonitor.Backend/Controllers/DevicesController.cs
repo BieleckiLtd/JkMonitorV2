@@ -447,6 +447,22 @@ public sealed class DevicesController(
 
         // Start only the targeted device (not all enabled devices)
         await orchestrator.EnsureDeviceRunningAsync(device, cancellationToken);
+        if (IsPassiveAdvertisementDefinition(definition))
+        {
+            logger.LogInformation("Start configuration applied; passive BLE device is now listening for broadcast updates.");
+            var passiveState = stateStore.GetDeviceState(deviceId);
+            var passiveOutcome = passiveState?.LastOutcome ?? "Listening";
+
+            return Ok(new
+            {
+                deviceId,
+                started = true,
+                outcome = passiveOutcome,
+                error = GetStartOutcomeError(passiveOutcome, passiveState?.LastError),
+                message = BuildStartOutcomeMessage(passiveOutcome, passiveState?.LastError)
+            });
+        }
+
         logger.LogInformation("Start configuration applied; waiting for initial poll result.");
 
         // Wait for the first poll result (up to ~8 seconds)
@@ -558,7 +574,8 @@ public sealed class DevicesController(
            !string.Equals(outcome, "Started", StringComparison.OrdinalIgnoreCase);
 
     internal static bool IsSuccessfulStartOutcome(string? outcome)
-        => string.Equals(outcome, "Succeeded", StringComparison.OrdinalIgnoreCase);
+        => string.Equals(outcome, "Succeeded", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(outcome, "Listening", StringComparison.OrdinalIgnoreCase);
 
     internal static string NormalizeHistoryResolution(string requestedResolution, string persistedResolution)
         => string.Equals(requestedResolution, "1s", StringComparison.Ordinal) ||
@@ -597,14 +614,25 @@ public sealed class DevicesController(
     }
 
     internal static string BuildStartOutcomeMessage(string? outcome, string? lastError)
-        => IsSuccessfulStartOutcome(outcome)
+    {
+        if (string.Equals(outcome, "Listening", StringComparison.OrdinalIgnoreCase))
+            return "Device started and listening for broadcast updates.";
+
+        return IsSuccessfulStartOutcome(outcome)
             ? "Device started and responding."
             : $"Device started but first poll failed: {GetStartOutcomeError(outcome, lastError)}";
+    }
 
     internal static string BuildStartTimeoutMessage(string? outcome, string? lastError)
         => IsTerminalStartOutcome(outcome)
             ? $"Device started, but no successful poll completed within 8 seconds. Last error: {GetStartOutcomeError(outcome, lastError)}"
             : "Device started but no response received within 8 seconds. Check serial port and address.";
+
+    private static bool IsPassiveAdvertisementDefinition(Contracts.DeviceDefinition.DeviceDefinition definition)
+    {
+        return string.Equals(definition.Connection.Transport.Type, "ble", StringComparison.OrdinalIgnoreCase) &&
+               string.Equals(definition.Connection.Protocol.Type, "ble-advertisement", StringComparison.OrdinalIgnoreCase);
+    }
 
     private DeviceConfigurationsResponse BuildDeviceConfigurationResponse(IReadOnlyList<DeviceConfiguration> devices)
     {

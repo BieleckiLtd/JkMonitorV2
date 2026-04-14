@@ -79,6 +79,37 @@ public sealed class DeviceOrchestratorTests
     }
 
     [Fact]
+    public async Task StartDevice_UsesPassiveListener_ForBleAdvertisementDevices()
+    {
+        var pollingClient = new TestPollingClient();
+        var passiveMonitor = new TestPassiveBleAdvertisementMonitor();
+        var store = CreateStateStore([]);
+        var orchestrator = CreateOrchestrator(store, pollingClient, passiveMonitor);
+        var device = new DeviceConfiguration
+        {
+            DeviceId = "govee-thermo-hygrometer-gvh5075-7256",
+            DisplayName = "Fridge",
+            DefinitionId = "govee-thermo-hygrometer-ble",
+            TransportPortName = "A4:C1:38:19:72:56",
+            PollIntervalMilliseconds = 5000,
+            Enabled = true
+        };
+
+        using var cts = new CancellationTokenSource();
+        orchestrator.StartDevice(device, cts.Token);
+
+        await passiveMonitor.WaitForStartAsync();
+        var state = store.GetDeviceState(device.DeviceId);
+
+        Assert.NotNull(state);
+        Assert.Equal("Listening", state!.LastOutcome);
+        Assert.Equal(0, pollingClient.PollCount);
+
+        cts.Cancel();
+        await orchestrator.StopAllAsync();
+    }
+
+    [Fact]
     public async Task ApplyConfigurationAsync_UpdatesRuntimeOrderForEnabledDevices()
     {
         var pollingClient = new TestPollingClient();
@@ -146,6 +177,7 @@ public sealed class DeviceOrchestratorTests
     private static DeviceOrchestrator CreateOrchestrator(
         DeviceStateStore stateStore,
         IDevicePollingClient pollingClient,
+        IPassiveBleAdvertisementMonitor? passiveMonitor,
         out PollTrigger pollTrigger)
     {
         var definitionLoader = CreateDefinitionLoader();
@@ -165,6 +197,7 @@ public sealed class DeviceOrchestratorTests
 
         return new DeviceOrchestrator(
             pollingClient,
+            passiveMonitor ?? new NoOpPassiveBleAdvertisementMonitor(),
             new NoOpTelemetryRepository(),
             stateStore,
             definitionLoader,
@@ -174,9 +207,25 @@ public sealed class DeviceOrchestratorTests
             NullLogger<DeviceOrchestrator>.Instance);
     }
 
+    private static DeviceOrchestrator CreateOrchestrator(
+        DeviceStateStore stateStore,
+        IDevicePollingClient pollingClient,
+        out PollTrigger pollTrigger)
+    {
+        return CreateOrchestrator(stateStore, pollingClient, passiveMonitor: null, out pollTrigger);
+    }
+
+    private static DeviceOrchestrator CreateOrchestrator(
+        DeviceStateStore stateStore,
+        IDevicePollingClient pollingClient,
+        IPassiveBleAdvertisementMonitor passiveMonitor)
+    {
+        return CreateOrchestrator(stateStore, pollingClient, passiveMonitor, out _);
+    }
+
     private static DeviceOrchestrator CreateOrchestrator(DeviceStateStore stateStore, IDevicePollingClient pollingClient)
     {
-        return CreateOrchestrator(stateStore, pollingClient, out _);
+        return CreateOrchestrator(stateStore, pollingClient, passiveMonitor: null, out _);
     }
 
     private static Task InvokeRunDeviceLoopAsync(DeviceOrchestrator orchestrator, DeviceConfiguration device, CancellationToken cancellationToken)
@@ -214,11 +263,13 @@ public sealed class DeviceOrchestratorTests
 
     private static DeviceDefinitionLoader CreateDefinitionLoader()
     {
-        return new DeviceDefinitionLoader(
+        var loader = new DeviceDefinitionLoader(
             "devices",
-            Directory.GetCurrentDirectory(),
+            ResolveRepositoryRoot(),
             new StubHttpClientFactory(),
             NullLogger<DeviceDefinitionLoader>.Instance);
+        loader.LoadAll();
+        return loader;
     }
 
     private static MonitorConfiguration CreateDefaultConfiguration()
@@ -299,6 +350,26 @@ public sealed class DeviceOrchestratorTests
         }
     }
 
+    private sealed class TestPassiveBleAdvertisementMonitor : IPassiveBleAdvertisementMonitor
+    {
+        private readonly TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task RunAsync(DeviceConfiguration device, CancellationToken cancellationToken)
+        {
+            _started.TrySetResult();
+            await Task.Delay(Timeout.Infinite, cancellationToken);
+        }
+
+        public Task WaitForStartAsync()
+            => _started.Task.WaitAsync(TimeSpan.FromSeconds(2));
+    }
+
+    private sealed class NoOpPassiveBleAdvertisementMonitor : IPassiveBleAdvertisementMonitor
+    {
+        public Task RunAsync(DeviceConfiguration device, CancellationToken cancellationToken)
+            => Task.Delay(Timeout.Infinite, cancellationToken);
+    }
+
     private sealed class FakeBuildMetadataProvider(BuildRuntimeInfo buildInfo) : IBuildMetadataProvider
     {
         public BuildRuntimeInfo GetBuildInfo() => buildInfo;
@@ -315,5 +386,19 @@ public sealed class DeviceOrchestratorTests
     private sealed class StubHttpClientFactory : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => new();
+    }
+
+    private static string ResolveRepositoryRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (Directory.Exists(Path.Combine(current.FullName, "devices")))
+                return current.FullName;
+
+            current = current.Parent;
+        }
+
+        return Directory.GetCurrentDirectory();
     }
 }

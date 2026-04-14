@@ -676,7 +676,7 @@ function getActionResultClassName(result: StartStopResult) {
     return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400';
   }
 
-  if (result.stopped || result.outcome === 'Started') {
+  if (result.stopped || result.outcome === 'Started' || result.outcome === 'Listening') {
     return 'border-border bg-muted/60 text-foreground';
   }
 
@@ -686,6 +686,10 @@ function getActionResultClassName(result: StartStopResult) {
 function getActionResultMessage(result: StartStopResult) {
   const explicitMessage = result.message?.trim() ?? '';
   const blankFailureMessage = /^Device started but first poll failed:\s*$/i.test(explicitMessage);
+
+  if (result.outcome === 'Listening') {
+    return explicitMessage || 'Device started and listening for broadcast updates.';
+  }
 
   if (result.outcome === 'Started') {
     return 'Device start requested. Waiting for first poll result...';

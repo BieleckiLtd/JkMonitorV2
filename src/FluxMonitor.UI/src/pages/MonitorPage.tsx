@@ -98,6 +98,12 @@ type DeviceRuntimeStateStreamEnvelope = {
 const reconnectDelayMs = 2000;
 const fallbackRefreshIntervalMs = 2000;
 const nd = 'N/D';
+const emptyTelemetrySnapshot: DeviceTelemetrySnapshot = {
+  collectedAt: '',
+  cells: [],
+  activeWarnings: [],
+  parameters: [],
+};
 
 function getRelativeAdvertisementAgeSeconds(collectedAt: string | null | undefined, nowMs: number) {
   if (!collectedAt) {
@@ -299,6 +305,8 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
   const parameters = telemetry?.parameters ?? [];
   const cells = telemetry?.cells ?? [];
   const warnings = telemetry?.activeWarnings ?? [];
+  const isPassiveAdvertisement = definition?.connection.protocol.type === 'ble-advertisement'
+    || device.protocolHandler === 'ble-advertisement';
   const isHealthy = device.lastOutcome === 'Succeeded';
   const isFailing = device.lastOutcome === 'Failed';
   const dp = device.displayPrecision ?? defaultPrecision;
@@ -328,14 +336,19 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
   const paramTableSections = monitorSections?.filter(s => s.type === 'parameter-table');
 
   // Environment devices and JK BMS units use a compact expandable card.
-  if ((isEnvironment || isJkBms) && telemetry) {
+  if (isEnvironment || (isJkBms && telemetry)) {
+    const compactTelemetry = telemetry ?? emptyTelemetrySnapshot;
+    const compactParameters = compactTelemetry.parameters ?? [];
+    const compactCells = compactTelemetry.cells ?? [];
+    const compactWarnings = compactTelemetry.activeWarnings ?? [];
+    const compactParamByKey = new Map(compactParameters.map(p => [p.key, p]));
     const heroSection = monitorSections?.find(s => s.type === 'hero-metrics');
     const heroMetrics = heroSection?.metrics ?? [];
-    const batteryParam = paramByKey.get('battery_pct');
+    const batteryParam = compactParamByKey.get('battery_pct');
     const batteryValue = batteryParam?.numericValue;
-    const signalValue = paramByKey.get('signal_strength_pct')?.numericValue;
-    const capacityAh = paramByKey.get('nominal_battery_capacity')?.numericValue;
-    const advertisementAgeSeconds = getRelativeAdvertisementAgeSeconds(telemetry.collectedAt, nowMs);
+    const signalValue = compactParamByKey.get('signal_strength_pct')?.numericValue;
+    const capacityAh = compactParamByKey.get('nominal_battery_capacity')?.numericValue;
+    const advertisementAgeSeconds = getRelativeAdvertisementAgeSeconds(telemetry?.collectedAt, nowMs);
     const compactSections = monitorSections?.filter(section => section.type !== 'hero-metrics' && section.type !== 'parameter-table') ?? [];
 
     return (
@@ -364,7 +377,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                   </div>
                 ) : (
                   <div className='text-[10px] font-mono text-muted-foreground/70 truncate'>
-                    {device.deviceId} {device.protocolHandler ? `• ${device.protocolHandler}` : ''} • {device.pollIntervalMilliseconds}ms
+                    {formatDeviceConnectionDescriptor(device, isPassiveAdvertisement)}
                   </div>
                 )}
               </div>
@@ -373,7 +386,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
               {isEnvironment ? (
                 <>
                   <StatusGlyph
-                    title={formatAdvertisementStatusTitle(telemetry.collectedAt, nowMs)}
+                    title={telemetry ? formatAdvertisementStatusTitle(telemetry.collectedAt, nowMs) : 'Listening for a first signal'}
                     toneClassName={getAdvertisementStatusToneClassName(advertisementAgeSeconds)}
                   >
                     <SeenStatusGlyph />
@@ -399,7 +412,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                 <>
                   <div className='hidden text-right sm:block'>
                     <div className='text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60'>Last update</div>
-                    <div className='text-xs font-medium text-muted-foreground'>{new Date(telemetry.collectedAt).toLocaleTimeString()}</div>
+                    <div className='text-xs font-medium text-muted-foreground'>{new Date(compactTelemetry.collectedAt).toLocaleTimeString()}</div>
                   </div>
                   <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em]', getOutcomeClass(device.lastOutcome))}>
                     {device.lastOutcome}
@@ -416,7 +429,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
           <div className='border-t border-border/60 px-4 py-3 sm:px-5 sm:py-4'>
             <div className='grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4'>
               {heroMetrics.map((m) => {
-                const param = paramByKey.get(m.entity);
+                const param = compactParamByKey.get(m.entity);
                 const entity = definition?.entities.find(e => e.id === m.entity) ?? definition?.computedEntities?.find(e => e.id === m.entity);
                 const value = param?.numericValue;
                 const sourceUnit = param?.unit ?? (entity && 'source' in entity ? entity.source?.unit : undefined) ?? (entity && 'unit' in entity ? (entity as { unit?: string }).unit : '') ?? '';
@@ -425,7 +438,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                 const displayValue = isCelsiusUnit(sourceUnit)
                   ? convertTemperatureValue(value != null ? Number(value) : null, temperatureUnit)
                   : value != null ? Number(value) : null;
-                const chargeState = getBatteryStateFromCurrent(telemetry.currentAmps);
+                const chargeState = getBatteryStateFromCurrent(compactTelemetry.currentAmps);
                 const isCurrentMetric = m.entity === 'current';
                 const isPowerMetric = m.entity === 'power';
                 const accentClass = (isCurrentMetric || isPowerMetric)
@@ -478,7 +491,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                     temperatureUnit={temperatureUnit}
                   />
                   {monitorSections?.filter(s => s.type === 'parameter-table').map((section, idx) => {
-                    const params = filterParams(parameters, section);
+                    const params = filterParams(compactParameters, section);
                     if (params.length === 0) return null;
                     return (
                       <ParameterCategoryCard
@@ -486,8 +499,8 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                         category={section.title ?? 'Parameters'}
                         params={params}
                         deviceId={device.deviceId}
-                        telemetry={telemetry}
-                        paramByKey={paramByKey}
+                        telemetry={compactTelemetry}
+                        paramByKey={compactParamByKey}
                         temperatureUnit={temperatureUnit}
                       />
                     );
@@ -495,28 +508,39 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                 </>
               ) : (
                 <>
-                  {renderDefinitionSections(compactSections, paramByKey, telemetry, dp, cells, selectedCellIndices, setSelectedCellIndices, device.deviceId, definition, temperatureUnit)}
+                  {renderDefinitionSections(compactSections, compactParamByKey, compactTelemetry, dp, compactCells, selectedCellIndices, setSelectedCellIndices, device.deviceId, definition, temperatureUnit)}
                   {paramTableSections && paramTableSections.length > 0 ? (
                     <div className='grid gap-3 sm:gap-4 lg:grid-cols-2'>
                       {paramTableSections.map((section, idx) => {
-                        const params = filterParams(parameters, section);
+                        const params = filterParams(compactParameters, section);
                         if (params.length === 0) return null;
                         if (section.groupBy === 'category') {
                           const catGroups = groupByCategory(params);
                           return Array.from(catGroups.entries()).map(([cat, catParams]) => (
-                            <ParameterCategoryCard key={`${idx}-${cat}`} category={cat} params={catParams} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} temperatureUnit={temperatureUnit} />
+                            <ParameterCategoryCard key={`${idx}-${cat}`} category={cat} params={catParams} deviceId={device.deviceId} telemetry={compactTelemetry} paramByKey={compactParamByKey} temperatureUnit={temperatureUnit} />
                           ));
                         }
                         return (
-                          <ParameterCategoryCard key={idx} category={section.title ?? 'Parameters'} params={params} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} temperatureUnit={temperatureUnit} />
+                          <ParameterCategoryCard key={idx} category={section.title ?? 'Parameters'} params={params} deviceId={device.deviceId} telemetry={compactTelemetry} paramByKey={compactParamByKey} temperatureUnit={temperatureUnit} />
                         );
                       })}
                     </div>
                   ) : (
                     <div className='grid gap-3 sm:gap-4 lg:grid-cols-2'>
-                      {sortedCategories.filter(c => c !== 'Cell Voltages').map((category) => (
-                        <ParameterCategoryCard key={category} category={category} params={grouped.get(category)!} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} temperatureUnit={temperatureUnit} />
-                      ))}
+                      {[...new Set(compactParameters.map(parameter => parameter.category))]
+                        .filter(category => category !== 'Cell Voltages')
+                        .sort((a, b) => a.localeCompare(b))
+                        .map((category) => (
+                          <ParameterCategoryCard
+                            key={category}
+                            category={category}
+                            params={compactParameters.filter(parameter => parameter.category === category)}
+                            deviceId={device.deviceId}
+                            telemetry={compactTelemetry}
+                            paramByKey={compactParamByKey}
+                            temperatureUnit={temperatureUnit}
+                          />
+                        ))}
                     </div>
                   )}
                 </>
@@ -531,12 +555,12 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
           </div>
         )}
 
-        {warnings.length > 0 && (
+        {compactWarnings.length > 0 && (
           <div className='flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-3 sm:px-4'>
             <AlertTriangle className='mt-0.5 h-4 w-4 shrink-0 text-amber-400' />
             <div className='text-sm text-amber-300'>
               <span className='font-semibold'>Active warnings: </span>
-              {warnings.join(', ')}
+              {compactWarnings.join(', ')}
             </div>
           </div>
         )}
@@ -565,7 +589,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
               </span>
             </div>
             <div className='mt-1 text-xs font-mono text-muted-foreground'>
-              {device.deviceId} &bull; {device.protocolHandler ?? device.definitionId} &bull; {device.pollIntervalMilliseconds}ms
+              {formatDeviceConnectionDescriptor(device, isPassiveAdvertisement)}
             </div>
           </div>
         </div>
@@ -592,7 +616,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
         </div>
       )}
 
-      {!telemetry && !device.lastError && (
+      {!telemetry && !device.lastError && !isPassiveAdvertisement && (
         <div className='flex items-center justify-center rounded-2xl border border-dashed border-border bg-card/40 py-8 text-sm text-muted-foreground'>
           <LoaderCircle className='mr-2 h-4 w-4 animate-spin' /> Waiting for first reading...
         </div>
@@ -1253,6 +1277,18 @@ function formatAdvertisementStatusTitle(collectedAt: string | null | undefined, 
   return `Last seen ${ageDescription} (${new Date(collectedMs).toISOString()})`;
 }
 
+function formatDeviceConnectionDescriptor(
+  device: Pick<DeviceRuntimeState, 'deviceId' | 'definitionId' | 'protocolHandler' | 'pollIntervalMilliseconds'>,
+  isPassiveAdvertisement: boolean,
+) {
+  const handler = device.protocolHandler ?? device.definitionId;
+  if (isPassiveAdvertisement) {
+    return `${device.deviceId} • ${handler} • passive listener`;
+  }
+
+  return `${device.deviceId} • ${handler} • ${device.pollIntervalMilliseconds}ms`;
+}
+
 /** Maps color name strings from the device definition to Tailwind text-color classes. */
 const colorClassLookup: Record<string, string> = {
   emerald: 'text-emerald-400',
@@ -1443,6 +1479,8 @@ function getOutcomeClass(outcome: string): string {
   switch (outcome) {
     case 'Succeeded':
       return 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-300';
+    case 'Listening':
+      return 'border border-border bg-muted/60 text-muted-foreground';
     case 'PersistFailed':
       return 'border border-amber-500/20 bg-amber-500/10 text-amber-300';
     case 'Failed':

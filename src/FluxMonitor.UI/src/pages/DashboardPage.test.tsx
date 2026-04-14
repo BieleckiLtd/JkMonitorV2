@@ -80,7 +80,8 @@ describe('DashboardPage', () => {
           {
             deviceId: 'device-1',
             displayName: 'Battery 1',
-            protocol: 'modbus',
+            definitionId: 'jk-inverter-bms',
+            protocolHandler: 'modbus',
             enabled: true,
             isMaster: true,
             pollIntervalMilliseconds: 1000,

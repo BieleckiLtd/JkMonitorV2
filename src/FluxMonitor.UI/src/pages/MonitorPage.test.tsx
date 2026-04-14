@@ -295,6 +295,98 @@ describe('MonitorPage', () => {
     expect(screen.queryByText(/Last advertisement/i)).not.toBeInTheDocument();
   }, 10000);
 
+  it('renders passive BLE environment devices in listening mode without a waiting banner', async () => {
+    useDeviceDefinitionMock.mockReturnValue({
+      version: '1',
+      device: {
+        id: 'govee-thermo-hygrometer-ble',
+        name: 'Govee',
+        manufacturer: 'Govee',
+        model: 'H5075',
+        category: 'environment',
+      },
+      connection: {
+        transport: { type: 'ble', defaults: {} },
+        protocol: { type: 'ble-advertisement', settings: {} },
+      },
+      dataSources: [],
+      pollGroups: {},
+      entities: [
+        {
+          id: 'temperature_c',
+          type: 'number',
+          name: 'Temperature',
+          category: 'Environment',
+          source: { bank: 'advertisement', byteOffset: 0, unit: 'C' },
+          display: { precision: 1 },
+        },
+      ],
+      computedEntities: [],
+      ui: {
+        pages: {
+          monitor: {
+            sections: [
+              {
+                type: 'hero-metrics',
+                metrics: [
+                  { entity: 'temperature_c', color: 'amber' },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    } satisfies DeviceDefinition);
+
+    class FakeEventSource {
+      static instances: FakeEventSource[] = [];
+
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      close = vi.fn();
+
+      constructor(public readonly url: string) {
+        FakeEventSource.instances.push(this);
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }));
+      }
+    }
+
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    render(<MonitorPage />);
+
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(1);
+    });
+
+    FakeEventSource.instances[0]?.emit({
+      devices: [
+        {
+          deviceId: 'govee-1',
+          displayName: 'Fridge Sensor',
+          definitionId: 'govee-thermo-hygrometer-ble',
+          protocolHandler: 'ble-advertisement',
+          enabled: true,
+          isMaster: false,
+          pollIntervalMilliseconds: 5000,
+          lastOutcome: 'Listening',
+          latestTelemetry: null,
+        },
+      ],
+    });
+
+    expect(await screen.findByText('Fridge Sensor')).toBeInTheDocument();
+    expect(screen.getByTitle('Listening for a first signal')).toBeInTheDocument();
+    expect(screen.queryByText(/Waiting for first reading/i)).not.toBeInTheDocument();
+  }, 10000);
+
   it('renders JK BMS cards collapsed by default and expands them on demand', async () => {
     useDeviceDefinitionMock.mockReturnValue({
       version: '1',

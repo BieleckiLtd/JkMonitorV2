@@ -161,9 +161,31 @@ public sealed class DeviceStateStore
         PublishCurrentDevices();
     }
 
-    public void MarkAdvertisementObserved(
+    public void MarkPassiveMonitoringListening(
         DeviceConfiguration device,
-        DeviceTelemetrySnapshot latestTelemetry)
+        DateTimeOffset startedAt)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+
+        _states.AddOrUpdate(
+            device.DeviceId,
+            _ => CreateState(device, startedAt, null, "Listening"),
+            (_, current) => current with
+            {
+                LastPollStartedAt = startedAt,
+                LastOutcome = "Listening",
+                LastError = null
+            });
+
+        PublishCurrentDevices();
+    }
+
+    public void MarkPassiveTelemetryObserved(
+        DeviceConfiguration device,
+        DeviceTelemetrySnapshot latestTelemetry,
+        DateTimeOffset? lastPersistedAt,
+        string outcome,
+        string? lastError = null)
     {
         ArgumentNullException.ThrowIfNull(device);
         ArgumentNullException.ThrowIfNull(latestTelemetry);
@@ -173,12 +195,36 @@ public sealed class DeviceStateStore
             _ => CreateState(
                 device,
                 latestTelemetry.CollectedAt,
-                null,
-                "NotStarted",
-                latestTelemetry: latestTelemetry),
+                latestTelemetry.CollectedAt,
+                outcome,
+                lastError,
+                lastPersistedAt,
+                latestTelemetry),
             (_, current) => current with
             {
+                LastPollStartedAt = current.LastPollStartedAt ?? latestTelemetry.CollectedAt,
+                LastPollCompletedAt = latestTelemetry.CollectedAt,
+                LastOutcome = outcome,
+                LastError = lastError,
+                LastPersistedAt = lastPersistedAt ?? current.LastPersistedAt,
                 LatestTelemetry = SelectNewerTelemetry(current.LatestTelemetry, latestTelemetry)
+            });
+
+        PublishCurrentDevices();
+    }
+
+    public void MarkPassiveMonitoringFailed(DeviceConfiguration device, Exception exception)
+    {
+        var userFacingError = BluetoothFailureHints.Describe(exception);
+
+        _states.AddOrUpdate(
+            device.DeviceId,
+            _ => CreateState(device, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, "Failed", userFacingError),
+            (_, current) => current with
+            {
+                LastPollCompletedAt = DateTimeOffset.UtcNow,
+                LastOutcome = "Failed",
+                LastError = userFacingError
             });
 
         PublishCurrentDevices();

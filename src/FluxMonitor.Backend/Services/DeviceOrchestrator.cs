@@ -9,6 +9,7 @@ namespace FluxMonitor.Backend.Services;
 /// </summary>
 public sealed class DeviceOrchestrator(
     IDevicePollingClient pollingClient,
+    IPassiveBleAdvertisementMonitor passiveBleAdvertisementMonitor,
     ITelemetryRepository telemetryRepository,
     DeviceStateStore stateStore,
     DeviceDefinitionLoader definitionLoader,
@@ -26,6 +27,12 @@ public sealed class DeviceOrchestrator(
         pollingClient is PollingClientDispatcher dispatcher
             ? dispatcher.GetUnsupportedTransportMessage(device) ?? "Transport type is not yet supported."
             : "Transport type is not yet supported.";
+
+    private bool IsPassiveBleAdvertisementDevice(DeviceConfiguration device)
+        => device.TryResolveDefinition(definitionLoader, out var definition) &&
+           definition is not null &&
+           string.Equals(definition.Connection.Transport.Type, "ble", StringComparison.OrdinalIgnoreCase) &&
+           string.Equals(definition.Connection.Protocol.Type, "ble-advertisement", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// Apply a full device configuration set. Diffs against running devices to
@@ -103,20 +110,36 @@ public sealed class DeviceOrchestrator(
     }
 
     /// <summary>
-    /// Start a single device polling loop.
+    /// Start a single device runtime loop.
     /// </summary>
     public void StartDevice(DeviceConfiguration device, CancellationToken applicationStopping)
     {
         var cts = CancellationTokenSource.CreateLinkedTokenSource(applicationStopping);
-        var handle = new DeviceHandle(device, cts);
-        handle.Task = RunDeviceLoopAsync(device, cts.Token);
+        var mode = IsPassiveBleAdvertisementDevice(device)
+            ? DeviceExecutionMode.PassiveBleAdvertisement
+            : DeviceExecutionMode.Polling;
+        var handle = new DeviceHandle(device, cts, mode);
+        if (mode is DeviceExecutionMode.PassiveBleAdvertisement)
+        {
+            stateStore.MarkPassiveMonitoringListening(device, DateTimeOffset.UtcNow);
+            handle.Task = RunPassiveAdvertisementLoopAsync(device, cts.Token);
+            logger.LogInformation(
+                "Passive BLE advertisement listener created for {DeviceId}. DefinitionId={DefinitionId}, TransportTarget={TransportTarget}.",
+                device.DeviceId,
+                device.DefinitionId,
+                string.IsNullOrWhiteSpace(device.TransportPortName) ? "<none>" : device.TransportPortName);
+        }
+        else
+        {
+            handle.Task = RunDeviceLoopAsync(device, cts.Token);
+            logger.LogInformation(
+                "Device polling loop created for {DeviceId}. DefinitionId={DefinitionId}, PollIntervalMs={PollIntervalMs}, TransportTarget={TransportTarget}.",
+                device.DeviceId,
+                device.DefinitionId,
+                device.PollIntervalMilliseconds,
+                string.IsNullOrWhiteSpace(device.TransportPortName) ? "<none>" : device.TransportPortName);
+        }
         _handles[device.DeviceId] = handle;
-        logger.LogInformation(
-            "Device polling loop created for {DeviceId}. DefinitionId={DefinitionId}, PollIntervalMs={PollIntervalMs}, TransportTarget={TransportTarget}.",
-            device.DeviceId,
-            device.DefinitionId,
-            device.PollIntervalMilliseconds,
-            string.IsNullOrWhiteSpace(device.TransportPortName) ? "<none>" : device.TransportPortName);
     }
 
     /// <summary>
@@ -155,13 +178,17 @@ public sealed class DeviceOrchestrator(
     }
 
     /// <summary>
-    /// Stop a single device polling loop.
+    /// Stop a single device runtime loop.
     /// </summary>
     public async Task StopDeviceAsync(string deviceId)
     {
         if (_handles.TryRemove(deviceId, out var handle))
         {
-            logger.LogInformation("Stopping device polling loop for {DeviceId}.", deviceId);
+            logger.LogInformation(
+                handle.Mode is DeviceExecutionMode.PassiveBleAdvertisement
+                    ? "Stopping passive BLE advertisement listener for {DeviceId}."
+                    : "Stopping device polling loop for {DeviceId}.",
+                deviceId);
             await handle.Cts.CancelAsync();
             try { await handle.Task; } catch (OperationCanceledException) { }
             handle.Cts.Dispose();
@@ -275,6 +302,46 @@ public sealed class DeviceOrchestrator(
         }
     }
 
+    private async Task RunPassiveAdvertisementLoopAsync(DeviceConfiguration device, CancellationToken cancellationToken)
+    {
+        while (!cancellationToken.IsCancellationRequested)
+        {
+            try
+            {
+                await passiveBleAdvertisementMonitor.RunAsync(device, cancellationToken);
+                break;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (NotSupportedException exception)
+            {
+                stateStore.MarkPassiveMonitoringFailed(device, exception);
+                logger.LogWarning(
+                    "Stopping passive BLE advertisement listener for device {DeviceId}: {Message}",
+                    device.DeviceId,
+                    exception.Message);
+                break;
+            }
+            catch (Exception exception)
+            {
+                stateStore.MarkPassiveMonitoringFailed(device, exception);
+                logger.LogError(exception, "Passive BLE advertisement listener failed for device {DeviceId}.", device.DeviceId);
+
+                try
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+                    stateStore.MarkPassiveMonitoringListening(device, DateTimeOffset.UtcNow);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+            }
+        }
+    }
+
     private static bool DeviceConfigChanged(DeviceConfiguration a, DeviceConfiguration b)
     {
         return a.DefinitionId != b.DefinitionId
@@ -289,10 +356,17 @@ public sealed class DeviceOrchestrator(
             || a.BleSettingsPin != b.BleSettingsPin;
     }
 
-    private sealed class DeviceHandle(DeviceConfiguration device, CancellationTokenSource cts)
+    private enum DeviceExecutionMode
+    {
+        Polling,
+        PassiveBleAdvertisement
+    }
+
+    private sealed class DeviceHandle(DeviceConfiguration device, CancellationTokenSource cts, DeviceExecutionMode mode)
     {
         public DeviceConfiguration Device { get; } = device;
         public CancellationTokenSource Cts { get; } = cts;
+        public DeviceExecutionMode Mode { get; } = mode;
         public Task Task { get; set; } = Task.CompletedTask;
     }
 }

@@ -4,6 +4,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../co
 import { cn } from '../lib/utils';
 
 type DeviceTelemetrySnapshot = {
+  collectedAt?: string | null;
   totalVoltageVolts?: number | null;
   currentAmps?: number | null;
   stateOfChargePercent?: number | null;
@@ -12,7 +13,8 @@ type DeviceTelemetrySnapshot = {
 type DeviceRuntimeState = {
   deviceId: string;
   displayName: string;
-  protocol: string;
+  definitionId?: string;
+  protocolHandler?: string | null;
   enabled: boolean;
   isMaster: boolean;
   pollIntervalMilliseconds: number;
@@ -229,8 +231,9 @@ export function DashboardPage() {
   const storageUsagePercent = getUsagePercent(storageUsed, storageTotal);
   const applicationUptime = status ? formatDuration(status.startedAt, status.reportedAt) : noDataLabel;
   const deviceCount = status?.devices.length ?? 0;
-  const healthyDevices = status?.devices.filter((device) => device.lastOutcome === 'Succeeded').length ?? 0;
-  const failingDevices = status?.devices.filter((device) => device.lastOutcome === 'Failed' || device.lastOutcome === 'PersistFailed').length ?? 0;
+  const reportingDevices = status?.devices.filter((device) => device.lastOutcome === 'Succeeded' || device.lastOutcome === 'PersistFailed').length ?? 0;
+  const failingDevices = status?.devices.filter((device) => device.lastOutcome === 'Failed').length ?? 0;
+  const listeningDevices = status?.devices.filter((device) => device.lastOutcome === 'Listening').length ?? 0;
   const latestReport = status?.reportedAt ? formatTimestamp(status.reportedAt) : 'Waiting for first sample';
   const releaseTag = formatReleaseDisplay(status?.build);
   const sourceRevisionId = status?.build?.sourceRevisionId ?? noDataLabel;
@@ -248,7 +251,7 @@ export function DashboardPage() {
             <div>
               <h2 className='text-3xl font-bold tracking-tight text-foreground md:text-4xl'>Host health and capacity</h2>
               <p className='mt-2 max-w-2xl text-sm leading-6 text-muted-foreground'>
-                Runtime telemetry from the active Flux Monitor host, including CPU, memory, storage, and device polling health.
+                Runtime telemetry from the active Flux Monitor host, including CPU, memory, storage, and device reporting health.
               </p>
             </div>
           </div>
@@ -305,10 +308,16 @@ export function DashboardPage() {
         />
         <MetricCard
           icon={Gauge}
-          title='Device Polling'
-          value={`${healthyDevices}/${status?.enabledDeviceCount ?? 0}`}
+          title='Device Telemetry'
+          value={`${reportingDevices}/${status?.enabledDeviceCount ?? 0}`}
           accentClass={failingDevices > 0 ? 'text-rose-400' : 'text-primary'}
-          detail={failingDevices > 0 ? `${failingDevices} attention needed` : `${deviceCount} configured devices tracked`}
+          detail={
+            failingDevices > 0
+              ? `${failingDevices} attention needed`
+              : listeningDevices > 0
+                ? `${listeningDevices} listening for signals`
+                : `${deviceCount} configured devices tracked`
+          }
         />
       </div>
 
@@ -351,18 +360,23 @@ export function DashboardPage() {
             <Card className='border border-border/80 bg-card/85 shadow-sm'>
               <CardHeader className='border-b border-border/60 pb-4'>
                 <CardTitle>Device activity</CardTitle>
-                <CardDescription>Latest polling outcome for each configured BMS definition.</CardDescription>
+                <CardDescription>Latest runtime state for each configured device.</CardDescription>
               </CardHeader>
               <CardContent className='space-y-3 pt-5'>
                 {status.devices.length > 0 ? status.devices.map((device) => (
                   <article key={device.deviceId} className='rounded-2xl border border-border/70 bg-background/60 p-4'>
+                    {(() => {
+                      const isPassiveAdvertisement = device.protocolHandler === 'ble-advertisement';
+                      const lastUpdate = device.latestTelemetry?.collectedAt ?? device.lastPollCompletedAt;
+                      return (
+                        <>
                     <div className='flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between'>
                       <div>
                         <div className='flex flex-wrap items-center gap-2'>
                           <h3 className='text-sm font-semibold text-foreground'>{device.displayName}</h3>
                           {!device.enabled ? <span className='rounded-full border border-border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>Disabled</span> : null}
                         </div>
-                        <div className='mt-1 text-xs font-mono text-muted-foreground'>{device.deviceId} • {device.protocol}</div>
+                        <div className='mt-1 text-xs font-mono text-muted-foreground'>{device.deviceId} • {device.protocolHandler ?? device.definitionId ?? noDataLabel}</div>
                       </div>
                       <div className={cn('inline-flex items-center rounded-full px-3 py-1 text-xs font-semibold uppercase tracking-[0.18em]', getOutcomeClassName(device.lastOutcome))}>
                         {device.lastOutcome}
@@ -370,9 +384,9 @@ export function DashboardPage() {
                     </div>
 
                     <div className='mt-4 grid gap-3 md:grid-cols-3'>
-                      <DetailTile label='Last poll' value={formatTimestamp(device.lastPollCompletedAt)} />
+                      <DetailTile label={isPassiveAdvertisement ? 'Last signal' : 'Last poll'} value={formatTimestamp(lastUpdate)} />
                       <DetailTile label='Persisted' value={formatTimestamp(device.lastPersistedAt)} />
-                      <DetailTile label='Interval' value={`${device.pollIntervalMilliseconds.toLocaleString()} ms`} />
+                      <DetailTile label={isPassiveAdvertisement ? 'Mode' : 'Interval'} value={isPassiveAdvertisement ? 'Passive listener' : `${device.pollIntervalMilliseconds.toLocaleString()} ms`} />
                     </div>
 
                     <div className='mt-4 grid gap-3 md:grid-cols-3'>
@@ -386,6 +400,9 @@ export function DashboardPage() {
                         {device.lastError}
                       </div>
                     ) : null}
+                        </>
+                      );
+                    })()}
                   </article>
                 )) : (
                   <div className='rounded-2xl border border-dashed border-border bg-background/40 px-5 py-10 text-center text-sm text-muted-foreground'>
@@ -421,13 +438,14 @@ export function DashboardPage() {
 
             <Card className='border border-border/80 bg-card/85 shadow-sm'>
               <CardHeader className='border-b border-border/60 pb-4'>
-                <CardTitle>Polling summary</CardTitle>
-                <CardDescription>Quick view of how many configured devices are active and reporting.</CardDescription>
+                <CardTitle>Device summary</CardTitle>
+                <CardDescription>Quick view of how many configured devices are reporting, listening, or need attention.</CardDescription>
               </CardHeader>
               <CardContent className='grid gap-3 pt-5'>
                 <DetailTile label='Configured devices' value={status.configuredDeviceCount.toLocaleString()} />
                 <DetailTile label='Enabled devices' value={status.enabledDeviceCount.toLocaleString()} />
-                <DetailTile label='Healthy devices' value={healthyDevices.toLocaleString()} />
+                <DetailTile label='Reporting devices' value={reportingDevices.toLocaleString()} />
+                <DetailTile label='Listening devices' value={listeningDevices.toLocaleString()} />
                 <DetailTile label='Devices needing attention' value={failingDevices.toLocaleString()} />
               </CardContent>
             </Card>
@@ -698,6 +716,8 @@ function getOutcomeClassName(outcome: string) {
   switch (outcome) {
     case 'Succeeded':
       return 'border border-emerald-500/20 bg-emerald-500/10 text-emerald-300';
+    case 'Listening':
+      return 'border border-border bg-muted/70 text-muted-foreground';
     case 'PersistFailed':
       return 'border border-amber-500/20 bg-amber-500/10 text-amber-300';
     case 'Failed':

@@ -147,6 +147,67 @@ public class DeviceStateStoreTests
             state!.LastError);
     }
 
+    [Fact]
+    public void MarkPassiveMonitoringListening_SetsListeningOutcome()
+    {
+        var device = new DeviceConfiguration
+        {
+            DeviceId = "device-01",
+            DisplayName = "Thermometer",
+            DefinitionId = "govee-thermo-hygrometer-ble"
+        };
+
+        var store = CreateStore(
+            new BuildRuntimeInfo(),
+            CreateDefaultConfiguration(),
+            [device]);
+
+        store.MarkPassiveMonitoringListening(device, DateTimeOffset.Parse("2026-04-14T12:00:00Z"));
+
+        var state = store.GetDeviceState(device.DeviceId);
+
+        Assert.NotNull(state);
+        Assert.Equal("Listening", state!.LastOutcome);
+        Assert.Null(state.LastError);
+    }
+
+    [Fact]
+    public void MarkPassiveTelemetryObserved_PromotesStateToSucceeded()
+    {
+        var device = new DeviceConfiguration
+        {
+            DeviceId = "device-01",
+            DisplayName = "Thermometer",
+            DefinitionId = "govee-thermo-hygrometer-ble"
+        };
+
+        var store = CreateStore(
+            new BuildRuntimeInfo(),
+            CreateDefaultConfiguration(),
+            [device]);
+        var collectedAt = DateTimeOffset.Parse("2026-04-14T12:01:00Z");
+
+        store.MarkPassiveMonitoringListening(device, DateTimeOffset.Parse("2026-04-14T12:00:00Z"));
+        store.MarkPassiveTelemetryObserved(
+            device,
+            new DeviceTelemetrySnapshot
+            {
+                CollectedAt = collectedAt,
+                Cells = [],
+                ActiveWarnings = []
+            },
+            collectedAt,
+            "Succeeded");
+
+        var state = store.GetDeviceState(device.DeviceId);
+
+        Assert.NotNull(state);
+        Assert.Equal("Succeeded", state!.LastOutcome);
+        Assert.Equal(collectedAt, state.LastPollCompletedAt);
+        Assert.Equal(collectedAt, state.LastPersistedAt);
+        Assert.NotNull(state.LatestTelemetry);
+    }
+
     private static DeviceStateStore CreateStore(
         BuildRuntimeInfo buildInfo,
         MonitorConfiguration? configuration = null,
@@ -158,9 +219,10 @@ public class DeviceStateStoreTests
 
         var definitionLoader = new DeviceDefinitionLoader(
             "devices",
-            Directory.GetCurrentDirectory(),
+            ResolveRepositoryRoot(),
             new StubHttpClientFactory(),
             NullLogger<DeviceDefinitionLoader>.Instance);
+        definitionLoader.LoadAll();
 
         var config = configuration ?? CreateDefaultConfiguration();
         var deviceConfigStore = new DeviceConfigStore(
@@ -229,5 +291,19 @@ public class DeviceStateStoreTests
     private sealed class StubHttpClientFactory : IHttpClientFactory
     {
         public HttpClient CreateClient(string name) => new();
+    }
+
+    private static string ResolveRepositoryRoot()
+    {
+        var current = new DirectoryInfo(AppContext.BaseDirectory);
+        while (current is not null)
+        {
+            if (Directory.Exists(Path.Combine(current.FullName, "devices")))
+                return current.FullName;
+
+            current = current.Parent;
+        }
+
+        return Directory.GetCurrentDirectory();
     }
 }

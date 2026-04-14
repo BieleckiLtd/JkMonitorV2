@@ -18,11 +18,15 @@ public sealed class GenericBleAdvertisementPollingClient(
     DeviceConfigStore deviceConfigStore,
     DeviceDefinitionLoader definitionLoader,
     DeviceStateStore stateStore,
-    ILogger<GenericBleAdvertisementPollingClient> logger) : IDevicePollingClient, IDisposable
+    ITelemetryRepository telemetryRepository,
+    CellVoltageSmoothingFilter smoothingFilter,
+    NotificationEvaluator notificationEvaluator,
+    ILogger<GenericBleAdvertisementPollingClient> logger) : IDevicePollingClient, IPassiveBleAdvertisementMonitor, IDisposable
 {
     private readonly SemaphoreSlim _scannerLock = new(1, 1);
     private readonly object _cacheGate = new();
     private readonly Dictionary<string, AdvertisementDeviceSnapshot> _snapshots = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, AdvertisementObservationDispatchState> _observationDispatchStates = new(StringComparer.OrdinalIgnoreCase);
     private static readonly TimeSpan SnapshotMetadataRefreshInterval = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan SnapshotRefreshInterval = TimeSpan.FromSeconds(1);
     private static readonly HashSet<string> SnapshotRelevantDeviceProperties = new(StringComparer.Ordinal)
@@ -88,6 +92,32 @@ public sealed class GenericBleAdvertisementPollingClient(
 
     public Task<DevicePollResult> PollAsync(DeviceConfiguration device, CancellationToken cancellationToken)
         => throw new NotSupportedException("Advertisement polling requires the resolved device definition.");
+
+    public async Task RunAsync(DeviceConfiguration device, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(device);
+
+        if (!OperatingSystem.IsLinux())
+            throw new PlatformNotSupportedException("BLE advertisement monitoring is supported on Linux/BlueZ only.");
+
+        if (!device.TryResolveDefinition(definitionLoader, out var definition) || definition is null)
+            throw new InvalidOperationException($"Device '{device.DeviceId}' has no valid DefinitionId ('{device.DefinitionId}').");
+
+        var unsupportedReason = GetUnsupportedDefinitionMessage(definition);
+        if (unsupportedReason is not null)
+        {
+            throw new NotSupportedException(
+                $"BLE advertisement definition '{definition.Device.Id}' is not supported for device '{device.DeviceId}': {unsupportedReason}");
+        }
+
+        var identifier = device.TransportPortName?.Trim();
+        if (string.IsNullOrWhiteSpace(identifier))
+            throw new InvalidOperationException($"Device '{device.DeviceId}' has no BLE address or alias configured.");
+
+        await EnsureScannerRunningAsync(cancellationToken);
+        await ReplayLatestObservationAsync(device, definition, cancellationToken);
+        await Task.Delay(Timeout.Infinite, cancellationToken);
+    }
 
     public async Task<DevicePollResult> PollAsync(
         DeviceConfiguration device,
@@ -246,6 +276,23 @@ public sealed class GenericBleAdvertisementPollingClient(
         {
             while (await timer.WaitForNextTickAsync(cancellationToken))
             {
+                try
+                {
+                    if (!await adapter.GetAsync<bool>("Powered"))
+                        await adapter.SetAsync("Powered", true);
+
+                    if (!await adapter.GetAsync<bool>("Discovering"))
+                        await adapter.StartDiscoveryAsync();
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception exception)
+                {
+                    logger.LogDebug(exception, "Unable to keep BLE advertisement discovery active.");
+                }
+
                 IReadOnlyList<Device> devices;
                 try
                 {
@@ -569,12 +616,14 @@ public sealed class GenericBleAdvertisementPollingClient(
         if (string.IsNullOrWhiteSpace(snapshot.Address))
             return;
 
+        var hasFreshAdvertisement = previousSnapshot is null || snapshot.LastSeen > previousSnapshot.LastSeen;
+
         lock (_cacheGate)
         {
             _snapshots[snapshot.Address] = snapshot;
         }
 
-        await PublishAdvertisementObservationsAsync(snapshot);
+        await PublishAdvertisementObservationsAsync(snapshot, hasFreshAdvertisement, CancellationToken.None);
     }
 
     private static async Task<AdvertisementDeviceSnapshot> BuildSnapshotAsync(
@@ -641,8 +690,39 @@ public sealed class GenericBleAdvertisementPollingClient(
             shouldRefreshMetadata ? capturedAt : previousSnapshot?.MetadataRefreshedAt ?? capturedAt);
     }
 
-    private Task PublishAdvertisementObservationsAsync(AdvertisementDeviceSnapshot snapshot)
+    private async Task ReplayLatestObservationAsync(
+        DeviceConfiguration device,
+        DeviceDefinition definition,
+        CancellationToken cancellationToken)
     {
+        AdvertisementDeviceSnapshot? snapshot;
+        lock (_cacheGate)
+        {
+            snapshot = _snapshots.Values
+                .Where(candidate =>
+                    GenericBlePollingClient.IdentifierMatches(
+                        device.TransportPortName ?? string.Empty,
+                        candidate.Address,
+                        candidate.Alias,
+                        candidate.Name))
+                .OrderByDescending(candidate => candidate.LastSeen)
+                .FirstOrDefault();
+        }
+
+        if (snapshot is null || !TryExtractPayload(snapshot, definition, out var payloadSnapshot))
+            return;
+
+        await ProcessAdvertisementObservationAsync(device, definition, payloadSnapshot, cancellationToken);
+    }
+
+    private async Task PublishAdvertisementObservationsAsync(
+        AdvertisementDeviceSnapshot snapshot,
+        bool hasFreshAdvertisement,
+        CancellationToken cancellationToken)
+    {
+        if (!hasFreshAdvertisement)
+            return;
+
         foreach (var device in deviceConfigStore.GetDevices())
         {
             if (!device.Enabled || string.IsNullOrWhiteSpace(device.TransportPortName))
@@ -666,8 +746,7 @@ public sealed class GenericBleAdvertisementPollingClient(
 
             try
             {
-                var result = BuildResultFromPayload(payloadSnapshot, definition);
-                stateStore.MarkAdvertisementObserved(device, result.Snapshot);
+                await ProcessAdvertisementObservationAsync(device, definition, payloadSnapshot, cancellationToken);
             }
             catch (Exception exception)
             {
@@ -677,8 +756,90 @@ public sealed class GenericBleAdvertisementPollingClient(
                     device.DeviceId);
             }
         }
+    }
 
-        return Task.CompletedTask;
+    private async Task ProcessAdvertisementObservationAsync(
+        DeviceConfiguration device,
+        DeviceDefinition definition,
+        AdvertisementPayloadSnapshot payloadSnapshot,
+        CancellationToken cancellationToken)
+    {
+        if (!TryReserveObservation(device.DeviceId, payloadSnapshot, out var persistenceKey, out var shouldPersist))
+            return;
+
+        var rawSample = BuildResultFromPayload(payloadSnapshot, definition);
+        var filteredSnapshot = smoothingFilter.Apply(device, rawSample.Snapshot);
+        var sample = rawSample with { Snapshot = filteredSnapshot };
+        DateTimeOffset? persistedAt = null;
+        var outcome = "Succeeded";
+        string? persistenceError = null;
+
+        if (shouldPersist)
+        {
+            try
+            {
+                await telemetryRepository.PersistAsync(device, sample, cancellationToken);
+                persistedAt = DateTimeOffset.UtcNow;
+                MarkObservationPersisted(device.DeviceId, persistenceKey);
+            }
+            catch (Exception exception)
+            {
+                outcome = "PersistFailed";
+                persistenceError = exception.Message;
+                logger.LogError(exception, "Telemetry persistence failed for passive BLE device {DeviceId}.", device.DeviceId);
+            }
+        }
+
+        stateStore.MarkPassiveTelemetryObserved(device, sample.Snapshot, persistedAt, outcome, persistenceError);
+
+        try
+        {
+            await notificationEvaluator.EvaluateAsync(device.DeviceId, device.DisplayName, sample.Snapshot, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Notification evaluation failed for passive BLE device {DeviceId}.", device.DeviceId);
+        }
+    }
+
+    private bool TryReserveObservation(
+        string deviceId,
+        AdvertisementPayloadSnapshot payloadSnapshot,
+        out string persistenceKey,
+        out bool shouldPersist)
+    {
+        var liveUpdateKey = BuildLiveUpdateKey(payloadSnapshot);
+        persistenceKey = Convert.ToHexString(payloadSnapshot.Payload);
+
+        lock (_cacheGate)
+        {
+            _observationDispatchStates.TryGetValue(deviceId, out var current);
+            if (string.Equals(current?.LastLiveUpdateKey, liveUpdateKey, StringComparison.Ordinal))
+            {
+                shouldPersist = false;
+                return false;
+            }
+
+            shouldPersist = !string.Equals(current?.LastPersistedPayloadKey, persistenceKey, StringComparison.Ordinal);
+            _observationDispatchStates[deviceId] = new AdvertisementObservationDispatchState(liveUpdateKey, current?.LastPersistedPayloadKey);
+            return true;
+        }
+    }
+
+    private void MarkObservationPersisted(string deviceId, string persistenceKey)
+    {
+        lock (_cacheGate)
+        {
+            if (!_observationDispatchStates.TryGetValue(deviceId, out var current))
+                return;
+
+            _observationDispatchStates[deviceId] = current with { LastPersistedPayloadKey = persistenceKey };
+        }
+    }
+
+    private static string BuildLiveUpdateKey(AdvertisementPayloadSnapshot payloadSnapshot)
+    {
+        return $"{payloadSnapshot.CapturedAt:O}|{Convert.ToHexString(payloadSnapshot.Payload)}|{payloadSnapshot.Rssi?.ToString() ?? "<null>"}";
     }
 
     private static Dictionary<string, byte[]> CreateBankData(DeviceDefinition definition, byte[] payload)
@@ -1144,6 +1305,10 @@ public sealed class GenericBleAdvertisementPollingClient(
         DateTimeOffset CapturedAt,
         int? Rssi,
         int? SignalStrengthPercent);
+
+    private sealed record AdvertisementObservationDispatchState(
+        string LastLiveUpdateKey,
+        string? LastPersistedPayloadKey);
 
     private sealed record ExtractedPayloadMap(
         Dictionary<int, byte[]> Payloads,
