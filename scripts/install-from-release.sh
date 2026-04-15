@@ -16,6 +16,7 @@ CHECKSUM_ASSET_NAME="$ASSET_NAME.sha256"
 INSTALL_SCRIPT=''
 SERVICE_NAME='fluxmonitor.service'
 SERVICE_PATH="/etc/systemd/system/$SERVICE_NAME"
+MDNS_SERVICE_NAME='avahi-daemon.service'
 NETWORKMANAGER_POLKIT_RULE_PATH='/etc/polkit-1/rules.d/50-fluxmonitor-networkmanager.rules'
 NETWORKMANAGER_WIFI_POWERSAVE_CONFIG_PATH='/etc/NetworkManager/conf.d/50-fluxmonitor-wifi-powersave-off.conf'
 SYSTEMD_POLKIT_RULE_PATH='/etc/polkit-1/rules.d/51-fluxmonitor-systemd.rules'
@@ -429,6 +430,27 @@ get_access_url() {
   fi
 
   echo "$APP_LOCAL_URL"
+}
+
+get_host_name() {
+  if command -v hostname >/dev/null 2>&1; then
+    hostname 2>/dev/null | tr -d '[:space:]'
+    return
+  fi
+
+  echo ""
+}
+
+get_hostname_access_url() {
+  local host_name
+  host_name="$(get_host_name)"
+
+  if [ -n "$host_name" ]; then
+    echo "http://$host_name.local:$APP_PORT"
+    return
+  fi
+
+  echo ""
 }
 
 has_existing_runtime_configuration() {
@@ -1345,6 +1367,42 @@ configure_persistent_wifi_powersave_off() {
   fi
 }
 
+install_or_update_mdns_support() {
+  local host_name
+  local hostname_url
+
+  host_name="$(get_host_name)"
+  hostname_url="$(get_hostname_access_url)"
+
+  if [ -z "$host_name" ]; then
+    warn 'Could not determine the device hostname. Skipping .local access configuration.'
+    return 0
+  fi
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    warn "apt-get is not available on this host. Skipping automatic mDNS package installation for $hostname_url."
+    return 0
+  fi
+
+  info "Installing or updating mDNS support for $hostname_url."
+  run_elevated apt-get update >&2
+  run_elevated apt-get install -y avahi-daemon avahi-utils libnss-mdns >&2
+
+  if command -v systemctl >/dev/null 2>&1; then
+    run_elevated systemctl enable "$MDNS_SERVICE_NAME" >/dev/null 2>&1 || true
+    run_elevated systemctl restart "$MDNS_SERVICE_NAME" >/dev/null 2>&1 || true
+  fi
+
+  if command -v avahi-resolve-host-name >/dev/null 2>&1; then
+    if avahi-resolve-host-name -4 "$host_name.local" >/dev/null 2>&1; then
+      success "mDNS hostname is active: $hostname_url"
+      return 0
+    fi
+
+    warn "mDNS packages were installed, but $host_name.local did not resolve locally yet."
+  fi
+}
+
 write_configure_script() {
   cat > "$CONFIGURE_SCRIPT_PATH" <<'EOF'
 #!/usr/bin/env bash
@@ -1355,6 +1413,7 @@ APP_ROOT="$SCRIPT_ROOT/app"
 ENV_PATH="$SCRIPT_ROOT/fluxmonitor.env"
 SERVICE_NAME='fluxmonitor.service'
 APP_PORT='5074'
+APP_BIND_URL="http://[::]:$APP_PORT"
 
 get_primary_ip() {
   if command -v hostname >/dev/null 2>&1; then
@@ -1392,6 +1451,27 @@ get_access_url() {
   fi
 
   echo "http://127.0.0.1:$APP_PORT"
+}
+
+get_host_name() {
+  if command -v hostname >/dev/null 2>&1; then
+    hostname 2>/dev/null | tr -d '[:space:]'
+    return
+  fi
+
+  echo ""
+}
+
+get_hostname_access_url() {
+  local host_name
+  host_name="$(get_host_name)"
+
+  if [ -n "$host_name" ]; then
+    echo "http://$host_name.local:$APP_PORT"
+    return
+  fi
+
+  echo ""
 }
 
 writable_config="$APP_ROOT/appsettings.Production.Local.json"
@@ -1438,7 +1518,17 @@ else
 fi
 
 echo 'No devices are configured by this helper. Add them from the app after it starts.'
-echo "Open $(get_access_url) from your PC once the service is running."
+hostname_url="$(get_hostname_access_url)"
+lan_url="$(get_access_url)"
+
+if [ -n "$hostname_url" ]; then
+  echo "Open $hostname_url from your PC once the service is running."
+  if [ "$lan_url" != "$hostname_url" ]; then
+    echo "If this PC does not resolve .local hostnames, use $lan_url instead."
+  fi
+else
+  echo "Open $lan_url from your PC once the service is running."
+fi
 EOF
 
   chmod +x "$CONFIGURE_SCRIPT_PATH"
@@ -1775,8 +1865,12 @@ fi
 section 'Configuring Wi-Fi'
 configure_persistent_wifi_powersave_off
 
+section 'Configuring local hostname discovery'
+install_or_update_mdns_support
+
 ACCESS_URL="$(get_access_url 2>/dev/null)" || ACCESS_URL="$APP_LOCAL_URL"
 ACCESS_URL="${ACCESS_URL:-$APP_LOCAL_URL}"
+HOSTNAME_ACCESS_URL="$(get_hostname_access_url 2>/dev/null)" || HOSTNAME_ACCESS_URL=''
 
 INSTALL_SERVICE='n'
 if command -v systemctl >/dev/null 2>&1; then
@@ -1799,13 +1893,23 @@ if [ "${INSTALL_SERVICE,,}" = 'y' ]; then
   muted "Installed app root: $APP_ROOT"
   muted "Reusable launch command: $DESTINATION/start.sh"
   muted "Service file path: $SERVICE_PATH"
+  if [ -n "$HOSTNAME_ACCESS_URL" ]; then
+    success "Hostname access URL: $HOSTNAME_ACCESS_URL"
+  fi
   success "Local access URL: $APP_LOCAL_URL"
   success "LAN access URL: $ACCESS_URL"
   muted 'Tip: most terminals let you Ctrl+Click the URL to open it.'
   muted 'No devices are preconfigured. Add them from the app after the first start.'
 
   if wait_for_health; then
-    success "Flux Monitor is running under systemd. Open $ACCESS_URL from your PC."
+    if [ -n "$HOSTNAME_ACCESS_URL" ]; then
+      success "Flux Monitor is running under systemd. Open $HOSTNAME_ACCESS_URL from your PC."
+      if [ "$HOSTNAME_ACCESS_URL" != "$ACCESS_URL" ]; then
+        muted "If this PC does not resolve .local hostnames, use $ACCESS_URL instead."
+      fi
+    else
+      success "Flux Monitor is running under systemd. Open $ACCESS_URL from your PC."
+    fi
   else
     echo 'The systemd service was installed, but the health endpoint did not become ready in time.' >&2
     echo "Inspect service logs with: sudo journalctl -u $SERVICE_NAME -n 200 --no-pager" >&2
@@ -1820,13 +1924,23 @@ info "Environment: $ENVIRONMENT"
 muted "Installed app root: $APP_ROOT"
 muted "Reusable launch command: $DESTINATION/start.sh"
 muted "Service file path: $SERVICE_PATH"
+if [ -n "$HOSTNAME_ACCESS_URL" ]; then
+  success "Hostname access URL: $HOSTNAME_ACCESS_URL"
+fi
 success "Local access URL: $APP_LOCAL_URL"
 success "LAN access URL: $ACCESS_URL"
 muted 'Tip: most terminals let you Ctrl+Click the URL to open it.'
 muted 'No devices are preconfigured. Add them from the app after the first start.'
 
 info "Opening $APP_LOCAL_URL on the device after the backend is ready."
-success "From your PC, open $ACCESS_URL once the device is reachable on your network."
+if [ -n "$HOSTNAME_ACCESS_URL" ]; then
+  success "From your PC, open $HOSTNAME_ACCESS_URL once the device is reachable on your network."
+  if [ "$HOSTNAME_ACCESS_URL" != "$ACCESS_URL" ]; then
+    muted "If this PC does not resolve .local hostnames, use $ACCESS_URL instead."
+  fi
+else
+  success "From your PC, open $ACCESS_URL once the device is reachable on your network."
+fi
 muted 'Tip: Ctrl+Click usually works directly from the terminal output.'
 
 BROWSER_PID=''
