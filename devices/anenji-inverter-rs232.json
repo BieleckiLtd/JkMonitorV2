@@ -882,10 +882,10 @@
           {
             "type": "hero-metrics",
             "metrics": [
-              { "entity": "battery_voltage",    "icon": "battery",  "color": "emerald" },
-              { "entity": "state_of_charge",    "icon": "battery",  "color": "green" },
-              { "entity": "output_active_power","icon": "gauge",    "color": "amber" },
-              { "entity": "pv_power",           "icon": "zap",      "color": "sky" }
+              { "entity": "grid_power",         "icon": "zap",      "color": "sky",     "label": "Grid",    "format": "power-short" },
+              { "entity": "battery_power",      "icon": "battery",  "color": "emerald", "label": "Battery", "format": "power-short" },
+              { "entity": "pv_power",           "icon": "zap",      "color": "green",   "label": "Solar",   "format": "power-short" },
+              { "entity": "output_active_power","icon": "gauge",    "color": "amber",   "label": "Load",    "format": "power-short" }
             ]
           },
           {

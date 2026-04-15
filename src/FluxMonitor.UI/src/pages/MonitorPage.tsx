@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Activity, AlertTriangle, Battery, BatteryCharging, Check, ChevronDown, ChevronUp, Edit2, Gauge, LoaderCircle, Shield, Thermometer, X, Zap } from 'lucide-react';
+import { Activity, AlertTriangle, Battery, BatteryCharging, Check, ChevronDown, ChevronUp, Edit2, Gauge, Leaf, LoaderCircle, Shield, Thermometer, X, Zap } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { HistoryCharts } from '../components/HistoryCharts';
 import { cn } from '../lib/utils';
 import { getBatteryStateFromCurrent } from '../lib/batteryStatus';
 import { useDeviceDefinition } from '../hooks/useDeviceDefinition';
-import type { DeviceDefinition, UiSectionDefinition, UiStatusGlyphDefinition, UiStatusGlyphLevelDefinition } from '../types/deviceDefinition';
+import type { DeviceDefinition, UiMetricDefinition, UiSectionDefinition, UiStatusGlyphDefinition, UiStatusGlyphLevelDefinition } from '../types/deviceDefinition';
 import {
   convertTemperatureValue,
   getTemperatureDisplayUnit,
@@ -129,6 +129,7 @@ type ResolvedStatusGlyph = {
   title: string;
   toneClassName: string;
   icon: React.ReactNode;
+  variant?: 'icon' | 'badge';
 };
 
 export function MonitorPage() {
@@ -320,6 +321,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
   const dp = device.displayPrecision ?? defaultPrecision;
   const [selectedCellIndices, setSelectedCellIndices] = useState<number[]>([]);
   const isEnvironment = definition?.device.category === 'environment';
+  const isInverter = definition?.device.category === 'inverter';
   const isJkBms = definition?.device.manufacturer?.toLowerCase() === 'jk';
   const [isExpanded, setIsExpanded] = useState(false);
 
@@ -344,7 +346,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
   const paramTableSections = monitorSections?.filter(s => s.type === 'parameter-table');
 
   // Environment devices and JK BMS units use a compact expandable card.
-  if (isEnvironment || (isJkBms && telemetry)) {
+  if (isEnvironment || ((isInverter || isJkBms) && telemetry)) {
     const compactTelemetry = telemetry ?? emptyTelemetrySnapshot;
     const compactParameters = compactTelemetry.parameters ?? [];
     const compactCells = compactTelemetry.cells ?? [];
@@ -359,9 +361,11 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
     const advertisementAgeSeconds = getRelativeAdvertisementAgeSeconds(telemetry?.collectedAt, nowMs);
     const compactSections = monitorSections?.filter(section => section.type !== 'hero-metrics' && section.type !== 'parameter-table') ?? [];
     const statusGlyphDefinitions = definition?.ui?.pages?.monitor?.card?.statusGlyphs;
-    const headerStatusGlyphs = statusGlyphDefinitions != null
-      ? resolveConfiguredStatusGlyphs(statusGlyphDefinitions, compactTelemetry, compactParamByKey, nowMs, isPassiveAdvertisement)
-      : [];
+    const headerStatusGlyphs = isInverter
+      ? resolveInverterStatusGlyphs(statusGlyphDefinitions, compactTelemetry, compactParamByKey, nowMs, isPassiveAdvertisement)
+      : statusGlyphDefinitions != null
+        ? resolveConfiguredStatusGlyphs(statusGlyphDefinitions, compactTelemetry, compactParamByKey, nowMs, isPassiveAdvertisement)
+        : [];
 
     return (
       <div className='space-y-3 sm:space-y-4'>
@@ -398,7 +402,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
               {headerStatusGlyphs.length > 0 ? (
                 <>
                   {headerStatusGlyphs.map((glyph) => (
-                    <StatusGlyph key={glyph.key} title={glyph.title} toneClassName={glyph.toneClassName}>
+                    <StatusGlyph key={glyph.key} title={glyph.title} toneClassName={glyph.toneClassName} variant={glyph.variant}>
                       {glyph.icon}
                     </StatusGlyph>
                   ))}
@@ -458,6 +462,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                 const displayValue = isCelsiusUnit(sourceUnit)
                   ? convertTemperatureValue(value != null ? Number(value) : null, temperatureUnit)
                   : value != null ? Number(value) : null;
+                const metricDisplay = formatMetricDisplayValue(displayValue, unit, prec, m);
                 const chargeState = getRealtimeBatteryState(compactTelemetry, compactParamByKey);
                 const isCurrentMetric = m.entity === 'current';
                 const isPowerMetric = m.entity === 'power';
@@ -474,13 +479,13 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                 return (
                   <div key={m.entity} className='min-w-0'>
                     <div className='text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground/70'>
-                      {param?.displayName ?? entity?.name ?? m.entity}
+                      {m.label ?? param?.displayName ?? entity?.name ?? m.entity}
                     </div>
                     <div className='mt-1 flex items-baseline gap-1'>
                       <span className={cn('text-xl font-bold tracking-tight tabular-nums sm:text-2xl', accentClass)}>
-                        {fmt(displayValue, prec)}
+                        {metricDisplay.valueText}
                       </span>
-                      <span className='text-xs font-medium text-muted-foreground/70'>{unit}</span>
+                      <span className='text-xs font-medium text-muted-foreground/70'>{metricDisplay.unitText}</span>
                     </div>
                   </div>
                 );
@@ -1001,6 +1006,7 @@ function renderDefinitionSections(
                 const displayValue = isCelsiusUnit(sourceUnit)
                   ? convertTemperatureValue(value != null ? Number(value) : null, temperatureUnit)
                   : value != null ? Number(value) : null;
+                const metricDisplay = formatMetricDisplayValue(displayValue, unit, prec, m);
                 const isSoc = m.entity === 'state_of_charge';
                 const isCurrent = m.entity === 'current';
                 const isPower = m.entity === 'power';
@@ -1041,9 +1047,9 @@ function renderDefinitionSections(
                   <HeroMetric
                     key={m.entity}
                     icon={resolveIcon(m.icon)}
-                    label={param?.displayName ?? entity?.name ?? m.entity}
-                    value={fmt(displayValue, prec)}
-                    unit={unit}
+                    label={m.label ?? param?.displayName ?? entity?.name ?? m.entity}
+                    value={metricDisplay.valueText}
+                    unit={metricDisplay.unitText}
                     accent={accent}
                     subtitle={heroSubtitle}
                   />
@@ -1120,6 +1126,7 @@ const iconLookup: Record<string, typeof Zap> = {
   'battery-charging': BatteryCharging,
   thermometer: Thermometer,
   shield: Shield,
+  leaf: Leaf,
 };
 
 function resolveIcon(name?: string): typeof Zap {
@@ -1139,10 +1146,12 @@ function DeviceIcon({ name, className }: { name?: string; className?: string }) 
 function StatusGlyph({
   title,
   toneClassName,
+  variant = 'icon',
   children,
 }: {
   title: string;
   toneClassName: string;
+  variant?: 'icon' | 'badge';
   children: React.ReactNode;
 }) {
   return (
@@ -1150,7 +1159,9 @@ function StatusGlyph({
       title={title}
       aria-label={title}
       className={cn(
-        'inline-flex h-7 w-7 items-center justify-center rounded-full border border-border/70 bg-background/45',
+        variant === 'badge'
+          ? 'inline-flex min-h-7 items-center justify-center rounded-full border border-border/70 bg-background/45 px-2 text-[10px] font-semibold uppercase tracking-[0.18em]'
+          : 'inline-flex h-7 w-7 items-center justify-center rounded-full border border-border/70 bg-background/45',
         toneClassName
       )}
     >
@@ -1169,6 +1180,51 @@ function resolveConfiguredStatusGlyphs(
   return statusGlyphs
     .map((statusGlyph, index) => resolveConfiguredStatusGlyph(statusGlyph, index, telemetry, paramByKey, nowMs, isPassiveAdvertisement))
     .filter((statusGlyph): statusGlyph is ResolvedStatusGlyph => statusGlyph != null);
+}
+
+function resolveInverterStatusGlyphs(
+  statusGlyphs: UiStatusGlyphDefinition[] | undefined,
+  telemetry: DeviceTelemetrySnapshot,
+  paramByKey: Map<string, DeviceParameter>,
+  nowMs: number,
+  isPassiveAdvertisement: boolean,
+): ResolvedStatusGlyph[] {
+  const glyphs: ResolvedStatusGlyph[] = [];
+  const lastSeenGlyph = statusGlyphs?.find((glyph) => glyph.type === 'last-seen');
+
+  glyphs.push(resolveLastSeenStatusGlyph(
+    lastSeenGlyph ?? { type: 'last-seen', icon: 'pulse' },
+    0,
+    telemetry.collectedAt,
+    nowMs,
+    isPassiveAdvertisement,
+  ));
+
+  if (isInverterEcoModeEnabled(paramByKey.get('energy_saving_mode'))) {
+    glyphs.push({
+      key: 'status-eco-mode',
+      title: 'Eco mode enabled',
+      toneClassName: 'text-emerald-400',
+      icon: <Leaf className='h-4 w-4' />,
+    });
+  }
+
+  const stateOfCharge = paramByKey.get('state_of_charge')?.numericValue;
+  if (stateOfCharge != null && Number.isFinite(stateOfCharge)) {
+    glyphs.push({
+      key: 'status-state-of-charge',
+      title: `Battery ${Math.round(stateOfCharge)}%`,
+      toneClassName: getBatteryStatusToneClassName(stateOfCharge),
+      icon: <BatteryStatusGlyph percent={stateOfCharge} />,
+    });
+  }
+
+  const outputPriorityGlyph = resolveInverterOutputPriorityGlyph(paramByKey.get('output_priority'));
+  if (outputPriorityGlyph != null) {
+    glyphs.push(outputPriorityGlyph);
+  }
+
+  return glyphs;
 }
 
 function resolveConfiguredStatusGlyph(
@@ -1399,6 +1455,106 @@ function getRealtimeCurrentAmps(
     : null;
 }
 
+function isInverterEcoModeEnabled(param: DeviceParameter | undefined) {
+  if (!param) {
+    return false;
+  }
+
+  if (param.booleanValue != null) {
+    return param.booleanValue;
+  }
+
+  if (param.numericValue != null && Number.isFinite(param.numericValue)) {
+    return param.numericValue > 0;
+  }
+
+  if (param.rawValue != null && Number.isFinite(param.rawValue)) {
+    return param.rawValue > 0;
+  }
+
+  return (param.stringValue ?? '').trim().toLowerCase() === 'on';
+}
+
+function resolveInverterOutputPriorityGlyph(param: DeviceParameter | undefined): ResolvedStatusGlyph | null {
+  if (!param) {
+    return null;
+  }
+
+  const label = getInverterOutputPriorityLabel(param);
+  const badgeText = getInverterOutputPriorityCode(param, label);
+  if (!badgeText) {
+    return null;
+  }
+
+  return {
+    key: 'status-output-priority',
+    title: label ? `Output priority ${label}` : `Output priority ${badgeText}`,
+    toneClassName: 'text-sky-400',
+    icon: <span>{badgeText}</span>,
+    variant: 'badge',
+  };
+}
+
+function getInverterOutputPriorityLabel(param: DeviceParameter) {
+  if (param.stringValue && param.stringValue.trim().length > 0) {
+    return param.stringValue.trim();
+  }
+
+  const rawValue = param.rawValue ?? param.numericValue;
+  if (rawValue == null || !Number.isFinite(rawValue)) {
+    return null;
+  }
+
+  const normalizedValue = Math.round(rawValue);
+  return normalizedValue === 0
+    ? 'Utility first'
+    : normalizedValue === 1
+      ? 'PV first (SOL)'
+      : normalizedValue === 2
+        ? 'PV → Battery → Utility (SBU)'
+        : normalizedValue === 3
+          ? 'PV → Utility → Battery (SUB)'
+          : null;
+}
+
+function getInverterOutputPriorityCode(param: DeviceParameter, label: string | null) {
+  const normalizedLabel = label?.trim() ?? '';
+  const lowercaseLabel = normalizedLabel.toLowerCase();
+
+  if (lowercaseLabel.includes('utility first')) {
+    return 'SUF';
+  }
+
+  const labelCodeMatch = normalizedLabel.match(/\(([A-Z]{3})\)/);
+  if (labelCodeMatch) {
+    return labelCodeMatch[1];
+  }
+
+  const rawValue = param.rawValue ?? param.numericValue;
+  if (rawValue == null || !Number.isFinite(rawValue)) {
+    return null;
+  }
+
+  const normalizedValue = Math.round(rawValue);
+  if (normalizedValue === 0) {
+    return 'SUF';
+  }
+
+  if (normalizedValue === 1) {
+    return 'SOL';
+  }
+
+  if (normalizedValue === 2) {
+    return 'SBU';
+  }
+
+  if (normalizedValue === 3) {
+    return 'SUB';
+  }
+
+  return null;
+}
+
 function getRealtimeBatteryState(
   telemetry: DeviceTelemetrySnapshot,
   paramByKey: Map<string, DeviceParameter>,
@@ -1503,6 +1659,30 @@ function normalizeStatusPercent(percent: number | null | undefined) {
   }
 
   return Math.max(0, Math.min(100, Math.round(percent)));
+}
+
+function formatMetricDisplayValue(
+  value: number | null | undefined,
+  unit: string | null | undefined,
+  decimals: number,
+  metric?: UiMetricDefinition,
+) {
+  if (metric?.format === 'power-short' && unit?.toLowerCase() === 'w') {
+    if (value == null || !Number.isFinite(value)) {
+      return { valueText: nd, unitText: 'W' };
+    }
+
+    if (Math.abs(value) > 500) {
+      return { valueText: (value / 1000).toFixed(1), unitText: 'kW' };
+    }
+
+    return { valueText: Math.round(value).toLocaleString(), unitText: 'W' };
+  }
+
+  return {
+    valueText: fmt(value, decimals),
+    unitText: unit ?? '',
+  };
 }
 
 function getBatteryStatusToneClassName(percent: number | null | undefined) {

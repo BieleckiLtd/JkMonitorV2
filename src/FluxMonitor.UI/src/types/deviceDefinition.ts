@@ -230,8 +230,10 @@ export type UiSectionDefinition = {
 
 export type UiMetricDefinition = {
   entity: string;
-  icon: string;
+  icon?: string;
   color: string;
+  label?: string;
+  format?: 'power-short';
 };
 
 export type UiFilterDefinition = {

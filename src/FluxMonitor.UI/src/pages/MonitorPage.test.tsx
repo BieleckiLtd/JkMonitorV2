@@ -610,4 +610,187 @@ describe('MonitorPage', () => {
     expect(await screen.findByTestId('history-charts')).toHaveTextContent('History for jk-1');
     expect(screen.getByText('Charge Switch')).toBeInTheDocument();
   });
+
+  it('renders inverter cards as compact expandable summaries with power units and header badges', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-04-12T12:00:04.000Z').getTime());
+
+    useDeviceDefinitionMock.mockReturnValue({
+      version: '1',
+      device: {
+        id: 'anenji-inverter-rs232',
+        name: 'Anenji Inverter',
+        manufacturer: 'Anenji / Easun',
+        model: 'ANJ-HHS-11000W-48V',
+        category: 'inverter',
+        icon: 'zap',
+      },
+      connection: {
+        transport: { type: 'serial', defaults: {} },
+        protocol: { type: 'modbus-rtu', settings: {} },
+      },
+      dataSources: [],
+      pollGroups: {},
+      entities: [
+        {
+          id: 'grid_power',
+          type: 'number',
+          name: 'Grid Power',
+          category: 'Grid',
+          source: { bank: 'live', byteOffset: 0, unit: 'W' },
+          display: { precision: 0 },
+        },
+        {
+          id: 'battery_power',
+          type: 'number',
+          name: 'Battery Power',
+          category: 'Battery',
+          source: { bank: 'live', byteOffset: 2, unit: 'W' },
+          display: { precision: 0 },
+        },
+        {
+          id: 'pv_power',
+          type: 'number',
+          name: 'PV Power',
+          category: 'Solar',
+          source: { bank: 'live', byteOffset: 4, unit: 'W' },
+          display: { precision: 0 },
+        },
+        {
+          id: 'output_active_power',
+          type: 'number',
+          name: 'Output Active Power',
+          category: 'Output',
+          source: { bank: 'live', byteOffset: 6, unit: 'W' },
+          display: { precision: 0 },
+        },
+        {
+          id: 'state_of_charge',
+          type: 'number',
+          name: 'State of Charge',
+          category: 'Battery',
+          source: { bank: 'live', byteOffset: 8, unit: '%' },
+          display: { precision: 0 },
+        },
+      ],
+      computedEntities: [],
+      ui: {
+        pages: {
+          monitor: {
+            card: {
+              statusGlyphs: [
+                {
+                  type: 'last-seen',
+                  icon: 'pulse',
+                  levels: [
+                    { maxAgeSeconds: 10, color: 'green', label: 'less than 10 seconds ago' },
+                    { maxAgeSeconds: 300, color: 'orange', label: 'less than 5 minutes ago' },
+                    { color: 'red', label: 'more than 5 minutes ago' },
+                  ],
+                },
+              ],
+            },
+            sections: [
+              {
+                type: 'hero-metrics',
+                metrics: [
+                  { entity: 'grid_power', color: 'sky', label: 'Grid', format: 'power-short' },
+                  { entity: 'battery_power', color: 'emerald', label: 'Battery', format: 'power-short' },
+                  { entity: 'pv_power', color: 'green', label: 'Solar', format: 'power-short' },
+                  { entity: 'output_active_power', color: 'amber', label: 'Load', format: 'power-short' },
+                ],
+              },
+              {
+                type: 'parameter-table',
+                title: 'Settings',
+                filter: { writable: true },
+              },
+            ],
+          },
+        },
+      },
+    } satisfies DeviceDefinition);
+
+    class FakeEventSource {
+      static instances: FakeEventSource[] = [];
+
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      close = vi.fn();
+
+      constructor(public readonly url: string) {
+        FakeEventSource.instances.push(this);
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }));
+      }
+    }
+
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    render(<MonitorPage />);
+
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(1);
+    });
+
+    FakeEventSource.instances[0]?.emit({
+      devices: [
+        {
+          deviceId: 'inv-1',
+          displayName: 'Garage Inverter',
+          definitionId: 'anenji-inverter-rs232',
+          protocolHandler: 'modbus-rtu',
+          enabled: true,
+          isMaster: true,
+          pollIntervalMilliseconds: 5000,
+          lastOutcome: 'Succeeded',
+          latestTelemetry: {
+            collectedAt: '2026-04-12T12:00:00.000Z',
+            cells: [],
+            activeWarnings: [],
+            parameters: [
+              { key: 'grid_power', displayName: 'Grid Power', category: 'Grid', numericValue: 90, sortOrder: 0, unit: 'W' },
+              { key: 'battery_power', displayName: 'Battery Power', category: 'Battery', numericValue: 620, sortOrder: 1, unit: 'W' },
+              { key: 'pv_power', displayName: 'PV Power', category: 'Solar', numericValue: 1280, sortOrder: 2, unit: 'W' },
+              { key: 'output_active_power', displayName: 'Output Active Power', category: 'Output', numericValue: 540, sortOrder: 3, unit: 'W' },
+              { key: 'state_of_charge', displayName: 'State of Charge', category: 'Battery', numericValue: 78, sortOrder: 4, unit: '%' },
+              { key: 'energy_saving_mode', displayName: 'Eco Mode', category: 'Power Management', numericValue: 1, stringValue: 'On', sortOrder: 5, unit: '' },
+              { key: 'output_priority', displayName: 'Output Priority', category: 'Power Management', numericValue: 0, stringValue: 'Utility first (UTI)', sortOrder: 6, unit: '' },
+              { key: 'max_charge_current', displayName: 'Max Charge Current', category: 'Settings', numericValue: 100, rawValue: 100, sortOrder: 7, isWritable: true, unit: 'A' },
+              { key: 'output_apparent_power', displayName: 'Output Apparent Power', category: 'Output', numericValue: 900, sortOrder: 8, unit: 'VA' },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(await screen.findByText('Garage Inverter')).toBeInTheDocument();
+    expect(screen.getByTitle('Last seen less than 10 seconds ago (2026-04-12T12:00:00.000Z)')).toBeInTheDocument();
+    expect(screen.getByTitle('Eco mode enabled')).toHaveClass('text-emerald-400');
+    expect(screen.getByTitle('Battery 78%')).toBeInTheDocument();
+    expect(screen.getByTitle('Output priority Utility first (UTI)')).toBeInTheDocument();
+    expect(screen.getByText('SUF')).toBeInTheDocument();
+    expect(screen.getByText('Grid')).toBeInTheDocument();
+    expect(screen.getByText('Battery')).toBeInTheDocument();
+    expect(screen.getByText('Solar')).toBeInTheDocument();
+    expect(screen.getByText('Load')).toBeInTheDocument();
+    expect(screen.getByText('90')).toBeInTheDocument();
+    expect(screen.getByText('0.6')).toBeInTheDocument();
+    expect(screen.getByText('1.3')).toBeInTheDocument();
+    expect(screen.getByText('0.5')).toBeInTheDocument();
+    expect(screen.getAllByText('kW')).toHaveLength(3);
+    expect(screen.getByText('W')).toBeInTheDocument();
+    expect(screen.queryByText('Max Charge Current')).not.toBeInTheDocument();
+    expect(screen.queryByText(/VA/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /garage inverter/i }));
+
+    expect(await screen.findByTestId('history-charts')).toHaveTextContent('History for inv-1');
+    expect(screen.getByText('Max Charge Current')).toBeInTheDocument();
+  });
 });

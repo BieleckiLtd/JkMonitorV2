@@ -34,6 +34,8 @@ import time
 import sys
 import json
 import argparse
+import urllib.error
+import urllib.request
 from datetime import datetime
 
 # ─── Modbus RTU helpers ───────────────────────────────────────────
@@ -586,6 +588,174 @@ def build_json(regs):
     return d
 
 
+# ─── FluxMonitor API fallback ────────────────────────────────────
+
+DEFAULT_API_BASE = 'http://127.0.0.1:5074'
+DEFAULT_API_DEFINITION_ID = 'anenji-inverter-rs232'
+
+
+def is_port_busy_error(exc):
+    """Return True when pyserial failed because another process owns the port."""
+    errno_value = getattr(exc, 'errno', None)
+    if errno_value == 16:
+        return True
+
+    message = str(exc).lower()
+    return 'errno 16' in message or 'device or resource busy' in message
+
+
+def api_get_json(url, timeout=2.0):
+    """Fetch and decode JSON from the FluxMonitor HTTP API."""
+    with urllib.request.urlopen(url, timeout=timeout) as response:
+        return json.loads(response.read().decode('utf-8'))
+
+
+def encode_ascii_registers(text, start):
+    """Encode ASCII text into consecutive 16-bit registers."""
+    regs = {}
+    if not text:
+        return regs
+
+    data = text.encode('ascii', errors='ignore')
+    for i in range(0, len(data), 2):
+        hi = data[i]
+        lo = data[i + 1] if i + 1 < len(data) else 0
+        regs[start + i // 2] = (hi << 8) | lo
+    return regs
+
+
+def set_quantized_reg(regs, addr, value, scale=1, signed=False):
+    """Store a numeric value into a synthetic register using the requested scale."""
+    if value is None:
+        return
+
+    raw = int(round(float(value) / scale))
+    if signed:
+        raw &= 0xFFFF
+    regs[addr] = raw
+
+
+def get_parameter_map(device):
+    """Index FluxMonitor parameter objects by key."""
+    telemetry = device.get('latestTelemetry') or {}
+    parameters = telemetry.get('parameters') or []
+    return {
+        parameter.get('key'): parameter
+        for parameter in parameters
+        if parameter.get('key')
+    }
+
+
+def get_parameter_value(params, key, field='numericValue'):
+    """Read a field from a FluxMonitor parameter entry."""
+    parameter = params.get(key)
+    if not parameter:
+        return None
+    return parameter.get(field)
+
+
+def choose_api_device(devices, device_id=None):
+    """Find the best inverter device from /api/devices/current."""
+    if device_id:
+        for device in devices:
+            if device.get('deviceId') == device_id:
+                return device
+
+    exact_matches = [
+        device for device in devices
+        if device.get('definitionId') == DEFAULT_API_DEFINITION_ID
+    ]
+    if exact_matches:
+        return exact_matches[0]
+
+    for device in devices:
+        name = (device.get('displayName') or '').lower()
+        definition = (device.get('definitionId') or '').lower()
+        if 'anenji' in name or 'easun' in name or 'smg' in name or 'anenji' in definition:
+            return device
+
+    return None
+
+
+def build_regs_from_api_device(device):
+    """Convert FluxMonitor's latest snapshot into synthetic Modbus registers."""
+    regs = {}
+    params = get_parameter_map(device)
+
+    # Model-specific identity exposed by this script's target inverter family.
+    regs[171] = 0x7300
+
+    regs.update(encode_ascii_registers(
+        get_parameter_value(params, 'firmware_version', 'stringValue'),
+        754))
+
+    set_quantized_reg(regs, 691, get_parameter_value(params, 'rated_power'))
+    set_quantized_reg(regs, 201, get_parameter_value(params, 'operating_mode'))
+    set_quantized_reg(regs, 203, get_parameter_value(params, 'mains_frequency'), scale=0.01, signed=True)
+    set_quantized_reg(regs, 209, get_parameter_value(params, 'ac_charging_power'), signed=True)
+    set_quantized_reg(regs, 223, get_parameter_value(params, 'pv_power'), signed=True)
+    set_quantized_reg(regs, 224, get_parameter_value(params, 'pv_charging_power'), signed=True)
+    set_quantized_reg(regs, 225, get_parameter_value(params, 'load_percent'))
+    set_quantized_reg(regs, 227, get_parameter_value(params, 'output_frequency'), scale=0.01, signed=True)
+    set_quantized_reg(regs, 231, get_parameter_value(params, 'inv_temperature'), signed=True)
+    set_quantized_reg(regs, 277, get_parameter_value(params, 'battery_voltage'), scale=0.1, signed=True)
+    set_quantized_reg(regs, 278, get_parameter_value(params, 'battery_current'), scale=0.1, signed=True)
+    set_quantized_reg(regs, 279, get_parameter_value(params, 'battery_power'), signed=True)
+    set_quantized_reg(regs, 280, get_parameter_value(params, 'state_of_charge'))
+    set_quantized_reg(regs, 281, get_parameter_value(params, 'dc_temperature'), signed=True)
+    set_quantized_reg(regs, 305, get_parameter_value(params, 'pv_temperature'), signed=True)
+    set_quantized_reg(regs, 338, get_parameter_value(params, 'grid_voltage'), scale=0.1, signed=True)
+    set_quantized_reg(regs, 340, get_parameter_value(params, 'grid_power'), signed=True)
+    set_quantized_reg(regs, 346, get_parameter_value(params, 'output_voltage'), scale=0.1, signed=True)
+    set_quantized_reg(regs, 347, get_parameter_value(params, 'output_current'), scale=0.1, signed=True)
+    set_quantized_reg(regs, 348, get_parameter_value(params, 'output_active_power'), signed=True)
+    set_quantized_reg(regs, 349, get_parameter_value(params, 'output_apparent_power'), signed=True)
+    set_quantized_reg(regs, 601, get_parameter_value(params, 'output_priority'))
+    set_quantized_reg(regs, 605, get_parameter_value(params, 'charge_priority'))
+    set_quantized_reg(regs, 606, get_parameter_value(params, 'output_voltage_setting'), scale=0.1)
+    set_quantized_reg(regs, 607, get_parameter_value(params, 'output_frequency_setting'), scale=0.01)
+    set_quantized_reg(regs, 630, get_parameter_value(params, 'battery_type'))
+    set_quantized_reg(regs, 631, get_parameter_value(params, 'battery_ovp'), scale=0.1)
+    set_quantized_reg(regs, 632, get_parameter_value(params, 'output_priority'))
+    set_quantized_reg(regs, 636, get_parameter_value(params, 'charge_priority'))
+    set_quantized_reg(regs, 637, get_parameter_value(params, 'max_charge_voltage'), scale=0.1)
+    set_quantized_reg(regs, 638, get_parameter_value(params, 'float_charge_voltage'), scale=0.1)
+    set_quantized_reg(regs, 640, get_parameter_value(params, 'max_charge_current'), scale=0.1)
+    set_quantized_reg(regs, 641, get_parameter_value(params, 'max_mains_charge_current'), scale=0.1)
+    set_quantized_reg(regs, 642, get_parameter_value(params, 'max_discharge_current'))
+    set_quantized_reg(regs, 643, get_parameter_value(params, 'mains_discharge_recovery_v'), scale=0.1)
+    set_quantized_reg(regs, 644, get_parameter_value(params, 'mains_low_voltage_v'), scale=0.1)
+    set_quantized_reg(regs, 646, get_parameter_value(params, 'offgrid_low_voltage_v'), scale=0.1)
+    set_quantized_reg(regs, 647, get_parameter_value(params, 'low_dc_protection_soc'))
+    set_quantized_reg(regs, 648, get_parameter_value(params, 'low_dc_recovery_soc'))
+    set_quantized_reg(regs, 650, get_parameter_value(params, 'battery_cutoff_soc'))
+    set_quantized_reg(regs, 677, get_parameter_value(params, 'input_mode'))
+    set_quantized_reg(regs, 679, get_parameter_value(params, 'lcd_backlight'))
+    set_quantized_reg(regs, 681, get_parameter_value(params, 'energy_saving_mode'))
+
+    return regs
+
+
+def read_api_registers(api_base, device_id=None):
+    """Fetch the current inverter snapshot from FluxMonitor and map it to registers."""
+    url = api_base.rstrip('/') + '/api/devices/current'
+    payload = api_get_json(url)
+    devices = payload if isinstance(payload, list) else payload.get('devices')
+    if not isinstance(devices, list):
+        raise RuntimeError('Unexpected response from FluxMonitor device API')
+
+    device = choose_api_device(devices, device_id=device_id)
+    if device is None:
+        raise RuntimeError('No Anenji/Easun inverter device found in FluxMonitor API')
+
+    telemetry = device.get('latestTelemetry')
+    if not telemetry:
+        outcome = device.get('lastOutcome') or 'Unknown'
+        raise RuntimeError('Inverter device has no latest telemetry in FluxMonitor (last outcome: %s)' % outcome)
+
+    return build_regs_from_api_device(device), device
+
+
 # ─── Optimized register read ranges ──────────────────────────────
 
 LIVE_RANGES = [
@@ -636,6 +806,8 @@ def main():
     parser.add_argument('--port', default='/dev/ttyAMA0', help='Serial port (default: /dev/ttyAMA0)')
     parser.add_argument('--baud', type=int, default=9600, help='Baud rate (default: 9600)')
     parser.add_argument('--slave', type=int, default=1, help='Modbus slave ID (default: 1)')
+    parser.add_argument('--api-base', default=DEFAULT_API_BASE, help='FluxMonitor API base for busy-port fallback (default: http://127.0.0.1:5074)')
+    parser.add_argument('--api-device-id', help='Specific FluxMonitor deviceId to use for busy-port fallback')
     parser.add_argument('--json', action='store_true', help='Output as JSON')
     parser.add_argument('--raw', action='store_true', help='Dump all non-zero registers')
     parser.add_argument('--live', action='store_true', help='Compact live-data-only output')
@@ -644,12 +816,40 @@ def main():
     parser.add_argument('--scan', action='store_true', help='Full 0-999 register scan (use with --raw)')
     args = parser.parse_args()
 
-    ser = serial.Serial(args.port, args.baud, timeout=0.5)
-    time.sleep(0.3)
+    ser = None
+    use_api_fallback = False
+
+    try:
+        ser = serial.Serial(args.port, args.baud, timeout=0.5)
+        time.sleep(0.3)
+    except serial.SerialException as exc:
+        if not is_port_busy_error(exc):
+            raise
+
+        if args.raw or args.scan:
+            print(
+                'ERROR: %s is busy and --raw/--scan require direct serial access; API fallback cannot provide raw registers.' % args.port,
+                file=sys.stderr)
+            sys.exit(1)
+
+        try:
+            read_api_registers(args.api_base, args.api_device_id)
+            use_api_fallback = True
+            print(
+                'INFO: %s is busy; falling back to FluxMonitor API at %s' % (args.port, args.api_base),
+                file=sys.stderr)
+        except Exception as api_exc:
+            print('ERROR: could not open port %s: %s' % (args.port, exc), file=sys.stderr)
+            print(
+                'ERROR: FluxMonitor API fallback also failed: %s' % api_exc,
+                file=sys.stderr)
+            sys.exit(1)
 
     try:
         while True:
-            if args.raw:
+            if use_api_fallback:
+                regs, _device = read_api_registers(args.api_base, args.api_device_id)
+            elif args.raw:
                 regs = read_all_registers(ser, args.slave)
             elif args.fast or args.live:
                 regs = read_live_registers(ser, args.slave)
@@ -657,7 +857,10 @@ def main():
                 regs = read_full_registers(ser, args.slave)
 
             if not regs:
-                print('ERROR: No response from inverter', file=sys.stderr)
+                if use_api_fallback:
+                    print('ERROR: No inverter snapshot available from FluxMonitor API', file=sys.stderr)
+                else:
+                    print('ERROR: No response from inverter', file=sys.stderr)
                 if args.loop:
                     time.sleep(args.loop)
                     continue
@@ -681,7 +884,8 @@ def main():
     except KeyboardInterrupt:
         pass
     finally:
-        ser.close()
+        if ser is not None:
+            ser.close()
 
 if __name__ == '__main__':
     main()
