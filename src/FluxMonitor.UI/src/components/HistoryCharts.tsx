@@ -156,6 +156,7 @@ const cellColorPalette = [
 /** Maps definition color names to hex values used by Recharts. */
 const definitionColorMap: Record<string, string> = {
   emerald: '#34d399', green: '#34d399', blue: '#38bdf8', sky: '#38bdf8',
+  gray: '#94a3b8', grey: '#94a3b8',
   amber: '#fbbf24', yellow: '#fbbf24', red: '#f87171', rose: '#f87171',
   purple: '#a78bfa', violet: '#a78bfa', teal: '#2dd4bf', orange: '#fb923c',
 };

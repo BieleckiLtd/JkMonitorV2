@@ -81,10 +81,10 @@ type DisplayPrecision = {
 
 const defaultPrecision: DisplayPrecision = { voltage: 2, cellVoltage: 3, current: 1, power: 0, temperature: 1, soc: 0, deltaVoltage: 3 };
 const inverterCompactHeroMetrics: UiMetricDefinition[] = [
-  { entity: 'grid_power', icon: 'zap', color: 'sky', label: 'Grid', format: 'power-short' },
+  { entity: 'grid_power', icon: 'zap', color: 'gray', label: 'Grid', format: 'power-short' },
   { entity: 'battery_power', icon: 'battery', color: 'emerald', label: 'Battery', format: 'power-short' },
-  { entity: 'pv_power', icon: 'zap', color: 'green', label: 'Solar', format: 'power-short' },
-  { entity: 'output_active_power', icon: 'gauge', color: 'amber', label: 'Load', format: 'power-short' },
+  { entity: 'pv_power', icon: 'zap', color: 'amber', label: 'Solar', format: 'power-short' },
+  { entity: 'output_active_power', icon: 'gauge', color: 'blue', label: 'Load', format: 'power-short' },
 ];
 
 type DeviceRuntimeState = {
@@ -1838,6 +1838,8 @@ const colorClassLookup: Record<string, string> = {
   green: 'text-emerald-400',
   blue: 'text-sky-400',
   sky: 'text-sky-400',
+  gray: 'text-slate-300',
+  grey: 'text-slate-300',
   amber: 'text-amber-400',
   yellow: 'text-amber-400',
   red: 'text-rose-400',
