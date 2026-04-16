@@ -72,6 +72,12 @@ type DisplayPrecision = {
 };
 
 const defaultPrecision: DisplayPrecision = { voltage: 2, cellVoltage: 3, current: 1, power: 0, temperature: 1, soc: 0, deltaVoltage: 3 };
+const inverterCompactHeroMetrics: UiMetricDefinition[] = [
+  { entity: 'grid_power', icon: 'zap', color: 'sky', label: 'Grid', format: 'power-short' },
+  { entity: 'battery_power', icon: 'battery', color: 'emerald', label: 'Battery', format: 'power-short' },
+  { entity: 'pv_power', icon: 'zap', color: 'green', label: 'Solar', format: 'power-short' },
+  { entity: 'output_active_power', icon: 'gauge', color: 'amber', label: 'Load', format: 'power-short' },
+];
 
 type DeviceRuntimeState = {
   deviceId: string;
@@ -353,7 +359,9 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
     const compactWarnings = compactTelemetry.activeWarnings ?? [];
     const compactParamByKey = new Map(compactParameters.map(p => [p.key, p]));
     const heroSection = monitorSections?.find(s => s.type === 'hero-metrics');
-    const heroMetrics = heroSection?.metrics ?? [];
+    const heroMetrics = isInverter
+      ? inverterCompactHeroMetrics
+      : heroSection?.metrics ?? [];
     const batteryParam = compactParamByKey.get('battery_pct');
     const batteryValue = batteryParam?.numericValue;
     const signalValue = compactParamByKey.get('signal_strength_pct')?.numericValue;

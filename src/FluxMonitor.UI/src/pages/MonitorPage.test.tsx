@@ -671,6 +671,14 @@ describe('MonitorPage', () => {
           source: { bank: 'live', byteOffset: 8, unit: '%' },
           display: { precision: 0 },
         },
+        {
+          id: 'battery_voltage',
+          type: 'number',
+          name: 'Battery Voltage',
+          category: 'Battery',
+          source: { bank: 'live', byteOffset: 10, unit: 'V' },
+          display: { precision: 1 },
+        },
       ],
       computedEntities: [],
       ui: {
@@ -693,10 +701,10 @@ describe('MonitorPage', () => {
               {
                 type: 'hero-metrics',
                 metrics: [
-                  { entity: 'grid_power', color: 'sky', label: 'Grid', format: 'power-short' },
-                  { entity: 'battery_power', color: 'emerald', label: 'Battery', format: 'power-short' },
-                  { entity: 'pv_power', color: 'green', label: 'Solar', format: 'power-short' },
-                  { entity: 'output_active_power', color: 'amber', label: 'Load', format: 'power-short' },
+                  { entity: 'battery_voltage', color: 'emerald' },
+                  { entity: 'state_of_charge', color: 'green' },
+                  { entity: 'output_active_power', color: 'amber' },
+                  { entity: 'pv_power', color: 'sky' },
                 ],
               },
               {
