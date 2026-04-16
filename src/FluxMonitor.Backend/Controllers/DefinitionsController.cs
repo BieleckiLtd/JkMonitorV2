@@ -14,11 +14,18 @@ public sealed class DefinitionsController(
     PollingClientDispatcher pollingClientDispatcher,
     IConfiguration configuration) : ControllerBase
 {
+    private void RefreshLocalDefinitions()
+    {
+        definitionLoader.LoadAll();
+    }
+
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] bool includeRemote = false,
         CancellationToken cancellationToken = default)
     {
+        RefreshLocalDefinitions();
+
         if (includeRemote && configuration.GetValue("Monitor:EnableRemoteDeviceDefinitions", true))
         {
             await definitionLoader.EnsureRemoteDefinitionsLoadedAsync(cancellationToken);
@@ -44,6 +51,8 @@ public sealed class DefinitionsController(
     [HttpGet("{id}")]
     public IActionResult GetById(string id, [FromQuery] bool preferCatalog = false)
     {
+        RefreshLocalDefinitions();
+
         if (preferCatalog &&
             definitionLoader.TryGet(id, out var catalogDefinition) &&
             catalogDefinition is not null)
@@ -62,6 +71,8 @@ public sealed class DefinitionsController(
     [HttpGet("{id}/entities")]
     public IActionResult GetEntities(string id)
     {
+        RefreshLocalDefinitions();
+
         if (!TryResolveDefinition(id, out var definition) || definition is null)
         {
             return NotFound(new { message = $"Device definition '{id}' not found." });
@@ -90,6 +101,8 @@ public sealed class DefinitionsController(
     [HttpGet("{id}/ui/{page}")]
     public IActionResult GetUiPage(string id, string page)
     {
+        RefreshLocalDefinitions();
+
         if (!TryResolveDefinition(id, out var definition) || definition is null)
         {
             return NotFound(new { message = $"Device definition '{id}' not found." });

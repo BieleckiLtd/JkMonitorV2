@@ -708,19 +708,52 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
   todayXTicks?: string[];
   subtitle?: React.ReactNode;
 }) {
-  // Build a formatter that rounds tooltip values based on precision config.
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tooltipFormatter: any = useCallback((value: unknown, name: string, props: { dataKey?: string | number }) => {
-    const num = typeof value === 'number' ? value : Number(value);
-    if (Number.isNaN(num)) return [String(value), name];
-    const key = String(props.dataKey ?? '');
-    const decimals = getDecimalsForKey(key);
-    const suffix = getUnitForKey(key);
-    return [`${num.toFixed(decimals)}${suffix}`, name];
-  }, [getDecimalsForKey, getUnitForKey]);
-
   const activePoint = getActivePoint(data, hoveredTime, selectedTime);
   const activeValueText = lines.length === 1 ? formatActiveValues(activePoint, lines, getDecimalsForKey, getUnitForKey) : null;
+  const renderTooltipContent = useCallback((tooltipState: {
+    active?: boolean;
+    label?: string | number;
+    payload?: ReadonlyArray<{ payload?: Record<string, unknown> }>;
+  }) => {
+    if (!tooltipState.active) {
+      return null;
+    }
+
+    const tooltipPoint = tooltipState.payload?.[0]?.payload ?? activePoint;
+    if (!tooltipPoint) {
+      return null;
+    }
+
+    const rows = lines.map((line) => {
+      const raw = tooltipPoint[line.key];
+      if (raw == null) {
+        return { name: line.name, value: 'N/D', color: line.color };
+      }
+
+      const num = typeof raw === 'number' ? raw : Number(raw);
+      if (Number.isNaN(num)) {
+        return { name: line.name, value: String(raw), color: line.color };
+      }
+
+      const decimals = getDecimalsForKey(line.key);
+      const suffix = getUnitForKey(line.key);
+      return { name: line.name, value: `${num.toFixed(decimals)}${suffix}`, color: line.color };
+    });
+
+    return (
+      <div style={tooltipContentStyle}>
+        <div style={tooltipLabelStyle}>{String(tooltipState.label ?? '')}</div>
+        <div className='mt-2 space-y-1'>
+          {rows.map((row) => (
+            <div key={row.name} className='flex items-center justify-between gap-4 text-[12px]'>
+              <span style={{ color: row.color }}>{row.name}</span>
+              <span>{row.value}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }, [activePoint, getDecimalsForKey, getUnitForKey, lines]);
 
   const handleChartMove = useCallback((state: unknown) => {
     const idx = extractActiveIndex(state);
@@ -779,10 +812,7 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
           <XAxis dataKey='time' tick={xTickStyle} tickLine={false} axisLine={false} {...(todayXTicks ? { ticks: todayXTicks } : {})} />
           <YAxis orientation='right' width={32} tick={yTickStyle} tickLine={false} axisLine={false} domain={domain ?? ['auto', 'auto']} />
           <Tooltip
-            contentStyle={tooltipContentStyle}
-            labelStyle={tooltipLabelStyle}
-            itemStyle={{ color: 'var(--foreground)' }}
-            formatter={tooltipFormatter}
+            content={renderTooltipContent}
           />
           <Legend wrapperStyle={legendStyle} />
           {lines.map((l) => (

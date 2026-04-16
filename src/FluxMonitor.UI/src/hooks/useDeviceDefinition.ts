@@ -22,14 +22,15 @@ export function useDeviceDefinition(definitionId: string | null | undefined) {
     const cached = definitionCache.get(definitionId);
     if (cached) {
       setDefinition(cached);
-      return;
+    } else {
+      setDefinition(null);
     }
 
     let cancelled = false;
 
     const load = async () => {
       try {
-        const resp = await fetch(`/api/definitions/${encodeURIComponent(definitionId)}`);
+        const resp = await fetch(`/api/definitions/${encodeURIComponent(definitionId)}`, { cache: 'no-store' });
         if (!resp.ok || cancelled) return;
         const data = (await resp.json()) as DeviceDefinition;
         definitionCache.set(definitionId, data);
