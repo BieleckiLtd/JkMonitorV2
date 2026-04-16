@@ -76,6 +76,48 @@ public sealed class DefinitionDrivenTelemetryBuilderTests
         Assert.Equal(51.200m, smartSleep!.NumericValue);
     }
 
+    [Fact]
+    public void BuildPollResult_ParsesSignedInverterLoadRegisterWithoutOffsetError()
+    {
+        var loader = new DeviceDefinitionLoader(
+            "devices",
+            RepositoryRoot,
+            new StubHttpClientFactory(),
+            NullLogger<DeviceDefinitionLoader>.Instance);
+        loader.LoadFromJson(File.ReadAllText(Path.Combine(RepositoryRoot, "devices", "anenji-inverter-rs232.json")));
+
+        var definition = loader.Get("anenji-inverter-rs232");
+        var liveMain = new byte[34];
+        var liveAc = new byte[24];
+
+        WriteInt16BigEndian(liveMain, 16, 31);
+
+        WriteInt16BigEndian(liveAc, 0, 2300);
+        WriteInt16BigEndian(liveAc, 4, 450);
+        WriteInt16BigEndian(liveAc, 16, 2300);
+        WriteInt16BigEndian(liveAc, 18, 1);
+        WriteInt16BigEndian(liveAc, 20, -29);
+        WriteUInt16BigEndian(liveAc, 22, 19);
+
+        var builder = new DefinitionDrivenTelemetryBuilder(new ExpressionEvaluator());
+        var result = builder.BuildPollResult(
+            definition,
+            new Dictionary<string, byte[]>
+            {
+                ["live_main"] = liveMain,
+                ["live_ac"] = liveAc,
+            },
+            new DateTimeOffset(2026, 4, 16, 19, 0, 0, TimeSpan.Zero));
+
+        var gridPower = result.Snapshot.Parameters.FirstOrDefault(parameter => parameter.Key == "grid_power");
+        var outputActivePower = result.Snapshot.Parameters.FirstOrDefault(parameter => parameter.Key == "output_active_power");
+
+        Assert.NotNull(gridPower);
+        Assert.NotNull(outputActivePower);
+        Assert.Equal(450m, gridPower!.NumericValue);
+        Assert.Equal(-29m, outputActivePower!.NumericValue);
+    }
+
     private static void WriteUInt16LittleEndian(byte[] buffer, int offset, ushort value)
     {
         buffer[offset] = (byte)(value & 0xFF);
@@ -95,6 +137,15 @@ public sealed class DefinitionDrivenTelemetryBuilderTests
 
     private static void WriteInt32LittleEndian(byte[] buffer, int offset, int value)
         => WriteUInt32LittleEndian(buffer, offset, unchecked((uint)value));
+
+    private static void WriteUInt16BigEndian(byte[] buffer, int offset, ushort value)
+    {
+        buffer[offset] = (byte)(value >> 8);
+        buffer[offset + 1] = (byte)(value & 0xFF);
+    }
+
+    private static void WriteInt16BigEndian(byte[] buffer, int offset, short value)
+        => WriteUInt16BigEndian(buffer, offset, unchecked((ushort)value));
 
     private static void WriteAscii(byte[] buffer, int offset, int length, string value)
     {

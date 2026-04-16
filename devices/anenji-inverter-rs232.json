@@ -420,7 +420,7 @@
     {
       "id": "output_active_power",
       "type": "sensor",
-      "name": "Output Active Power",
+      "name": "Load Power",
       "category": "Output",
       "icon": "gauge",
       "source": {
@@ -849,6 +849,7 @@
       { "entity": "battery_current",    "aggregate": "avg",  "column": "battery_current_a" },
       { "entity": "battery_power",      "aggregate": "avg",  "column": "battery_power_w" },
       { "entity": "state_of_charge",    "aggregate": "last", "column": "soc_pct" },
+      { "entity": "grid_power",         "aggregate": "avg",  "column": "grid_power_w" },
       { "entity": "output_active_power","aggregate": "avg",  "column": "output_power_w" },
       { "entity": "grid_voltage",       "aggregate": "avg",  "column": "grid_voltage_v" },
       { "entity": "pv_power",           "aggregate": "avg",  "column": "pv_power_w" },
@@ -929,9 +930,10 @@
             "title": "Power",
             "type": "line-chart",
             "traces": [
+              { "entity": "grid_power",           "label": "Grid",    "color": "sky" },
               { "entity": "battery_power",       "label": "Battery",  "color": "blue" },
-              { "entity": "output_active_power",  "label": "Output",   "color": "amber" },
-              { "entity": "pv_power",             "label": "PV",       "color": "sky" }
+              { "entity": "output_active_power", "label": "Load",    "color": "amber" },
+              { "entity": "pv_power",            "label": "PV",      "color": "sky" }
             ],
             "yAxis": { "unit": "W", "label": "Power" }
           },

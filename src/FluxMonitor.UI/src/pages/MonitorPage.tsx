@@ -5,7 +5,15 @@ import { HistoryCharts } from '../components/HistoryCharts';
 import { cn } from '../lib/utils';
 import { getBatteryStateFromCurrent } from '../lib/batteryStatus';
 import { useDeviceDefinition } from '../hooks/useDeviceDefinition';
-import type { DeviceDefinition, UiMetricDefinition, UiSectionDefinition, UiStatusGlyphDefinition, UiStatusGlyphLevelDefinition } from '../types/deviceDefinition';
+import type {
+  ComputedEntityDefinition,
+  DeviceDefinition,
+  EntityDefinition,
+  UiMetricDefinition,
+  UiSectionDefinition,
+  UiStatusGlyphDefinition,
+  UiStatusGlyphLevelDefinition,
+} from '../types/deviceDefinition';
 import {
   convertTemperatureValue,
   getTemperatureDisplayUnit,
@@ -460,44 +468,50 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
           {/* Compact hero metrics row */}
           <div className='border-t border-border/60 px-4 py-3 sm:px-5 sm:py-4'>
             <div className='grid grid-cols-2 gap-3 sm:grid-cols-4 sm:gap-4'>
-              {heroMetrics.map((m) => {
-                const param = compactParamByKey.get(m.entity);
-                const entity = definition?.entities.find(e => e.id === m.entity) ?? definition?.computedEntities?.find(e => e.id === m.entity);
-                const value = param?.numericValue;
-                const sourceUnit = param?.unit ?? (entity && 'source' in entity ? entity.source?.unit : undefined) ?? (entity && 'unit' in entity ? (entity as { unit?: string }).unit : '') ?? '';
-                const unit = getTemperatureDisplayUnit(sourceUnit, temperatureUnit) ?? '';
-                const prec = entity?.display?.precision ?? 2;
-                const displayValue = isCelsiusUnit(sourceUnit)
-                  ? convertTemperatureValue(value != null ? Number(value) : null, temperatureUnit)
-                  : value != null ? Number(value) : null;
-                const metricDisplay = formatMetricDisplayValue(displayValue, unit, prec, m);
-                const chargeState = getRealtimeBatteryState(compactTelemetry, compactParamByKey);
-                const isCurrentMetric = m.entity === 'current';
-                const isPowerMetric = m.entity === 'power';
-                const accentClass = (isCurrentMetric || isPowerMetric)
-                  ? chargeState === 'CHARGING'
-                    ? 'text-emerald-400'
-                    : chargeState === 'DISCHARGING'
-                      ? 'text-rose-400'
-                      : resolveColorClass(m.color)
-                  : m.entity === 'total_voltage'
-                    ? 'text-sky-400'
-                    : resolveColorClass(m.color);
+              {(() => {
+                const sharedPowerKilowatts = shouldUseSharedPowerKilowatts(heroMetrics, compactParamByKey, definition);
 
-                return (
-                  <div key={m.entity} className='min-w-0'>
-                    <div className='text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground/70'>
-                      {m.label ?? param?.displayName ?? entity?.name ?? m.entity}
+                return heroMetrics.map((m) => {
+                  const param = compactParamByKey.get(m.entity);
+                  const entity = findMetricEntity(definition, m.entity);
+                  const value = param?.numericValue;
+                  const sourceUnit = getMetricSourceUnit(param, entity);
+                  const unit = getTemperatureDisplayUnit(sourceUnit, temperatureUnit) ?? '';
+                  const prec = entity?.display?.precision ?? 2;
+                  const displayValue = isCelsiusUnit(sourceUnit)
+                    ? convertTemperatureValue(value != null ? Number(value) : null, temperatureUnit)
+                    : value != null ? Number(value) : null;
+                  const metricDisplay = formatMetricDisplayValue(displayValue, unit, prec, m, {
+                    forcePowerShortKilowatts: sharedPowerKilowatts,
+                  });
+                  const chargeState = getRealtimeBatteryState(compactTelemetry, compactParamByKey);
+                  const isCurrentMetric = m.entity === 'current';
+                  const isPowerMetric = m.entity === 'power';
+                  const accentClass = (isCurrentMetric || isPowerMetric)
+                    ? chargeState === 'CHARGING'
+                      ? 'text-emerald-400'
+                      : chargeState === 'DISCHARGING'
+                        ? 'text-rose-400'
+                        : resolveColorClass(m.color)
+                    : m.entity === 'total_voltage'
+                      ? 'text-sky-400'
+                      : resolveColorClass(m.color);
+
+                  return (
+                    <div key={m.entity} className='min-w-0'>
+                      <div className='text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground/70'>
+                        {m.label ?? param?.displayName ?? entity?.name ?? m.entity}
+                      </div>
+                      <div className='mt-1 flex items-baseline gap-1'>
+                        <span className={cn('text-xl font-bold tracking-tight tabular-nums sm:text-2xl', accentClass)}>
+                          {metricDisplay.valueText}
+                        </span>
+                        <span className='text-xs font-medium text-muted-foreground/70'>{metricDisplay.unitText}</span>
+                      </div>
                     </div>
-                    <div className='mt-1 flex items-baseline gap-1'>
-                      <span className={cn('text-xl font-bold tracking-tight tabular-nums sm:text-2xl', accentClass)}>
-                        {metricDisplay.valueText}
-                      </span>
-                      <span className='text-xs font-medium text-muted-foreground/70'>{metricDisplay.unitText}</span>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                });
+              })()}
             </div>
           </div>
 
@@ -1002,19 +1016,22 @@ function renderDefinitionSections(
         if (section.metrics) {
           const capacityAh = paramByKey.get('nominal_battery_capacity')?.numericValue;
           const chargeState = getRealtimeBatteryState(telemetry, paramByKey);
+          const sharedPowerKilowatts = shouldUseSharedPowerKilowatts(section.metrics, paramByKey, definition);
           elements.push(
             <div key={`section-${i}`} className='grid grid-cols-2 gap-2 sm:gap-3 lg:grid-cols-4'>
               {section.metrics.map((m) => {
                 const param = paramByKey.get(m.entity);
-                const entity = definition?.entities.find(e => e.id === m.entity) ?? definition?.computedEntities?.find(e => e.id === m.entity);
+                const entity = findMetricEntity(definition, m.entity);
                 const value = param?.numericValue;
-                const sourceUnit = param?.unit ?? (entity && 'source' in entity ? entity.source?.unit : undefined) ?? (entity && 'unit' in entity ? (entity as { unit?: string }).unit : '') ?? '';
+                const sourceUnit = getMetricSourceUnit(param, entity);
                 const unit = getTemperatureDisplayUnit(sourceUnit, temperatureUnit) ?? '';
                 const prec = entity?.display?.precision ?? 2;
                 const displayValue = isCelsiusUnit(sourceUnit)
                   ? convertTemperatureValue(value != null ? Number(value) : null, temperatureUnit)
                   : value != null ? Number(value) : null;
-                const metricDisplay = formatMetricDisplayValue(displayValue, unit, prec, m);
+                const metricDisplay = formatMetricDisplayValue(displayValue, unit, prec, m, {
+                  forcePowerShortKilowatts: sharedPowerKilowatts,
+                });
                 const isSoc = m.entity === 'state_of_charge';
                 const isCurrent = m.entity === 'current';
                 const isPower = m.entity === 'power';
@@ -1669,18 +1686,58 @@ function normalizeStatusPercent(percent: number | null | undefined) {
   return Math.max(0, Math.min(100, Math.round(percent)));
 }
 
+function findMetricEntity(definition: DeviceDefinition | null | undefined, entityId: string) {
+  return definition?.entities.find((entity) => entity.id === entityId)
+    ?? definition?.computedEntities?.find((entity) => entity.id === entityId);
+}
+
+function getMetricSourceUnit(
+  param: DeviceParameter | undefined,
+  entity: EntityDefinition | ComputedEntityDefinition | undefined,
+) {
+  return param?.unit
+    ?? (entity && 'source' in entity ? entity.source?.unit : undefined)
+    ?? (entity && 'unit' in entity ? entity.unit : undefined)
+    ?? '';
+}
+
+function shouldUseSharedPowerKilowatts(
+  metrics: UiMetricDefinition[],
+  paramByKey: Map<string, DeviceParameter>,
+  definition?: DeviceDefinition | null,
+) {
+  return metrics.some((metric) => {
+    if (metric.format !== 'power-short') {
+      return false;
+    }
+
+    const param = paramByKey.get(metric.entity);
+    const entity = findMetricEntity(definition, metric.entity);
+    const sourceUnit = getMetricSourceUnit(param, entity);
+    if (!sourceUnit || sourceUnit.toLowerCase() !== 'w') {
+      return false;
+    }
+
+    const value = param?.numericValue;
+    return value != null && Number.isFinite(Number(value)) && Math.abs(Number(value)) > 500;
+  });
+}
+
 function formatMetricDisplayValue(
   value: number | null | undefined,
   unit: string | null | undefined,
   decimals: number,
   metric?: UiMetricDefinition,
+  options?: { forcePowerShortKilowatts?: boolean },
 ) {
   if (metric?.format === 'power-short' && unit?.toLowerCase() === 'w') {
+    const useKilowatts = options?.forcePowerShortKilowatts || (value != null && Number.isFinite(value) && Math.abs(value) > 500);
+
     if (value == null || !Number.isFinite(value)) {
-      return { valueText: nd, unitText: 'W' };
+      return { valueText: nd, unitText: useKilowatts ? 'kW' : 'W' };
     }
 
-    if (Math.abs(value) > 500) {
+    if (useKilowatts) {
       return { valueText: (value / 1000).toFixed(1), unitText: 'kW' };
     }
 

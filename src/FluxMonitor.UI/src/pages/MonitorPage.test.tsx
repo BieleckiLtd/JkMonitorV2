@@ -611,7 +611,7 @@ describe('MonitorPage', () => {
     expect(screen.getByText('Charge Switch')).toBeInTheDocument();
   });
 
-  it('renders inverter cards as compact expandable summaries with power units and header badges', async () => {
+  it('renders inverter cards as compact expandable summaries with synchronized power units and header badges', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-04-12T12:00:04.000Z').getTime());
 
     useDeviceDefinitionMock.mockReturnValue({
@@ -787,12 +787,11 @@ describe('MonitorPage', () => {
     expect(screen.getByText('Battery')).toBeInTheDocument();
     expect(screen.getByText('Solar')).toBeInTheDocument();
     expect(screen.getByText('Load')).toBeInTheDocument();
-    expect(screen.getByText('90')).toBeInTheDocument();
+    expect(screen.getByText('0.1')).toBeInTheDocument();
     expect(screen.getByText('0.6')).toBeInTheDocument();
     expect(screen.getByText('1.3')).toBeInTheDocument();
     expect(screen.getByText('0.5')).toBeInTheDocument();
-    expect(screen.getAllByText('kW')).toHaveLength(3);
-    expect(screen.getByText('W')).toBeInTheDocument();
+    expect(screen.getAllByText('kW')).toHaveLength(4);
     expect(screen.queryByText('Max Charge Current')).not.toBeInTheDocument();
     expect(screen.queryByText(/VA/i)).not.toBeInTheDocument();
 
