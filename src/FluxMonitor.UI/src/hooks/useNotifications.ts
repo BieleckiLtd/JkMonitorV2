@@ -8,6 +8,22 @@ import type {
   TestChannelResponse,
 } from '../types/notification';
 
+async function readErrorMessage(response: Response, fallbackMessage: string) {
+  try {
+    const payload = await response.json() as {
+      detail?: string;
+      error?: string;
+      title?: string;
+      errors?: Record<string, string[]>;
+    };
+
+    const validationMessages = Object.values(payload.errors ?? {}).flat().filter(Boolean);
+    return validationMessages[0] ?? payload.detail ?? payload.error ?? payload.title ?? fallbackMessage;
+  } catch {
+    return fallbackMessage;
+  }
+}
+
 export function useNotificationConfig() {
   const [config, setConfig] = useState<NotificationConfigResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -38,7 +54,7 @@ export function useNotificationConfig() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ channels }),
     });
-    if (!response.ok) throw new Error('Failed to save channels.');
+    if (!response.ok) throw new Error(await readErrorMessage(response, 'Failed to save channels.'));
     const data = (await response.json()) as NotificationConfigResponse;
     setConfig(data);
     return data;
@@ -50,7 +66,7 @@ export function useNotificationConfig() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ rules }),
     });
-    if (!response.ok) throw new Error('Failed to save rules.');
+    if (!response.ok) throw new Error(await readErrorMessage(response, 'Failed to save rules.'));
     const data = (await response.json()) as NotificationConfigResponse;
     setConfig(data);
     return data;

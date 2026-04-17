@@ -6,7 +6,15 @@ import { Switch } from '../components/ui/switch';
 import { Badge } from '../components/ui/badge';
 import { cn } from '../lib/utils';
 import { useNotificationConfig, useNotificationLog, useNotificationMetadata } from '../hooks/useNotifications';
-import type { NotificationChannelConfig, NotificationRuleConfig, NtfySettings, EmailSettings, BrevoSettings, TelegramSettings } from '../types/notification';
+import type {
+  NotificationChannelConfig,
+  NotificationRuleConfig,
+  NtfySettings,
+  EmailSettings,
+  BrevoSettings,
+  TelegramSettings,
+  DeviceOption,
+} from '../types/notification';
 
 // ── helpers ──
 
@@ -75,6 +83,36 @@ const defaultRule = (): NotificationRuleConfig => ({
   severity: 'info',
   cooldownMinutes: 15,
 });
+
+function getDeviceEntities(devices: DeviceOption[], deviceId: string) {
+  return devices.find((device) => device.id === deviceId)?.entities ?? [];
+}
+
+function getRuleValidationMessage(rules: NotificationRuleConfig[], devices: DeviceOption[]) {
+  for (let index = 0; index < rules.length; index += 1) {
+    const rule = rules[index];
+    const label = rule.name.trim() ? `Rule "${rule.name.trim()}"` : `Rule ${index + 1}`;
+
+    if (!rule.deviceId.trim()) {
+      return `${label}: select a device.`;
+    }
+
+    const entities = getDeviceEntities(devices, rule.deviceId);
+    if (!rule.entityId.trim()) {
+      return `${label}: select an entity.`;
+    }
+
+    if (entities.length > 0 && !entities.some((entity) => entity.id === rule.entityId)) {
+      return `${label}: select a valid entity for the chosen device.`;
+    }
+
+    if (!rule.expression.trim()) {
+      return `${label}: enter an expression.`;
+    }
+  }
+
+  return null;
+}
 
 function getChannelAppearance(type: NotificationChannelConfig['type']) {
   switch (type) {
@@ -215,6 +253,12 @@ export function NotificationsPage({ hideHeader = false }: { hideHeader?: boolean
   };
 
   const handleSaveRules = async () => {
+    const validationMessage = getRuleValidationMessage(rules, devices);
+    if (validationMessage) {
+      setSaveMsg(validationMessage);
+      return;
+    }
+
     setIsSaving(true);
     setSaveMsg(null);
     try {
@@ -414,11 +458,14 @@ export function NotificationsPage({ hideHeader = false }: { hideHeader?: boolean
                 <label className='space-y-1.5'>
                   <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Device</span>
                   <select
+                    aria-label={`Rule ${index + 1} device`}
                     className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
                     value={rule.deviceId}
                     onChange={(e) => {
-                      updateRule(index, 'deviceId', e.target.value);
-                      updateRule(index, 'entityId', '');
+                      const deviceId = e.target.value;
+                      const nextEntityId = getDeviceEntities(devices, deviceId)[0]?.id ?? '';
+                      updateRule(index, 'deviceId', deviceId);
+                      updateRule(index, 'entityId', nextEntityId);
                     }}
                   >
                     <option value=''>Select device...</option>
@@ -433,12 +480,13 @@ export function NotificationsPage({ hideHeader = false }: { hideHeader?: boolean
                 <label className='space-y-1.5'>
                   <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Entity</span>
                   <select
+                    aria-label={`Rule ${index + 1} entity`}
                     className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
                     value={rule.entityId}
                     onChange={(e) => updateRule(index, 'entityId', e.target.value)}
                   >
                     <option value=''>Select entity...</option>
-                    {(devices.find((d) => d.id === rule.deviceId)?.entities ?? []).map((en) => (
+                    {getDeviceEntities(devices, rule.deviceId).map((en) => (
                       <option key={en.id} value={en.id}>
                         {en.name} {en.unit ? `(${en.unit})` : ''}
                       </option>
@@ -471,6 +519,7 @@ export function NotificationsPage({ hideHeader = false }: { hideHeader?: boolean
                 <label className='space-y-1.5'>
                   <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Severity</span>
                   <select
+                    aria-label={`Rule ${index + 1} severity`}
                     className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
                     value={rule.severity}
                     onChange={(e) => updateRule(index, 'severity', e.target.value as NotificationRuleConfig['severity'])}

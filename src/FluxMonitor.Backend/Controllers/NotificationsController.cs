@@ -46,6 +46,19 @@ public sealed class NotificationsController(
         [FromBody] SaveNotificationRulesRequest request,
         CancellationToken cancellationToken)
     {
+        var validationErrors = NotificationRuleValidator.Validate(request.Rules);
+        if (validationErrors.Count > 0)
+        {
+            return ValidationProblem(new ValidationProblemDetails(new Dictionary<string, string[]>
+            {
+                ["rules"] = [.. validationErrors]
+            })
+            {
+                Title = "Invalid notification rules.",
+                Status = StatusCodes.Status400BadRequest
+            });
+        }
+
         await configStore.SaveRulesAsync(request.Rules, cancellationToken);
         var config = configStore.GetConfig();
         return Ok(new NotificationConfigResponse

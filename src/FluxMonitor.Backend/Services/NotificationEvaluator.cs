@@ -26,6 +26,9 @@ public sealed class NotificationEvaluator(
     // deviceId → whether the device is currently in a communication-failure state
     private readonly ConcurrentDictionary<string, bool> _deviceCommFailed = new(StringComparer.OrdinalIgnoreCase);
 
+    // warning key → true once emitted, to avoid log spam for persistently invalid rules
+    private readonly ConcurrentDictionary<string, bool> _validationWarnings = new(StringComparer.OrdinalIgnoreCase);
+
     // Recent notification log (ring buffer, last 100)
     private readonly ConcurrentQueue<NotificationLogEntry> _log = new();
     private const int MaxLogEntries = 100;
@@ -113,9 +116,34 @@ public sealed class NotificationEvaluator(
         DeviceTelemetrySnapshot snapshot,
         CancellationToken cancellationToken)
     {
+        if (string.IsNullOrWhiteSpace(rule.EntityId))
+        {
+            if (_validationWarnings.TryAdd($"missing-entity:{rule.Id}", true))
+            {
+                logger.LogWarning(
+                    "Skipping notification rule '{RuleId}' for device {DeviceId} because no entity is selected. Re-save the rule with a valid entity.",
+                    rule.Id,
+                    deviceId);
+            }
+
+            return;
+        }
+
         // Resolve the current entity value from the snapshot
         var currentValue = ResolveEntityValue(rule.EntityId, snapshot);
-        if (currentValue is null) return;
+        if (currentValue is null)
+        {
+            if (_validationWarnings.TryAdd($"unresolved-entity:{rule.Id}:{rule.EntityId}", true))
+            {
+                logger.LogWarning(
+                    "Skipping notification rule '{RuleId}' for device {DeviceId} because entity '{EntityId}' is not available in the current snapshot.",
+                    rule.Id,
+                    deviceId,
+                    rule.EntityId);
+            }
+
+            return;
+        }
 
         var cacheKey = $"{deviceId}:{rule.EntityId}";
         var previousValue = _previousValues.GetValueOrDefault(cacheKey, currentValue.Value);
