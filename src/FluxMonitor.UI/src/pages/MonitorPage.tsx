@@ -1019,7 +1019,7 @@ function ParameterCategoryCard({
   const combinedClockParams = getCombinedClockParams(params, definition);
   const visibleParams = combinedClockParams == null
     ? params
-    : params.filter((param) => !inverterClockParameterKeys.includes(param.key));
+    : params.filter((param) => !inverterClockParameterKeySet.has(param.key));
 
   return (
     <Card className='border border-border/80 bg-card/85 shadow-sm'>
@@ -2174,6 +2174,7 @@ const inverterClockParameterKeys = [
   'clock_minute',
   'clock_second',
 ] as const;
+const inverterClockParameterKeySet = new Set<string>(inverterClockParameterKeys);
 
 type InverterClockParameterKey = (typeof inverterClockParameterKeys)[number];
 type InverterClockRawValues = Record<InverterClockParameterKey, number>;
