@@ -59,49 +59,58 @@ internal static class ModbusRtu
 
     /// <summary>
     /// Build a Modbus RTU "Write Multiple Registers" (function code 0x10) request.
+    /// Writes the supplied register values as big-endian 16-bit words.
+    /// </summary>
+    public static byte[] BuildWriteMultipleRegistersRequest(byte slaveAddress, ushort startRegister, IReadOnlyList<ushort> registerValues)
+    {
+        if (registerValues.Count == 0 || registerValues.Count > byte.MaxValue / 2)
+        {
+            throw new ArgumentOutOfRangeException(nameof(registerValues), "Register value count must be between 1 and 127.");
+        }
+
+        var registerCount = registerValues.Count;
+        var byteCount = registerCount * 2;
+        var request = new byte[7 + byteCount + 2];
+        request[0] = slaveAddress;
+        request[1] = 0x10;
+        request[2] = (byte)(startRegister >> 8);
+        request[3] = (byte)(startRegister & 0xFF);
+        request[4] = (byte)(registerCount >> 8);
+        request[5] = (byte)(registerCount & 0xFF);
+        request[6] = (byte)byteCount;
+
+        for (var i = 0; i < registerCount; i++)
+        {
+            var registerValue = registerValues[i];
+            var offset = 7 + (i * 2);
+            request[offset] = (byte)(registerValue >> 8);
+            request[offset + 1] = (byte)(registerValue & 0xFF);
+        }
+
+        var crc = ComputeCrc16(request.AsSpan(0, request.Length - 2));
+        request[^2] = (byte)(crc & 0xFF);
+        request[^1] = (byte)((crc >> 8) & 0xFF);
+        return request;
+    }
+
+    /// <summary>
+    /// Build a Modbus RTU "Write Multiple Registers" (function code 0x10) request.
     /// When <paramref name="registerCount"/> is 1, writes only the lower 16 bits.
     /// When 2 (default), writes all 32 bits across two consecutive registers.
     /// </summary>
     public static byte[] BuildWriteMultipleRegistersRequest(byte slaveAddress, ushort startRegister, uint value, int registerCount = 2)
+        => BuildWriteMultipleRegistersRequest(slaveAddress, startRegister, EncodeRegisterValues(value, registerCount));
+
+    internal static ushort[] EncodeRegisterValues(uint value, int registerCount)
     {
-        if (registerCount == 1)
+        if (registerCount is < 1 or > 2)
         {
-            // FC 0x10, 1 register, 2 data bytes
-            var request = new byte[11];
-            request[0] = slaveAddress;
-            request[1] = 0x10;
-            request[2] = (byte)(startRegister >> 8);
-            request[3] = (byte)(startRegister & 0xFF);
-            request[4] = 0x00;
-            request[5] = 0x01;
-            request[6] = 0x02;
-            request[7] = (byte)((value >> 8) & 0xFF);
-            request[8] = (byte)(value & 0xFF);
-            var crc = ComputeCrc16(request.AsSpan(0, 9));
-            request[9] = (byte)(crc & 0xFF);
-            request[10] = (byte)((crc >> 8) & 0xFF);
-            return request;
+            throw new ArgumentOutOfRangeException(nameof(registerCount), registerCount, "Only 1 or 2 registers are supported for scalar writes.");
         }
 
-        // Default: 2 registers, 4 data bytes
-        {
-            var request = new byte[13];
-            request[0] = slaveAddress;
-            request[1] = 0x10;
-            request[2] = (byte)(startRegister >> 8);
-            request[3] = (byte)(startRegister & 0xFF);
-            request[4] = 0x00;
-            request[5] = 0x02;
-            request[6] = 0x04;
-            request[7] = (byte)(value >> 24);
-            request[8] = (byte)(value >> 16);
-            request[9] = (byte)(value >> 8);
-            request[10] = (byte)(value & 0xFF);
-            var crc = ComputeCrc16(request.AsSpan(0, 11));
-            request[11] = (byte)(crc & 0xFF);
-            request[12] = (byte)((crc >> 8) & 0xFF);
-            return request;
-        }
+        return registerCount == 1
+            ? [(ushort)(value & 0xFFFF)]
+            : [(ushort)((value >> 16) & 0xFFFF), (ushort)(value & 0xFFFF)];
     }
 
     /// <summary>

@@ -1391,7 +1391,9 @@
       },
       "writable": true,
       "write": {
-        "address": 696
+        "address": 696,
+        "groupStartAddress": 696,
+        "groupRegisterCount": 6
       },
       "_comment": "=== F3 TIME — Manual Setting F3 ==="
     },
@@ -1410,7 +1412,9 @@
       },
       "writable": true,
       "write": {
-        "address": 697
+        "address": 697,
+        "groupStartAddress": 696,
+        "groupRegisterCount": 6
       }
     },
     {
@@ -1428,7 +1432,9 @@
       },
       "writable": true,
       "write": {
-        "address": 698
+        "address": 698,
+        "groupStartAddress": 696,
+        "groupRegisterCount": 6
       }
     },
     {
@@ -1446,7 +1452,9 @@
       },
       "writable": true,
       "write": {
-        "address": 699
+        "address": 699,
+        "groupStartAddress": 696,
+        "groupRegisterCount": 6
       }
     },
     {
@@ -1464,7 +1472,9 @@
       },
       "writable": true,
       "write": {
-        "address": 700
+        "address": 700,
+        "groupStartAddress": 696,
+        "groupRegisterCount": 6
       }
     },
     {
@@ -1482,7 +1492,9 @@
       },
       "writable": true,
       "write": {
-        "address": 701
+        "address": 701,
+        "groupStartAddress": 696,
+        "groupRegisterCount": 6
       }
     },
     {

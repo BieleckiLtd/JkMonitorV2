@@ -177,38 +177,37 @@ public sealed class GenericSerialPollingClient(
             logger.LogInformation("Writing a configured register value. Register=0x{Register:X4}.", registerAddress);
 
             var registersPerWrite = bank.Write.RegistersPerWrite > 0 ? bank.Write.RegistersPerWrite : 2;
-            var writeRequest = ModbusRtu.BuildWriteMultipleRegistersRequest(slaveAddress, registerAddress, rawValue, registersPerWrite);
-            var writeResponse = await SendAndReceiveModbusAsync(serialPort, writeRequest,
-                ModbusRtu.WriteResponseLength, readTimeout, cancellationToken);
-            ModbusRtu.ValidateAndExtractData(writeResponse, slaveAddress, bank.Write.FunctionCode);
-
-            // Read back to verify
-            await Task.Delay(50, writeToken);
-            serialPort.DiscardInBuffer();
-
-            var readRequest = ModbusRtu.BuildReadHoldingRegistersRequest(slaveAddress, registerAddress, (ushort)registersPerWrite);
-            var readResponse = await SendAndReceiveModbusAsync(serialPort, readRequest,
-                ModbusRtu.ExpectedReadResponseLength((ushort)registersPerWrite), readTimeout, cancellationToken);
-
-            var frame = readResponse;
-            var expectedDataBytes = registersPerWrite * 2;
-            var minFrameLength = 3 + expectedDataBytes + 2;
-            if (frame.Length >= minFrameLength && frame[1] == 0x03 && frame[2] == expectedDataBytes)
+            if (TryResolveGroupWrite(entity, registerAddress, registersPerWrite, out var groupWrite))
             {
-                var readBack = registersPerWrite == 1
-                    ? (uint)((frame[3] << 8) | frame[4])
-                    : (uint)((frame[3] << 24) | (frame[4] << 16) | (frame[5] << 8) | frame[6]);
-                var success = readBack == rawValue;
-                logger.LogInformation("Write verification completed. Success={Success}.", success);
+                var groupResult = await WriteGroupedRegistersAsync(
+                    serialPort,
+                    slaveAddress,
+                    bank,
+                    rawValue,
+                    readTimeout,
+                    writeToken,
+                    groupWrite);
 
-                // Invalidate cached bank data after a write
                 _bankCache.Remove(bank.Id);
-
-                return new WriteRegisterResult(success, rawValue, readBack,
-                    success ? null : $"Read-back mismatch: expected {rawValue}, got {readBack}");
+                return groupResult;
             }
 
-            return new WriteRegisterResult(false, rawValue, null, "Unable to read back register value after write.");
+            var writeRequest = ModbusRtu.BuildWriteMultipleRegistersRequest(slaveAddress, registerAddress, rawValue, registersPerWrite);
+            var writeResponse = await SendAndReceiveModbusAsync(serialPort, writeRequest,
+                ModbusRtu.WriteResponseLength, readTimeout, writeToken);
+            ModbusRtu.ValidateAndExtractData(writeResponse, slaveAddress, bank.Write.FunctionCode);
+
+            var verificationResult = await ReadAndVerifyWriteAsync(
+                serialPort,
+                slaveAddress,
+                registerAddress,
+                registersPerWrite,
+                readTimeout,
+                writeToken,
+                rawValue);
+
+            _bankCache.Remove(bank.Id);
+            return verificationResult;
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -568,6 +567,67 @@ public sealed class GenericSerialPollingClient(
 
     #region Protocol-specific bank reading
 
+    internal static bool TryResolveGroupWrite(
+        EntityDefinition entity,
+        ushort registerAddress,
+        int registersPerWrite,
+        out GroupWritePlan groupWrite)
+    {
+        var groupStartAddress = entity.Write?.GroupStartAddress;
+        var groupRegisterCount = entity.Write?.GroupRegisterCount;
+
+        if (!groupStartAddress.HasValue || !groupRegisterCount.HasValue)
+        {
+            groupWrite = default;
+            return false;
+        }
+
+        if (groupStartAddress.Value < 0 || groupStartAddress.Value > ushort.MaxValue)
+            throw new InvalidOperationException($"Writable entity '{entity.Id}' has an invalid grouped write start address.");
+
+        if (groupRegisterCount.Value < registersPerWrite)
+            throw new InvalidOperationException($"Writable entity '{entity.Id}' has an invalid grouped write register count.");
+
+        var startAddress = (ushort)groupStartAddress.Value;
+        var registerOffset = registerAddress - startAddress;
+        if (registerOffset < 0 || registerOffset + registersPerWrite > groupRegisterCount.Value)
+            throw new InvalidOperationException($"Writable entity '{entity.Id}' resolved outside its grouped write range.");
+
+        groupWrite = new GroupWritePlan(startAddress, groupRegisterCount.Value, registerOffset);
+        return true;
+    }
+
+    internal static ushort[] MergeGroupWriteRegisters(
+        IReadOnlyList<ushort> existingRegisters,
+        int registerOffset,
+        uint rawValue,
+        int registersPerWrite)
+    {
+        var merged = existingRegisters.ToArray();
+        var encodedValue = ModbusRtu.EncodeRegisterValues(rawValue, registersPerWrite);
+
+        if (registerOffset < 0 || registerOffset + encodedValue.Length > merged.Length)
+            throw new ArgumentOutOfRangeException(nameof(registerOffset), "Register offset falls outside the grouped register range.");
+
+        for (var i = 0; i < encodedValue.Length; i++)
+        {
+            merged[registerOffset + i] = encodedValue[i];
+        }
+
+        return merged;
+    }
+
+    internal static uint DecodeRegisterValue(IReadOnlyList<ushort> registers, int startIndex, int registerCount)
+    {
+        if (registerCount == 1)
+            return registers[startIndex];
+
+        if (registerCount == 2)
+            return ((uint)registers[startIndex] << 16) | registers[startIndex + 1];
+
+        throw new ArgumentOutOfRangeException(nameof(registerCount), registerCount, "Only 1 or 2 registers are supported for scalar read-back decoding.");
+    }
+
     private async Task<byte[]> ReadModbusBankAsync(
         SerialPort serialPort, DataSourceDefinition bank, byte slaveAddress,
         int readTimeout, CancellationToken ct)
@@ -601,6 +661,132 @@ public sealed class GenericSerialPollingClient(
     }
 
     #endregion
+
+    private async Task<WriteRegisterResult> WriteGroupedRegistersAsync(
+        SerialPort serialPort,
+        byte slaveAddress,
+        DataSourceDefinition bank,
+        uint rawValue,
+        int readTimeout,
+        CancellationToken cancellationToken,
+        GroupWritePlan groupWrite)
+    {
+        var existingRegisters = await ReadHoldingRegistersAsync(
+            serialPort,
+            slaveAddress,
+            groupWrite.StartAddress,
+            groupWrite.RegisterCount,
+            readTimeout,
+            cancellationToken);
+        var mergedRegisters = MergeGroupWriteRegisters(
+            existingRegisters,
+            groupWrite.RegisterOffset,
+            rawValue,
+            bank.Write?.RegistersPerWrite > 0 ? bank.Write.RegistersPerWrite : 2);
+
+        var writeRequest = ModbusRtu.BuildWriteMultipleRegistersRequest(slaveAddress, groupWrite.StartAddress, mergedRegisters);
+        var writeResponse = await SendAndReceiveModbusAsync(
+            serialPort,
+            writeRequest,
+            ModbusRtu.WriteResponseLength,
+            readTimeout,
+            cancellationToken);
+        ModbusRtu.ValidateAndExtractData(writeResponse, slaveAddress, bank.Write?.FunctionCode ?? 0x10);
+
+        await Task.Delay(50, cancellationToken);
+        serialPort.DiscardInBuffer();
+
+        var verifiedRegisters = await ReadHoldingRegistersAsync(
+            serialPort,
+            slaveAddress,
+            groupWrite.StartAddress,
+            groupWrite.RegisterCount,
+            readTimeout,
+            cancellationToken);
+        var success = mergedRegisters.SequenceEqual(verifiedRegisters);
+        var readBackValue = DecodeRegisterValue(
+            verifiedRegisters,
+            groupWrite.RegisterOffset,
+            bank.Write?.RegistersPerWrite > 0 ? bank.Write.RegistersPerWrite : 2);
+
+        logger.LogInformation(
+            "Grouped write verification completed. Register=0x{Register:X4}, GroupStart=0x{GroupStart:X4}, RegisterCount={RegisterCount}, Success={Success}.",
+            groupWrite.StartAddress + groupWrite.RegisterOffset,
+            groupWrite.StartAddress,
+            groupWrite.RegisterCount,
+            success);
+
+        return new WriteRegisterResult(
+            success,
+            rawValue,
+            readBackValue,
+            success ? null : $"Read-back mismatch: expected grouped write at 0x{groupWrite.StartAddress:X4} to persist.");
+    }
+
+    private async Task<WriteRegisterResult> ReadAndVerifyWriteAsync(
+        SerialPort serialPort,
+        byte slaveAddress,
+        ushort registerAddress,
+        int registersPerWrite,
+        int readTimeout,
+        CancellationToken cancellationToken,
+        uint rawValue)
+    {
+        await Task.Delay(50, cancellationToken);
+        serialPort.DiscardInBuffer();
+
+        var readRequest = ModbusRtu.BuildReadHoldingRegistersRequest(slaveAddress, registerAddress, (ushort)registersPerWrite);
+        var readResponse = await SendAndReceiveModbusAsync(
+            serialPort,
+            readRequest,
+            ModbusRtu.ExpectedReadResponseLength((ushort)registersPerWrite),
+            readTimeout,
+            cancellationToken);
+        var registers = ParseHoldingRegisters(readResponse, slaveAddress, registersPerWrite);
+        var readBack = DecodeRegisterValue(registers, 0, registersPerWrite);
+        var success = readBack == rawValue;
+        logger.LogInformation("Write verification completed. Success={Success}.", success);
+
+        return new WriteRegisterResult(
+            success,
+            rawValue,
+            readBack,
+            success ? null : $"Read-back mismatch: expected {rawValue}, got {readBack}");
+    }
+
+    private static async Task<ushort[]> ReadHoldingRegistersAsync(
+        SerialPort serialPort,
+        byte slaveAddress,
+        ushort startRegister,
+        int registerCount,
+        int readTimeout,
+        CancellationToken cancellationToken)
+    {
+        var readRequest = ModbusRtu.BuildReadHoldingRegistersRequest(slaveAddress, startRegister, (ushort)registerCount);
+        var readResponse = await SendAndReceiveModbusAsync(
+            serialPort,
+            readRequest,
+            ModbusRtu.ExpectedReadResponseLength((ushort)registerCount),
+            readTimeout,
+            cancellationToken);
+        return ParseHoldingRegisters(readResponse, slaveAddress, registerCount);
+    }
+
+    private static ushort[] ParseHoldingRegisters(byte[] response, byte slaveAddress, int registerCount)
+    {
+        var payload = ModbusRtu.ValidateAndExtractData(response, slaveAddress, 0x03);
+        if (payload.Length != registerCount * 2)
+            throw new InvalidDataException($"Modbus read-back length mismatch. Expected {registerCount * 2} data bytes, got {payload.Length}.");
+
+        var registers = new ushort[registerCount];
+        for (var i = 0; i < registerCount; i++)
+        {
+            var offset = i * 2;
+            registers[i] = BinaryPrimitives.ReadUInt16BigEndian(payload.Slice(offset, 2));
+        }
+
+        return registers;
+    }
 
     #region Serial Port Management
 
@@ -668,3 +854,5 @@ public sealed class GenericSerialPollingClient(
 
     #endregion
 }
+
+internal readonly record struct GroupWritePlan(ushort StartAddress, int RegisterCount, int RegisterOffset);

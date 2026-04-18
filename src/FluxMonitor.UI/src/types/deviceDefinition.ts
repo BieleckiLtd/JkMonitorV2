@@ -138,6 +138,8 @@ export type EntityDefinition = {
 export type EntityWriteDefinition = {
   address?: number;
   valueLength?: number;
+  groupStartAddress?: number;
+  groupRegisterCount?: number;
 };
 
 export type EntitySourceDefinition = {

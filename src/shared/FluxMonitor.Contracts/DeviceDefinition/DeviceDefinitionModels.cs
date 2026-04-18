@@ -370,6 +370,10 @@ public sealed class EntityWriteDefinition
     public int? Address { get; init; }
 
     public int? ValueLength { get; init; }
+
+    public int? GroupStartAddress { get; init; }
+
+    public int? GroupRegisterCount { get; init; }
 }
 
 public sealed class EntitySourceDefinition

@@ -935,7 +935,7 @@ function ParameterRow({
                   <span className='text-[10px] text-muted-foreground/60'>{editModeLabel}</span>
                   <input
                     type='number'
-                    step='any'
+                    step={entity ? getEditableDisplayStep(entity, param, temperatureUnit) : 'any'}
                     inputMode='decimal'
                     aria-label={`Set ${param.displayName}`}
                     className='w-24 rounded border border-border bg-background px-2 py-0.5 text-sm font-semibold text-foreground outline-none focus:border-primary'
