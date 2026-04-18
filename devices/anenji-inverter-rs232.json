@@ -459,11 +459,29 @@
       "writable": true,
       "write": { "address": 601 },
       "options": [
-        { "value": 0, "label": "Utility first (UTI)" },
-        { "value": 1, "label": "PV first (SOL)" },
+        { "value": 1, "label": "PV → Utility → Battery (SUB)" },
         { "value": 2, "label": "PV → Battery → Utility (SBU)" },
-        { "value": 3, "label": "PV → Utility → Battery (SUB)" }
+        { "value": 3, "label": "PV → Utility → Battery + Grid-tie (SUF)" },
+        { "value": 4, "label": "Self-consumption (ZEC)" }
       ]
+    },
+    {
+      "id": "current_output_priority",
+      "type": "select",
+      "name": "Current Output Priority",
+      "category": "Status",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 8,
+        "dataType": "uint16"
+      },
+      "options": [
+        { "value": 1, "label": "SUB" },
+        { "value": 2, "label": "SBU" },
+        { "value": 3, "label": "SUF" },
+        { "value": 4, "label": "ZEC" }
+      ],
+      "display": { "format": "text" }
     },
     {
       "id": "charge_priority",
@@ -472,17 +490,35 @@
       "category": "Power Management",
       "source": {
         "bank": "settings",
-        "byteOffset": 8,
+        "byteOffset": 62,
         "dataType": "uint16"
       },
       "writable": true,
-      "write": { "address": 605 },
+      "write": { "address": 632 },
       "options": [
-        { "value": 0, "label": "Utility priority" },
-        { "value": 1, "label": "PV priority" },
-        { "value": 2, "label": "PV and mains" },
-        { "value": 3, "label": "PV only" }
+        { "value": 1, "label": "PV first (SOF)" },
+        { "value": 2, "label": "PV & Mains equal (SNU)" },
+        { "value": 3, "label": "PV only (OSO)" },
+        { "value": 4, "label": "PV priority, surplus charge (SOR)" }
       ]
+    },
+    {
+      "id": "current_charge_priority",
+      "type": "select",
+      "name": "Current Charge Priority",
+      "category": "Status",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 70,
+        "dataType": "uint16"
+      },
+      "options": [
+        { "value": 1, "label": "SOF" },
+        { "value": 2, "label": "SNU" },
+        { "value": 3, "label": "OSO" },
+        { "value": 4, "label": "SOR" }
+      ],
+      "display": { "format": "text" }
     },
     {
       "id": "output_voltage_setting",
@@ -515,6 +551,26 @@
       "display": { "precision": 2 },
       "writable": true,
       "write": { "address": 607 }
+    },
+
+    {
+      "id": "buzzer_mode",
+      "type": "select",
+      "name": "Buzzer Mode",
+      "category": "System Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 4,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": { "address": 603 },
+      "options": [
+        { "value": 0, "label": "Off" },
+        { "value": 1, "label": "Faults & Warnings" },
+        { "value": 2, "label": "Faults only" },
+        { "value": 3, "label": "All" }
+      ]
     },
 
     {
@@ -588,6 +644,21 @@
       "display": { "precision": 1 },
       "writable": true,
       "write": { "address": 638 }
+    },
+    {
+      "id": "constant_to_float_wait",
+      "type": "number",
+      "name": "Constant-to-Float Wait Time",
+      "category": "Battery Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 76,
+        "dataType": "uint16",
+        "unit": "min"
+      },
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": { "address": 639 }
     },
     {
       "id": "max_charge_current",
@@ -715,6 +786,21 @@
       "write": { "address": 648 }
     },
     {
+      "id": "offgrid_soc_protection",
+      "type": "number",
+      "name": "Off-grid Low DC Protection SOC",
+      "category": "Battery Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 96,
+        "dataType": "uint16",
+        "unit": "%"
+      },
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": { "address": 649 }
+    },
+    {
       "id": "battery_cutoff_soc",
       "type": "number",
       "name": "Battery Low Cut-off SOC",
@@ -728,6 +814,67 @@
       "display": { "precision": 0 },
       "writable": true,
       "write": { "address": 650 }
+    },
+    {
+      "id": "eq_charge_voltage",
+      "type": "number",
+      "name": "Equalization Charge Voltage",
+      "category": "Battery Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 102,
+        "dataType": "uint16",
+        "scale": 0.1,
+        "unit": "V"
+      },
+      "display": { "precision": 1 },
+      "writable": true,
+      "write": { "address": 652 }
+    },
+    {
+      "id": "eq_time",
+      "type": "number",
+      "name": "Equalization Time",
+      "category": "Battery Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 104,
+        "dataType": "uint16",
+        "unit": "min"
+      },
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": { "address": 653 }
+    },
+    {
+      "id": "eq_timeout",
+      "type": "number",
+      "name": "Equalization Timeout",
+      "category": "Battery Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 106,
+        "dataType": "uint16",
+        "unit": "min"
+      },
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": { "address": 654 }
+    },
+    {
+      "id": "eq_interval",
+      "type": "number",
+      "name": "Equalization Interval",
+      "category": "Battery Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 108,
+        "dataType": "uint16",
+        "unit": "days"
+      },
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": { "address": 655 }
     },
 
     {
@@ -767,6 +914,23 @@
       ]
     },
     {
+      "id": "lcd_auto_return",
+      "type": "select",
+      "name": "LCD Auto Return",
+      "category": "System Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 154,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": { "address": 678 },
+      "options": [
+        { "value": 0, "label": "Off" },
+        { "value": 1, "label": "1 Minute" }
+      ]
+    },
+    {
       "id": "lcd_backlight",
       "type": "select",
       "name": "LCD Backlight",
@@ -781,6 +945,74 @@
       "options": [
         { "value": 0, "label": "Timed off" },
         { "value": 1, "label": "Always on" }
+      ]
+    },
+    {
+      "id": "overload_auto_restart",
+      "type": "select",
+      "name": "Overload Auto Restart",
+      "category": "System Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 162,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": { "address": 682 },
+      "options": [
+        { "value": 0, "label": "No" },
+        { "value": 1, "label": "Yes" }
+      ]
+    },
+    {
+      "id": "over_temp_auto_restart",
+      "type": "select",
+      "name": "Over-temperature Auto Restart",
+      "category": "System Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 164,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": { "address": 683 },
+      "options": [
+        { "value": 0, "label": "No" },
+        { "value": 1, "label": "Yes" }
+      ]
+    },
+    {
+      "id": "overload_transfer_bypass",
+      "type": "select",
+      "name": "Overload Transfer to Bypass",
+      "category": "System Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 166,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": { "address": 684 },
+      "options": [
+        { "value": 0, "label": "Disabled" },
+        { "value": 1, "label": "Enabled" }
+      ]
+    },
+    {
+      "id": "remote_switch",
+      "type": "select",
+      "name": "Remote Switch",
+      "category": "System Settings",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 176,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": { "address": 689 },
+      "options": [
+        { "value": 0, "label": "Off" },
+        { "value": 1, "label": "On" }
       ]
     },
 
