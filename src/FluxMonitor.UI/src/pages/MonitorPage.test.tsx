@@ -813,6 +813,161 @@ describe('MonitorPage', () => {
     expect(screen.queryByText('2,026')).not.toBeInTheDocument();
   });
 
+  it('renders inverter clock settings as a combined date and time editor', async () => {
+    useDeviceDefinitionMock.mockReturnValue({
+      version: '1',
+      device: {
+        id: 'anenji-inverter-rs232',
+        name: 'Anenji Inverter',
+        manufacturer: 'Anenji / Easun',
+        model: 'ANJ-HHS-11000W-48V',
+        category: 'inverter',
+        icon: 'zap',
+      },
+      connection: {
+        transport: { type: 'serial', defaults: {} },
+        protocol: { type: 'modbus-rtu', settings: {} },
+      },
+      dataSources: [],
+      pollGroups: {},
+      entities: [
+        { id: 'clock_year', type: 'number', name: 'Time setting - Year', category: 'F3 Time', writable: true, source: { bank: 'clock', byteOffset: 0, unit: '' }, display: { precision: 0, formatter: 'plain-number' } },
+        { id: 'clock_month', type: 'number', name: 'Time setting - Month', category: 'F3 Time', writable: true, source: { bank: 'clock', byteOffset: 2, unit: '' }, display: { precision: 0, formatter: 'plain-number' } },
+        { id: 'clock_day', type: 'number', name: 'Time setting - Day', category: 'F3 Time', writable: true, source: { bank: 'clock', byteOffset: 4, unit: '' }, display: { precision: 0, formatter: 'plain-number' } },
+        { id: 'clock_hour', type: 'number', name: 'Time setting - Hour', category: 'F3 Time', writable: true, source: { bank: 'clock', byteOffset: 6, unit: '' }, display: { precision: 0, formatter: 'plain-number' } },
+        { id: 'clock_minute', type: 'number', name: 'Time setting - Minute', category: 'F3 Time', writable: true, source: { bank: 'clock', byteOffset: 8, unit: '' }, display: { precision: 0, formatter: 'plain-number' } },
+        { id: 'clock_second', type: 'number', name: 'Time setting - Second', category: 'F3 Time', writable: true, source: { bank: 'clock', byteOffset: 10, unit: '' }, display: { precision: 0, formatter: 'plain-number' } },
+      ],
+      computedEntities: [],
+      ui: {
+        pages: {
+          monitor: {
+            sections: [
+              {
+                type: 'parameter-table',
+                title: 'Clock',
+                filter: { writable: true, categories: ['F3 Time'] },
+              },
+            ],
+          },
+        },
+      },
+    } satisfies DeviceDefinition);
+
+    class FakeEventSource {
+      static instances: FakeEventSource[] = [];
+
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      close = vi.fn();
+
+      constructor(public readonly url: string) {
+        FakeEventSource.instances.push(this);
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }));
+      }
+    }
+
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        results: [
+          { parameterKey: 'clock_year', success: true, writtenValue: 2026, readBackValue: 2026 },
+          { parameterKey: 'clock_month', success: true, writtenValue: 4, readBackValue: 4 },
+          { parameterKey: 'clock_day', success: true, writtenValue: 12, readBackValue: 12 },
+          { parameterKey: 'clock_hour', success: true, writtenValue: 13, readBackValue: 13 },
+          { parameterKey: 'clock_minute', success: true, writtenValue: 45, readBackValue: 45 },
+          { parameterKey: 'clock_second', success: true, writtenValue: 30, readBackValue: 30 },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    render(<MonitorPage />);
+
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(1);
+    });
+
+    FakeEventSource.instances[0]?.emit({
+      devices: [
+        {
+          deviceId: 'inv-clock',
+          displayName: 'Clock Inverter',
+          definitionId: 'anenji-inverter-rs232',
+          protocolHandler: 'modbus-rtu',
+          enabled: true,
+          isMaster: true,
+          pollIntervalMilliseconds: 5000,
+          lastOutcome: 'Succeeded',
+          latestTelemetry: {
+            collectedAt: '2026-04-12T12:00:00.000Z',
+            cells: [],
+            activeWarnings: [],
+            parameters: [
+              { key: 'clock_year', displayName: 'Time setting - Year', category: 'F3 Time', numericValue: 2026, rawValue: 2026, sortOrder: 0, isWritable: true, unit: '', displayFormatter: 'plain-number' },
+              { key: 'clock_month', displayName: 'Time setting - Month', category: 'F3 Time', numericValue: 4, rawValue: 4, sortOrder: 1, isWritable: true, unit: '', displayFormatter: 'plain-number' },
+              { key: 'clock_day', displayName: 'Time setting - Day', category: 'F3 Time', numericValue: 12, rawValue: 12, sortOrder: 2, isWritable: true, unit: '', displayFormatter: 'plain-number' },
+              { key: 'clock_hour', displayName: 'Time setting - Hour', category: 'F3 Time', numericValue: 12, rawValue: 12, sortOrder: 3, isWritable: true, unit: '', displayFormatter: 'plain-number' },
+              { key: 'clock_minute', displayName: 'Time setting - Minute', category: 'F3 Time', numericValue: 34, rawValue: 34, sortOrder: 4, isWritable: true, unit: '', displayFormatter: 'plain-number' },
+              { key: 'clock_second', displayName: 'Time setting - Second', category: 'F3 Time', numericValue: 56, rawValue: 56, sortOrder: 5, isWritable: true, unit: '', displayFormatter: 'plain-number' },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(await screen.findByText('Clock Inverter')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /clock inverter/i }));
+
+    expect(await screen.findByText('Date & Time')).toBeInTheDocument();
+    expect(screen.getByText('2026-04-12 12:34:56')).toBeInTheDocument();
+    expect(screen.queryByText('Time setting - Year')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTitle('Edit date and time'));
+
+    const input = screen.getByLabelText('Set inverter date and time');
+    expect(input).toHaveDisplayValue('2026-04-12T12:34:56.000');
+
+    fireEvent.change(input, { target: { value: '2026-04-12T13:45:30' } });
+    fireEvent.click(screen.getByLabelText('Save date and time'));
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/devices/inv-clock/parameters/batch',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          parameters: [
+            { parameterKey: 'clock_year', rawValue: 2026 },
+            { parameterKey: 'clock_month', rawValue: 4 },
+            { parameterKey: 'clock_day', rawValue: 12 },
+            { parameterKey: 'clock_hour', rawValue: 13 },
+            { parameterKey: 'clock_minute', rawValue: 45 },
+            { parameterKey: 'clock_second', rawValue: 30 },
+          ],
+        }),
+      }),
+    );
+
+    expect(await screen.findByText(/Confirmed: 2026-04-12 13:45:30/)).toBeInTheDocument();
+  });
+
   it('uses entity scale when editing writable numeric parameters', async () => {
     useDeviceDefinitionMock.mockReturnValue({
       version: '1',

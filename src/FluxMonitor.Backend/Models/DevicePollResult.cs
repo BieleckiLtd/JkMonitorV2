@@ -12,3 +12,14 @@ public sealed record WriteRegisterResult(
     uint WrittenValue,
     uint? ReadBackValue,
     string? Error);
+
+public sealed record EntityWriteRequest(
+    string EntityId,
+    uint RawValue);
+
+public sealed record EntityWriteResult(
+    string EntityId,
+    bool Success,
+    uint WrittenValue,
+    uint? ReadBackValue,
+    string? Error);

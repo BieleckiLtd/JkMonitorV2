@@ -36,6 +36,23 @@ type DeviceParameter = {
   displayFormatter?: string | null;
 };
 
+type ParameterWriteResult = {
+  success: boolean;
+  message: string;
+};
+
+type BatchWriteResponse = {
+  success?: boolean;
+  results?: {
+    parameterKey?: string;
+    success?: boolean;
+    writtenValue?: number;
+    readBackValue?: number;
+    error?: string | null;
+  }[];
+  message?: string;
+};
+
 type CellVoltageSnapshot = {
   index: number;
   voltageVolts: number;
@@ -999,6 +1016,11 @@ function ParameterCategoryCard({
   definition?: DeviceDefinition | null;
   temperatureUnit: TemperatureUnit;
 }) {
+  const combinedClockParams = getCombinedClockParams(params, definition);
+  const visibleParams = combinedClockParams == null
+    ? params
+    : params.filter((param) => !inverterClockParameterKeys.includes(param.key));
+
   return (
     <Card className='border border-border/80 bg-card/85 shadow-sm'>
       <CardHeader className='border-b border-border/60 pb-3'>
@@ -1009,12 +1031,147 @@ function ParameterCategoryCard({
       </CardHeader>
       <CardContent className='pt-3'>
         <div className='grid gap-2'>
-          {params.map((param) => (
+          {combinedClockParams != null && (
+            <CombinedClockParameterRow
+              params={combinedClockParams}
+              deviceId={deviceId}
+              temperatureUnit={temperatureUnit}
+            />
+          )}
+          {visibleParams.map((param) => (
             <ParameterRow key={param.key} param={param} deviceId={deviceId} telemetry={telemetry} paramByKey={paramByKey} definition={definition} temperatureUnit={temperatureUnit} />
           ))}
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function CombinedClockParameterRow({
+  params,
+  deviceId,
+  temperatureUnit,
+}: {
+  params: DeviceParameter[];
+  deviceId: string;
+  temperatureUnit: TemperatureUnit;
+}) {
+  const [isEditing, setIsEditing] = useState(false);
+  const [editValue, setEditValue] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
+  const [writeResult, setWriteResult] = useState<ParameterWriteResult | null>(null);
+  const displayValue = formatCombinedClockDisplayValue(params);
+
+  const startEdit = useCallback(() => {
+    setEditValue(formatCombinedClockEditValue(params));
+    setIsEditing(true);
+    setWriteResult(null);
+  }, [params]);
+
+  const cancelEdit = useCallback(() => {
+    setIsEditing(false);
+    setWriteResult(null);
+  }, []);
+
+  const saveValue = useCallback(async () => {
+    const parsedValue = parseCombinedClockEditValue(editValue);
+    if (!parsedValue.success) {
+      setWriteResult({ success: false, message: parsedValue.message });
+      return;
+    }
+
+    setIsSaving(true);
+    setWriteResult(null);
+
+    try {
+      const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/parameters/batch`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          parameters: inverterClockParameterKeys.map((parameterKey) => ({
+            parameterKey,
+            rawValue: parsedValue.rawValues[parameterKey],
+          })),
+        }),
+      });
+
+      const data = await response.json().catch(() => ({})) as BatchWriteResponse;
+      if (!response.ok) {
+        setWriteResult({ success: false, message: data.message ?? 'Write failed' });
+        return;
+      }
+
+      const results = data.results ?? [];
+      const failedResult = results.find((result) => !result.success);
+      if (failedResult) {
+        setWriteResult({ success: false, message: failedResult.error ?? 'Verification failed' });
+        return;
+      }
+
+      const confirmedRawValues = buildClockRawValuesFromBatchResults(results, parsedValue.rawValues);
+      setWriteResult({
+        success: true,
+        message: `Confirmed: ${formatCombinedClockDisplayValueFromRawValues(confirmedRawValues, temperatureUnit)}`,
+      });
+      setIsEditing(false);
+    } catch {
+      setWriteResult({ success: false, message: 'Network error' });
+    } finally {
+      setIsSaving(false);
+    }
+  }, [deviceId, editValue, temperatureUnit]);
+
+  return (
+    <div className='rounded-lg border border-border/50 bg-background/40 px-3 py-2'>
+      <div className='flex items-center justify-between gap-3'>
+        <span className='flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground'>
+          <span>Date &amp; Time</span>
+        </span>
+        <div className='flex items-center gap-2'>
+          {isEditing ? (
+            <div className='flex items-center gap-1'>
+              <input
+                type='datetime-local'
+                step={1}
+                aria-label='Set inverter date and time'
+                className='rounded border border-border bg-background px-2 py-0.5 text-sm font-semibold text-foreground outline-none focus:border-primary'
+                value={editValue}
+                onChange={(event) => setEditValue(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === 'Enter') void saveValue();
+                  if (event.key === 'Escape') cancelEdit();
+                }}
+                disabled={isSaving}
+                autoFocus
+              />
+              <button onClick={() => void saveValue()} disabled={isSaving}
+                aria-label='Save date and time'
+                className='rounded p-1 text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50'>
+                {isSaving ? <LoaderCircle className='h-3.5 w-3.5 animate-spin' /> : <Check className='h-3.5 w-3.5' />}
+              </button>
+              <button onClick={cancelEdit} disabled={isSaving}
+                aria-label='Cancel date and time edit'
+                className='rounded p-1 text-muted-foreground hover:bg-muted/50 disabled:opacity-50'>
+                <X className='h-3.5 w-3.5' />
+              </button>
+            </div>
+          ) : (
+            <>
+              <span className='text-sm font-semibold text-foreground'>{displayValue}</span>
+              <button onClick={startEdit} className='rounded p-1 text-muted-foreground/60 hover:text-primary hover:bg-primary/10 transition-colors'
+                title='Edit date and time'>
+                <Edit2 className='h-3 w-3' />
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+      {writeResult && (
+        <div className={cn('mt-1 text-[10px]', writeResult.success ? 'text-emerald-400' : 'text-rose-400')}>
+          {writeResult.success ? '✓ ' : '✗ '}{writeResult.message}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -2007,6 +2164,154 @@ function getSwitchStatusChip(
     default:
       return null;
   }
+}
+
+const inverterClockParameterKeys = [
+  'clock_year',
+  'clock_month',
+  'clock_day',
+  'clock_hour',
+  'clock_minute',
+  'clock_second',
+] as const;
+
+type InverterClockParameterKey = (typeof inverterClockParameterKeys)[number];
+type InverterClockRawValues = Record<InverterClockParameterKey, number>;
+
+function getCombinedClockParams(
+  params: DeviceParameter[],
+  definition?: DeviceDefinition | null,
+) {
+  if (definition?.device.category !== 'inverter') {
+    return null;
+  }
+
+  const paramByKey = new Map(params.map((param) => [param.key, param]));
+  const combinedParams = inverterClockParameterKeys
+    .map((key) => paramByKey.get(key))
+    .filter((param): param is DeviceParameter => param != null);
+
+  if (combinedParams.length !== inverterClockParameterKeys.length) {
+    return null;
+  }
+
+  return combinedParams.every((param) => param.isWritable)
+    ? combinedParams
+    : null;
+}
+
+function buildClockRawValues(params: DeviceParameter[]): InverterClockRawValues | null {
+  const paramByKey = new Map(params.map((param) => [param.key, param]));
+  const rawValues = {} as InverterClockRawValues;
+
+  for (const key of inverterClockParameterKeys) {
+    const param = paramByKey.get(key);
+    const rawValue = param?.rawValue ?? param?.numericValue;
+    if (rawValue == null || !Number.isFinite(rawValue)) {
+      return null;
+    }
+
+    rawValues[key] = Math.round(rawValue);
+  }
+
+  return rawValues;
+}
+
+function formatCombinedClockDisplayValue(params: DeviceParameter[]) {
+  const rawValues = buildClockRawValues(params);
+  return rawValues == null
+    ? nd
+    : formatCombinedClockDisplayValueFromRawValues(rawValues);
+}
+
+function formatCombinedClockEditValue(params: DeviceParameter[]) {
+  const rawValues = buildClockRawValues(params);
+  if (rawValues == null) {
+    return '';
+  }
+
+  return `${padClockValue(rawValues.clock_year, 4)}-${padClockValue(rawValues.clock_month)}-${padClockValue(rawValues.clock_day)}T${padClockValue(rawValues.clock_hour)}:${padClockValue(rawValues.clock_minute)}:${padClockValue(rawValues.clock_second)}`;
+}
+
+function formatCombinedClockDisplayValueFromRawValues(rawValues: InverterClockRawValues, _temperatureUnit?: TemperatureUnit) {
+  return `${padClockValue(rawValues.clock_year, 4)}-${padClockValue(rawValues.clock_month)}-${padClockValue(rawValues.clock_day)} ${padClockValue(rawValues.clock_hour)}:${padClockValue(rawValues.clock_minute)}:${padClockValue(rawValues.clock_second)}`;
+}
+
+function buildClockRawValuesFromBatchResults(
+  results: BatchWriteResponse['results'],
+  fallbackRawValues: InverterClockRawValues,
+): InverterClockRawValues {
+  const resolvedRawValues = { ...fallbackRawValues };
+  const resultByKey = new Map((results ?? []).map((result) => [result.parameterKey, result]));
+
+  for (const key of inverterClockParameterKeys) {
+    const result = resultByKey.get(key);
+    const readBackValue = result?.readBackValue;
+    if (readBackValue != null && Number.isFinite(readBackValue)) {
+      resolvedRawValues[key] = Math.round(readBackValue);
+    }
+  }
+
+  return resolvedRawValues;
+}
+
+function parseCombinedClockEditValue(input: string):
+  | { success: true; rawValues: InverterClockRawValues }
+  | { success: false; message: string } {
+  const match = input.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?(?:\.\d+)?$/);
+  if (!match) {
+    return { success: false, message: 'Invalid date/time' };
+  }
+
+  const [
+    ,
+    yearText,
+    monthText,
+    dayText,
+    hourText,
+    minuteText,
+    secondText = '00',
+  ] = match;
+
+  const rawValues: InverterClockRawValues = {
+    clock_year: Number.parseInt(yearText, 10),
+    clock_month: Number.parseInt(monthText, 10),
+    clock_day: Number.parseInt(dayText, 10),
+    clock_hour: Number.parseInt(hourText, 10),
+    clock_minute: Number.parseInt(minuteText, 10),
+    clock_second: Number.parseInt(secondText, 10),
+  };
+
+  if (rawValues.clock_year < 2000 || rawValues.clock_year > 2099) {
+    return { success: false, message: 'Year must be between 2000 and 2099.' };
+  }
+
+  if (rawValues.clock_month < 1 || rawValues.clock_month > 12) {
+    return { success: false, message: 'Month must be between 1 and 12.' };
+  }
+
+  const daysInMonth = new Date(rawValues.clock_year, rawValues.clock_month, 0).getDate();
+  if (rawValues.clock_day < 1 || rawValues.clock_day > daysInMonth) {
+    return { success: false, message: 'Day is out of range for the selected month.' };
+  }
+
+  if (rawValues.clock_hour < 0 || rawValues.clock_hour > 23) {
+    return { success: false, message: 'Hour must be between 0 and 23.' };
+  }
+
+  if (rawValues.clock_minute < 0 || rawValues.clock_minute > 59) {
+    return { success: false, message: 'Minute must be between 0 and 59.' };
+  }
+
+  if (rawValues.clock_second < 0 || rawValues.clock_second > 59) {
+    return { success: false, message: 'Second must be between 0 and 59.' };
+  }
+
+  return { success: true, rawValues };
+}
+
+function padClockValue(value: number, width = 2) {
+  return value.toString().padStart(width, '0');
 }
 
 function formatParamValue(

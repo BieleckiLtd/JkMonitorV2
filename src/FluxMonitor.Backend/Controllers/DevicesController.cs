@@ -292,6 +292,98 @@ public sealed class DevicesController(
         }
     }
 
+    [HttpPost("{deviceId}/parameters/batch")]
+    public async Task<IActionResult> WriteParametersBatch(
+        string deviceId,
+        [FromBody] BatchWriteParametersRequest request,
+        CancellationToken cancellationToken)
+    {
+        var device = deviceConfigStore.GetDevices().FirstOrDefault(d =>
+            string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase));
+
+        if (device is null)
+            return NotFound(new { message = $"Device '{deviceId}' not found." });
+
+        if (request.Parameters is null || request.Parameters.Count == 0)
+            return BadRequest(new { message = "Specify at least one parameter write." });
+
+        try
+        {
+            if (!device.TryResolveDefinition(definitionLoader, out var definition) || definition is null)
+                return BadRequest(new { message = $"Device definition '{device.DefinitionId}' not found." });
+
+            IReadOnlyList<EntityWriteResult> results;
+            if (string.Equals(definition.Connection.Transport.Type, "ble", StringComparison.OrdinalIgnoreCase))
+            {
+                var bleResults = new List<EntityWriteResult>(request.Parameters.Count);
+                foreach (var parameter in request.Parameters)
+                {
+                    var result = await genericBlePollingClient.WriteEntityAsync(
+                        device,
+                        definition,
+                        parameter.ParameterKey,
+                        parameter.RawValue,
+                        cancellationToken);
+                    bleResults.Add(new EntityWriteResult(
+                        parameter.ParameterKey,
+                        result.Success,
+                        result.WrittenValue,
+                        result.ReadBackValue,
+                        result.Error));
+                }
+
+                results = bleResults;
+            }
+            else
+            {
+                results = await genericModbusPollingClient.WriteEntitiesAsync(
+                    device,
+                    definition,
+                    request.Parameters.Select(parameter => new EntityWriteRequest(parameter.ParameterKey, parameter.RawValue)).ToArray(),
+                    cancellationToken);
+            }
+
+            pollTrigger.Signal();
+            return Ok(new
+            {
+                success = results.All(result => result.Success),
+                results = results.Select(result => new
+                {
+                    parameterKey = result.EntityId,
+                    success = result.Success,
+                    writtenValue = result.WrittenValue,
+                    readBackValue = result.ReadBackValue,
+                    error = result.Error
+                }).ToArray()
+            });
+        }
+        catch (ArgumentException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (TimeoutException ex)
+        {
+            return StatusCode(504, new { message = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (NotSupportedException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (InvalidDataException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Batch parameter write failed for a configured device.");
+            return StatusCode(500, new { message = "Failed to write parameters." });
+        }
+    }
+
     [HttpGet("ports")]
     public IActionResult GetAvailablePorts()
     {
@@ -665,6 +757,10 @@ public sealed class DevicesController(
 }
 
 public sealed record WriteParameterRequest(uint RawValue);
+
+public sealed record BatchWriteParametersRequest(IReadOnlyList<BatchWriteParameterRequest> Parameters);
+
+public sealed record BatchWriteParameterRequest(string ParameterKey, uint RawValue);
 
 internal sealed record DeviceStateStreamEnvelope
 {

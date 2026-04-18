@@ -138,30 +138,33 @@ public sealed class GenericSerialPollingClient(
         uint rawValue,
         CancellationToken cancellationToken)
     {
-        var entity = definition.Entities.FirstOrDefault(e =>
-            string.Equals(e.Id, entityId, StringComparison.OrdinalIgnoreCase) && e.Writable);
-        if (entity is null)
-            throw new ArgumentException($"Writable entity '{entityId}' not found in definition '{definition.Device.Id}'.");
+        var result = (await WriteEntitiesAsync(
+            device,
+            definition,
+            [new EntityWriteRequest(entityId, rawValue)],
+            cancellationToken)).Single();
 
-        var bank = definition.DataSources.FirstOrDefault(b =>
-            string.Equals(b.Id, entity.Source.Bank, StringComparison.OrdinalIgnoreCase));
-        if (bank?.Write is null)
-            throw new InvalidOperationException($"Register bank '{entity.Source.Bank}' does not support writes.");
+        return new WriteRegisterResult(
+            result.Success,
+            result.WrittenValue,
+            result.ReadBackValue,
+            result.Error);
+    }
+
+    public async Task<IReadOnlyList<EntityWriteResult>> WriteEntitiesAsync(
+        DeviceConfiguration device,
+        DeviceDefinition definition,
+        IReadOnlyList<EntityWriteRequest> writes,
+        CancellationToken cancellationToken)
+    {
+        if (writes.Count == 0)
+            throw new ArgumentException("At least one write request is required.", nameof(writes));
 
         var transport = definition.Connection.Transport;
         var protocolSettings = definition.Connection.Protocol.Settings ?? new ProtocolSettings();
         var slaveAddress = device.Address != 0 ? device.Address : protocolSettings.DefaultSlaveAddress;
         var readTimeout = transport.Defaults?.ReadTimeoutMs ?? 1000;
-
-        var configuredWriteAddress = entity.Write?.Address;
-        if (configuredWriteAddress is < 0 or > ushort.MaxValue)
-            throw new InvalidOperationException($"Writable entity '{entityId}' resolved to an invalid register address.");
-
-        // Default behavior remains definition-driven from the bank base plus byte offset,
-        // but entities can now override the write address in the device definition.
-        var registerAddress = configuredWriteAddress.HasValue
-            ? (ushort)configuredWriteAddress.Value
-            : (ushort)(bank.Address + entity.Source.ByteOffset);
+        var plans = writes.Select(write => ResolveWritePlan(definition, write.EntityId, write.RawValue)).ToList();
 
         using var writeCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         writeCts.CancelAfter(readTimeout * 5);
@@ -174,45 +177,73 @@ public sealed class GenericSerialPollingClient(
             serialPort.DiscardInBuffer();
             serialPort.DiscardOutBuffer();
 
-            logger.LogInformation("Writing a configured register value. Register=0x{Register:X4}.", registerAddress);
+            var resultsByEntityId = new Dictionary<string, EntityWriteResult>(StringComparer.OrdinalIgnoreCase);
+            var affectedBankIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            var pendingPlans = new List<ResolvedWritePlan>(plans);
 
-            var registersPerWrite = bank.Write.RegistersPerWrite > 0 ? bank.Write.RegistersPerWrite : 2;
-            if (TryResolveGroupWrite(entity, registerAddress, registersPerWrite, out var groupWrite))
+            while (pendingPlans.Count > 0)
             {
-                var groupResult = await WriteGroupedRegistersAsync(
+                var currentPlan = pendingPlans[0];
+                pendingPlans.RemoveAt(0);
+
+                logger.LogInformation(
+                    "Writing configured register value. Entity={EntityId}, Register=0x{Register:X4}.",
+                    currentPlan.Entity.Id,
+                    currentPlan.RegisterAddress);
+
+                if (currentPlan.GroupWrite is { } groupWrite)
+                {
+                    var groupedPlans = new[] { currentPlan }
+                        .Concat(pendingPlans.Where(plan =>
+                            plan.Bank.Id == currentPlan.Bank.Id &&
+                            plan.GroupWrite is { } candidate &&
+                            candidate.StartAddress == groupWrite.StartAddress &&
+                            candidate.RegisterCount == groupWrite.RegisterCount))
+                        .ToArray();
+
+                    foreach (var groupedPlan in groupedPlans.Skip(1))
+                    {
+                        pendingPlans.Remove(groupedPlan);
+                    }
+
+                    var groupedResults = await WriteGroupedRegistersAsync(
+                        serialPort,
+                        slaveAddress,
+                        readTimeout,
+                        writeToken,
+                        groupedPlans);
+
+                    foreach (var result in groupedResults)
+                    {
+                        resultsByEntityId[result.EntityId] = result;
+                    }
+
+                    affectedBankIds.Add(currentPlan.Bank.Id);
+                    continue;
+                }
+
+                var verificationResult = await WriteSingleRegisterAsync(
                     serialPort,
                     slaveAddress,
-                    bank,
-                    rawValue,
+                    currentPlan,
                     readTimeout,
-                    writeToken,
-                    groupWrite);
+                    writeToken);
 
-                _bankCache.Remove(bank.Id);
-                return groupResult;
+                resultsByEntityId[verificationResult.EntityId] = verificationResult;
+                affectedBankIds.Add(currentPlan.Bank.Id);
             }
 
-            var writeRequest = ModbusRtu.BuildWriteMultipleRegistersRequest(slaveAddress, registerAddress, rawValue, registersPerWrite);
-            var writeResponse = await SendAndReceiveModbusAsync(serialPort, writeRequest,
-                ModbusRtu.WriteResponseLength, readTimeout, writeToken);
-            ModbusRtu.ValidateAndExtractData(writeResponse, slaveAddress, bank.Write.FunctionCode);
+            foreach (var bankId in affectedBankIds)
+            {
+                _bankCache.Remove(bankId);
+            }
 
-            var verificationResult = await ReadAndVerifyWriteAsync(
-                serialPort,
-                slaveAddress,
-                registerAddress,
-                registersPerWrite,
-                readTimeout,
-                writeToken,
-                rawValue);
-
-            _bankCache.Remove(bank.Id);
-            return verificationResult;
+            return plans.Select(plan => resultsByEntityId[plan.Entity.Id]).ToArray();
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
             ClosePort();
-            throw new TimeoutException($"Write timeout exceeded for entity {entityId}.");
+            throw new TimeoutException("Write timeout exceeded while updating device parameters.");
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -567,6 +598,36 @@ public sealed class GenericSerialPollingClient(
 
     #region Protocol-specific bank reading
 
+    private static ResolvedWritePlan ResolveWritePlan(DeviceDefinition definition, string entityId, uint rawValue)
+    {
+        var entity = definition.Entities.FirstOrDefault(e =>
+            string.Equals(e.Id, entityId, StringComparison.OrdinalIgnoreCase) && e.Writable);
+        if (entity is null)
+            throw new ArgumentException($"Writable entity '{entityId}' not found in definition '{definition.Device.Id}'.");
+
+        var bank = definition.DataSources.FirstOrDefault(b =>
+            string.Equals(b.Id, entity.Source.Bank, StringComparison.OrdinalIgnoreCase));
+        if (bank?.Write is null)
+            throw new InvalidOperationException($"Register bank '{entity.Source.Bank}' does not support writes.");
+
+        var configuredWriteAddress = entity.Write?.Address;
+        if (configuredWriteAddress is < 0 or > ushort.MaxValue)
+            throw new InvalidOperationException($"Writable entity '{entityId}' resolved to an invalid register address.");
+
+        var registerAddress = configuredWriteAddress.HasValue
+            ? (ushort)configuredWriteAddress.Value
+            : (ushort)(bank.Address + entity.Source.ByteOffset);
+        var registersPerWrite = bank.Write.RegistersPerWrite > 0 ? bank.Write.RegistersPerWrite : 2;
+
+        GroupWritePlan? groupWrite = null;
+        if (TryResolveGroupWrite(entity, registerAddress, registersPerWrite, out var resolvedGroupWrite))
+        {
+            groupWrite = resolvedGroupWrite;
+        }
+
+        return new ResolvedWritePlan(entity, bank, registerAddress, registersPerWrite, rawValue, groupWrite);
+    }
+
     internal static bool TryResolveGroupWrite(
         EntityDefinition entity,
         ushort registerAddress,
@@ -662,15 +723,18 @@ public sealed class GenericSerialPollingClient(
 
     #endregion
 
-    private async Task<WriteRegisterResult> WriteGroupedRegistersAsync(
+    private async Task<IReadOnlyList<EntityWriteResult>> WriteGroupedRegistersAsync(
         SerialPort serialPort,
         byte slaveAddress,
-        DataSourceDefinition bank,
-        uint rawValue,
         int readTimeout,
         CancellationToken cancellationToken,
-        GroupWritePlan groupWrite)
+        IReadOnlyList<ResolvedWritePlan> groupedPlans)
     {
+        var firstPlan = groupedPlans[0];
+        var bank = firstPlan.Bank;
+        var groupWrite = firstPlan.GroupWrite
+            ?? throw new InvalidOperationException("Grouped write plan is missing grouped write metadata.");
+
         var existingRegisters = await ReadHoldingRegistersAsync(
             serialPort,
             slaveAddress,
@@ -678,11 +742,15 @@ public sealed class GenericSerialPollingClient(
             groupWrite.RegisterCount,
             readTimeout,
             cancellationToken);
-        var mergedRegisters = MergeGroupWriteRegisters(
-            existingRegisters,
-            groupWrite.RegisterOffset,
-            rawValue,
-            bank.Write?.RegistersPerWrite > 0 ? bank.Write.RegistersPerWrite : 2);
+        var mergedRegisters = existingRegisters.ToArray();
+        foreach (var plan in groupedPlans)
+        {
+            mergedRegisters = MergeGroupWriteRegisters(
+                mergedRegisters,
+                plan.GroupWrite?.RegisterOffset ?? 0,
+                plan.RawValue,
+                plan.RegistersPerWrite);
+        }
 
         var writeRequest = ModbusRtu.BuildWriteMultipleRegistersRequest(slaveAddress, groupWrite.StartAddress, mergedRegisters);
         var writeResponse = await SendAndReceiveModbusAsync(
@@ -704,54 +772,72 @@ public sealed class GenericSerialPollingClient(
             readTimeout,
             cancellationToken);
         var success = mergedRegisters.SequenceEqual(verifiedRegisters);
-        var readBackValue = DecodeRegisterValue(
-            verifiedRegisters,
-            groupWrite.RegisterOffset,
-            bank.Write?.RegistersPerWrite > 0 ? bank.Write.RegistersPerWrite : 2);
 
         logger.LogInformation(
-            "Grouped write verification completed. Register=0x{Register:X4}, GroupStart=0x{GroupStart:X4}, RegisterCount={RegisterCount}, Success={Success}.",
-            groupWrite.StartAddress + groupWrite.RegisterOffset,
+            "Grouped write verification completed. GroupStart=0x{GroupStart:X4}, RegisterCount={RegisterCount}, Success={Success}.",
             groupWrite.StartAddress,
             groupWrite.RegisterCount,
             success);
 
-        return new WriteRegisterResult(
-            success,
-            rawValue,
-            readBackValue,
-            success ? null : $"Read-back mismatch: expected grouped write at 0x{groupWrite.StartAddress:X4} to persist.");
+        return groupedPlans.Select(plan =>
+        {
+            var planGroupWrite = plan.GroupWrite
+                ?? throw new InvalidOperationException("Grouped write plan is missing grouped write metadata.");
+            var readBackValue = DecodeRegisterValue(
+                verifiedRegisters,
+                planGroupWrite.RegisterOffset,
+                plan.RegistersPerWrite);
+
+            return new EntityWriteResult(
+                plan.Entity.Id,
+                success,
+                plan.RawValue,
+                readBackValue,
+                success ? null : $"Read-back mismatch: expected grouped write at 0x{groupWrite.StartAddress:X4} to persist.");
+        }).ToArray();
     }
 
-    private async Task<WriteRegisterResult> ReadAndVerifyWriteAsync(
+    private async Task<EntityWriteResult> WriteSingleRegisterAsync(
         SerialPort serialPort,
         byte slaveAddress,
-        ushort registerAddress,
-        int registersPerWrite,
+        ResolvedWritePlan plan,
         int readTimeout,
-        CancellationToken cancellationToken,
-        uint rawValue)
+        CancellationToken cancellationToken)
     {
+        var writeRequest = ModbusRtu.BuildWriteMultipleRegistersRequest(
+            slaveAddress,
+            plan.RegisterAddress,
+            plan.RawValue,
+            plan.RegistersPerWrite);
+        var writeResponse = await SendAndReceiveModbusAsync(
+            serialPort,
+            writeRequest,
+            ModbusRtu.WriteResponseLength,
+            readTimeout,
+            cancellationToken);
+        ModbusRtu.ValidateAndExtractData(writeResponse, slaveAddress, plan.Bank.Write?.FunctionCode ?? 0x10);
+
         await Task.Delay(50, cancellationToken);
         serialPort.DiscardInBuffer();
 
-        var readRequest = ModbusRtu.BuildReadHoldingRegistersRequest(slaveAddress, registerAddress, (ushort)registersPerWrite);
+        var readRequest = ModbusRtu.BuildReadHoldingRegistersRequest(slaveAddress, plan.RegisterAddress, (ushort)plan.RegistersPerWrite);
         var readResponse = await SendAndReceiveModbusAsync(
             serialPort,
             readRequest,
-            ModbusRtu.ExpectedReadResponseLength((ushort)registersPerWrite),
+            ModbusRtu.ExpectedReadResponseLength((ushort)plan.RegistersPerWrite),
             readTimeout,
             cancellationToken);
-        var registers = ParseHoldingRegisters(readResponse, slaveAddress, registersPerWrite);
-        var readBack = DecodeRegisterValue(registers, 0, registersPerWrite);
-        var success = readBack == rawValue;
+        var registers = ParseHoldingRegisters(readResponse, slaveAddress, plan.RegistersPerWrite);
+        var readBack = DecodeRegisterValue(registers, 0, plan.RegistersPerWrite);
+        var success = readBack == plan.RawValue;
         logger.LogInformation("Write verification completed. Success={Success}.", success);
 
-        return new WriteRegisterResult(
+        return new EntityWriteResult(
+            plan.Entity.Id,
             success,
-            rawValue,
+            plan.RawValue,
             readBack,
-            success ? null : $"Read-back mismatch: expected {rawValue}, got {readBack}");
+            success ? null : $"Read-back mismatch: expected {plan.RawValue}, got {readBack}");
     }
 
     private static async Task<ushort[]> ReadHoldingRegistersAsync(
@@ -856,3 +942,11 @@ public sealed class GenericSerialPollingClient(
 }
 
 internal readonly record struct GroupWritePlan(ushort StartAddress, int RegisterCount, int RegisterOffset);
+
+internal sealed record ResolvedWritePlan(
+    EntityDefinition Entity,
+    DataSourceDefinition Bank,
+    ushort RegisterAddress,
+    int RegistersPerWrite,
+    uint RawValue,
+    GroupWritePlan? GroupWrite);
