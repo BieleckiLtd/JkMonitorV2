@@ -1714,6 +1714,11 @@
           {
             "type": "parameter-table",
             "title": "Device Info",
+            "entities": [
+              "serial_number",
+              "firmware_version",
+              "rated_power"
+            ],
             "filter": {
               "categories": [
                 "Device Info"

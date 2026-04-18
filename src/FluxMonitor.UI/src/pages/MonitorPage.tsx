@@ -2040,6 +2040,12 @@ function resolveColorClass(name?: string): string {
 /** Filters parameters based on a UI section filter definition. */
 function filterParams(allParams: DeviceParameter[], section: UiSectionDefinition): DeviceParameter[] {
   let result = allParams;
+  if (section.entities?.length) {
+    const order = new Map(section.entities.map((entity, index) => [entity, index]));
+    result = result
+      .filter(p => order.has(p.key))
+      .sort((a, b) => (order.get(a.key) ?? Number.MAX_SAFE_INTEGER) - (order.get(b.key) ?? Number.MAX_SAFE_INTEGER));
+  }
   const f = section.filter;
   if (f?.writable) result = result.filter(p => p.isWritable);
   if (f?.categories) result = result.filter(p => f.categories!.includes(p.category));

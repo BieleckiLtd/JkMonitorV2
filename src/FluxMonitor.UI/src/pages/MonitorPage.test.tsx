@@ -687,6 +687,28 @@ describe('MonitorPage', () => {
           source: { bank: 'live', byteOffset: 12, unit: '' },
           display: { precision: 0, formatter: 'plain-number' },
         },
+        {
+          id: 'serial_number',
+          type: 'text',
+          name: 'Serial Number',
+          category: 'Device Info',
+          source: { bank: 'info', byteOffset: 14, unit: '' },
+        },
+        {
+          id: 'firmware_version',
+          type: 'text',
+          name: 'Firmware Version',
+          category: 'Device Info',
+          source: { bank: 'info', byteOffset: 28, unit: '' },
+        },
+        {
+          id: 'rated_power',
+          type: 'number',
+          name: 'Rated Power',
+          category: 'Device Info',
+          source: { bank: 'info', byteOffset: 44, unit: 'W' },
+          display: { precision: 0, formatter: 'plain-number' },
+        },
       ],
       computedEntities: [],
       ui: {
@@ -719,6 +741,12 @@ describe('MonitorPage', () => {
                 type: 'parameter-table',
                 title: 'Settings',
                 filter: { writable: true },
+              },
+              {
+                type: 'parameter-table',
+                title: 'Device Info',
+                entities: ['serial_number', 'firmware_version', 'rated_power'],
+                filter: { categories: ['Device Info'] },
               },
             ],
           },
@@ -780,6 +808,9 @@ describe('MonitorPage', () => {
               { key: 'max_charge_current', displayName: 'Max Charge Current', category: 'Settings', numericValue: 100, rawValue: 100, sortOrder: 7, isWritable: true, unit: 'A' },
               { key: 'output_apparent_power', displayName: 'Output Apparent Power', category: 'Output', numericValue: 900, sortOrder: 8, unit: 'VA' },
               { key: 'clock_year', displayName: 'Time setting - Year', category: 'F3 Time', numericValue: 2026, rawValue: 2026, sortOrder: 9, isWritable: true, unit: '', displayFormatter: 'plain-number' },
+              { key: 'serial_number', displayName: 'Serial Number', category: 'Device Info', stringValue: 'SN123456789ABC', sortOrder: 10 },
+              { key: 'firmware_version', displayName: 'Firmware Version', category: 'Device Info', stringValue: 'FW1.2.3', sortOrder: 11 },
+              { key: 'rated_power', displayName: 'Rated Power', category: 'Device Info', numericValue: 11000, sortOrder: 12, unit: 'W' },
             ],
           },
         },
@@ -809,6 +840,8 @@ describe('MonitorPage', () => {
     expect(await screen.findByTestId('history-charts')).toHaveTextContent('History for inv-1');
     expect(screen.getByText('Max Charge Current')).toBeInTheDocument();
     expect(screen.getByText('Time setting - Year')).toBeInTheDocument();
+    expect(screen.getByText('Serial Number')).toBeInTheDocument();
+    expect(screen.getByText('SN123456789ABC')).toBeInTheDocument();
     expect(screen.getByText('2026')).toBeInTheDocument();
     expect(screen.queryByText('2,026')).not.toBeInTheDocument();
   });
