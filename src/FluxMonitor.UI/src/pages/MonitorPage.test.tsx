@@ -695,6 +695,14 @@ describe('MonitorPage', () => {
           source: { bank: 'info', byteOffset: 14, unit: '' },
         },
         {
+          id: 'equipment_type',
+          type: 'number',
+          name: 'Equipment Type',
+          category: 'Device Info',
+          source: { bank: 'info', byteOffset: 16, unit: '' },
+          display: { precision: 0 },
+        },
+        {
           id: 'firmware_version',
           type: 'text',
           name: 'Firmware Version',
@@ -745,7 +753,7 @@ describe('MonitorPage', () => {
               {
                 type: 'parameter-table',
                 title: 'Device Info',
-                entities: ['serial_number', 'firmware_version', 'rated_power'],
+                entities: ['serial_number', 'equipment_type', 'firmware_version', 'rated_power'],
                 filter: { categories: ['Device Info'] },
               },
             ],
@@ -809,8 +817,9 @@ describe('MonitorPage', () => {
               { key: 'output_apparent_power', displayName: 'Output Apparent Power', category: 'Output', numericValue: 900, sortOrder: 8, unit: 'VA' },
               { key: 'clock_year', displayName: 'Time setting - Year', category: 'F3 Time', numericValue: 2026, rawValue: 2026, sortOrder: 9, isWritable: true, unit: '', displayFormatter: 'plain-number' },
               { key: 'serial_number', displayName: 'Serial Number', category: 'Device Info', stringValue: 'SN123456789ABC', sortOrder: 10 },
-              { key: 'firmware_version', displayName: 'Firmware Version', category: 'Device Info', stringValue: 'FW1.2.3', sortOrder: 11 },
-              { key: 'rated_power', displayName: 'Rated Power', category: 'Device Info', numericValue: 11000, sortOrder: 12, unit: 'W' },
+              { key: 'equipment_type', displayName: 'Equipment Type', category: 'Device Info', numericValue: 29440, sortOrder: 11, unit: '' },
+              { key: 'firmware_version', displayName: 'Firmware Version', category: 'Device Info', stringValue: 'FW1.2.3', sortOrder: 12 },
+              { key: 'rated_power', displayName: 'Rated Power', category: 'Device Info', numericValue: 11000, sortOrder: 13, unit: 'W' },
             ],
           },
         },
@@ -842,6 +851,8 @@ describe('MonitorPage', () => {
     expect(screen.getByText('Time setting - Year')).toBeInTheDocument();
     expect(screen.getByText('Serial Number')).toBeInTheDocument();
     expect(screen.getByText('SN123456789ABC')).toBeInTheDocument();
+    expect(screen.getByText('Equipment Type')).toBeInTheDocument();
+    expect(screen.getByText('29,440')).toBeInTheDocument();
     expect(screen.getByText('2026')).toBeInTheDocument();
     expect(screen.queryByText('2,026')).not.toBeInTheDocument();
   });

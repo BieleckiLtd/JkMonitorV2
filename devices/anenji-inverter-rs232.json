@@ -1526,8 +1526,7 @@
         "bank": "info_id",
         "byteOffset": 0,
         "dataType": "uint16"
-      },
-      "hidden": true
+      }
     },
     {
       "id": "serial_number",
@@ -1716,6 +1715,7 @@
             "title": "Device Info",
             "entities": [
               "serial_number",
+              "equipment_type",
               "firmware_version",
               "rated_power"
             ],

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area, ReferenceDot,
   XAxis, YAxis, Tooltip, CartesianGrid, Legend,
@@ -588,15 +588,14 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
                   hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
                   onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
                   todayXTicks={todayXTicks} />
-                <ChartSection title='State of Charge' data={chartData}
-                  lines={[{ key: 'stateOfChargePercent', color: '#fbbf24', name: 'SOC' }]}
+                <StateOfChargeChartSection title='State of Charge' data={chartData}
+                  line={{ key: 'stateOfChargePercent', color: '#34d399', name: 'SOC' }}
                   getDecimalsForKey={getDecimalsForKey}
                   getUnitForKey={getUnitForKey}
-              domain={[0, 100]}
-              hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
-              onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
-              todayXTicks={todayXTicks}
-              subtitle={batteryStatusSubtitle} />
+                  hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
+                  onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
+                  todayXTicks={todayXTicks}
+                  subtitle={batteryStatusSubtitle} />
             <ChartSection title='Cell Voltage Spread' data={chartData}
               lines={[
                 { key: 'minCellVoltageVolts', color: '#f87171', name: 'Min Cell' },
@@ -670,7 +669,26 @@ function renderDefinitionCharts(
       name: t.label ?? t.entity,
     }));
 
-    const isSocChart = chart.traces?.some(t => t.entity === 'state_of_charge');
+    const isSocChart = lines.length === 1 && chart.traces?.[0]?.entity === 'state_of_charge';
+
+    if (isSocChart) {
+      return (
+        <StateOfChargeChartSection
+          key={`def-chart-${i}`}
+          title={chart.title}
+          data={chartData}
+          line={lines[0]}
+          getDecimalsForKey={getDecimalsForKey ?? (() => 2)}
+          getUnitForKey={getUnitForKey ?? (() => '')}
+          hoveredTime={hoveredTime}
+          selectedTime={selectedTime}
+          onHover={onHover}
+          onSelect={onSelect}
+          todayXTicks={todayXTicks}
+          subtitle={batteryStatusSubtitle}
+        />
+      );
+    }
 
     return (
         <ChartSection
@@ -830,6 +848,134 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
             />
           ))}
         </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUnitForKey, hoveredTime, selectedTime, onHover, onSelect, todayXTicks, subtitle }: {
+  title: string;
+  data: ChartDataPoint[];
+  line: LineSpec;
+  getDecimalsForKey: (key: string) => number;
+  getUnitForKey: (key: string) => string;
+  hoveredTime: string | null;
+  selectedTime: string | null;
+  onHover: (time: string | null) => void;
+  onSelect: (time: string | null) => void;
+  todayXTicks?: string[];
+  subtitle?: React.ReactNode;
+}) {
+  const gradientId = useId().replace(/:/g, '');
+  const activePoint = getActivePoint(data, hoveredTime, selectedTime);
+  const activeValueText = formatActiveValues(activePoint, [line], getDecimalsForKey, getUnitForKey);
+  const renderTooltipContent = useCallback((tooltipState: {
+    active?: boolean;
+    label?: string | number;
+    payload?: ReadonlyArray<{ payload?: Record<string, unknown> }>;
+  }) => {
+    if (!tooltipState.active) {
+      return null;
+    }
+
+    const tooltipPoint = tooltipState.payload?.[0]?.payload ?? activePoint;
+    if (!tooltipPoint) {
+      return null;
+    }
+
+    const raw = tooltipPoint[line.key];
+    const num = raw == null ? Number.NaN : typeof raw === 'number' ? raw : Number(raw);
+    const value = Number.isNaN(num)
+      ? 'N/D'
+      : `${num.toFixed(getDecimalsForKey(line.key))}${getUnitForKey(line.key)}`;
+
+    return (
+      <div style={tooltipContentStyle}>
+        <div style={tooltipLabelStyle}>{String(tooltipState.label ?? '')}</div>
+        <div className='mt-2 space-y-1'>
+          <div className='flex items-center justify-between gap-4 text-[12px]'>
+            <span style={{ color: line.color }}>{line.name}</span>
+            <span>{value}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }, [activePoint, getDecimalsForKey, getUnitForKey, line]);
+
+  const handleChartMove = useCallback((state: unknown) => {
+    const idx = extractActiveIndex(state);
+    if (idx != null && data[idx]) {
+      onHover(String(data[idx].timestamp ?? ''));
+    } else {
+      onHover(null);
+    }
+  }, [data, onHover]);
+
+  const handleChartLeave = useCallback(() => {
+    onHover(null);
+  }, [onHover]);
+
+  const handleChartClick = useCallback((state: unknown) => {
+    const idx = extractActiveIndex(state);
+    if (idx != null && data[idx]) {
+      onSelect(String(data[idx].timestamp ?? ''));
+    } else {
+      onSelect(null);
+    }
+  }, [data, onSelect]);
+
+  return (
+    <div>
+      <div className='mb-2 flex items-start justify-between gap-3 px-2 sm:px-0'>
+        <div>
+          <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{title}</div>
+          {subtitle && <div className='mt-1'>{subtitle}</div>}
+        </div>
+        <div className='text-right'>
+          <div className='text-[11px] font-medium text-foreground'>
+            {activeValueText ?? 'No data'}
+          </div>
+          {selectedTime != null && (
+            <button
+              onClick={() => onSelect(null)}
+              className='mt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground'
+            >
+              Show latest
+            </button>
+          )}
+        </div>
+      </div>
+      <ResponsiveContainer width='100%' height={180}>
+        <AreaChart
+          data={data}
+          margin={{ top: 4, right: 0, bottom: 0, left: 0 }}
+          onMouseMove={handleChartMove}
+          onMouseLeave={handleChartLeave}
+          onClick={handleChartClick}
+        >
+          <defs>
+            <linearGradient id={gradientId} x1='0' y1='0' x2='0' y2='1'>
+              <stop offset='0%' stopColor={line.color} stopOpacity={0.32} />
+              <stop offset='100%' stopColor={line.color} stopOpacity={0.04} />
+            </linearGradient>
+          </defs>
+          <CartesianGrid strokeDasharray='3 3' stroke='var(--border)' opacity={0.4} />
+          <XAxis dataKey='time' tick={xTickStyle} tickLine={false} axisLine={false} {...(todayXTicks ? { ticks: todayXTicks } : {})} />
+          <YAxis orientation='right' width={32} tick={yTickStyle} tickLine={false} axisLine={false} domain={[0, 100]} />
+          <Tooltip content={renderTooltipContent} />
+          <Legend wrapperStyle={legendStyle} />
+          <Area
+            type='monotone'
+            dataKey={line.key}
+            stroke={line.color}
+            fill={`url(#${gradientId})`}
+            name={line.name}
+            dot={false}
+            strokeWidth={1.75}
+            connectNulls
+            isAnimationActive={false}
+          />
+        </AreaChart>
       </ResponsiveContainer>
     </div>
   );
