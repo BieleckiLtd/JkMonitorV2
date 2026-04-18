@@ -549,6 +549,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                         deviceId={device.deviceId}
                         telemetry={compactTelemetry}
                         paramByKey={compactParamByKey}
+                        definition={definition}
                         temperatureUnit={temperatureUnit}
                       />
                     );
@@ -565,11 +566,11 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                         if (section.groupBy === 'category') {
                           const catGroups = groupByCategory(params);
                           return Array.from(catGroups.entries()).map(([cat, catParams]) => (
-                            <ParameterCategoryCard key={`${idx}-${cat}`} category={cat} params={catParams} deviceId={device.deviceId} telemetry={compactTelemetry} paramByKey={compactParamByKey} temperatureUnit={temperatureUnit} />
+                            <ParameterCategoryCard key={`${idx}-${cat}`} category={cat} params={catParams} deviceId={device.deviceId} telemetry={compactTelemetry} paramByKey={compactParamByKey} definition={definition} temperatureUnit={temperatureUnit} />
                           ));
                         }
                         return (
-                          <ParameterCategoryCard key={idx} category={section.title ?? 'Parameters'} params={params} deviceId={device.deviceId} telemetry={compactTelemetry} paramByKey={compactParamByKey} temperatureUnit={temperatureUnit} />
+                          <ParameterCategoryCard key={idx} category={section.title ?? 'Parameters'} params={params} deviceId={device.deviceId} telemetry={compactTelemetry} paramByKey={compactParamByKey} definition={definition} temperatureUnit={temperatureUnit} />
                         );
                       })}
                     </div>
@@ -586,6 +587,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                             deviceId={device.deviceId}
                             telemetry={compactTelemetry}
                             paramByKey={compactParamByKey}
+                            definition={definition}
                             temperatureUnit={temperatureUnit}
                           />
                         ))}
@@ -694,18 +696,18 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                 if (section.groupBy === 'category') {
                   const catGroups = groupByCategory(params);
                   return Array.from(catGroups.entries()).map(([cat, catParams]) => (
-                    <ParameterCategoryCard key={`${idx}-${cat}`} category={cat} params={catParams} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} temperatureUnit={temperatureUnit} />
+                    <ParameterCategoryCard key={`${idx}-${cat}`} category={cat} params={catParams} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} definition={definition} temperatureUnit={temperatureUnit} />
                   ));
                 }
                 return (
-                  <ParameterCategoryCard key={idx} category={section.title ?? 'Parameters'} params={params} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} temperatureUnit={temperatureUnit} />
+                  <ParameterCategoryCard key={idx} category={section.title ?? 'Parameters'} params={params} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} definition={definition} temperatureUnit={temperatureUnit} />
                 );
               })}
             </div>
           ) : (
             <div className='grid gap-3 sm:gap-4 lg:grid-cols-2'>
               {sortedCategories.filter(c => c !== 'Cell Voltages').map((category) => (
-                <ParameterCategoryCard key={category} category={category} params={grouped.get(category)!} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} temperatureUnit={temperatureUnit} />
+                <ParameterCategoryCard key={category} category={category} params={grouped.get(category)!} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} definition={definition} temperatureUnit={temperatureUnit} />
               ))}
             </div>
           )}
@@ -820,12 +822,14 @@ function ParameterRow({
   deviceId,
   telemetry,
   paramByKey,
+  definition,
   temperatureUnit,
 }: {
   param: DeviceParameter;
   deviceId: string;
   telemetry: DeviceTelemetrySnapshot;
   paramByKey: Map<string, DeviceParameter>;
+  definition?: DeviceDefinition | null;
   temperatureUnit: TemperatureUnit;
 }) {
   const [isEditing, setIsEditing] = useState(false);
@@ -835,14 +839,21 @@ function ParameterRow({
   const isSwitchSetting = isSwitchSettingParam(param.key);
   const statusChip = getSwitchStatusChip(param, telemetry, paramByKey);
   const value = formatParamValue(param, temperatureUnit, isSwitchSetting ? 'enabled-disabled' : 'yes-no');
+  const entity = definition?.entities.find((candidate) => candidate.id === param.key);
   const displayUnit = getTemperatureDisplayUnit(param.unit, temperatureUnit) ?? param.unit;
+  const editModeLabel = entity ? 'value:' : 'raw:';
+  const editValueUnit = entity
+    ? getTemperatureDisplayUnit(entity.source.unit ?? param.unit, temperatureUnit) ?? param.unit
+    : null;
 
   const startEdit = useCallback(() => {
     if (!param.isWritable) return;
-    setEditValue(param.rawValue?.toString() ?? '');
+    setEditValue(param.options?.length
+      ? (param.rawValue?.toString() ?? '')
+      : formatEditableParameterInputValue(param, entity, temperatureUnit));
     setIsEditing(true);
     setWriteResult(null);
-  }, [param]);
+  }, [entity, param, temperatureUnit]);
 
   const cancelEdit = useCallback(() => {
     setIsEditing(false);
@@ -850,11 +861,14 @@ function ParameterRow({
   }, []);
 
   const saveValue = useCallback(async () => {
-    const rawValue = parseInt(editValue, 10);
-    if (isNaN(rawValue) || rawValue < 0) {
-      setWriteResult({ success: false, message: 'Invalid value' });
+    const parsedRawValue = param.options?.length
+      ? parseRawSelectValue(editValue)
+      : parseParameterInputValue(editValue, param, entity, temperatureUnit);
+    if (!parsedRawValue.success) {
+      setWriteResult({ success: false, message: parsedRawValue.message });
       return;
     }
+    const rawValue = parsedRawValue.rawValue;
 
     setIsSaving(true);
     setWriteResult(null);
@@ -874,7 +888,11 @@ function ParameterRow({
       }
 
       if (data.success) {
-        setWriteResult({ success: true, message: `Confirmed: ${data.readBackValue}` });
+        const confirmedValue = data.readBackValue ?? rawValue;
+        const confirmationText = param.options?.length
+          ? formatSelectParameterValue(param, confirmedValue)
+          : formatParameterReadBackValue(confirmedValue, param, entity, temperatureUnit);
+        setWriteResult({ success: true, message: `Confirmed: ${confirmationText}` });
         setIsEditing(false);
       } else {
         setWriteResult({ success: false, message: data.error ?? 'Verification failed' });
@@ -884,7 +902,7 @@ function ParameterRow({
     } finally {
       setIsSaving(false);
     }
-  }, [editValue, deviceId, param.key]);
+  }, [deviceId, editValue, entity, param, temperatureUnit]);
 
   return (
     <div className='rounded-lg border border-border/50 bg-background/40 px-3 py-2'>
@@ -914,9 +932,12 @@ function ParameterRow({
                 </select>
               ) : (
                 <>
-                  <span className='text-[10px] text-muted-foreground/60'>raw:</span>
+                  <span className='text-[10px] text-muted-foreground/60'>{editModeLabel}</span>
                   <input
                     type='number'
+                    step='any'
+                    inputMode='decimal'
+                    aria-label={`Set ${param.displayName}`}
                     className='w-24 rounded border border-border bg-background px-2 py-0.5 text-sm font-semibold text-foreground outline-none focus:border-primary'
                     value={editValue}
                     onChange={e => setEditValue(e.target.value)}
@@ -924,6 +945,7 @@ function ParameterRow({
                     disabled={isSaving}
                     autoFocus
                   />
+                  {editValueUnit && <span className='text-[10px] text-muted-foreground/60'>{editValueUnit}</span>}
                 </>
               )}
               <button onClick={() => void saveValue()} disabled={isSaving}
@@ -966,6 +988,7 @@ function ParameterCategoryCard({
   deviceId,
   telemetry,
   paramByKey,
+  definition,
   temperatureUnit,
 }: {
   category: string;
@@ -973,6 +996,7 @@ function ParameterCategoryCard({
   deviceId: string;
   telemetry: DeviceTelemetrySnapshot;
   paramByKey: Map<string, DeviceParameter>;
+  definition?: DeviceDefinition | null;
   temperatureUnit: TemperatureUnit;
 }) {
   return (
@@ -986,7 +1010,7 @@ function ParameterCategoryCard({
       <CardContent className='pt-3'>
         <div className='grid gap-2'>
           {params.map((param) => (
-            <ParameterRow key={param.key} param={param} deviceId={deviceId} telemetry={telemetry} paramByKey={paramByKey} temperatureUnit={temperatureUnit} />
+            <ParameterRow key={param.key} param={param} deviceId={deviceId} telemetry={telemetry} paramByKey={paramByKey} definition={definition} temperatureUnit={temperatureUnit} />
           ))}
         </div>
       </CardContent>
@@ -2020,6 +2044,171 @@ function formatParamValue(
     return param.stringValue;
   }
   return nd;
+}
+
+function formatEditableParameterInputValue(
+  param: DeviceParameter,
+  entity: EntityDefinition | undefined,
+  temperatureUnit: TemperatureUnit,
+) {
+  if (!entity) {
+    return param.rawValue?.toString() ?? '';
+  }
+
+  const sourceValue = param.numericValue != null && Number.isFinite(Number(param.numericValue))
+    ? Number(param.numericValue)
+    : param.rawValue != null && Number.isFinite(Number(param.rawValue))
+      ? Number(param.rawValue) * getEntityScale(entity)
+      : null;
+  if (sourceValue == null) {
+    return '';
+  }
+
+  const displayValue = isCelsiusUnit(entity.source.unit ?? param.unit)
+    ? convertTemperatureValue(sourceValue, temperatureUnit)
+    : sourceValue;
+  if (displayValue == null || !Number.isFinite(displayValue)) {
+    return '';
+  }
+
+  return displayValue.toFixed(getEditableParameterPrecision(entity, param, temperatureUnit));
+}
+
+function parseParameterInputValue(
+  input: string,
+  param: DeviceParameter,
+  entity: EntityDefinition | undefined,
+  temperatureUnit: TemperatureUnit,
+): { success: true; rawValue: number } | { success: false; message: string } {
+  if (!entity) {
+    const rawValue = Number.parseInt(input, 10);
+    if (!Number.isInteger(rawValue) || rawValue < 0) {
+      return { success: false, message: 'Invalid value' };
+    }
+
+    return { success: true, rawValue };
+  }
+
+  const parsedValue = Number.parseFloat(input);
+  if (!Number.isFinite(parsedValue)) {
+    return { success: false, message: 'Invalid value' };
+  }
+
+  const normalizedValue = isCelsiusUnit(entity.source.unit ?? param.unit) && temperatureUnit === 'f'
+    ? (parsedValue - 32) * 5 / 9
+    : parsedValue;
+  const scale = getEntityScale(entity);
+  const rawValue = normalizedValue / scale;
+  const roundedRawValue = Math.round(rawValue);
+  const tolerance = Math.max(1e-9, Math.abs(rawValue) * 1e-9);
+
+  if (Math.abs(rawValue - roundedRawValue) > tolerance) {
+    return {
+      success: false,
+      message: `Value must align to ${formatEditableStep(entity, param, temperatureUnit)} steps.`,
+    };
+  }
+
+  if (roundedRawValue < 0 || roundedRawValue > 0xFFFFFFFF) {
+    return { success: false, message: 'Value is outside the supported range.' };
+  }
+
+  return { success: true, rawValue: roundedRawValue };
+}
+
+function parseRawSelectValue(input: string): { success: true; rawValue: number } | { success: false; message: string } {
+  const rawValue = Number.parseInt(input, 10);
+  if (!Number.isInteger(rawValue) || rawValue < 0) {
+    return { success: false, message: 'Invalid value' };
+  }
+
+  return { success: true, rawValue };
+}
+
+function formatParameterReadBackValue(
+  rawValue: number,
+  param: DeviceParameter,
+  entity: EntityDefinition | undefined,
+  temperatureUnit: TemperatureUnit,
+) {
+  if (!entity) {
+    return rawValue.toString();
+  }
+
+  const scaledValue = rawValue * getEntityScale(entity);
+  const displayValue = isCelsiusUnit(entity.source.unit ?? param.unit)
+    ? convertTemperatureValue(scaledValue, temperatureUnit)
+    : scaledValue;
+  if (displayValue == null || !Number.isFinite(displayValue)) {
+    return rawValue.toString();
+  }
+
+  const formattedValue = displayValue.toFixed(getEditableParameterPrecision(entity, param, temperatureUnit));
+  const unit = getTemperatureDisplayUnit(entity.source.unit ?? param.unit, temperatureUnit) ?? param.unit;
+  return unit ? `${formattedValue} ${unit}` : formattedValue;
+}
+
+function formatSelectParameterValue(param: DeviceParameter, rawValue: number) {
+  return param.options?.find((option) => option.value === rawValue)?.label ?? rawValue.toString();
+}
+
+function getEntityScale(entity: EntityDefinition) {
+  return entity.source.scale && Number.isFinite(entity.source.scale) && entity.source.scale !== 0
+    ? entity.source.scale
+    : 1;
+}
+
+function getEditableParameterPrecision(
+  entity: EntityDefinition,
+  param: DeviceParameter,
+  temperatureUnit: TemperatureUnit,
+) {
+  const displayPrecision = Math.max(0, entity.display?.precision ?? 0);
+  const stepPrecision = countFractionDigits(getEditableDisplayStep(entity, param, temperatureUnit));
+  return Math.max(displayPrecision, stepPrecision);
+}
+
+function getEditableDisplayStep(
+  entity: EntityDefinition,
+  param: DeviceParameter,
+  temperatureUnit: TemperatureUnit,
+) {
+  const scale = Math.abs(getEntityScale(entity));
+  if (isCelsiusUnit(entity.source.unit ?? param.unit) && temperatureUnit === 'f') {
+    return scale * 9 / 5;
+  }
+
+  return scale;
+}
+
+function formatEditableStep(
+  entity: EntityDefinition,
+  param: DeviceParameter,
+  temperatureUnit: TemperatureUnit,
+) {
+  const step = getEditableDisplayStep(entity, param, temperatureUnit);
+  const unit = getTemperatureDisplayUnit(entity.source.unit ?? param.unit, temperatureUnit) ?? param.unit;
+  const formattedStep = trimTrailingZeroes(step.toFixed(Math.max(countFractionDigits(step), 0)));
+  return unit ? `${formattedStep} ${unit}` : formattedStep;
+}
+
+function countFractionDigits(value: number) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  const normalized = value.toString().toLowerCase();
+  if (normalized.includes('e-')) {
+    const [, exponent] = normalized.split('e-');
+    return Number.parseInt(exponent ?? '0', 10);
+  }
+
+  const [, fraction = ''] = normalized.split('.');
+  return fraction.length;
+}
+
+function trimTrailingZeroes(value: string) {
+  return value.replace(/\.?0+$/, '');
 }
 
 function fmt(value: number | null | undefined, decimals = 2): string {

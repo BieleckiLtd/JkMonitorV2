@@ -812,4 +812,144 @@ describe('MonitorPage', () => {
     expect(screen.getByText('2026')).toBeInTheDocument();
     expect(screen.queryByText('2,026')).not.toBeInTheDocument();
   });
+
+  it('uses entity scale when editing writable numeric parameters', async () => {
+    useDeviceDefinitionMock.mockReturnValue({
+      version: '1',
+      device: {
+        id: 'scaled-device',
+        name: 'Scaled Device',
+        manufacturer: 'Acme',
+        model: 'Scale-1',
+        category: 'controller',
+      },
+      connection: {
+        transport: { type: 'serial', defaults: {} },
+        protocol: { type: 'modbus-rtu', settings: {} },
+      },
+      dataSources: [],
+      pollGroups: {},
+      entities: [
+        {
+          id: 'cell_charge_request',
+          type: 'number',
+          name: 'Cell Charge Request',
+          category: 'Configuration',
+          writable: true,
+          source: { bank: 'config', byteOffset: 0, unit: 'V', scale: 0.001 },
+          display: { precision: 3 },
+        },
+      ],
+      computedEntities: [],
+      ui: {
+        pages: {
+          monitor: {
+            sections: [
+              {
+                type: 'parameter-table',
+                title: 'Configuration',
+                filter: { writable: true },
+              },
+            ],
+          },
+        },
+      },
+    } satisfies DeviceDefinition);
+
+    class FakeEventSource {
+      static instances: FakeEventSource[] = [];
+
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      close = vi.fn();
+
+      constructor(public readonly url: string) {
+        FakeEventSource.instances.push(this);
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }));
+      }
+    }
+
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({
+        success: true,
+        writtenValue: 3460,
+        readBackValue: 3460,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+    globalThis.fetch = fetchMock as typeof fetch;
+
+    render(<MonitorPage />);
+
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(1);
+    });
+
+    FakeEventSource.instances[0]?.emit({
+      devices: [
+        {
+          deviceId: 'scaled-1',
+          displayName: 'Scaled Battery',
+          definitionId: 'scaled-device',
+          protocolHandler: 'modbus-rtu',
+          enabled: true,
+          isMaster: true,
+          pollIntervalMilliseconds: 1000,
+          lastOutcome: 'Succeeded',
+          latestTelemetry: {
+            collectedAt: '2026-04-12T12:00:00.000Z',
+            cells: [],
+            activeWarnings: [],
+            parameters: [
+              {
+                key: 'cell_charge_request',
+                displayName: 'Cell Charge Request',
+                category: 'Configuration',
+                numericValue: 3.45,
+                rawValue: 3450,
+                sortOrder: 0,
+                isWritable: true,
+                unit: 'V',
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(await screen.findByText('Scaled Battery')).toBeInTheDocument();
+    fireEvent.click(screen.getByTitle('Edit parameter'));
+
+    const input = screen.getByLabelText('Set Cell Charge Request');
+    expect(input).toHaveDisplayValue('3.450');
+
+    fireEvent.change(input, { target: { value: '3.460' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+    });
+
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/devices/scaled-1/parameters/cell_charge_request',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rawValue: 3460 }),
+      }),
+    );
+
+    expect(await screen.findByText(/Confirmed: 3\.460 V/)).toBeInTheDocument();
+  });
 });
