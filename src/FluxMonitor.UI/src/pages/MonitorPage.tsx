@@ -33,6 +33,7 @@ type DeviceParameter = {
   isWritable?: boolean;
   rawValue?: number | null;
   options?: { value: number; label: string }[] | null;
+  displayFormatter?: string | null;
 };
 
 type CellVoltageSnapshot = {
@@ -2008,7 +2009,11 @@ function formatParamValue(
       return nd;
     }
 
-    if (Number.isInteger(displayValue)) return displayValue.toLocaleString();
+    if (Number.isInteger(displayValue)) {
+      return param.displayFormatter === 'plain-number'
+        ? displayValue.toFixed(0)
+        : displayValue.toLocaleString();
+    }
     return displayValue.toFixed(Math.abs(displayValue) >= 100 ? 1 : 3);
   }
   if (param.stringValue != null) {

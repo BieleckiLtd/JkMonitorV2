@@ -160,6 +160,7 @@ export type EntitySourceDefinition = {
 export type EntityDisplayDefinition = {
   precision?: number;
   format?: string;
+  formatter?: string;
 };
 
 export type ComputedEntityDefinition = {

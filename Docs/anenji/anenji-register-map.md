@@ -128,12 +128,12 @@
 | 692–693 | — | R | Unknown | — | ❓ |
 | 694 | — | R | Unknown | 1 | ❓ |
 | 695 | — | R | Unknown | 0 (ERR out-of-range) | ❓ |
-| 696 | 434 | W | F3P00 — Year | 2026 | 🔍 |
-| 697 | 435 | W | F3P01 — Month | 4 | 🔍 |
-| 698 | 436 | W | F3P02 — Day | 18 | 🔍 |
-| 699 | 437 | W | F3P03 — Hour | (changes) | 🔍 |
-| 700 | 438 | W | F3P04 — Minute | (changes) | 🔍 |
-| 701 | 439 | W | F3P05 — Second | (changes) | 🔍 |
+| 696 | 434 | W | F3P01 — Time setting - Year | 2026 | 🔍 |
+| 697 | 435 | W | F3P02 — Time setting - Month | 4 | 🔍 |
+| 698 | 436 | W | F3P03 — Time setting - Day | 18 | 🔍 |
+| 699 | 437 | W | F3P04 — Time setting - Hour | (changes) | 🔍 |
+| 700 | 438 | W | F3P05 — Time setting - Minute | (changes) | 🔍 |
+| 701 | 439 | W | F3P06 — Time setting - Second | (changes) | 🔍 |
 | 702–707 | — | R | Unknown | 0 | ❓ |
 | 708 | — | R | Unknown | 90 | ❓ |
 | 709 | — | R | Unknown | 6 | ❓ |
@@ -151,15 +151,82 @@
 ## 8. Settings — Complete Map (Data Source: `settings`, addr 601, count 90)
 
 This is the core settings block. All settings use FC 0x03 for read and FC 0x10
-(write multiple, qty=1) for write. Each setting is labelled with its manual
-program number (e.g. F0P01). Programs skipped in sequence are unavailable on
-this model.
+(write multiple, qty=1) for write.
+
+`Prog` uses the inverter front-panel program numbers from the user manual. `?`
+marks a probable match that still needs LCD or write-path verification, and `—`
+means the register is not exposed as a confirmed F0-F4 front-panel program.
+
+### 8.0 Manual Program Index (F0–F4)
+
+This index keeps the manual program numbering out of the UI while preserving it
+in the register map.
+
+| Group | Prog | Manual description | Register / entity | Notes |
+|------|------|--------------------|-------------------|-------|
+| F0 | P01 | AC input voltage range | 677 / `input_mode` | Confirmed |
+| F0 | P02 | Power saving mode enable/disable | 681 / `energy_saving_mode` | Confirmed |
+| F0 | P03 | Overload bypass | 684 / `overload_transfer_bypass` | Confirmed |
+| F0 | P04 | Auto restart when overload occurs | 682 / `overload_auto_restart` | Confirmed |
+| F0 | P05 | Auto restart when over temperature occurs | 683 / `over_temp_auto_restart` | Confirmed |
+| F0 | P06 | Auto bypass | — | Not mapped in the current device definition |
+| F0 | P07 | Auto return to default display screen | 678 / `lcd_auto_return` | Confirmed |
+| F0 | P08 | Backlight control | 679 / `lcd_backlight` | Confirmed |
+| F0 | P09 | Buzzer mode | 603 / `buzzer_mode` | Confirmed; physical register sits in the 600 block |
+| F0 | P10 | Modbus ID setting | 686 / `modbus_address` | Confirmed |
+| F0 | P16 | Dry contact mode | 690 / `dry_contact_mode` | Confirmed |
+| F1 | P01 | Output source priority | 601 / `output_priority` | Confirmed |
+| F1 | P02 | AC output mode | 600 | Confirmed; not exposed as a UI entity today |
+| F1 | P03 | Output voltage | 606 / `output_voltage_setting` | Confirmed |
+| F1 | P04 | Output frequency | 607 / `output_frequency_setting` | Confirmed |
+| F1 | P06 | Slave output source priority | — | Manual feature present; live register still not confirmed |
+| F1 | P07 | Slave output source priority start hour | — | Manual feature present; live register still not confirmed |
+| F1 | P08 | Slave output source priority start minute | — | Manual feature present; live register still not confirmed |
+| F1 | P09 | Slave output source priority end hour | — | Manual feature present; live register still not confirmed |
+| F1 | P10 | Slave output source priority end minute | — | Manual feature present; live register still not confirmed |
+| F1 | P11 | Second output (OP2) control | — | Manual feature present; live register still not confirmed |
+| F1 | P12 | Second output (OP2) overload warning point | — | Manual feature present; live register still not confirmed |
+| F1 | P13 | Second output (OP2) on timer - Hours | — | Manual feature present; live register still not confirmed |
+| F1 | P14 | Second output (OP2) off timer - Hours | — | Manual feature present; live register still not confirmed |
+| F2 | P01 | Battery type | 630 / `battery_type` | Confirmed |
+| F2 | P02 | Charger source priority | 632 / `charge_priority` | Confirmed |
+| F2 | P03 | Bulk charging voltage | 637 / `max_charge_voltage` | Confirmed |
+| F2 | P04 | Floating charging voltage | 638 / `float_charge_voltage` | Confirmed |
+| F2 | P05 | Back to utility source voltage / SOC | 644? / `mains_low_voltage_v` | Probable manual match |
+| F2 | P06 | Back to battery mode voltage / SOC | 643? / `mains_discharge_recovery_v` | Probable manual match |
+| F2 | P07 | Main output (OP1) cut-off voltage / SOC | 646? and 647? | Probable manual match |
+| F2 | P08 | Second output (OP2) cut-off voltage / SOC | 649? and 650? | Probable manual match |
+| F2 | P09 | Maximum charging current | 640 / `max_charge_current` | Confirmed |
+| F2 | P10 | Maximum mains charging current | 641 / `max_mains_charge_current` | Confirmed |
+| F2 | P11 | Slave charger source priority | — | Manual feature present; live register still not confirmed |
+| F2 | P12 | Slave charger source priority start hour | — | Manual feature present; live register still not confirmed |
+| F2 | P13 | Slave charger source priority start minute | — | Manual feature present; live register still not confirmed |
+| F2 | P14 | Slave charger source priority end hour | — | Manual feature present; live register still not confirmed |
+| F2 | P15 | Slave charger source priority end minute | — | Manual feature present; live register still not confirmed |
+| F2 | P16 | Bulk charging time (C.V stage) | 639? / `constant_to_float_wait` | Probable manual match |
+| F2 | P17 | Battery equalization | 656? | Probable manual match |
+| F2 | P18 | Battery equalization voltage | 652 / `eq_charge_voltage` | Confirmed |
+| F2 | P19 | Battery equalized time | 653 / `eq_time` | Confirmed |
+| F2 | P20 | Battery equalized timeout | 654 / `eq_timeout` | Confirmed |
+| F2 | P21 | Equalization interval | 655 / `eq_interval` | Confirmed |
+| F2 | P22 | Equalization activated immediately | — | Manual feature present; live register still not confirmed |
+| F2 | P23 | Manual activate the lithium battery setting | — | Manual feature present; live register still not confirmed |
+| F2 | P24 | Automatic activation for lithium battery | — | Manual feature present; live register still not confirmed |
+| F2 | P25 | Max battery discharge current setting | 642? / `max_discharge_current` | Probable manual match |
+| F2 | P26 | Lithium battery activation time | — | Manual feature present; live register still not confirmed |
+| F3 | P01 | Time setting - Year | 696 / `clock_year` | Confirmed |
+| F3 | P02 | Time setting - Month | 697 / `clock_month` | Confirmed |
+| F3 | P03 | Time setting - Day | 698 / `clock_day` | Confirmed |
+| F3 | P04 | Time setting - Hour | 699 / `clock_hour` | Confirmed |
+| F3 | P05 | Time setting - Minute | 700 / `clock_minute` | Confirmed |
+| F3 | P06 | Time setting - Second | 701 / `clock_second` | Confirmed |
+| F4 | P01 | Reset stored PV and output load energy data | 795 / `factory_reset` | Confirmed |
 
 ### 8.1 F1 Output Settings (regs 600–629)
 
 | Reg | Std | R/W | Prog | Name | Values / Unit | Live Value | Verified |
 |-----|-----|-----|------|------|--------------|------------|----------|
-| 600 | 300 | Wm | — | Output mode | 0=Single, 1=Parallel, 2–4=3-phase | 0 (Single) | 🔍 |
+| 600 | 300 | Wm | F1P02 | AC output mode | 0=Single, 1=Parallel, 2–4=3-phase | 0 (Single) | 🔍 |
 | 601 | 301 | **W** | **F1P01** | **Output source priority** | **1=SUB, 2=SBU, 3=SUF** | 2 (SBU) | **✅ LCD** |
 | 602 | — | W | — | Unknown | — | 0 | ❓ |
 | 603 | 303 | W | F0P09 | Buzzer mode | 0=Off, 1=Faults+warnings, 2=Faults only, 3=All | 0 (Off) | 🔍 |
@@ -174,33 +241,38 @@ this model.
 | Reg | Std | R/W | Prog | Name | Values / Unit | Live Value | Verified |
 |-----|-----|-----|------|------|--------------|------------|----------|
 | 630 | 322 | W | F2P01 | Battery type | 0=AGM, 1=FLD, 2=USER, 3=Li1, 4=LiFePO4, 5=Li3, 6=Li4, 8=LIB | 4 (LiFePO4) | 🔍 |
-| 631 | 323 | W | F2P03 | Battery OVP | ×0.1 V | 590 (59.0V) | 🔍 |
-| 632 | 331 | **W** | **F2P02** | **Charge source priority** | **1=SOF, 2=SNU, 3=OSO, 4=SOR** | 2 (SNU) | **✅ LCD** |
+| 631 | 323 | W | — | Battery overvoltage protection point | ×0.1 V | 590 (59.0V) | 🔍 |
+| 632 | 331 | **W** | **F2P02** | **Charger source priority** | **1=SOF, 2=SNU, 3=OSO, 4=SOR** | 2 (SNU) | **✅ LCD** |
 | 633 | 318? | W | — | Unknown (secondary output priority?) | — | 3 | ❓ |
 | 634 | 319? | W | — | Unknown (secondary charge priority?) | — | 0 | ❓ |
 | 635 | — | W | — | Unknown | — | 0 | ❓ |
 | 636 | 403 | **R** | — | **Current charge priority** (mirror of 632) | same as 632 | 2 (SNU) | **✅ LCD** |
-| 637 | 324 | W | F2P04 | Bulk charge voltage | ×0.1 V | 580 (58.0V) | 🔍 |
-| 638 | 325 | W | F2P05 | Float charge voltage | ×0.1 V | 564 (56.4V) | 🔍 |
-| 639 | 330 | W | F2P06 | Constant-to-float wait time | minutes (1–900) | 0 | 🔍 |
-| 640 | 332 | W | F2P07 | Max charging current | ×0.1 A | 180 (18.0A) | 🔍 |
-| 641 | 333 | W | F2P08 | Max mains charging current | ×0.1 A | 100 (10.0A) | 🔍 |
-| 642 | 351 | W | F2P09 | Max discharge current | A | 15 | 🔍 |
-| 643 | 326 | W | F2P10 | Mains discharge recovery voltage | ×0.1 V | 530 (53.0V) | 🔍 |
-| 644 | 327 | W | F2P11 | Mains low voltage protection | ×0.1 V | 520 (52.0V) | 🔍 |
+| 637 | 324 | W | F2P03 | Bulk charging voltage | ×0.1 V | 580 (58.0V) | 🔍 |
+| 638 | 325 | W | F2P04 | Floating charging voltage | ×0.1 V | 564 (56.4V) | 🔍 |
+| 639 | 330 | W | F2P16? | Bulk charging time / constant-to-float wait | minutes (1–900) | 0 | ❓ |
+| 640 | 332 | W | F2P09 | Maximum charging current | ×0.1 A | 180 (18.0A) | 🔍 |
+| 641 | 333 | W | F2P10 | Maximum mains charging current | ×0.1 A | 100 (10.0A) | 🔍 |
+| 642 | 351 | W | F2P25? | Max battery discharge current | A | 15 | ❓ |
+| 643 | 326 | W | F2P06? | Back to battery mode voltage | ×0.1 V | 530 (53.0V) | ❓ |
+| 644 | 327 | W | F2P05? | Back to utility source voltage | ×0.1 V | 520 (52.0V) | ❓ |
 | 645 | — | W | — | Reserved | — | 0 | ❓ |
-| 646 | 329 | W | F2P12 | Off-grid low voltage protection | ×0.1 V | 500 (50.0V) | 🔍 |
-| 647 | 341 | W | F2P13 | Low DC protection SOC | % (20–50) | 4 | 🔍 |
-| 648 | 342 | W | F2P14 | Low DC recovery SOC | % (60–100) | 60 | 🔍 |
-| 649 | 343 | W | F2P15 | Off-grid low DC SOC protection | % (3–30) | 0 | 🔍 |
-| 650 | — | W | F2P16 | Battery low cut-off SOC | % | 3 | 🔍 |
+| 646 | 329 | W | F2P07? | Main output cut-off voltage | ×0.1 V | 500 (50.0V) | ❓ |
+| 647 | 341 | W | F2P07? | Main output cut-off SOC | % (20–50) | 4 | ❓ |
+| 648 | 342 | W | F2P06? | Back to battery mode SOC | % (60–100) | 60 | ❓ |
+| 649 | 343 | W | F2P08? | Second output cut-off SOC | % (3–30) | 0 | ❓ |
+| 650 | — | W | — | Battery low cut-off SOC | % | 3 | ❓ |
 | 651 | 344? | W | — | Unknown (PV grid-tie max power?) | — | 0 | ❓ |
-| 652 | 334 | W | F2P17 | Equalization voltage | ×0.1 V | 564 (56.4V) | 🔍 |
-| 653 | 335 | W | F2P18 | Equalization time | minutes (0–900) | 60 | 🔍 |
-| 654 | 336 | W | F2P19 | Equalization timeout | minutes (0–900) | 120 | 🔍 |
-| 655 | 337 | W | F2P20 | Equalization interval | days (1–90) | 30 | 🔍 |
-| 656 | 313? | ERR | — | Equalization enable? | 0=Off, 1=On (value 0 rejected) | 0 | ❓ |
+| 652 | 334 | W | F2P18 | Battery equalization voltage | ×0.1 V | 564 (56.4V) | 🔍 |
+| 653 | 335 | W | F2P19 | Battery equalized time | minutes (0–900) | 60 | 🔍 |
+| 654 | 336 | W | F2P20 | Battery equalized timeout | minutes (0–900) | 120 | 🔍 |
+| 655 | 337 | W | F2P21 | Equalization interval | days (1–90) | 30 | 🔍 |
+| 656 | 313? | ERR | F2P17? | Battery equalization | 0=Off, 1=On (value 0 rejected) | 0 | ❓ |
 | 657–676 | — | W | — | Reserved / unused | all 0 | 0 | — |
+
+> F2 program numbers above `04` depend on whether the inverter is using voltage
+> thresholds or SOC thresholds, and the firmware exposes several adjacent
+> registers that still need LCD/write verification. Probable matches are marked
+> with `?` instead of assigning incorrect manual IDs.
 
 ### 8.3 F0 System Settings (regs 677–690)
 
@@ -210,12 +282,12 @@ this model.
 | 678 | 306 | W | F0P07 | LCD auto return | 0=Off, 1=1 min | 0 (Off) | 🔍 |
 | 679 | 305 | W | F0P08 | LCD backlight | 0=Timed, 1=Always on | 1 (Always) | 🔍 |
 | 680 | — | W | — | Unknown | — | 0 | ❓ |
-| 681 | 307 | W | F0P03 | Power saving mode | 0=Off, 1=On | 0 (Off) | 🔍 |
-| 682 | 308 | W | F0P05 | Overload auto restart | 0=No, 1=Yes | 0 (No) | 🔍 |
-| 683 | 309 | W | F0P06 | Over-temperature auto restart | 0=No, 1=Yes | 0 (No) | 🔍 |
-| 684 | 310 | W | F0P04 | Overload transfer to bypass | 0=Disable, 1=Enable | 0 (Disable) | 🔍 |
+| 681 | 307 | W | F0P02 | Power saving mode | 0=Off, 1=On | 0 (Off) | 🔍 |
+| 682 | 308 | W | F0P04 | Overload auto restart | 0=No, 1=Yes | 0 (No) | 🔍 |
+| 683 | 309 | W | F0P05 | Over-temperature auto restart | 0=No, 1=Yes | 0 (No) | 🔍 |
+| 684 | 310 | W | F0P03 | Overload transfer to bypass | 0=Disable, 1=Enable | 0 (Disable) | 🔍 |
 | 685 | — | R? | — | Unknown (read-only, does not persist writes) | — | 0 | ❓ |
-| 686 | 312 | W | F0P10 | Modbus address | 1–247 | 0 | 🔍 |
+| 686 | 312 | W | F0P10 | Modbus ID setting | 1–247 | 0 | 🔍 |
 | 687 | 314 | W | — | Warning mask (low word) | bitfield | 65535 (0xFFFF) | 🔍 |
 | 688 | 315 | W | — | Warning mask (high word) | bitfield | 60927 (0xEDFF) | 🔍 |
 | 689 | 420 | W | — | Remote switch | 0=Off, 1=On | 1 (On) | 🔍 |
@@ -225,7 +297,7 @@ this model.
 
 | Reg | Std | R/W | Prog | Name | Values / Unit | Live Value | Verified |
 |-----|-----|-----|------|------|--------------|------------|----------|
-| 795 | 421 | W | F4P01 | Reset all stored data | Write 1 to trigger factory reset | 0 | 🔍 |
+| 795 | 421 | W | F4P01 | Reset stored PV and output load energy data | Write 1 to trigger the reset | 0 | 🔍 |
 
 > **CAUTION**: Writing value 1 to reg 795 is expected to reset all inverter
 > settings to factory defaults. Register address derived from standard 421
@@ -240,17 +312,17 @@ For users familiar with the standard GM6200/SMG-II protocol:
 
 | Standard Reg | Anenji Reg | Offset | Prog | Setting |
 |-------------|-----------|--------|------|---------|
-| 300 | 600 | +300 | — | Output mode (single only) |
+| 300 | 600 | +300 | F1P02 | AC output mode |
 | 301 | 601 | +300 | F1P01 | Output source priority |
 | 302 | 677 | +375 | F0P01 | AC input voltage range |
 | 303 | 603 | +300 | F0P09 | Buzzer mode |
 | 305 | 679 | +374 | F0P08 | LCD backlight |
 | 306 | 678 | +372 | F0P07 | LCD auto return |
-| 307 | 681 | +374 | F0P03 | Power saving mode |
-| 308 | 682 | +374 | F0P05 | Overload auto restart |
-| 309 | 683 | +374 | F0P06 | Over-temperature auto restart |
-| 310 | 684 | +374 | F0P04 | Overload transfer to bypass |
-| 312 | 686 | +374 | F0P10 | Modbus address |
+| 307 | 681 | +374 | F0P02 | Power saving mode |
+| 308 | 682 | +374 | F0P04 | Overload auto restart |
+| 309 | 683 | +374 | F0P05 | Over-temperature auto restart |
+| 310 | 684 | +374 | F0P03 | Overload transfer to bypass |
+| 312 | 686 | +374 | F0P10 | Modbus ID setting |
 | 313 | 656? | +343? | — | Eq enable (ERR) |
 | 314–315 | 687–688 | +373 | — | Warning mask |
 | 316? | 690 | +374? | F0P16 | Dry contact mode |
@@ -259,34 +331,34 @@ For users familiar with the standard GM6200/SMG-II protocol:
 | 320 | 606 | +286 | F1P03 | Output voltage |
 | 321 | 607 | +286 | F1P04 | Output frequency |
 | 322 | 630 | +308 | F2P01 | Battery type |
-| 323 | 631 | +308 | F2P03 | Battery OVP |
-| 324 | 637 | +313 | F2P04 | Bulk charge voltage |
-| 325 | 638 | +313 | F2P05 | Float charge voltage |
-| 326 | 643 | +317 | F2P10 | Mains discharge recovery V |
-| 327 | 644 | +317 | F2P11 | Mains low voltage V |
-| 329 | 646 | +317 | F2P12 | Off-grid low voltage V |
-| 330 | 639 | +309 | F2P06 | Constant-to-float wait |
+| 323 | 631 | +308 | — | Battery overvoltage protection point |
+| 324 | 637 | +313 | F2P03 | Bulk charging voltage |
+| 325 | 638 | +313 | F2P04 | Floating charging voltage |
+| 326 | 643 | +317 | F2P06? | Back to battery mode voltage |
+| 327 | 644 | +317 | F2P05? | Back to utility source voltage |
+| 329 | 646 | +317 | F2P07? | Main output cut-off voltage |
+| 330 | 639 | +309 | F2P16? | Bulk charging time / constant-to-float wait |
 | 331 | 632 | +301 | F2P02 | Charge source priority |
-| 332 | 640 | +308 | F2P07 | Max charging current |
-| 333 | 641 | +308 | F2P08 | Max mains charging current |
-| 334 | 652 | +318 | F2P17 | Equalization voltage |
-| 335 | 653 | +318 | F2P18 | Equalization time |
-| 336 | 654 | +318 | F2P19 | Equalization timeout |
-| 337 | 655 | +318 | F2P20 | Equalization interval |
-| 341 | 647 | +306 | F2P13 | Low DC protection SOC |
-| 342 | 648 | +306 | F2P14 | Low DC recovery SOC |
-| 343 | 649 | +306 | F2P15 | Off-grid low DC SOC protection |
-| 351 | 642 | +291 | F2P09 | Max discharge current |
+| 332 | 640 | +308 | F2P09 | Maximum charging current |
+| 333 | 641 | +308 | F2P10 | Maximum mains charging current |
+| 334 | 652 | +318 | F2P18 | Battery equalization voltage |
+| 335 | 653 | +318 | F2P19 | Battery equalized time |
+| 336 | 654 | +318 | F2P20 | Battery equalized timeout |
+| 337 | 655 | +318 | F2P21 | Equalization interval |
+| 341 | 647 | +306 | F2P07? | Main output cut-off SOC |
+| 342 | 648 | +306 | F2P06? | Back to battery mode SOC |
+| 343 | 649 | +306 | F2P08? | Second output cut-off SOC |
+| 351 | 642 | +291 | F2P25? | Max battery discharge current |
 | 402 | 605 | +203 | — | Current output priority (R) |
 | 403 | 636 | +233 | — | Current charge priority (R) |
 | 420 | 689 | +269 | — | Remote switch |
-| 421 | 795 | +374 | F4P01 | Reset all stored data |
-| 434 | 696 | +262 | F3P00 | Year |
-| 435 | 697 | +262 | F3P01 | Month |
-| 436 | 698 | +262 | F3P02 | Day |
-| 437 | 699 | +262 | F3P03 | Hour |
-| 438 | 700 | +262 | F3P04 | Minute |
-| 439 | 701 | +262 | F3P05 | Second |
+| 421 | 795 | +374 | F4P01 | Reset stored PV and output load energy data |
+| 434 | 696 | +262 | F3P01 | Time setting - Year |
+| 435 | 697 | +262 | F3P02 | Time setting - Month |
+| 436 | 698 | +262 | F3P03 | Time setting - Day |
+| 437 | 699 | +262 | F3P04 | Time setting - Hour |
+| 438 | 700 | +262 | F3P05 | Time setting - Minute |
+| 439 | 701 | +262 | F3P06 | Time setting - Second |
 | 626–633 | 754–761 | +128 | — | Firmware version (ASCII) |
 | 643 | 691 | +48 | — | Rated power |
 | 644 | 763 | +119 | — | Rated battery cells |

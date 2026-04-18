@@ -263,7 +263,8 @@ public sealed class GenericSerialPollingClient(
                         StringValue = textValue,
                         Category = entity.Category,
                         SortOrder = sortOrder++,
-                        IsWritable = entity.Writable
+                        IsWritable = entity.Writable,
+                        DisplayFormatter = entity.Display?.Formatter
                     });
                 }
                 continue;
@@ -284,7 +285,8 @@ public sealed class GenericSerialPollingClient(
                         BooleanValue = boolValue,
                         Category = entity.Category,
                         SortOrder = sortOrder++,
-                        IsWritable = entity.Writable
+                        IsWritable = entity.Writable,
+                        DisplayFormatter = entity.Display?.Formatter
                     });
                 }
                 continue;
@@ -307,7 +309,8 @@ public sealed class GenericSerialPollingClient(
                         Category = entity.Category,
                         SortOrder = sortOrder++,
                         IsWritable = entity.Writable,
-                        RawValue = rawUint.HasValue ? (long)rawUint.Value : null
+                        RawValue = rawUint.HasValue ? (long)rawUint.Value : null,
+                        DisplayFormatter = entity.Display?.Formatter
                     });
                 }
                 else
@@ -321,7 +324,8 @@ public sealed class GenericSerialPollingClient(
                         Category = entity.Category,
                         SortOrder = sortOrder++,
                         IsWritable = entity.Writable,
-                        RawValue = ReadRawUint(entity, data) is { } rv ? (long)rv : null
+                        RawValue = ReadRawUint(entity, data) is { } rv ? (long)rv : null,
+                        DisplayFormatter = entity.Display?.Formatter
                     });
                 }
             }
@@ -349,7 +353,8 @@ public sealed class GenericSerialPollingClient(
                     DisplayName = computed.Name,
                     BooleanValue = result.HasValue && result.Value != 0,
                     Category = computed.Category,
-                    SortOrder = sortOrder++
+                    SortOrder = sortOrder++,
+                    DisplayFormatter = computed.Display?.Formatter
                 });
             }
             else if (result.HasValue)
@@ -362,7 +367,8 @@ public sealed class GenericSerialPollingClient(
                     NumericValue = decimal.Round(result.Value, precision),
                     Unit = computed.Unit,
                     Category = computed.Category,
-                    SortOrder = sortOrder++
+                    SortOrder = sortOrder++,
+                    DisplayFormatter = computed.Display?.Formatter
                 });
             }
         }

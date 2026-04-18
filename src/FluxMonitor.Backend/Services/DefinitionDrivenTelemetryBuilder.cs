@@ -57,7 +57,8 @@ public sealed class DefinitionDrivenTelemetryBuilder(ExpressionEvaluator express
                         StringValue = textValue,
                         Category = entity.Category,
                         SortOrder = sortOrder++,
-                        IsWritable = entity.Writable
+                        IsWritable = entity.Writable,
+                        DisplayFormatter = entity.Display?.Formatter
                     });
                 }
 
@@ -79,7 +80,8 @@ public sealed class DefinitionDrivenTelemetryBuilder(ExpressionEvaluator express
                         BooleanValue = boolValue,
                         Category = entity.Category,
                         SortOrder = sortOrder++,
-                        IsWritable = entity.Writable
+                        IsWritable = entity.Writable,
+                        DisplayFormatter = entity.Display?.Formatter
                     });
                 }
 
@@ -107,7 +109,8 @@ public sealed class DefinitionDrivenTelemetryBuilder(ExpressionEvaluator express
                         SortOrder = sortOrder++,
                         IsWritable = entity.Writable,
                         RawValue = rawUint.HasValue ? (long)rawUint.Value : null,
-                        Options = entity.Options.Select(o => new SelectOptionModel(o.Value, o.Label)).ToList()
+                        Options = entity.Options.Select(o => new SelectOptionModel(o.Value, o.Label)).ToList(),
+                        DisplayFormatter = entity.Display?.Formatter
                     });
                 }
 
@@ -130,7 +133,8 @@ public sealed class DefinitionDrivenTelemetryBuilder(ExpressionEvaluator express
                         Category = entity.Category,
                         SortOrder = sortOrder++,
                         IsWritable = entity.Writable,
-                        RawValue = rawUint.HasValue ? (long)rawUint.Value : null
+                        RawValue = rawUint.HasValue ? (long)rawUint.Value : null,
+                        DisplayFormatter = entity.Display?.Formatter
                     });
                 }
                 else
@@ -144,7 +148,8 @@ public sealed class DefinitionDrivenTelemetryBuilder(ExpressionEvaluator express
                         Category = entity.Category,
                         SortOrder = sortOrder++,
                         IsWritable = entity.Writable,
-                        RawValue = ReadRawUint(entity, data, isLittleEndian) is { } rv ? (long)rv : null
+                        RawValue = ReadRawUint(entity, data, isLittleEndian) is { } rv ? (long)rv : null,
+                        DisplayFormatter = entity.Display?.Formatter
                     });
                 }
             }
@@ -181,7 +186,8 @@ public sealed class DefinitionDrivenTelemetryBuilder(ExpressionEvaluator express
                     DisplayName = computed.Name,
                     BooleanValue = result.HasValue && result.Value != 0,
                     Category = computed.Category,
-                    SortOrder = sortOrder++
+                    SortOrder = sortOrder++,
+                    DisplayFormatter = computed.Display?.Formatter
                 });
             }
             else if (result.HasValue)
@@ -193,7 +199,8 @@ public sealed class DefinitionDrivenTelemetryBuilder(ExpressionEvaluator express
                     NumericValue = decimal.Round(result.Value, computed.Display?.Precision ?? 2),
                     Unit = computed.Unit,
                     Category = computed.Category,
-                    SortOrder = sortOrder++
+                    SortOrder = sortOrder++,
+                    DisplayFormatter = computed.Display?.Formatter
                 });
             }
         }

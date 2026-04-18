@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Restructure anenji-inverter-rs232.json:
-- Number every setting with its manual program number (F0P01, F1P01, F2P01 etc.)
+- Keep settings ordered by their manual program grouping without putting
+  the F0P01/F1P01-style identifiers into UI labels
 - Merge F2 Charger + F3 Battery → F2 Battery
 - Add F0P10 Modbus address (reg 686) and F0P16 Dry contact mode (reg 690)
 - Add F3 Time entities (regs 696-701)
@@ -18,46 +19,50 @@ for ds in doc['dataSources']:
     if ds['id'] == 'settings':
         ds['count'] = 90
         ds['_comment'] = 'Regs 601-690: all user-configurable settings (output/charge priority, voltages, currents, mode toggles, Modbus address, dry contact)'
-        break
+    elif ds['id'] in ('info_fw', 'factory_reset'):
+        ds['write'] = {
+            'functionCode': 16,
+            'registersPerWrite': 1
+        }
 
 # ---------- 2. Entity name/category mappings ----------
 # Map entity id → (new_name, new_category, optional _comment override)
 rename_map = {
     # F0 System
-    'input_mode':               ('F0P01 AC Input Voltage Range',        'F0 System', None),
-    'energy_saving_mode':       ('F0P03 Power Saving Mode',             'F0 System', None),
-    'overload_transfer_bypass': ('F0P04 Overload Transfer to Bypass',   'F0 System', None),
-    'overload_auto_restart':    ('F0P05 Overload Auto Restart',         'F0 System', None),
-    'over_temp_auto_restart':   ('F0P06 Over-temperature Auto Restart', 'F0 System', None),
-    'lcd_auto_return':          ('F0P07 LCD Auto Return',               'F0 System', None),
-    'lcd_backlight':            ('F0P08 LCD Backlight',                  'F0 System', None),
-    'buzzer_mode':              ('F0P09 Buzzer Mode',                    'F0 System', None),
+    'input_mode':               ('AC input voltage range',              'F0 System', None),
+    'energy_saving_mode':       ('Power saving mode',                   'F0 System', None),
+    'overload_transfer_bypass': ('Overload bypass',                     'F0 System', None),
+    'overload_auto_restart':    ('Auto restart when overload occurs',   'F0 System', None),
+    'over_temp_auto_restart':   ('Auto restart when over temperature occurs', 'F0 System', None),
+    'lcd_auto_return':          ('Auto return to default display screen', 'F0 System', None),
+    'lcd_backlight':            ('Backlight control',                   'F0 System', None),
+    'buzzer_mode':              ('Buzzer mode',                         'F0 System', None),
     'remote_switch':            ('Remote Switch',                        'F0 System', None),
     # F1 Output
-    'output_priority':          ('F1P01 Output Source Priority',         'F1 Output', None),
-    'output_voltage_setting':   ('F1P03 Output Voltage',                 'F1 Output', None),
-    'output_frequency_setting': ('F1P04 Output Frequency',               'F1 Output', None),
+    'output_priority':          ('Output source priority',              'F1 Output', None),
+    'output_voltage_setting':   ('Output voltage',                      'F1 Output', None),
+    'output_frequency_setting': ('Output frequency',                    'F1 Output', None),
     # F2 Battery (merged charger + battery)
-    'battery_type':             ('F2P01 Battery Type',                   'F2 Battery', None),
-    'charge_priority':          ('F2P02 Charge Source Priority',         'F2 Battery', None),
-    'battery_ovp':              ('F2P03 Battery OVP',                    'F2 Battery', None),
-    'max_charge_voltage':       ('F2P04 Bulk Charge Voltage',            'F2 Battery', None),
-    'float_charge_voltage':     ('F2P05 Float Charge Voltage',           'F2 Battery', None),
-    'constant_to_float_wait':   ('F2P06 Constant-to-Float Wait Time',   'F2 Battery', None),
-    'max_charge_current':       ('F2P07 Max Charging Current',           'F2 Battery', None),
-    'max_mains_charge_current': ('F2P08 Max Mains Charging Current',     'F2 Battery', None),
-    'max_discharge_current':    ('F2P09 Max Discharge Current',          'F2 Battery', None),
-    'mains_discharge_recovery_v': ('F2P10 Mains Discharge Recovery Voltage', 'F2 Battery', None),
-    'mains_low_voltage_v':      ('F2P11 Mains Low Voltage Protection',   'F2 Battery', None),
-    'offgrid_low_voltage_v':    ('F2P12 Off-grid Low Voltage Protection', 'F2 Battery', None),
-    'low_dc_protection_soc':    ('F2P13 Low DC Protection SOC',          'F2 Battery', None),
-    'low_dc_recovery_soc':      ('F2P14 Low DC Recovery SOC',            'F2 Battery', None),
-    'offgrid_soc_protection':   ('F2P15 Off-grid Low DC SOC Protection', 'F2 Battery', None),
-    'battery_cutoff_soc':       ('F2P16 Battery Low Cut-off SOC',        'F2 Battery', None),
-    'eq_charge_voltage':        ('F2P17 Equalization Voltage',           'F2 Battery', None),
-    'eq_time':                  ('F2P18 Equalization Time',              'F2 Battery', None),
-    'eq_timeout':               ('F2P19 Equalization Timeout',           'F2 Battery', None),
-    'eq_interval':              ('F2P20 Equalization Interval',          'F2 Battery', None),
+    'battery_type':             ('Battery type',                        'F2 Battery', None),
+    'charge_priority':          ('Charger source priority',             'F2 Battery', None),
+    'battery_ovp':              ('Battery overvoltage protection point', 'F2 Battery', None),
+    'max_charge_voltage':       ('Bulk charging voltage',               'F2 Battery', None),
+    'float_charge_voltage':     ('Floating charging voltage',           'F2 Battery', None),
+    'constant_to_float_wait':   ('Bulk charging time',                  'F2 Battery', None),
+    'max_charge_current':       ('Maximum charging current',            'F2 Battery', None),
+    'max_mains_charge_current': ('Maximum mains charging current',      'F2 Battery', None),
+    'max_discharge_current':    ('Max battery discharge current',       'F2 Battery', None),
+    'mains_discharge_recovery_v': ('Back to battery mode voltage',      'F2 Battery', None),
+    'mains_low_voltage_v':      ('Back to utility source voltage',      'F2 Battery', None),
+    'offgrid_low_voltage_v':    ('Main output cut-off voltage',         'F2 Battery', None),
+    'low_dc_protection_soc':    ('Main output cut-off SOC',             'F2 Battery', None),
+    'low_dc_recovery_soc':      ('Back to battery mode SOC',            'F2 Battery', None),
+    'offgrid_soc_protection':   ('Second output cut-off SOC',           'F2 Battery', None),
+    'battery_cutoff_soc':       ('Battery low cut-off SOC',             'F2 Battery', None),
+    'eq_charge_voltage':        ('Battery equalization voltage',        'F2 Battery', None),
+    'eq_time':                  ('Battery equalized time',              'F2 Battery', None),
+    'eq_timeout':               ('Battery equalized timeout',           'F2 Battery', None),
+    'eq_interval':              ('Equalization interval',               'F2 Battery', None),
 }
 
 # Apply renames
@@ -76,7 +81,7 @@ for ent in doc['entities']:
 modbus_address_entity = {
     "id": "modbus_address",
     "type": "number",
-    "name": "F0P10 Modbus Address",
+    "name": "Modbus ID setting",
     "category": "F0 System",
     "source": {
         "bank": "settings",
@@ -96,7 +101,7 @@ modbus_address_entity = {
 dry_contact_entity = {
     "id": "dry_contact_mode",
     "type": "number",
-    "name": "F0P16 Dry Contact Mode",
+    "name": "Dry contact mode",
     "category": "F0 System",
     "source": {
         "bank": "settings",
@@ -116,75 +121,99 @@ dry_contact_entity = {
 time_entities = [
     {
         "id": "clock_year",
-        "type": "sensor",
-        "name": "F3P00 Year",
+        "type": "number",
+        "name": "Time setting - Year",
         "category": "F3 Time",
         "source": {
             "bank": "info_fw",
             "byteOffset": 10,
             "dataType": "uint16"
         },
-        "display": {"precision": 0}
+        "display": {"precision": 0, "formatter": "plain-number"},
+        "writable": True,
+        "write": {
+            "address": 696
+        }
     },
     {
         "id": "clock_month",
-        "type": "sensor",
-        "name": "F3P01 Month",
+        "type": "number",
+        "name": "Time setting - Month",
         "category": "F3 Time",
         "source": {
             "bank": "info_fw",
             "byteOffset": 12,
             "dataType": "uint16"
         },
-        "display": {"precision": 0}
+        "display": {"precision": 0},
+        "writable": True,
+        "write": {
+            "address": 697
+        }
     },
     {
         "id": "clock_day",
-        "type": "sensor",
-        "name": "F3P02 Day",
+        "type": "number",
+        "name": "Time setting - Day",
         "category": "F3 Time",
         "source": {
             "bank": "info_fw",
             "byteOffset": 14,
             "dataType": "uint16"
         },
-        "display": {"precision": 0}
+        "display": {"precision": 0},
+        "writable": True,
+        "write": {
+            "address": 698
+        }
     },
     {
         "id": "clock_hour",
-        "type": "sensor",
-        "name": "F3P03 Hour",
+        "type": "number",
+        "name": "Time setting - Hour",
         "category": "F3 Time",
         "source": {
             "bank": "info_fw",
             "byteOffset": 16,
             "dataType": "uint16"
         },
-        "display": {"precision": 0}
+        "display": {"precision": 0},
+        "writable": True,
+        "write": {
+            "address": 699
+        }
     },
     {
         "id": "clock_minute",
-        "type": "sensor",
-        "name": "F3P04 Minute",
+        "type": "number",
+        "name": "Time setting - Minute",
         "category": "F3 Time",
         "source": {
             "bank": "info_fw",
             "byteOffset": 18,
             "dataType": "uint16"
         },
-        "display": {"precision": 0}
+        "display": {"precision": 0},
+        "writable": True,
+        "write": {
+            "address": 700
+        }
     },
     {
         "id": "clock_second",
-        "type": "sensor",
-        "name": "F3P05 Second",
+        "type": "number",
+        "name": "Time setting - Second",
         "category": "F3 Time",
         "source": {
             "bank": "info_fw",
             "byteOffset": 20,
             "dataType": "uint16"
         },
-        "display": {"precision": 0}
+        "display": {"precision": 0},
+        "writable": True,
+        "write": {
+            "address": 701
+        }
     }
 ]
 
@@ -226,10 +255,10 @@ desired_order = [
     'output_active_power', 'output_apparent_power',
     # F0 System (by program number)
     'input_mode',               # F0P01
-    'energy_saving_mode',       # F0P03
-    'overload_transfer_bypass', # F0P04
-    'overload_auto_restart',    # F0P05
-    'over_temp_auto_restart',   # F0P06
+    'energy_saving_mode',       # F0P02
+    'overload_transfer_bypass', # F0P03
+    'overload_auto_restart',    # F0P04
+    'over_temp_auto_restart',   # F0P05
     'lcd_auto_return',          # F0P07
     'lcd_backlight',            # F0P08
     'buzzer_mode',              # F0P09
@@ -246,33 +275,33 @@ desired_order = [
     # F2 Battery (by program number)
     'battery_type',             # F2P01
     'charge_priority',          # F2P02
-    'battery_ovp',              # F2P03
-    'max_charge_voltage',       # F2P04
-    'float_charge_voltage',     # F2P05
-    'constant_to_float_wait',   # F2P06
-    'max_charge_current',       # F2P07
-    'max_mains_charge_current', # F2P08
-    'max_discharge_current',    # F2P09
-    'mains_discharge_recovery_v', # F2P10
-    'mains_low_voltage_v',      # F2P11
-    'offgrid_low_voltage_v',    # F2P12
-    'low_dc_protection_soc',    # F2P13
-    'low_dc_recovery_soc',      # F2P14
-    'offgrid_soc_protection',   # F2P15
-    'battery_cutoff_soc',       # F2P16
-    'eq_charge_voltage',        # F2P17
-    'eq_time',                  # F2P18
-    'eq_timeout',               # F2P19
-    'eq_interval',              # F2P20
+    'battery_ovp',              # no confirmed front-panel program
+    'max_charge_voltage',       # F2P03
+    'float_charge_voltage',     # F2P04
+    'constant_to_float_wait',   # F2P16? probable
+    'max_charge_current',       # F2P09
+    'max_mains_charge_current', # F2P10
+    'max_discharge_current',    # F2P25? probable
+    'mains_discharge_recovery_v', # F2P06? probable
+    'mains_low_voltage_v',      # F2P05? probable
+    'offgrid_low_voltage_v',    # F2P07? probable
+    'low_dc_protection_soc',    # F2P07? probable
+    'low_dc_recovery_soc',      # F2P06? probable
+    'offgrid_soc_protection',   # F2P08? probable
+    'battery_cutoff_soc',       # no confirmed front-panel program
+    'eq_charge_voltage',        # F2P18
+    'eq_time',                  # F2P19
+    'eq_timeout',               # F2P20
+    'eq_interval',              # F2P21
     # BMS
     'charge_request_voltage',
     # F3 Time
-    'clock_year',   # F3P00
-    'clock_month',  # F3P01
-    'clock_day',    # F3P02
-    'clock_hour',   # F3P03
-    'clock_minute', # F3P04
-    'clock_second', # F3P05
+    'clock_year',   # F3P01
+    'clock_month',  # F3P02
+    'clock_day',    # F3P03
+    'clock_hour',   # F3P04
+    'clock_minute', # F3P05
+    'clock_second', # F3P06
     # Device Info
     'equipment_type',
     'serial_number',

@@ -23,6 +23,8 @@ public sealed record DeviceParameter
     public long? RawValue { get; init; }
 
     public IReadOnlyList<SelectOptionModel>? Options { get; init; }
+
+    public string? DisplayFormatter { get; init; }
 }
 
 /// <summary>Represents one choice in a <c>select</c>-type entity.</summary>

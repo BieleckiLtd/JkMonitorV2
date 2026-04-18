@@ -679,6 +679,14 @@ describe('MonitorPage', () => {
           source: { bank: 'live', byteOffset: 10, unit: 'V' },
           display: { precision: 1 },
         },
+        {
+          id: 'clock_year',
+          type: 'number',
+          name: 'Time setting - Year',
+          category: 'F3 Time',
+          source: { bank: 'live', byteOffset: 12, unit: '' },
+          display: { precision: 0, formatter: 'plain-number' },
+        },
       ],
       computedEntities: [],
       ui: {
@@ -771,6 +779,7 @@ describe('MonitorPage', () => {
               { key: 'output_priority', displayName: 'Output Priority', category: 'Power Management', numericValue: 0, stringValue: 'Utility first (UTI)', sortOrder: 6, unit: '' },
               { key: 'max_charge_current', displayName: 'Max Charge Current', category: 'Settings', numericValue: 100, rawValue: 100, sortOrder: 7, isWritable: true, unit: 'A' },
               { key: 'output_apparent_power', displayName: 'Output Apparent Power', category: 'Output', numericValue: 900, sortOrder: 8, unit: 'VA' },
+              { key: 'clock_year', displayName: 'Time setting - Year', category: 'F3 Time', numericValue: 2026, rawValue: 2026, sortOrder: 9, isWritable: true, unit: '', displayFormatter: 'plain-number' },
             ],
           },
         },
@@ -799,5 +808,8 @@ describe('MonitorPage', () => {
 
     expect(await screen.findByTestId('history-charts')).toHaveTextContent('History for inv-1');
     expect(screen.getByText('Max Charge Current')).toBeInTheDocument();
+    expect(screen.getByText('Time setting - Year')).toBeInTheDocument();
+    expect(screen.getByText('2026')).toBeInTheDocument();
+    expect(screen.queryByText('2,026')).not.toBeInTheDocument();
   });
 });

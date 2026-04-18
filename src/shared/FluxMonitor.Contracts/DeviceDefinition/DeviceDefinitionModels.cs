@@ -411,6 +411,8 @@ public sealed class EntityDisplayDefinition
     public int Precision { get; init; }
 
     public string? Format { get; init; }
+
+    public string? Formatter { get; init; }
 }
 
 public sealed class ComputedEntityDefinition
