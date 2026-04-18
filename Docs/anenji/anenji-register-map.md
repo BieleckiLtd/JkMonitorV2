@@ -221,6 +221,17 @@ this model.
 | 689 | 420 | W | — | Remote switch | 0=Off, 1=On | 1 (On) | 🔍 |
 | 690 | 316? | W | F0P16 | Dry contact mode | numeric | 0 | 🔍 |
 
+### 8.4 F4 Factory Reset (reg 795)
+
+| Reg | Std | R/W | Prog | Name | Values / Unit | Live Value | Verified |
+|-----|-----|-----|------|------|--------------|------------|----------|
+| 795 | 421 | W | F4P01 | Reset all stored data | Write 1 to trigger factory reset | 0 | 🔍 |
+
+> **CAUTION**: Writing value 1 to reg 795 is expected to reset all inverter
+> settings to factory defaults. Register address derived from standard 421
+> with +374 offset (consistent with other F0 settings). Confirmed writable
+> in probe but NOT tested with value 1 (destructive operation).
+
 ---
 
 ## 9. Standard → Anenji Address Cross-Reference
@@ -269,6 +280,7 @@ For users familiar with the standard GM6200/SMG-II protocol:
 | 402 | 605 | +203 | — | Current output priority (R) |
 | 403 | 636 | +233 | — | Current charge priority (R) |
 | 420 | 689 | +269 | — | Remote switch |
+| 421 | 795 | +374 | F4P01 | Reset all stored data |
 | 434 | 696 | +262 | F3P00 | Year |
 | 435 | 697 | +262 | F3P01 | Month |
 | 436 | 698 | +262 | F3P02 | Day |

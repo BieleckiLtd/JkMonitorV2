@@ -117,6 +117,15 @@
       "count": 16,
       "functionCode": 3,
       "pollGroup": "fast"
+    },
+    {
+      "_comment": "Reg 795: Factory reset command (std 421+374). Write 1 to trigger reset. Always reads 0.",
+      "id": "factory_reset",
+      "name": "Factory Reset",
+      "address": 795,
+      "count": 1,
+      "functionCode": 3,
+      "pollGroup": "slow"
     }
   ],
   "pollGroups": {
@@ -1360,7 +1369,7 @@
     },
     {
       "id": "clock_year",
-      "type": "sensor",
+      "type": "number",
       "name": "F3P00 Year",
       "category": "F3 Time",
       "source": {
@@ -1371,11 +1380,15 @@
       "display": {
         "precision": 0
       },
+      "writable": true,
+      "write": {
+        "address": 696
+      },
       "_comment": "=== F3 TIME — Manual Setting F3 ==="
     },
     {
       "id": "clock_month",
-      "type": "sensor",
+      "type": "number",
       "name": "F3P01 Month",
       "category": "F3 Time",
       "source": {
@@ -1385,11 +1398,15 @@
       },
       "display": {
         "precision": 0
+      },
+      "writable": true,
+      "write": {
+        "address": 697
       }
     },
     {
       "id": "clock_day",
-      "type": "sensor",
+      "type": "number",
       "name": "F3P02 Day",
       "category": "F3 Time",
       "source": {
@@ -1399,11 +1416,15 @@
       },
       "display": {
         "precision": 0
+      },
+      "writable": true,
+      "write": {
+        "address": 698
       }
     },
     {
       "id": "clock_hour",
-      "type": "sensor",
+      "type": "number",
       "name": "F3P03 Hour",
       "category": "F3 Time",
       "source": {
@@ -1413,11 +1434,15 @@
       },
       "display": {
         "precision": 0
+      },
+      "writable": true,
+      "write": {
+        "address": 699
       }
     },
     {
       "id": "clock_minute",
-      "type": "sensor",
+      "type": "number",
       "name": "F3P04 Minute",
       "category": "F3 Time",
       "source": {
@@ -1427,11 +1452,15 @@
       },
       "display": {
         "precision": 0
+      },
+      "writable": true,
+      "write": {
+        "address": 700
       }
     },
     {
       "id": "clock_second",
-      "type": "sensor",
+      "type": "number",
       "name": "F3P05 Second",
       "category": "F3 Time",
       "source": {
@@ -1441,6 +1470,29 @@
       },
       "display": {
         "precision": 0
+      },
+      "writable": true,
+      "write": {
+        "address": 701
+      }
+    },
+    {
+      "_comment": "=== F4 FACTORY — Manual Setting F4. Write 1 to trigger factory reset (reg 795 = std 421+374). CAUTION: This resets ALL stored settings to defaults! ===",
+      "id": "factory_reset",
+      "type": "number",
+      "name": "F4P01 Reset All Stored Data",
+      "category": "F4 Factory",
+      "source": {
+        "bank": "factory_reset",
+        "byteOffset": 0,
+        "dataType": "uint16"
+      },
+      "display": {
+        "precision": 0
+      },
+      "writable": true,
+      "write": {
+        "address": 795
       }
     },
     {
