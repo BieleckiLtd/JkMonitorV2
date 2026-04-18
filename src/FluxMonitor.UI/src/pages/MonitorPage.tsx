@@ -576,7 +576,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                 <>
                   {renderDefinitionSections(compactSections, compactParamByKey, compactTelemetry, dp, compactCells, selectedCellIndices, setSelectedCellIndices, device.deviceId, definition, temperatureUnit)}
                   {paramTableSections && paramTableSections.length > 0 ? (
-                    <div className='grid gap-3 sm:gap-4 lg:grid-cols-2'>
+                    <div className='space-y-3 sm:space-y-4'>
                       {paramTableSections.map((section, idx) => {
                         const params = filterParams(compactParameters, section);
                         if (params.length === 0) return null;
@@ -592,7 +592,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                       })}
                     </div>
                   ) : (
-                    <div className='grid gap-3 sm:gap-4 lg:grid-cols-2'>
+                    <div className='space-y-3 sm:space-y-4'>
                       {[...new Set(compactParameters.map(parameter => parameter.category))]
                         .filter(category => category !== 'Cell Voltages')
                         .sort((a, b) => a.localeCompare(b))
@@ -706,7 +706,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
 
           {/* Parameter categories */}
           {paramTableSections && paramTableSections.length > 0 ? (
-            <div className='grid gap-3 sm:gap-4 lg:grid-cols-2'>
+            <div className='space-y-3 sm:space-y-4'>
               {paramTableSections.map((section, idx) => {
                 const params = filterParams(parameters, section);
                 if (params.length === 0) return null;
@@ -722,7 +722,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
               })}
             </div>
           ) : (
-            <div className='grid gap-3 sm:gap-4 lg:grid-cols-2'>
+            <div className='space-y-3 sm:space-y-4'>
               {sortedCategories.filter(c => c !== 'Cell Voltages').map((category) => (
                 <ParameterCategoryCard key={category} category={category} params={grouped.get(category)!} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} definition={definition} temperatureUnit={temperatureUnit} />
               ))}
@@ -1016,33 +1016,48 @@ function ParameterCategoryCard({
   definition?: DeviceDefinition | null;
   temperatureUnit: TemperatureUnit;
 }) {
+  const [isExpanded, setIsExpanded] = useState(false);
   const combinedClockParams = getCombinedClockParams(params, definition);
   const visibleParams = combinedClockParams == null
     ? params
     : params.filter((param) => !inverterClockParameterKeySet.has(param.key));
+  const displayCategory = formatCategoryTitle(category);
 
   return (
     <Card className='border border-border/80 bg-card/85 shadow-sm'>
-      <CardHeader className='border-b border-border/60 pb-3'>
-        <CardTitle className='flex items-center gap-2 text-sm'>
-          <CategoryIcon category={category} />
-          {category}
-        </CardTitle>
+      <CardHeader className='pb-0'>
+        <button
+          type='button'
+          onClick={() => setIsExpanded((expanded) => !expanded)}
+          className='flex w-full items-center justify-between gap-3 rounded-xl border border-border/60 bg-background/25 px-3 py-3 text-left transition-colors hover:bg-background/40'
+          aria-expanded={isExpanded}
+          aria-label={`${displayCategory} section`}
+        >
+          <CardTitle className='flex items-center gap-2 text-sm'>
+            <CategoryIcon category={displayCategory} />
+            {displayCategory}
+          </CardTitle>
+          {isExpanded
+            ? <ChevronUp className='h-4 w-4 text-muted-foreground' />
+            : <ChevronDown className='h-4 w-4 text-muted-foreground' />}
+        </button>
       </CardHeader>
-      <CardContent className='pt-3'>
-        <div className='grid gap-2'>
-          {combinedClockParams != null && (
-            <CombinedClockParameterRow
-              params={combinedClockParams}
-              deviceId={deviceId}
-              temperatureUnit={temperatureUnit}
-            />
-          )}
-          {visibleParams.map((param) => (
-            <ParameterRow key={param.key} param={param} deviceId={deviceId} telemetry={telemetry} paramByKey={paramByKey} definition={definition} temperatureUnit={temperatureUnit} />
-          ))}
-        </div>
-      </CardContent>
+      {isExpanded && (
+        <CardContent className='pt-3'>
+          <div className='grid gap-2'>
+            {combinedClockParams != null && (
+              <CombinedClockParameterRow
+                params={combinedClockParams}
+                deviceId={deviceId}
+                temperatureUnit={temperatureUnit}
+              />
+            )}
+            {visibleParams.map((param) => (
+              <ParameterRow key={param.key} param={param} deviceId={deviceId} telemetry={telemetry} paramByKey={paramByKey} definition={definition} temperatureUnit={temperatureUnit} />
+            ))}
+          </div>
+        </CardContent>
+      )}
     </Card>
   );
 }
@@ -2115,11 +2130,19 @@ function CategoryIcon({ category }: { category: string }) {
     case 'Charging':
     case 'Discharging':
       return <BatteryCharging className='h-4 w-4 text-sky-400' />;
+    case 'F2 Charger':
+      return <BatteryCharging className='h-4 w-4 text-sky-400' />;
     case 'Device Info':
       return <Activity className='h-4 w-4 text-teal-400' />;
     default:
       return <Activity className='h-4 w-4 text-muted-foreground' />;
   }
+}
+
+function formatCategoryTitle(category: string) {
+  return category === 'F2 Battery'
+    ? 'F2 Charger'
+    : category;
 }
 
 function isSwitchSettingParam(key: string): boolean {

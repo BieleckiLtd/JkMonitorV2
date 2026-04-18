@@ -92,11 +92,11 @@
       }
     },
     {
-      "_comment": "Regs 171-192: equipment type (171), serial number ASCII (186-192)",
+      "_comment": "Regs 171-199: equipment type (171), protocol version (184), serial number ASCII (186-192). Serial only appears reliably when the larger aligned block is read.",
       "id": "info_id",
       "name": "Device Identity",
       "address": 171,
-      "count": 22,
+      "count": 29,
       "functionCode": 3,
       "pollGroup": "slow"
     },

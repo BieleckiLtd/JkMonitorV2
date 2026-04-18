@@ -608,6 +608,7 @@ describe('MonitorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /house battery/i }));
 
     expect(await screen.findByTestId('history-charts')).toHaveTextContent('History for jk-1');
+    fireEvent.click(screen.getByRole('button', { name: 'Configuration section' }));
     expect(screen.getByText('Charge Switch')).toBeInTheDocument();
   });
 
@@ -748,6 +749,7 @@ describe('MonitorPage', () => {
               {
                 type: 'parameter-table',
                 title: 'Settings',
+                groupBy: 'category',
                 filter: { writable: true },
               },
               {
@@ -813,10 +815,10 @@ describe('MonitorPage', () => {
               { key: 'state_of_charge', displayName: 'State of Charge', category: 'Battery', numericValue: 78, sortOrder: 4, unit: '%' },
               { key: 'energy_saving_mode', displayName: 'Eco Mode', category: 'Power Management', numericValue: 1, stringValue: 'On', sortOrder: 5, unit: '' },
               { key: 'output_priority', displayName: 'Output Priority', category: 'Power Management', numericValue: 0, stringValue: 'Utility first (UTI)', sortOrder: 6, unit: '' },
-              { key: 'max_charge_current', displayName: 'Max Charge Current', category: 'Settings', numericValue: 100, rawValue: 100, sortOrder: 7, isWritable: true, unit: 'A' },
+              { key: 'max_charge_current', displayName: 'Max Charge Current', category: 'F2 Battery', numericValue: 100, rawValue: 100, sortOrder: 7, isWritable: true, unit: 'A' },
               { key: 'output_apparent_power', displayName: 'Output Apparent Power', category: 'Output', numericValue: 900, sortOrder: 8, unit: 'VA' },
               { key: 'clock_year', displayName: 'Time setting - Year', category: 'F3 Time', numericValue: 2026, rawValue: 2026, sortOrder: 9, isWritable: true, unit: '', displayFormatter: 'plain-number' },
-              { key: 'serial_number', displayName: 'Serial Number', category: 'Device Info', stringValue: 'SN123456789ABC', sortOrder: 10 },
+              { key: 'serial_number', displayName: 'Serial Number', category: 'Device Info', stringValue: '92B32501100891', sortOrder: 10 },
               { key: 'equipment_type', displayName: 'Equipment Type', category: 'Device Info', numericValue: 29440, sortOrder: 11, unit: '' },
               { key: 'firmware_version', displayName: 'Firmware Version', category: 'Device Info', stringValue: 'FW1.2.3', sortOrder: 12 },
               { key: 'rated_power', displayName: 'Rated Power', category: 'Device Info', numericValue: 11000, sortOrder: 13, unit: 'W' },
@@ -847,13 +849,30 @@ describe('MonitorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /garage inverter/i }));
 
     expect(await screen.findByTestId('history-charts')).toHaveTextContent('History for inv-1');
+    const chargerSection = screen.getByRole('button', { name: 'F2 Charger section' });
+    const clockSection = screen.getByRole('button', { name: 'F3 Time section' });
+    const deviceInfoSection = screen.getByRole('button', { name: 'Device Info section' });
+    expect(chargerSection).toHaveAttribute('aria-expanded', 'false');
+    expect(clockSection).toHaveAttribute('aria-expanded', 'false');
+    expect(deviceInfoSection).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByText('Max Charge Current')).not.toBeInTheDocument();
+    expect(screen.queryByText('Serial Number')).not.toBeInTheDocument();
+
+    fireEvent.click(chargerSection);
+    expect(chargerSection).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('Max Charge Current')).toBeInTheDocument();
+
+    fireEvent.click(clockSection);
+    expect(clockSection).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('Time setting - Year')).toBeInTheDocument();
+    expect(screen.getByText('2026')).toBeInTheDocument();
+
+    fireEvent.click(deviceInfoSection);
+    expect(deviceInfoSection).toHaveAttribute('aria-expanded', 'true');
     expect(screen.getByText('Serial Number')).toBeInTheDocument();
-    expect(screen.getByText('SN123456789ABC')).toBeInTheDocument();
+    expect(screen.getByText('92B32501100891')).toBeInTheDocument();
     expect(screen.getByText('Equipment Type')).toBeInTheDocument();
     expect(screen.getByText('29,440')).toBeInTheDocument();
-    expect(screen.getByText('2026')).toBeInTheDocument();
     expect(screen.queryByText('2,026')).not.toBeInTheDocument();
   });
 
@@ -974,6 +993,10 @@ describe('MonitorPage', () => {
     expect(await screen.findByText('Clock Inverter')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: /clock inverter/i }));
 
+    const clockSection = await screen.findByRole('button', { name: 'Clock section' });
+    expect(clockSection).toHaveAttribute('aria-expanded', 'false');
+    fireEvent.click(clockSection);
+    expect(clockSection).toHaveAttribute('aria-expanded', 'true');
     expect(await screen.findByText('Date & Time')).toBeInTheDocument();
     expect(screen.getByText('2026-04-12 12:34:56')).toBeInTheDocument();
     expect(screen.queryByText('Time setting - Year')).not.toBeInTheDocument();
@@ -1127,6 +1150,7 @@ describe('MonitorPage', () => {
     });
 
     expect(await screen.findByText('Scaled Battery')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Configuration section' }));
     fireEvent.click(screen.getByTitle('Edit parameter'));
 
     const input = screen.getByLabelText('Set Cell Charge Request');
