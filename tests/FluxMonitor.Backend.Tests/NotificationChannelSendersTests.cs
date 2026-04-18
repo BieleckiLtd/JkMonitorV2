@@ -11,6 +11,70 @@ namespace FluxMonitor.Backend.Tests;
 public class NotificationChannelSendersTests
 {
     [Fact]
+    public async Task NtfyChannelSender_SendAsync_FallsBackToTopicEndpoint_WhenRootJsonPublishFails()
+    {
+        var requestUris = new List<string>();
+        string? fallbackTitle = null;
+        string? fallbackPriority = null;
+        string? fallbackTags = null;
+        string? fallbackAuthorization = null;
+        string? fallbackBody = null;
+        var callCount = 0;
+
+        var sender = new NtfyChannelSender(
+            new StubHttpClientFactory(new StubHttpMessageHandler(request =>
+            {
+                callCount++;
+                requestUris.Add(request.RequestUri?.AbsoluteUri ?? string.Empty);
+
+                if (callCount == 1)
+                {
+                    return new HttpResponseMessage(HttpStatusCode.NotFound)
+                    {
+                        Content = new StringContent("not found")
+                    };
+                }
+
+                fallbackTitle = request.Headers.TryGetValues("Title", out var titleValues) ? string.Join("", titleValues) : null;
+                fallbackPriority = request.Headers.TryGetValues("Priority", out var priorityValues) ? string.Join("", priorityValues) : null;
+                fallbackTags = request.Headers.TryGetValues("Tags", out var tagValues) ? string.Join("", tagValues) : null;
+                fallbackAuthorization = request.Headers.Authorization?.ToString();
+                fallbackBody = request.Content?.ReadAsStringAsync().GetAwaiter().GetResult();
+
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("""{"id":"abc123"}""")
+                };
+            })));
+
+        var channel = new NotificationChannelConfig
+        {
+            Id = "ntfy-1",
+            Type = "ntfy",
+            Name = "Ops ntfy",
+            Settings = new Dictionary<string, object?>
+            {
+                ["baseUrl"] = "https://ntfy.example.com",
+                ["topic"] = "alerts",
+                ["accessToken"] = "tk_test",
+                ["priority"] = 4,
+            }
+        };
+
+        var result = await sender.SendAsync(channel, "Charge complete", "Battery is at 100%.", "warning", CancellationToken.None);
+
+        Assert.Equal("sent", result);
+        Assert.Equal(
+            ["https://ntfy.example.com/", "https://ntfy.example.com/alerts"],
+            requestUris);
+        Assert.Equal("Charge complete", fallbackTitle);
+        Assert.Equal("4", fallbackPriority);
+        Assert.Equal("warning", fallbackTags);
+        Assert.Equal("Bearer tk_test", fallbackAuthorization);
+        Assert.Equal("Battery is at 100%.", fallbackBody);
+    }
+
+    [Fact]
     public async Task BrevoChannelSender_SendAsync_PostsExpectedApiRequest()
     {
         Uri? requestUri = null;

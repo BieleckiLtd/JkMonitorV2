@@ -24,7 +24,8 @@ public sealed class NtfyChannelSender(IHttpClientFactory httpClientFactory) : IN
         var priority = NotificationChannelSettings.GetInt(settings, "priority") ?? SeverityToPriority(severity);
 
         using var client = httpClientFactory.CreateClient();
-        var url = baseUrl.TrimEnd('/');
+        var trimmedBaseUrl = baseUrl.TrimEnd('/');
+        var jsonPublishUrl = $"{trimmedBaseUrl}/";
 
         // Use JSON publish format to support non-ASCII characters in title/body
         var payload = new Dictionary<string, object>
@@ -36,17 +37,47 @@ public sealed class NtfyChannelSender(IHttpClientFactory httpClientFactory) : IN
             ["tags"] = new[] { SeverityToTag(severity) }
         };
 
-        using var request = new HttpRequestMessage(HttpMethod.Post, url);
-        request.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
+        using var jsonRequest = new HttpRequestMessage(HttpMethod.Post, jsonPublishUrl);
+        jsonRequest.Content = new StringContent(JsonSerializer.Serialize(payload), Encoding.UTF8, "application/json");
 
         if (!string.IsNullOrEmpty(accessToken))
         {
-            request.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", accessToken);
+            jsonRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
         }
 
-        var response = await client.SendAsync(request, cancellationToken);
-        response.EnsureSuccessStatusCode();
-        return "sent";
+        using var jsonResponse = await client.SendAsync(jsonRequest, cancellationToken);
+        if (jsonResponse.IsSuccessStatusCode)
+        {
+            return "sent";
+        }
+
+        var jsonError = await ReadErrorAsync(jsonResponse, cancellationToken);
+
+        // Fall back to the simpler topic endpoint format. Some self-hosted setups and proxies
+        // are more permissive with topic publishes than root JSON publishes.
+        using var topicRequest = new HttpRequestMessage(HttpMethod.Post, $"{trimmedBaseUrl}/{Uri.EscapeDataString(topic)}");
+        topicRequest.Content = new StringContent(body, Encoding.UTF8, "text/plain");
+        if (!string.IsNullOrWhiteSpace(subject))
+        {
+            topicRequest.Headers.TryAddWithoutValidation("Title", subject);
+        }
+
+        topicRequest.Headers.TryAddWithoutValidation("Priority", priority.ToString());
+        topicRequest.Headers.TryAddWithoutValidation("Tags", SeverityToTag(severity));
+
+        if (!string.IsNullOrEmpty(accessToken))
+        {
+            topicRequest.Headers.Authorization = new AuthenticationHeaderValue("Bearer", accessToken);
+        }
+
+        using var topicResponse = await client.SendAsync(topicRequest, cancellationToken);
+        if (topicResponse.IsSuccessStatusCode)
+        {
+            return "sent";
+        }
+
+        var topicError = await ReadErrorAsync(topicResponse, cancellationToken);
+        throw new InvalidOperationException($"ntfy publish failed. JSON publish: {jsonError}. Topic publish fallback: {topicError}.");
     }
 
     private static int SeverityToPriority(string severity) => severity.ToLowerInvariant() switch
@@ -63,6 +94,20 @@ public sealed class NtfyChannelSender(IHttpClientFactory httpClientFactory) : IN
         "warning" => "warning",
         _ => "information_source"
     };
+
+    private static async Task<string> ReadErrorAsync(HttpResponseMessage response, CancellationToken cancellationToken)
+    {
+        var body = response.Content is null
+            ? string.Empty
+            : (await response.Content.ReadAsStringAsync(cancellationToken)).Trim();
+
+        if (string.IsNullOrWhiteSpace(body))
+        {
+            return $"{(int)response.StatusCode} {response.ReasonPhrase}";
+        }
+
+        return $"{(int)response.StatusCode} {response.ReasonPhrase}: {body}";
+    }
 }
 
 public sealed class EmailChannelSender(ILogger<EmailChannelSender> logger) : INotificationChannelSender

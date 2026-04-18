@@ -114,6 +114,30 @@ function getRuleValidationMessage(rules: NotificationRuleConfig[], devices: Devi
   return null;
 }
 
+function getChannelValidationMessage(channels: NotificationChannelConfig[]) {
+  for (let index = 0; index < channels.length; index += 1) {
+    const channel = channels[index];
+    const label = channel.name.trim() ? `Channel "${channel.name.trim()}"` : `Channel ${index + 1}`;
+
+    if (!channel.name.trim()) {
+      return `${label}: enter a name.`;
+    }
+
+    if (channel.type === 'ntfy') {
+      const settings = channel.settings as unknown as NtfySettings;
+      if (!settings.baseUrl?.trim()) {
+        return `${label}: enter an ntfy base URL.`;
+      }
+
+      if (!settings.topic?.trim()) {
+        return `${label}: enter an ntfy topic.`;
+      }
+    }
+  }
+
+  return null;
+}
+
 function getChannelAppearance(type: NotificationChannelConfig['type']) {
   switch (type) {
     case 'ntfy':
@@ -202,6 +226,12 @@ export function NotificationsPage({ hideHeader = false }: { hideHeader?: boolean
   };
 
   const handleSaveChannels = async () => {
+    const validationMessage = getChannelValidationMessage(channels);
+    if (validationMessage) {
+      setSaveMsg(validationMessage);
+      return;
+    }
+
     setIsSaving(true);
     setSaveMsg(null);
     try {
@@ -640,6 +670,7 @@ function NtfyChannelFields({
       <label className='space-y-1.5'>
         <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Base URL</span>
         <Input value={s.baseUrl ?? ''} onChange={(e) => onUpdate(index, 'baseUrl', e.target.value)} placeholder='https://ntfy.sh' />
+        <span className='block text-[11px] text-muted-foreground'>Use the ntfy server root URL only, for example <code>https://ntfy.sh</code>, not a topic URL.</span>
       </label>
       <label className='space-y-1.5'>
         <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Topic</span>
