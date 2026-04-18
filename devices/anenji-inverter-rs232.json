@@ -79,11 +79,11 @@
       "pollGroup": "fast"
     },
     {
-      "_comment": "Regs 601-689: all user-configurable settings (output/charge priority, voltages, currents, mode toggles)",
+      "_comment": "Regs 601-690: all user-configurable settings (output/charge priority, voltages, currents, mode toggles, Modbus address, dry contact)",
       "id": "settings",
       "name": "Settings",
       "address": 601,
-      "count": 89,
+      "count": 90,
       "functionCode": 3,
       "pollGroup": "slow",
       "write": {
@@ -131,7 +131,6 @@
   },
   "entities": [
     {
-      "_comment": "=== LIVE_MAIN — Status (addr 196, regs 196-212) ===",
       "id": "operating_mode",
       "type": "select",
       "name": "Operating Mode",
@@ -226,7 +225,6 @@
       }
     },
     {
-      "_comment": "=== LIVE_SOLAR — PV & Load (addr 223, regs 223-232) ===",
       "id": "pv_power",
       "type": "sensor",
       "name": "PV Power",
@@ -306,7 +304,6 @@
       "role": "temperature"
     },
     {
-      "_comment": "=== LIVE_BATTERY — Battery (addr 277, regs 277-281) ===",
       "id": "battery_voltage",
       "type": "sensor",
       "name": "Battery Voltage",
@@ -393,7 +390,6 @@
       }
     },
     {
-      "_comment": "=== LIVE_PV_TEMP — PV temperature (addr 305) ===",
       "id": "pv_temperature",
       "type": "sensor",
       "name": "PV Temperature",
@@ -410,7 +406,6 @@
       }
     },
     {
-      "_comment": "=== LIVE_AC — Grid/Output (addr 338, regs 338-349) ===",
       "id": "grid_voltage",
       "type": "sensor",
       "name": "Grid Voltage",
@@ -509,7 +504,7 @@
     {
       "id": "input_mode",
       "type": "select",
-      "name": "Input Mode",
+      "name": "F0P01 AC Input Voltage Range",
       "category": "F0 System",
       "source": {
         "bank": "settings",
@@ -534,12 +529,12 @@
           "label": "Generator (GNT)"
         }
       ],
-      "_comment": "=== F0 SYSTEM — Manual Setting F0, programs 01-09 ==="
+      "_comment": "=== F0 SYSTEM — Manual Setting F0 ==="
     },
     {
       "id": "energy_saving_mode",
       "type": "select",
-      "name": "Energy Saving Mode (Eco)",
+      "name": "F0P03 Power Saving Mode",
       "category": "F0 System",
       "source": {
         "bank": "settings",
@@ -564,7 +559,7 @@
     {
       "id": "overload_transfer_bypass",
       "type": "select",
-      "name": "Overload Transfer to Bypass",
+      "name": "F0P04 Overload Transfer to Bypass",
       "category": "F0 System",
       "source": {
         "bank": "settings",
@@ -589,7 +584,7 @@
     {
       "id": "overload_auto_restart",
       "type": "select",
-      "name": "Overload Auto Restart",
+      "name": "F0P05 Overload Auto Restart",
       "category": "F0 System",
       "source": {
         "bank": "settings",
@@ -614,7 +609,7 @@
     {
       "id": "over_temp_auto_restart",
       "type": "select",
-      "name": "Over-temperature Auto Restart",
+      "name": "F0P06 Over-temperature Auto Restart",
       "category": "F0 System",
       "source": {
         "bank": "settings",
@@ -637,9 +632,59 @@
       ]
     },
     {
+      "id": "lcd_auto_return",
+      "type": "select",
+      "name": "F0P07 LCD Auto Return",
+      "category": "F0 System",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 154,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": {
+        "address": 678
+      },
+      "options": [
+        {
+          "value": 0,
+          "label": "Off"
+        },
+        {
+          "value": 1,
+          "label": "1 Minute"
+        }
+      ]
+    },
+    {
+      "id": "lcd_backlight",
+      "type": "select",
+      "name": "F0P08 LCD Backlight",
+      "category": "F0 System",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 156,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": {
+        "address": 679
+      },
+      "options": [
+        {
+          "value": 0,
+          "label": "Timed off"
+        },
+        {
+          "value": 1,
+          "label": "Always on"
+        }
+      ]
+    },
+    {
       "id": "buzzer_mode",
       "type": "select",
-      "name": "Buzzer Mode",
+      "name": "F0P09 Buzzer Mode",
       "category": "F0 System",
       "source": {
         "bank": "settings",
@@ -670,6 +715,42 @@
       ]
     },
     {
+      "id": "modbus_address",
+      "type": "number",
+      "name": "F0P10 Modbus Address",
+      "category": "F0 System",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 170,
+        "dataType": "uint16"
+      },
+      "display": {
+        "precision": 0
+      },
+      "writable": true,
+      "write": {
+        "address": 686
+      }
+    },
+    {
+      "id": "dry_contact_mode",
+      "type": "number",
+      "name": "F0P16 Dry Contact Mode",
+      "category": "F0 System",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 178,
+        "dataType": "uint16"
+      },
+      "display": {
+        "precision": 0
+      },
+      "writable": true,
+      "write": {
+        "address": 690
+      }
+    },
+    {
       "id": "remote_switch",
       "type": "select",
       "name": "Remote Switch",
@@ -695,60 +776,10 @@
       ]
     },
     {
-      "id": "lcd_auto_return",
-      "type": "select",
-      "name": "LCD Auto Return",
-      "category": "F0 System",
-      "source": {
-        "bank": "settings",
-        "byteOffset": 154,
-        "dataType": "uint16"
-      },
-      "writable": true,
-      "write": {
-        "address": 678
-      },
-      "options": [
-        {
-          "value": 0,
-          "label": "Off"
-        },
-        {
-          "value": 1,
-          "label": "1 Minute"
-        }
-      ]
-    },
-    {
-      "id": "lcd_backlight",
-      "type": "select",
-      "name": "LCD Backlight",
-      "category": "F0 System",
-      "source": {
-        "bank": "settings",
-        "byteOffset": 156,
-        "dataType": "uint16"
-      },
-      "writable": true,
-      "write": {
-        "address": 679
-      },
-      "options": [
-        {
-          "value": 0,
-          "label": "Timed off"
-        },
-        {
-          "value": 1,
-          "label": "Always on"
-        }
-      ]
-    },
-    {
-      "_comment": "=== F1 OUTPUT — Manual Setting F1, programs 01-04 ===",
+      "_comment": "=== F1 OUTPUT — Manual Setting F1 ===",
       "id": "output_priority",
       "type": "select",
-      "name": "Output Priority",
+      "name": "F1P01 Output Source Priority",
       "category": "F1 Output",
       "source": {
         "bank": "settings",
@@ -777,7 +808,7 @@
     {
       "id": "output_voltage_setting",
       "type": "number",
-      "name": "Output Voltage Setting",
+      "name": "F1P03 Output Voltage",
       "category": "F1 Output",
       "source": {
         "bank": "settings",
@@ -797,7 +828,7 @@
     {
       "id": "output_frequency_setting",
       "type": "number",
-      "name": "Output Frequency Setting",
+      "name": "F1P04 Output Frequency",
       "category": "F1 Output",
       "source": {
         "bank": "settings",
@@ -876,44 +907,10 @@
       }
     },
     {
-      "id": "charge_priority",
-      "type": "select",
-      "name": "Charge Priority",
-      "category": "F2 Charger",
-      "source": {
-        "bank": "settings",
-        "byteOffset": 62,
-        "dataType": "uint16"
-      },
-      "writable": true,
-      "write": {
-        "address": 632
-      },
-      "options": [
-        {
-          "value": 1,
-          "label": "PV first (SOF)"
-        },
-        {
-          "value": 2,
-          "label": "PV & Mains equal (SNU)"
-        },
-        {
-          "value": 3,
-          "label": "PV only (OSO)"
-        },
-        {
-          "value": 4,
-          "label": "PV priority, surplus charge (SOR)"
-        }
-      ],
-      "_comment": "=== F2 CHARGER — Manual Setting F2, programs 01-04 ==="
-    },
-    {
       "id": "battery_type",
       "type": "select",
-      "name": "Battery Type",
-      "category": "F2 Charger",
+      "name": "F2P01 Battery Type",
+      "category": "F2 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 58,
@@ -956,13 +953,67 @@
           "value": 8,
           "label": "Lib"
         }
+      ],
+      "_comment": "=== F2 BATTERY — Manual Setting F2 ==="
+    },
+    {
+      "id": "charge_priority",
+      "type": "select",
+      "name": "F2P02 Charge Source Priority",
+      "category": "F2 Battery",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 62,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": {
+        "address": 632
+      },
+      "options": [
+        {
+          "value": 1,
+          "label": "PV first (SOF)"
+        },
+        {
+          "value": 2,
+          "label": "PV & Mains equal (SNU)"
+        },
+        {
+          "value": 3,
+          "label": "PV only (OSO)"
+        },
+        {
+          "value": 4,
+          "label": "PV priority, surplus charge (SOR)"
+        }
       ]
+    },
+    {
+      "id": "battery_ovp",
+      "type": "number",
+      "name": "F2P03 Battery OVP",
+      "category": "F2 Battery",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 60,
+        "dataType": "uint16",
+        "scale": 0.1,
+        "unit": "V"
+      },
+      "display": {
+        "precision": 1
+      },
+      "writable": true,
+      "write": {
+        "address": 631
+      }
     },
     {
       "id": "max_charge_voltage",
       "type": "number",
-      "name": "Bulk Charge Voltage",
-      "category": "F2 Charger",
+      "name": "F2P04 Bulk Charge Voltage",
+      "category": "F2 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 72,
@@ -981,8 +1032,8 @@
     {
       "id": "float_charge_voltage",
       "type": "number",
-      "name": "Float Charge Voltage",
-      "category": "F2 Charger",
+      "name": "F2P05 Float Charge Voltage",
+      "category": "F2 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 74,
@@ -999,31 +1050,29 @@
       }
     },
     {
-      "id": "battery_ovp",
+      "id": "constant_to_float_wait",
       "type": "number",
-      "name": "Battery Overvoltage Protection",
-      "category": "F3 Battery",
+      "name": "F2P06 Constant-to-Float Wait Time",
+      "category": "F2 Battery",
       "source": {
         "bank": "settings",
-        "byteOffset": 60,
+        "byteOffset": 76,
         "dataType": "uint16",
-        "scale": 0.1,
-        "unit": "V"
+        "unit": "min"
       },
       "display": {
-        "precision": 1
+        "precision": 0
       },
       "writable": true,
       "write": {
-        "address": 631
-      },
-      "_comment": "=== F3 BATTERY — Manual Setting F3 ==="
+        "address": 639
+      }
     },
     {
       "id": "max_charge_current",
       "type": "number",
-      "name": "Max Charging Current",
-      "category": "F3 Battery",
+      "name": "F2P07 Max Charging Current",
+      "category": "F2 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 78,
@@ -1042,8 +1091,8 @@
     {
       "id": "max_mains_charge_current",
       "type": "number",
-      "name": "Max Mains Charging Current",
-      "category": "F3 Battery",
+      "name": "F2P08 Max Mains Charging Current",
+      "category": "F2 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 80,
@@ -1062,8 +1111,8 @@
     {
       "id": "max_discharge_current",
       "type": "number",
-      "name": "Max Discharge Current Protection",
-      "category": "F3 Battery",
+      "name": "F2P09 Max Discharge Current",
+      "category": "F2 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 82,
@@ -1079,29 +1128,10 @@
       }
     },
     {
-      "id": "constant_to_float_wait",
-      "type": "number",
-      "name": "Constant-to-Float Wait Time",
-      "category": "F3 Battery",
-      "source": {
-        "bank": "settings",
-        "byteOffset": 76,
-        "dataType": "uint16",
-        "unit": "min"
-      },
-      "display": {
-        "precision": 0
-      },
-      "writable": true,
-      "write": {
-        "address": 639
-      }
-    },
-    {
       "id": "mains_discharge_recovery_v",
       "type": "number",
-      "name": "Mains Mode Discharge Recovery",
-      "category": "F3 Battery",
+      "name": "F2P10 Mains Discharge Recovery Voltage",
+      "category": "F2 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 84,
@@ -1120,8 +1150,8 @@
     {
       "id": "mains_low_voltage_v",
       "type": "number",
-      "name": "Mains Mode Low Voltage Protection",
-      "category": "F3 Battery",
+      "name": "F2P11 Mains Low Voltage Protection",
+      "category": "F2 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 86,
@@ -1140,8 +1170,8 @@
     {
       "id": "offgrid_low_voltage_v",
       "type": "number",
-      "name": "Off-grid Low Voltage Protection",
-      "category": "F3 Battery",
+      "name": "F2P12 Off-grid Low Voltage Protection",
+      "category": "F2 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 90,
@@ -1160,8 +1190,8 @@
     {
       "id": "low_dc_protection_soc",
       "type": "number",
-      "name": "Low DC Protection SOC (AC mode)",
-      "category": "F3 Battery",
+      "name": "F2P13 Low DC Protection SOC",
+      "category": "F2 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 92,
@@ -1179,8 +1209,8 @@
     {
       "id": "low_dc_recovery_soc",
       "type": "number",
-      "name": "Low DC Recovery SOC (AC mode)",
-      "category": "F3 Battery",
+      "name": "F2P14 Low DC Recovery SOC",
+      "category": "F2 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 94,
@@ -1198,8 +1228,8 @@
     {
       "id": "offgrid_soc_protection",
       "type": "number",
-      "name": "Off-grid Low DC Protection SOC",
-      "category": "F3 Battery",
+      "name": "F2P15 Off-grid Low DC SOC Protection",
+      "category": "F2 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 96,
@@ -1217,8 +1247,8 @@
     {
       "id": "battery_cutoff_soc",
       "type": "number",
-      "name": "Battery Low Cut-off SOC",
-      "category": "F3 Battery",
+      "name": "F2P16 Battery Low Cut-off SOC",
+      "category": "F2 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 98,
@@ -1236,8 +1266,8 @@
     {
       "id": "eq_charge_voltage",
       "type": "number",
-      "name": "Equalization Charge Voltage",
-      "category": "F3 Battery",
+      "name": "F2P17 Equalization Voltage",
+      "category": "F2 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 102,
@@ -1256,8 +1286,8 @@
     {
       "id": "eq_time",
       "type": "number",
-      "name": "Equalization Time",
-      "category": "F3 Battery",
+      "name": "F2P18 Equalization Time",
+      "category": "F2 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 104,
@@ -1275,8 +1305,8 @@
     {
       "id": "eq_timeout",
       "type": "number",
-      "name": "Equalization Timeout",
-      "category": "F3 Battery",
+      "name": "F2P19 Equalization Timeout",
+      "category": "F2 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 106,
@@ -1294,8 +1324,8 @@
     {
       "id": "eq_interval",
       "type": "number",
-      "name": "Equalization Interval",
-      "category": "F3 Battery",
+      "name": "F2P20 Equalization Interval",
+      "category": "F2 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 108,
@@ -1326,6 +1356,91 @@
       },
       "display": {
         "precision": 1
+      }
+    },
+    {
+      "id": "clock_year",
+      "type": "sensor",
+      "name": "F3P00 Year",
+      "category": "F3 Time",
+      "source": {
+        "bank": "info_fw",
+        "byteOffset": 10,
+        "dataType": "uint16"
+      },
+      "display": {
+        "precision": 0
+      },
+      "_comment": "=== F3 TIME — Manual Setting F3 ==="
+    },
+    {
+      "id": "clock_month",
+      "type": "sensor",
+      "name": "F3P01 Month",
+      "category": "F3 Time",
+      "source": {
+        "bank": "info_fw",
+        "byteOffset": 12,
+        "dataType": "uint16"
+      },
+      "display": {
+        "precision": 0
+      }
+    },
+    {
+      "id": "clock_day",
+      "type": "sensor",
+      "name": "F3P02 Day",
+      "category": "F3 Time",
+      "source": {
+        "bank": "info_fw",
+        "byteOffset": 14,
+        "dataType": "uint16"
+      },
+      "display": {
+        "precision": 0
+      }
+    },
+    {
+      "id": "clock_hour",
+      "type": "sensor",
+      "name": "F3P03 Hour",
+      "category": "F3 Time",
+      "source": {
+        "bank": "info_fw",
+        "byteOffset": 16,
+        "dataType": "uint16"
+      },
+      "display": {
+        "precision": 0
+      }
+    },
+    {
+      "id": "clock_minute",
+      "type": "sensor",
+      "name": "F3P04 Minute",
+      "category": "F3 Time",
+      "source": {
+        "bank": "info_fw",
+        "byteOffset": 18,
+        "dataType": "uint16"
+      },
+      "display": {
+        "precision": 0
+      }
+    },
+    {
+      "id": "clock_second",
+      "type": "sensor",
+      "name": "F3P05 Second",
+      "category": "F3 Time",
+      "source": {
+        "bank": "info_fw",
+        "byteOffset": 20,
+        "dataType": "uint16"
+      },
+      "display": {
+        "precision": 0
       }
     },
     {
