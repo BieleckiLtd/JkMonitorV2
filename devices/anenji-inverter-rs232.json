@@ -1,7 +1,6 @@
 {
   "$schema": "https://FluxMonitor.local/schemas/device-definition-v1.json",
   "version": "1",
-
   "device": {
     "id": "anenji-inverter-rs232",
     "name": "Anenji / Easun SMG-II Inverter",
@@ -12,7 +11,6 @@
     "icon": "zap",
     "documentationUrl": "https://github.com/BieleckiLtd/JkMonitorV2"
   },
-
   "connection": {
     "transport": {
       "type": "serial",
@@ -34,7 +32,6 @@
       }
     }
   },
-
   "dataSources": [
     {
       "_comment": "Regs 196-212: operating mode, frequency, grid power, AC charging power",
@@ -111,9 +108,17 @@
       "count": 71,
       "functionCode": 3,
       "pollGroup": "slow"
+    },
+    {
+      "_comment": "Regs 971-986: BMS communication data (charge request V, discharge cutoff V, current limits)",
+      "id": "bms_data",
+      "name": "BMS Data",
+      "address": 971,
+      "count": 16,
+      "functionCode": 3,
+      "pollGroup": "fast"
     }
   ],
-
   "pollGroups": {
     "fast": {
       "intervalMs": 5000,
@@ -124,9 +129,7 @@
       "description": "Settings, device info (slow-changing)"
     }
   },
-
   "entities": [
-
     {
       "_comment": "=== LIVE_MAIN — Status (addr 196, regs 196-212) ===",
       "id": "operating_mode",
@@ -140,16 +143,39 @@
         "dataType": "uint16"
       },
       "options": [
-        { "value": 0, "label": "Power on" },
-        { "value": 1, "label": "Standby" },
-        { "value": 2, "label": "Mains" },
-        { "value": 3, "label": "Off-grid" },
-        { "value": 4, "label": "Bypass" },
-        { "value": 5, "label": "Charging" },
-        { "value": 6, "label": "Fault" }
+        {
+          "value": 0,
+          "label": "Power on"
+        },
+        {
+          "value": 1,
+          "label": "Standby"
+        },
+        {
+          "value": 2,
+          "label": "Mains"
+        },
+        {
+          "value": 3,
+          "label": "Off-grid"
+        },
+        {
+          "value": 4,
+          "label": "Bypass"
+        },
+        {
+          "value": 5,
+          "label": "Charging"
+        },
+        {
+          "value": 6,
+          "label": "Fault"
+        }
       ],
       "role": "operating-mode",
-      "display": { "format": "text" }
+      "display": {
+        "format": "text"
+      }
     },
     {
       "id": "mains_frequency",
@@ -164,7 +190,9 @@
         "scale": 0.01,
         "unit": "Hz"
       },
-      "display": { "precision": 2 }
+      "display": {
+        "precision": 2
+      }
     },
     {
       "id": "grid_power_alt",
@@ -177,7 +205,9 @@
         "dataType": "int16",
         "unit": "W"
       },
-      "display": { "precision": 0 },
+      "display": {
+        "precision": 0
+      },
       "hidden": true
     },
     {
@@ -191,9 +221,10 @@
         "dataType": "int16",
         "unit": "W"
       },
-      "display": { "precision": 0 }
+      "display": {
+        "precision": 0
+      }
     },
-
     {
       "_comment": "=== LIVE_SOLAR — PV & Load (addr 223, regs 223-232) ===",
       "id": "pv_power",
@@ -207,7 +238,9 @@
         "dataType": "int16",
         "unit": "W"
       },
-      "display": { "precision": 0 }
+      "display": {
+        "precision": 0
+      }
     },
     {
       "id": "pv_charging_power",
@@ -220,7 +253,9 @@
         "dataType": "int16",
         "unit": "W"
       },
-      "display": { "precision": 0 }
+      "display": {
+        "precision": 0
+      }
     },
     {
       "id": "load_percent",
@@ -233,7 +268,9 @@
         "dataType": "int16",
         "unit": "%"
       },
-      "display": { "precision": 0 }
+      "display": {
+        "precision": 0
+      }
     },
     {
       "id": "output_frequency",
@@ -247,7 +284,9 @@
         "scale": 0.01,
         "unit": "Hz"
       },
-      "display": { "precision": 2 }
+      "display": {
+        "precision": 2
+      }
     },
     {
       "id": "inv_temperature",
@@ -261,10 +300,11 @@
         "dataType": "int16",
         "unit": "°C"
       },
-      "display": { "precision": 0 },
+      "display": {
+        "precision": 0
+      },
       "role": "temperature"
     },
-
     {
       "_comment": "=== LIVE_BATTERY — Battery (addr 277, regs 277-281) ===",
       "id": "battery_voltage",
@@ -279,7 +319,9 @@
         "scale": 0.1,
         "unit": "V"
       },
-      "display": { "precision": 1 },
+      "display": {
+        "precision": 1
+      },
       "role": "total-voltage"
     },
     {
@@ -295,7 +337,9 @@
         "scale": 0.1,
         "unit": "A"
       },
-      "display": { "precision": 1 },
+      "display": {
+        "precision": 1
+      },
       "role": "current"
     },
     {
@@ -310,7 +354,9 @@
         "dataType": "int16",
         "unit": "W"
       },
-      "display": { "precision": 0 },
+      "display": {
+        "precision": 0
+      },
       "role": "power"
     },
     {
@@ -325,7 +371,9 @@
         "dataType": "uint16",
         "unit": "%"
       },
-      "display": { "precision": 0 },
+      "display": {
+        "precision": 0
+      },
       "role": "state-of-charge"
     },
     {
@@ -340,9 +388,10 @@
         "dataType": "int16",
         "unit": "°C"
       },
-      "display": { "precision": 0 }
+      "display": {
+        "precision": 0
+      }
     },
-
     {
       "_comment": "=== LIVE_PV_TEMP — PV temperature (addr 305) ===",
       "id": "pv_temperature",
@@ -356,9 +405,10 @@
         "dataType": "int16",
         "unit": "°C"
       },
-      "display": { "precision": 0 }
+      "display": {
+        "precision": 0
+      }
     },
-
     {
       "_comment": "=== LIVE_AC — Grid/Output (addr 338, regs 338-349) ===",
       "id": "grid_voltage",
@@ -373,7 +423,9 @@
         "scale": 0.1,
         "unit": "V"
       },
-      "display": { "precision": 1 }
+      "display": {
+        "precision": 1
+      }
     },
     {
       "id": "grid_power",
@@ -386,7 +438,9 @@
         "dataType": "int16",
         "unit": "W"
       },
-      "display": { "precision": 0 }
+      "display": {
+        "precision": 0
+      }
     },
     {
       "id": "output_voltage",
@@ -401,7 +455,9 @@
         "scale": 0.1,
         "unit": "V"
       },
-      "display": { "precision": 1 }
+      "display": {
+        "precision": 1
+      }
     },
     {
       "id": "output_current",
@@ -415,7 +471,9 @@
         "scale": 0.1,
         "unit": "A"
       },
-      "display": { "precision": 1 }
+      "display": {
+        "precision": 1
+      }
     },
     {
       "id": "output_active_power",
@@ -429,7 +487,9 @@
         "dataType": "int16",
         "unit": "W"
       },
-      "display": { "precision": 0 }
+      "display": {
+        "precision": 0
+      }
     },
     {
       "id": "output_apparent_power",
@@ -442,28 +502,317 @@
         "dataType": "uint16",
         "unit": "VA"
       },
-      "display": { "precision": 0 }
+      "display": {
+        "precision": 0
+      }
     },
-
     {
-      "_comment": "=== SETTINGS — Output & Charge Priority (addr 601) ===",
+      "id": "input_mode",
+      "type": "select",
+      "name": "Input Mode",
+      "category": "F0 System",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 152,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": {
+        "address": 677
+      },
+      "options": [
+        {
+          "value": 0,
+          "label": "APL (Appliance)"
+        },
+        {
+          "value": 1,
+          "label": "UPS"
+        },
+        {
+          "value": 2,
+          "label": "Generator (GNT)"
+        }
+      ],
+      "_comment": "=== F0 SYSTEM — Manual Setting F0, programs 01-09 ==="
+    },
+    {
+      "id": "energy_saving_mode",
+      "type": "select",
+      "name": "Energy Saving Mode (Eco)",
+      "category": "F0 System",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 160,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": {
+        "address": 681
+      },
+      "options": [
+        {
+          "value": 0,
+          "label": "Off"
+        },
+        {
+          "value": 1,
+          "label": "On"
+        }
+      ]
+    },
+    {
+      "id": "overload_transfer_bypass",
+      "type": "select",
+      "name": "Overload Transfer to Bypass",
+      "category": "F0 System",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 166,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": {
+        "address": 684
+      },
+      "options": [
+        {
+          "value": 0,
+          "label": "Disabled"
+        },
+        {
+          "value": 1,
+          "label": "Enabled"
+        }
+      ]
+    },
+    {
+      "id": "overload_auto_restart",
+      "type": "select",
+      "name": "Overload Auto Restart",
+      "category": "F0 System",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 162,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": {
+        "address": 682
+      },
+      "options": [
+        {
+          "value": 0,
+          "label": "No"
+        },
+        {
+          "value": 1,
+          "label": "Yes"
+        }
+      ]
+    },
+    {
+      "id": "over_temp_auto_restart",
+      "type": "select",
+      "name": "Over-temperature Auto Restart",
+      "category": "F0 System",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 164,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": {
+        "address": 683
+      },
+      "options": [
+        {
+          "value": 0,
+          "label": "No"
+        },
+        {
+          "value": 1,
+          "label": "Yes"
+        }
+      ]
+    },
+    {
+      "id": "buzzer_mode",
+      "type": "select",
+      "name": "Buzzer Mode",
+      "category": "F0 System",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 4,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": {
+        "address": 603
+      },
+      "options": [
+        {
+          "value": 0,
+          "label": "Off"
+        },
+        {
+          "value": 1,
+          "label": "Faults & Warnings"
+        },
+        {
+          "value": 2,
+          "label": "Faults only"
+        },
+        {
+          "value": 3,
+          "label": "All"
+        }
+      ]
+    },
+    {
+      "id": "remote_switch",
+      "type": "select",
+      "name": "Remote Switch",
+      "category": "F0 System",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 176,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": {
+        "address": 689
+      },
+      "options": [
+        {
+          "value": 0,
+          "label": "Off"
+        },
+        {
+          "value": 1,
+          "label": "On"
+        }
+      ]
+    },
+    {
+      "id": "lcd_auto_return",
+      "type": "select",
+      "name": "LCD Auto Return",
+      "category": "F0 System",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 154,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": {
+        "address": 678
+      },
+      "options": [
+        {
+          "value": 0,
+          "label": "Off"
+        },
+        {
+          "value": 1,
+          "label": "1 Minute"
+        }
+      ]
+    },
+    {
+      "id": "lcd_backlight",
+      "type": "select",
+      "name": "LCD Backlight",
+      "category": "F0 System",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 156,
+        "dataType": "uint16"
+      },
+      "writable": true,
+      "write": {
+        "address": 679
+      },
+      "options": [
+        {
+          "value": 0,
+          "label": "Timed off"
+        },
+        {
+          "value": 1,
+          "label": "Always on"
+        }
+      ]
+    },
+    {
+      "_comment": "=== F1 OUTPUT — Manual Setting F1, programs 01-04 ===",
       "id": "output_priority",
       "type": "select",
       "name": "Output Priority",
-      "category": "Power Management",
+      "category": "F1 Output",
       "source": {
         "bank": "settings",
         "byteOffset": 0,
         "dataType": "uint16"
       },
       "writable": true,
-      "write": { "address": 601 },
+      "write": {
+        "address": 601
+      },
       "options": [
-        { "value": 1, "label": "PV → Utility → Battery (SUB)" },
-        { "value": 2, "label": "PV → Battery → Utility (SBU)" },
-        { "value": 3, "label": "PV → Utility → Battery + Grid-tie (SUF)" },
-        { "value": 4, "label": "Self-consumption (ZEC)" }
+        {
+          "value": 1,
+          "label": "PV → Utility → Battery (SUB)"
+        },
+        {
+          "value": 2,
+          "label": "PV → Battery → Utility (SBU)"
+        },
+        {
+          "value": 3,
+          "label": "PV → Utility → Battery + Grid-tie (SUF)"
+        }
       ]
+    },
+    {
+      "id": "output_voltage_setting",
+      "type": "number",
+      "name": "Output Voltage Setting",
+      "category": "F1 Output",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 10,
+        "dataType": "uint16",
+        "scale": 0.1,
+        "unit": "V"
+      },
+      "display": {
+        "precision": 0
+      },
+      "writable": true,
+      "write": {
+        "address": 606
+      }
+    },
+    {
+      "id": "output_frequency_setting",
+      "type": "number",
+      "name": "Output Frequency Setting",
+      "category": "F1 Output",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 12,
+        "dataType": "uint16",
+        "scale": 0.01,
+        "unit": "Hz"
+      },
+      "display": {
+        "precision": 2
+      },
+      "writable": true,
+      "write": {
+        "address": 607
+      }
     },
     {
       "id": "current_output_priority",
@@ -476,31 +825,23 @@
         "dataType": "uint16"
       },
       "options": [
-        { "value": 1, "label": "SUB" },
-        { "value": 2, "label": "SBU" },
-        { "value": 3, "label": "SUF" },
-        { "value": 4, "label": "ZEC" }
+        {
+          "value": 1,
+          "label": "SUB"
+        },
+        {
+          "value": 2,
+          "label": "SBU"
+        },
+        {
+          "value": 3,
+          "label": "SUF"
+        }
       ],
-      "display": { "format": "text" }
-    },
-    {
-      "id": "charge_priority",
-      "type": "select",
-      "name": "Charge Priority",
-      "category": "Power Management",
-      "source": {
-        "bank": "settings",
-        "byteOffset": 62,
-        "dataType": "uint16"
+      "display": {
+        "format": "text"
       },
-      "writable": true,
-      "write": { "address": 632 },
-      "options": [
-        { "value": 1, "label": "PV first (SOF)" },
-        { "value": 2, "label": "PV & Mains equal (SNU)" },
-        { "value": 3, "label": "PV only (OSO)" },
-        { "value": 4, "label": "PV priority, surplus charge (SOR)" }
-      ]
+      "_comment": "=== STATUS — Read-only active priority mirrors ==="
     },
     {
       "id": "current_charge_priority",
@@ -513,111 +854,115 @@
         "dataType": "uint16"
       },
       "options": [
-        { "value": 1, "label": "SOF" },
-        { "value": 2, "label": "SNU" },
-        { "value": 3, "label": "OSO" },
-        { "value": 4, "label": "SOR" }
+        {
+          "value": 1,
+          "label": "SOF"
+        },
+        {
+          "value": 2,
+          "label": "SNU"
+        },
+        {
+          "value": 3,
+          "label": "OSO"
+        },
+        {
+          "value": 4,
+          "label": "SOR"
+        }
       ],
-      "display": { "format": "text" }
+      "display": {
+        "format": "text"
+      }
     },
     {
-      "id": "output_voltage_setting",
-      "type": "number",
-      "name": "Output Voltage Setting",
-      "category": "Power Management",
-      "source": {
-        "bank": "settings",
-        "byteOffset": 10,
-        "dataType": "uint16",
-        "scale": 0.1,
-        "unit": "V"
-      },
-      "display": { "precision": 0 },
-      "writable": true,
-      "write": { "address": 606 }
-    },
-    {
-      "id": "output_frequency_setting",
-      "type": "number",
-      "name": "Output Frequency Setting",
-      "category": "Power Management",
-      "source": {
-        "bank": "settings",
-        "byteOffset": 12,
-        "dataType": "uint16",
-        "scale": 0.01,
-        "unit": "Hz"
-      },
-      "display": { "precision": 2 },
-      "writable": true,
-      "write": { "address": 607 }
-    },
-
-    {
-      "id": "buzzer_mode",
+      "id": "charge_priority",
       "type": "select",
-      "name": "Buzzer Mode",
-      "category": "System Settings",
+      "name": "Charge Priority",
+      "category": "F2 Charger",
       "source": {
         "bank": "settings",
-        "byteOffset": 4,
+        "byteOffset": 62,
         "dataType": "uint16"
       },
       "writable": true,
-      "write": { "address": 603 },
+      "write": {
+        "address": 632
+      },
       "options": [
-        { "value": 0, "label": "Off" },
-        { "value": 1, "label": "Faults & Warnings" },
-        { "value": 2, "label": "Faults only" },
-        { "value": 3, "label": "All" }
-      ]
+        {
+          "value": 1,
+          "label": "PV first (SOF)"
+        },
+        {
+          "value": 2,
+          "label": "PV & Mains equal (SNU)"
+        },
+        {
+          "value": 3,
+          "label": "PV only (OSO)"
+        },
+        {
+          "value": 4,
+          "label": "PV priority, surplus charge (SOR)"
+        }
+      ],
+      "_comment": "=== F2 CHARGER — Manual Setting F2, programs 01-04 ==="
     },
-
     {
-      "_comment": "=== SETTINGS — Battery Type & Voltages (regs 630-650) ===",
       "id": "battery_type",
       "type": "select",
       "name": "Battery Type",
-      "category": "Battery Settings",
+      "category": "F2 Charger",
       "source": {
         "bank": "settings",
         "byteOffset": 58,
         "dataType": "uint16"
       },
       "writable": true,
-      "write": { "address": 630 },
-      "options": [
-        { "value": 0, "label": "AGM" },
-        { "value": 1, "label": "Flooded" },
-        { "value": 2, "label": "User Defined" },
-        { "value": 3, "label": "Li1 / Pylontech" },
-        { "value": 4, "label": "LiFePO4" },
-        { "value": 5, "label": "Li3" },
-        { "value": 6, "label": "Li4" },
-        { "value": 8, "label": "Lib" }
-      ]
-    },
-    {
-      "id": "battery_ovp",
-      "type": "number",
-      "name": "Battery Overvoltage Protection",
-      "category": "Battery Settings",
-      "source": {
-        "bank": "settings",
-        "byteOffset": 60,
-        "dataType": "uint16",
-        "scale": 0.1,
-        "unit": "V"
+      "write": {
+        "address": 630
       },
-      "display": { "precision": 1 },
-      "writable": true,
-      "write": { "address": 631 }
+      "options": [
+        {
+          "value": 0,
+          "label": "AGM"
+        },
+        {
+          "value": 1,
+          "label": "Flooded"
+        },
+        {
+          "value": 2,
+          "label": "User Defined"
+        },
+        {
+          "value": 3,
+          "label": "Li1 / Pylontech"
+        },
+        {
+          "value": 4,
+          "label": "LiFePO4"
+        },
+        {
+          "value": 5,
+          "label": "Li3"
+        },
+        {
+          "value": 6,
+          "label": "Li4"
+        },
+        {
+          "value": 8,
+          "label": "Lib"
+        }
+      ]
     },
     {
       "id": "max_charge_voltage",
       "type": "number",
-      "name": "Max Charging Voltage",
-      "category": "Battery Settings",
+      "name": "Bulk Charge Voltage",
+      "category": "F2 Charger",
       "source": {
         "bank": "settings",
         "byteOffset": 72,
@@ -625,15 +970,19 @@
         "scale": 0.1,
         "unit": "V"
       },
-      "display": { "precision": 1 },
+      "display": {
+        "precision": 1
+      },
       "writable": true,
-      "write": { "address": 637 }
+      "write": {
+        "address": 637
+      }
     },
     {
       "id": "float_charge_voltage",
       "type": "number",
       "name": "Float Charge Voltage",
-      "category": "Battery Settings",
+      "category": "F2 Charger",
       "source": {
         "bank": "settings",
         "byteOffset": 74,
@@ -641,30 +990,40 @@
         "scale": 0.1,
         "unit": "V"
       },
-      "display": { "precision": 1 },
+      "display": {
+        "precision": 1
+      },
       "writable": true,
-      "write": { "address": 638 }
+      "write": {
+        "address": 638
+      }
     },
     {
-      "id": "constant_to_float_wait",
+      "id": "battery_ovp",
       "type": "number",
-      "name": "Constant-to-Float Wait Time",
-      "category": "Battery Settings",
+      "name": "Battery Overvoltage Protection",
+      "category": "F3 Battery",
       "source": {
         "bank": "settings",
-        "byteOffset": 76,
+        "byteOffset": 60,
         "dataType": "uint16",
-        "unit": "min"
+        "scale": 0.1,
+        "unit": "V"
       },
-      "display": { "precision": 0 },
+      "display": {
+        "precision": 1
+      },
       "writable": true,
-      "write": { "address": 639 }
+      "write": {
+        "address": 631
+      },
+      "_comment": "=== F3 BATTERY — Manual Setting F3 ==="
     },
     {
       "id": "max_charge_current",
       "type": "number",
       "name": "Max Charging Current",
-      "category": "Battery Settings",
+      "category": "F3 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 78,
@@ -672,15 +1031,19 @@
         "scale": 0.1,
         "unit": "A"
       },
-      "display": { "precision": 1 },
+      "display": {
+        "precision": 1
+      },
       "writable": true,
-      "write": { "address": 640 }
+      "write": {
+        "address": 640
+      }
     },
     {
       "id": "max_mains_charge_current",
       "type": "number",
       "name": "Max Mains Charging Current",
-      "category": "Battery Settings",
+      "category": "F3 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 80,
@@ -688,30 +1051,57 @@
         "scale": 0.1,
         "unit": "A"
       },
-      "display": { "precision": 1 },
+      "display": {
+        "precision": 1
+      },
       "writable": true,
-      "write": { "address": 641 }
+      "write": {
+        "address": 641
+      }
     },
     {
       "id": "max_discharge_current",
       "type": "number",
       "name": "Max Discharge Current Protection",
-      "category": "Battery Settings",
+      "category": "F3 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 82,
         "dataType": "uint16",
         "unit": "A"
       },
-      "display": { "precision": 0 },
+      "display": {
+        "precision": 0
+      },
       "writable": true,
-      "write": { "address": 642 }
+      "write": {
+        "address": 642
+      }
+    },
+    {
+      "id": "constant_to_float_wait",
+      "type": "number",
+      "name": "Constant-to-Float Wait Time",
+      "category": "F3 Battery",
+      "source": {
+        "bank": "settings",
+        "byteOffset": 76,
+        "dataType": "uint16",
+        "unit": "min"
+      },
+      "display": {
+        "precision": 0
+      },
+      "writable": true,
+      "write": {
+        "address": 639
+      }
     },
     {
       "id": "mains_discharge_recovery_v",
       "type": "number",
       "name": "Mains Mode Discharge Recovery",
-      "category": "Battery Settings",
+      "category": "F3 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 84,
@@ -719,15 +1109,19 @@
         "scale": 0.1,
         "unit": "V"
       },
-      "display": { "precision": 1 },
+      "display": {
+        "precision": 1
+      },
       "writable": true,
-      "write": { "address": 643 }
+      "write": {
+        "address": 643
+      }
     },
     {
       "id": "mains_low_voltage_v",
       "type": "number",
       "name": "Mains Mode Low Voltage Protection",
-      "category": "Battery Settings",
+      "category": "F3 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 86,
@@ -735,15 +1129,19 @@
         "scale": 0.1,
         "unit": "V"
       },
-      "display": { "precision": 1 },
+      "display": {
+        "precision": 1
+      },
       "writable": true,
-      "write": { "address": 644 }
+      "write": {
+        "address": 644
+      }
     },
     {
       "id": "offgrid_low_voltage_v",
       "type": "number",
       "name": "Off-grid Low Voltage Protection",
-      "category": "Battery Settings",
+      "category": "F3 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 90,
@@ -751,75 +1149,95 @@
         "scale": 0.1,
         "unit": "V"
       },
-      "display": { "precision": 1 },
+      "display": {
+        "precision": 1
+      },
       "writable": true,
-      "write": { "address": 646 }
+      "write": {
+        "address": 646
+      }
     },
     {
       "id": "low_dc_protection_soc",
       "type": "number",
       "name": "Low DC Protection SOC (AC mode)",
-      "category": "Battery Settings",
+      "category": "F3 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 92,
         "dataType": "uint16",
         "unit": "%"
       },
-      "display": { "precision": 0 },
+      "display": {
+        "precision": 0
+      },
       "writable": true,
-      "write": { "address": 647 }
+      "write": {
+        "address": 647
+      }
     },
     {
       "id": "low_dc_recovery_soc",
       "type": "number",
       "name": "Low DC Recovery SOC (AC mode)",
-      "category": "Battery Settings",
+      "category": "F3 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 94,
         "dataType": "uint16",
         "unit": "%"
       },
-      "display": { "precision": 0 },
+      "display": {
+        "precision": 0
+      },
       "writable": true,
-      "write": { "address": 648 }
+      "write": {
+        "address": 648
+      }
     },
     {
       "id": "offgrid_soc_protection",
       "type": "number",
       "name": "Off-grid Low DC Protection SOC",
-      "category": "Battery Settings",
+      "category": "F3 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 96,
         "dataType": "uint16",
         "unit": "%"
       },
-      "display": { "precision": 0 },
+      "display": {
+        "precision": 0
+      },
       "writable": true,
-      "write": { "address": 649 }
+      "write": {
+        "address": 649
+      }
     },
     {
       "id": "battery_cutoff_soc",
       "type": "number",
       "name": "Battery Low Cut-off SOC",
-      "category": "Battery Settings",
+      "category": "F3 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 98,
         "dataType": "uint16",
         "unit": "%"
       },
-      "display": { "precision": 0 },
+      "display": {
+        "precision": 0
+      },
       "writable": true,
-      "write": { "address": 650 }
+      "write": {
+        "address": 650
+      }
     },
     {
       "id": "eq_charge_voltage",
       "type": "number",
       "name": "Equalization Charge Voltage",
-      "category": "Battery Settings",
+      "category": "F3 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 102,
@@ -827,195 +1245,89 @@
         "scale": 0.1,
         "unit": "V"
       },
-      "display": { "precision": 1 },
+      "display": {
+        "precision": 1
+      },
       "writable": true,
-      "write": { "address": 652 }
+      "write": {
+        "address": 652
+      }
     },
     {
       "id": "eq_time",
       "type": "number",
       "name": "Equalization Time",
-      "category": "Battery Settings",
+      "category": "F3 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 104,
         "dataType": "uint16",
         "unit": "min"
       },
-      "display": { "precision": 0 },
+      "display": {
+        "precision": 0
+      },
       "writable": true,
-      "write": { "address": 653 }
+      "write": {
+        "address": 653
+      }
     },
     {
       "id": "eq_timeout",
       "type": "number",
       "name": "Equalization Timeout",
-      "category": "Battery Settings",
+      "category": "F3 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 106,
         "dataType": "uint16",
         "unit": "min"
       },
-      "display": { "precision": 0 },
+      "display": {
+        "precision": 0
+      },
       "writable": true,
-      "write": { "address": 654 }
+      "write": {
+        "address": 654
+      }
     },
     {
       "id": "eq_interval",
       "type": "number",
       "name": "Equalization Interval",
-      "category": "Battery Settings",
+      "category": "F3 Battery",
       "source": {
         "bank": "settings",
         "byteOffset": 108,
         "dataType": "uint16",
         "unit": "days"
       },
-      "display": { "precision": 0 },
-      "writable": true,
-      "write": { "address": 655 }
-    },
-
-    {
-      "_comment": "=== SETTINGS — Mode Switches (regs 677-689) ===",
-      "id": "energy_saving_mode",
-      "type": "select",
-      "name": "Energy Saving Mode (Eco)",
-      "category": "Power Management",
-      "source": {
-        "bank": "settings",
-        "byteOffset": 160,
-        "dataType": "uint16"
+      "display": {
+        "precision": 0
       },
       "writable": true,
-      "write": { "address": 681 },
-      "options": [
-        { "value": 0, "label": "Off" },
-        { "value": 1, "label": "On" }
-      ]
+      "write": {
+        "address": 655
+      }
     },
     {
-      "id": "input_mode",
-      "type": "select",
-      "name": "Input Mode",
-      "category": "Power Management",
+      "_comment": "=== BMS DATA — Battery management system live values (addr 971) ===",
+      "id": "charge_request_voltage",
+      "type": "sensor",
+      "name": "Charge Request Voltage",
+      "category": "Battery",
+      "icon": "battery",
       "source": {
-        "bank": "settings",
-        "byteOffset": 152,
-        "dataType": "uint16"
+        "bank": "bms_data",
+        "byteOffset": 0,
+        "dataType": "uint16",
+        "scale": 0.1,
+        "unit": "V"
       },
-      "writable": true,
-      "write": { "address": 677 },
-      "options": [
-        { "value": 0, "label": "APL (Appliance)" },
-        { "value": 1, "label": "UPS" },
-        { "value": 2, "label": "Generator (GNT)" }
-      ]
+      "display": {
+        "precision": 1
+      }
     },
-    {
-      "id": "lcd_auto_return",
-      "type": "select",
-      "name": "LCD Auto Return",
-      "category": "System Settings",
-      "source": {
-        "bank": "settings",
-        "byteOffset": 154,
-        "dataType": "uint16"
-      },
-      "writable": true,
-      "write": { "address": 678 },
-      "options": [
-        { "value": 0, "label": "Off" },
-        { "value": 1, "label": "1 Minute" }
-      ]
-    },
-    {
-      "id": "lcd_backlight",
-      "type": "select",
-      "name": "LCD Backlight",
-      "category": "Power Management",
-      "source": {
-        "bank": "settings",
-        "byteOffset": 156,
-        "dataType": "uint16"
-      },
-      "writable": true,
-      "write": { "address": 679 },
-      "options": [
-        { "value": 0, "label": "Timed off" },
-        { "value": 1, "label": "Always on" }
-      ]
-    },
-    {
-      "id": "overload_auto_restart",
-      "type": "select",
-      "name": "Overload Auto Restart",
-      "category": "System Settings",
-      "source": {
-        "bank": "settings",
-        "byteOffset": 162,
-        "dataType": "uint16"
-      },
-      "writable": true,
-      "write": { "address": 682 },
-      "options": [
-        { "value": 0, "label": "No" },
-        { "value": 1, "label": "Yes" }
-      ]
-    },
-    {
-      "id": "over_temp_auto_restart",
-      "type": "select",
-      "name": "Over-temperature Auto Restart",
-      "category": "System Settings",
-      "source": {
-        "bank": "settings",
-        "byteOffset": 164,
-        "dataType": "uint16"
-      },
-      "writable": true,
-      "write": { "address": 683 },
-      "options": [
-        { "value": 0, "label": "No" },
-        { "value": 1, "label": "Yes" }
-      ]
-    },
-    {
-      "id": "overload_transfer_bypass",
-      "type": "select",
-      "name": "Overload Transfer to Bypass",
-      "category": "System Settings",
-      "source": {
-        "bank": "settings",
-        "byteOffset": 166,
-        "dataType": "uint16"
-      },
-      "writable": true,
-      "write": { "address": 684 },
-      "options": [
-        { "value": 0, "label": "Disabled" },
-        { "value": 1, "label": "Enabled" }
-      ]
-    },
-    {
-      "id": "remote_switch",
-      "type": "select",
-      "name": "Remote Switch",
-      "category": "System Settings",
-      "source": {
-        "bank": "settings",
-        "byteOffset": 176,
-        "dataType": "uint16"
-      },
-      "writable": true,
-      "write": { "address": 689 },
-      "options": [
-        { "value": 0, "label": "Off" },
-        { "value": 1, "label": "On" }
-      ]
-    },
-
     {
       "_comment": "=== INFO_ID — Device Identity (addr 171) ===",
       "id": "equipment_type",
@@ -1041,7 +1353,6 @@
         "length": 14
       }
     },
-
     {
       "_comment": "=== INFO_FW — Firmware (addr 691) ===",
       "id": "rated_power",
@@ -1054,7 +1365,9 @@
         "dataType": "uint16",
         "unit": "W"
       },
-      "display": { "precision": 0 }
+      "display": {
+        "precision": 0
+      }
     },
     {
       "id": "firmware_version",
@@ -1068,33 +1381,79 @@
         "length": 16
       }
     }
-
   ],
-
   "storage": {
     "database": {
       "provider": "timescaledb",
       "defaultNamePattern": "FluxMonitor_{deviceId}"
     },
     "timeSeries": [
-      { "entity": "battery_voltage",    "aggregate": "avg",  "column": "battery_voltage_v" },
-      { "entity": "battery_current",    "aggregate": "avg",  "column": "battery_current_a" },
-      { "entity": "battery_power",      "aggregate": "avg",  "column": "battery_power_w" },
-      { "entity": "state_of_charge",    "aggregate": "last", "column": "soc_pct" },
-      { "entity": "grid_power",         "aggregate": "avg",  "column": "grid_power_w" },
-      { "entity": "output_active_power","aggregate": "avg",  "column": "output_power_w" },
-      { "entity": "grid_voltage",       "aggregate": "avg",  "column": "grid_voltage_v" },
-      { "entity": "pv_power",           "aggregate": "avg",  "column": "pv_power_w" },
-      { "entity": "inv_temperature",    "aggregate": "avg",  "column": "inv_temp_c" }
+      {
+        "entity": "battery_voltage",
+        "aggregate": "avg",
+        "column": "battery_voltage_v"
+      },
+      {
+        "entity": "battery_current",
+        "aggregate": "avg",
+        "column": "battery_current_a"
+      },
+      {
+        "entity": "battery_power",
+        "aggregate": "avg",
+        "column": "battery_power_w"
+      },
+      {
+        "entity": "state_of_charge",
+        "aggregate": "last",
+        "column": "soc_pct"
+      },
+      {
+        "entity": "grid_power",
+        "aggregate": "avg",
+        "column": "grid_power_w"
+      },
+      {
+        "entity": "output_active_power",
+        "aggregate": "avg",
+        "column": "output_power_w"
+      },
+      {
+        "entity": "grid_voltage",
+        "aggregate": "avg",
+        "column": "grid_voltage_v"
+      },
+      {
+        "entity": "pv_power",
+        "aggregate": "avg",
+        "column": "pv_power_w"
+      },
+      {
+        "entity": "inv_temperature",
+        "aggregate": "avg",
+        "column": "inv_temp_c"
+      },
+      {
+        "entity": "charge_request_voltage",
+        "aggregate": "avg",
+        "column": "charge_req_voltage_v"
+      }
     ],
     "retention": {
-      "raw":  { "window": "24h" },
-      "1m":   { "window": "1y" },
-      "5m":   { "window": "1y" },
-      "1h":   { "window": "10y" }
+      "raw": {
+        "window": "24h"
+      },
+      "1m": {
+        "window": "1y"
+      },
+      "5m": {
+        "window": "1y"
+      },
+      "1h": {
+        "window": "10y"
+      }
     }
   },
-
   "ui": {
     "pages": {
       "monitor": {
@@ -1104,9 +1463,20 @@
               "type": "last-seen",
               "icon": "pulse",
               "levels": [
-                { "maxAgeSeconds": 10, "color": "green",  "label": "less than 10 seconds ago" },
-                { "maxAgeSeconds": 300, "color": "orange", "label": "less than 5 minutes ago" },
-                { "color": "red", "label": "more than 5 minutes ago" }
+                {
+                  "maxAgeSeconds": 10,
+                  "color": "green",
+                  "label": "less than 10 seconds ago"
+                },
+                {
+                  "maxAgeSeconds": 300,
+                  "color": "orange",
+                  "label": "less than 5 minutes ago"
+                },
+                {
+                  "color": "red",
+                  "label": "more than 5 minutes ago"
+                }
               ]
             }
           ]
@@ -1115,68 +1485,165 @@
           {
             "type": "hero-metrics",
             "metrics": [
-              { "entity": "grid_power",         "icon": "zap",      "color": "gray",    "label": "Grid",    "format": "power-short" },
-              { "entity": "battery_power",      "icon": "battery",  "color": "emerald", "label": "Battery", "format": "power-short" },
-              { "entity": "pv_power",           "icon": "zap",      "color": "amber",   "label": "Solar",   "format": "power-short" },
-              { "entity": "output_active_power","icon": "gauge",    "color": "blue",    "label": "Load",    "format": "power-short" }
+              {
+                "entity": "grid_power",
+                "icon": "zap",
+                "color": "gray",
+                "label": "Grid",
+                "format": "power-short"
+              },
+              {
+                "entity": "battery_power",
+                "icon": "battery",
+                "color": "emerald",
+                "label": "Battery",
+                "format": "power-short"
+              },
+              {
+                "entity": "pv_power",
+                "icon": "zap",
+                "color": "amber",
+                "label": "Solar",
+                "format": "power-short"
+              },
+              {
+                "entity": "output_active_power",
+                "icon": "gauge",
+                "color": "blue",
+                "label": "Load",
+                "format": "power-short"
+              }
             ]
           },
           {
             "type": "parameter-table",
             "title": "Settings",
-            "filter": { "writable": true },
+            "filter": {
+              "writable": true
+            },
             "groupBy": "category"
           },
           {
             "type": "parameter-table",
             "title": "Device Info",
-            "filter": { "categories": ["Device Info"] }
+            "filter": {
+              "categories": [
+                "Device Info"
+              ]
+            }
           }
         ]
       },
       "history": {
         "resolutions": [
-          { "id": "1s", "label": "1 Second",  "defaultWindow": "10m" },
-          { "id": "1m", "label": "1 Minute",  "defaultWindow": "1h" },
-          { "id": "5m", "label": "5 Minutes", "defaultWindow": "24h" },
-          { "id": "1h", "label": "1 Hour",    "defaultWindow": "7d" }
+          {
+            "id": "1s",
+            "label": "1 Second",
+            "defaultWindow": "10m"
+          },
+          {
+            "id": "1m",
+            "label": "1 Minute",
+            "defaultWindow": "1h"
+          },
+          {
+            "id": "5m",
+            "label": "5 Minutes",
+            "defaultWindow": "24h"
+          },
+          {
+            "id": "1h",
+            "label": "1 Hour",
+            "defaultWindow": "7d"
+          }
         ],
         "charts": [
           {
             "title": "Battery",
             "type": "line-chart",
             "traces": [
-              { "entity": "battery_voltage", "label": "Voltage", "color": "emerald" }
+              {
+                "entity": "battery_voltage",
+                "label": "Voltage",
+                "color": "emerald"
+              },
+              {
+                "entity": "charge_request_voltage",
+                "label": "Charge Request",
+                "color": "yellow",
+                "dashed": true
+              }
             ],
-            "yAxis": { "unit": "V", "label": "Battery Voltage" }
+            "yAxis": {
+              "unit": "V",
+              "label": "Battery Voltage"
+            }
           },
           {
             "title": "State of Charge",
             "type": "line-chart",
             "traces": [
-              { "entity": "state_of_charge", "label": "SOC", "color": "green" }
+              {
+                "entity": "state_of_charge",
+                "label": "SOC",
+                "color": "green"
+              }
             ],
-            "yAxis": { "unit": "%", "label": "SOC" }
+            "yAxis": {
+              "unit": "%",
+              "label": "SOC"
+            }
           },
           {
             "title": "Power",
             "type": "line-chart",
             "traces": [
-              { "entity": "grid_power",         "label": "Grid",    "color": "gray" },
-              { "entity": "battery_power",      "label": "Battery", "color": "emerald" },
-              { "entity": "output_active_power","label": "Load",    "color": "blue" },
-              { "entity": "pv_power",           "label": "Solar",   "color": "amber" }
+              {
+                "entity": "grid_power",
+                "label": "Grid",
+                "color": "gray"
+              },
+              {
+                "entity": "battery_power",
+                "label": "Battery",
+                "color": "emerald"
+              },
+              {
+                "entity": "output_active_power",
+                "label": "Load",
+                "color": "blue"
+              },
+              {
+                "entity": "pv_power",
+                "label": "Solar",
+                "color": "amber"
+              }
             ],
-            "yAxis": { "unit": "W", "label": "Power" }
+            "yAxis": {
+              "unit": "W",
+              "label": "Power"
+            }
           },
           {
             "title": "Temperature",
             "type": "line-chart",
             "traces": [
-              { "entity": "inv_temperature", "label": "INV", "color": "orange" },
-              { "entity": "dc_temperature",  "label": "DC",  "color": "red",    "dashed": true }
+              {
+                "entity": "inv_temperature",
+                "label": "INV",
+                "color": "orange"
+              },
+              {
+                "entity": "dc_temperature",
+                "label": "DC",
+                "color": "red",
+                "dashed": true
+              }
             ],
-            "yAxis": { "unit": "°C", "label": "Temperature" }
+            "yAxis": {
+              "unit": "°C",
+              "label": "Temperature"
+            }
           }
         ]
       }
