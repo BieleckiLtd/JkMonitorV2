@@ -107,7 +107,7 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
     autoPollMs: '0',
     startRegister: '0',
     registerCount: '30',
-    registersPerRequest: '12',
+    registersPerRequest: '40',
     registerKind: 'holding',
   });
   const [scanResult, setScanResult] = useState<ModbusScannerReadResult | null>(null);
@@ -923,15 +923,9 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                                 )}
                                 style={{ gridColumn: String(index + 2) }}
                               >
-                                {matrixDisplayMode === 'hex' ? null : (
-                                  <span className='text-[9px] uppercase tracking-[0.14em] text-muted-foreground'>@{register.address}</span>
-                                )}
-                                <span className={cn(matrixDisplayMode === 'hex' ? 'break-all text-sm text-foreground' : 'mt-1 break-all text-xs text-foreground', matrixDisplayMode === 'binary' && 'text-[10px]')}>
+                                <span className={cn('break-all text-sm text-foreground', matrixDisplayMode === 'binary' && 'text-[10px]')}>
                                   {display.primary}
                                 </span>
-                                {matrixDisplayMode !== 'hex' && display.secondary ? (
-                                  <span className='mt-0.5 break-all text-[10px] text-muted-foreground'>{display.secondary}</span>
-                                ) : null}
                               </button>
                             );
                           })}
