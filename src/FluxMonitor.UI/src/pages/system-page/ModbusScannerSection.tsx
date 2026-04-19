@@ -6,11 +6,16 @@ import { Card, CardContent } from '../../components/ui/card';
 import { Input } from '../../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import {
+  buildAnnotationSegments,
   buildRegisterMatrix,
+  decodeAnnotationPreview,
   decodeSelection,
   formatRegisterValue,
   getSelectionSummary,
   type ModbusDecodeMode,
+  type ModbusEntityDataType,
+  type ModbusEntityKind,
+  type ModbusMatrixAnnotation,
   type ModbusMatrixDisplayMode,
 } from '../../lib/modbusScanner';
 import { cn } from '../../lib/utils';
@@ -45,6 +50,40 @@ const matrixDisplayModes: { value: ModbusMatrixDisplayMode; label: string }[] = 
   { value: 'ascii', label: 'ASCII' },
   { value: 'binary', label: 'Binary' },
 ];
+const entityTypeOptions: { value: ModbusEntityKind; label: string }[] = [
+  { value: 'sensor', label: 'Sensor' },
+  { value: 'binary_sensor', label: 'Binary sensor' },
+  { value: 'text', label: 'Text' },
+];
+const entityDataTypeOptions: { value: ModbusEntityDataType; label: string }[] = [
+  { value: 'uint16', label: 'UInt16' },
+  { value: 'int16', label: 'Int16' },
+  { value: 'uint32', label: 'UInt32' },
+  { value: 'int32', label: 'Int32' },
+  { value: 'float32', label: 'Float32' },
+  { value: 'float64', label: 'Float64' },
+  { value: 'ascii', label: 'ASCII' },
+  { value: 'hex', label: 'Hex bytes' },
+];
+const annotationPalette = [
+  'border-lime-400/90 bg-lime-500/18 text-lime-100',
+  'border-sky-400/90 bg-sky-500/18 text-sky-100',
+  'border-amber-400/90 bg-amber-500/18 text-amber-100',
+  'border-fuchsia-400/90 bg-fuchsia-500/18 text-fuchsia-100',
+  'border-cyan-400/90 bg-cyan-500/18 text-cyan-100',
+];
+
+type ModbusEntityDraft = {
+  id: string;
+  name: string;
+  category: string;
+  entityType: ModbusEntityKind;
+  dataType: ModbusEntityDataType;
+  formatter: string;
+  unit: string;
+  scale: string;
+  bitMask: string;
+};
 
 type ModbusScannerFormState = {
   portName: string;
@@ -97,6 +136,19 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
   const [decodeMode, setDecodeMode] = useState<ModbusDecodeMode>('float');
   const [matrixColumns, setMatrixColumns] = useState('10');
   const [matrixDisplayMode, setMatrixDisplayMode] = useState<ModbusMatrixDisplayMode>('hex');
+  const [annotations, setAnnotations] = useState<ModbusMatrixAnnotation[]>([]);
+  const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null);
+  const [entityDraft, setEntityDraft] = useState<ModbusEntityDraft>({
+    id: '',
+    name: '',
+    category: 'Registers',
+    entityType: 'sensor',
+    dataType: 'uint16',
+    formatter: '',
+    unit: '',
+    scale: '1',
+    bitMask: '',
+  });
 
   useEffect(() => {
     if (!form.portName && interfaces?.serialPorts.length) {
@@ -136,6 +188,43 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
   const decodedValues = useMemo(() => decodeSelection(selection, decodeMode), [decodeMode, selection]);
   const matrixColumnCount = useMemo(() => parsePositiveInteger(matrixColumns, 10), [matrixColumns]);
   const matrixRows = useMemo(() => buildRegisterMatrix(scanResult, matrixColumnCount), [matrixColumnCount, scanResult]);
+  const activeAnnotation = useMemo(
+    () => annotations.find((annotation) => annotation.id === activeAnnotationId) ?? null,
+    [activeAnnotationId, annotations],
+  );
+  const annotationSegments = useMemo(
+    () => buildAnnotationSegments(matrixRows, annotations, matrixColumnCount),
+    [annotations, matrixColumnCount, matrixRows],
+  );
+  const annotationPreviews = useMemo(
+    () => new Map(annotations.map((annotation) => [annotation.id, decodeAnnotationPreview(scanResult, annotation)])),
+    [annotations, scanResult],
+  );
+
+  useEffect(() => {
+    if (activeAnnotation) {
+      setEntityDraft({
+        id: activeAnnotation.id,
+        name: activeAnnotation.name,
+        category: activeAnnotation.category,
+        entityType: activeAnnotation.entityType,
+        dataType: activeAnnotation.dataType,
+        formatter: activeAnnotation.formatter ?? '',
+        unit: activeAnnotation.unit ?? '',
+        scale: String(activeAnnotation.scale ?? 1),
+        bitMask: activeAnnotation.bitMask == null || activeAnnotation.bitMask === 0 ? '' : `0x${activeAnnotation.bitMask.toString(16).toUpperCase()}`,
+      });
+      return;
+    }
+
+    if (selection) {
+      setEntityDraft((current) => ({
+        ...current,
+        name: current.name.trim() ? current.name : `REG_${selection.startAddress}_${selection.endAddress}`,
+        id: current.id.trim() ? current.id : slugifyEntityId(current.name.trim() || `REG_${selection.startAddress}_${selection.endAddress}`),
+      }));
+    }
+  }, [activeAnnotation, selection]);
 
   const runScan = useCallback(async (connecting: boolean) => {
     let request: ModbusScannerReadRequest;
@@ -335,6 +424,73 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
     } finally {
       setIsDeletingSettingName(null);
     }
+  }
+
+  function saveEntityMapping() {
+    if (!selection || !scanResult) {
+      setFeedback({
+        message: 'Select one or more registers before creating an entity mapping.',
+        isError: true,
+      });
+      return;
+    }
+
+    const name = entityDraft.name.trim();
+    const id = slugifyEntityId(entityDraft.id.trim() || name);
+    if (!name || !id) {
+      setFeedback({
+        message: 'Entity name and id are required.',
+        isError: true,
+      });
+      return;
+    }
+
+    const bitMask = parseOptionalInteger(entityDraft.bitMask);
+    const scale = parseDecimal(entityDraft.scale, 1);
+    const nextAnnotation: ModbusMatrixAnnotation = {
+      id,
+      name,
+      category: entityDraft.category.trim() || 'Registers',
+      entityType: entityDraft.entityType,
+      startAddress: selection.startAddress,
+      endAddress: selection.endAddress,
+      dataType: entityDraft.dataType,
+      formatter: entityDraft.formatter.trim() || undefined,
+      unit: entityDraft.unit.trim() || undefined,
+      scale,
+      bitMask: bitMask ?? undefined,
+      colorIndex: activeAnnotation?.colorIndex ?? annotations.length % annotationPalette.length,
+    };
+
+    const hasOverlap = annotations.some((annotation) => annotation.id !== activeAnnotationId && rangesOverlap(annotation, nextAnnotation));
+    if (hasOverlap) {
+      setFeedback({
+        message: 'That register range overlaps an existing entity mapping. Remove or edit the existing mapping first.',
+        isError: true,
+      });
+      return;
+    }
+
+    setAnnotations((current) => [
+      nextAnnotation,
+      ...current.filter((annotation) => annotation.id !== activeAnnotationId && annotation.id !== nextAnnotation.id),
+    ].sort((left, right) => left.startAddress - right.startAddress));
+    setActiveAnnotationId(nextAnnotation.id);
+    setFeedback({
+      message: `Mapped registers ${selection.startAddress}-${selection.endAddress} to '${nextAnnotation.name}'.`,
+      isError: false,
+    });
+  }
+
+  function loadAnnotation(annotation: ModbusMatrixAnnotation) {
+    setActiveAnnotationId(annotation.id);
+    setSelectionStart(annotation.startAddress);
+    setSelectionEnd(annotation.endAddress);
+  }
+
+  function removeAnnotation(annotationId: string) {
+    setAnnotations((current) => current.filter((annotation) => annotation.id !== annotationId));
+    setActiveAnnotationId((current) => current === annotationId ? null : current);
   }
 
   return (
@@ -607,69 +763,105 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
               {scanResult ? (
                 <div className='mt-4 overflow-x-auto'>
                   <div className='min-w-max'>
-                    <table className='border-separate border-spacing-1.5'>
-                      <thead>
-                        <tr>
-                          <th className='min-w-24 rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-left text-[11px] uppercase tracking-[0.18em] text-muted-foreground'>
-                            Address
-                          </th>
-                          {Array.from({ length: matrixColumnCount }, (_, offset) => (
-                            <th
-                              key={offset}
-                              className='min-w-32 rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-left text-[11px] uppercase tracking-[0.18em] text-muted-foreground'
-                            >
-                              +{offset}
-                            </th>
-                          ))}
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {matrixRows.map((row) => (
-                          <tr key={row.rowAddress}>
-                            <th className='rounded-xl border border-border/70 bg-background/70 px-3 py-2 text-left font-mono text-sm font-semibold text-foreground'>
-                              {row.rowAddress}
-                            </th>
-                            {row.cells.map((register, index) => {
-                              if (!register) {
-                                return (
-                                  <td
-                                    key={`${row.rowAddress}-${index}`}
-                                    className='rounded-xl border border-dashed border-border/60 bg-muted/15 px-3 py-3'
-                                  />
-                                );
-                              }
-
-                              const inSelection = selection != null
-                                && register.address >= selection.startAddress
-                                && register.address <= selection.endAddress;
-                              const display = formatRegisterValue(register, matrixDisplayMode);
-
-                              return (
-                                <td key={register.address} className='p-0 align-top'>
-                                  <button
-                                    type='button'
-                                    aria-label={`Register ${register.address}: ${display.primary}`}
-                                    onClick={(event) => handleRegisterClick(register.address, event.shiftKey)}
-                                    className={cn(
-                                      'flex min-h-20 w-full min-w-32 flex-col rounded-xl border px-3 py-3 text-left font-mono text-sm transition-colors',
-                                      inSelection ? 'border-primary/35 bg-primary/10 text-foreground' : 'border-border/70 bg-background/70 hover:bg-accent/35',
-                                    )}
-                                  >
-                                    <span className='text-[10px] uppercase tracking-[0.18em] text-muted-foreground'>@{register.address}</span>
-                                    <span className={cn('mt-2 break-all text-sm text-foreground', matrixDisplayMode === 'binary' && 'text-xs')}>
-                                      {display.primary}
-                                    </span>
-                                    {display.secondary ? (
-                                      <span className='mt-1 break-all text-[11px] text-muted-foreground'>{display.secondary}</span>
-                                    ) : null}
-                                  </button>
-                                </td>
-                              );
-                            })}
-                          </tr>
+                    <div className='space-y-1.5'>
+                      <div className='grid gap-1.5' style={{ gridTemplateColumns: `8rem repeat(${matrixColumnCount}, minmax(8rem, 1fr))` }}>
+                        <div className='rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-left text-[11px] uppercase tracking-[0.18em] text-muted-foreground'>
+                          Address
+                        </div>
+                        {Array.from({ length: matrixColumnCount }, (_, offset) => (
+                          <div
+                            key={offset}
+                            className='rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-left text-[11px] uppercase tracking-[0.18em] text-muted-foreground'
+                          >
+                            +{offset}
+                          </div>
                         ))}
-                      </tbody>
-                    </table>
+                      </div>
+
+                      {matrixRows.map((row) => (
+                        <div
+                          key={row.rowAddress}
+                          className='relative isolate grid gap-1.5'
+                          style={{ gridTemplateColumns: `8rem repeat(${matrixColumnCount}, minmax(8rem, 1fr))` }}
+                        >
+                          <div className='rounded-xl border border-border/70 bg-background/70 px-3 py-2 text-left font-mono text-sm font-semibold text-foreground'>
+                            {row.rowAddress}
+                          </div>
+                          {row.cells.map((register, index) => {
+                            if (!register) {
+                              return (
+                                <div
+                                  key={`${row.rowAddress}-${index}`}
+                                  className='rounded-xl border border-dashed border-border/60 bg-muted/15 px-3 py-3'
+                                />
+                              );
+                            }
+
+                            const inSelection = selection != null
+                              && register.address >= selection.startAddress
+                              && register.address <= selection.endAddress;
+                            const display = formatRegisterValue(register, matrixDisplayMode);
+
+                            return (
+                              <button
+                                key={register.address}
+                                type='button'
+                                aria-label={`Register ${register.address}: ${display.primary}`}
+                                onClick={(event) => handleRegisterClick(register.address, event.shiftKey)}
+                                className={cn(
+                                  'relative z-0 flex min-h-20 w-full min-w-32 flex-col rounded-xl border px-3 py-3 text-left font-mono text-sm transition-colors',
+                                  inSelection ? 'border-primary/35 bg-primary/10 text-foreground' : 'border-border/70 bg-background/70 hover:bg-accent/35',
+                                )}
+                              >
+                                <span className='text-[10px] uppercase tracking-[0.18em] text-muted-foreground'>@{register.address}</span>
+                                <span className={cn('mt-2 break-all text-sm text-foreground', matrixDisplayMode === 'binary' && 'text-xs')}>
+                                  {display.primary}
+                                </span>
+                                {display.secondary ? (
+                                  <span className='mt-1 break-all text-[11px] text-muted-foreground'>{display.secondary}</span>
+                                ) : null}
+                              </button>
+                            );
+                          })}
+
+                          {(annotationSegments.get(row.rowAddress) ?? []).map((segment) => {
+                            const annotation = annotations.find((item) => item.id === segment.annotationId);
+                            if (!annotation) {
+                              return null;
+                            }
+
+                            const preview = annotationPreviews.get(annotation.id);
+                            return (
+                              <div
+                                key={`${segment.annotationId}-${segment.rowAddress}`}
+                                className={cn(
+                                  'pointer-events-none z-10 rounded-xl border px-3 py-2 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] backdrop-blur-[1px]',
+                                  annotationPalette[annotation.colorIndex % annotationPalette.length],
+                                )}
+                                style={{
+                                  gridColumn: `${segment.startOffset + 2} / ${segment.endOffset + 3}`,
+                                  gridRow: '1',
+                                }}
+                              >
+                                {segment.isStartSegment ? (
+                                  <div className='min-h-[3.5rem]'>
+                                    <div className='text-[10px] font-semibold uppercase tracking-[0.18em]'>{annotation.name}</div>
+                                    <div className='mt-1 truncate font-mono text-sm font-semibold'>{preview?.value ?? 'Pending'}</div>
+                                    <div className='mt-1 truncate text-[11px] opacity-75'>
+                                      {annotation.dataType}
+                                      {annotation.formatter ? ` · ${annotation.formatter}` : ''}
+                                      {annotation.bitMask ? ` · mask ${toMaskLabel(annotation.bitMask)}` : ''}
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className='min-h-[3.5rem]' />
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      ))}
+                    </div>
                   </div>
                 </div>
               ) : (
@@ -720,6 +912,95 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                     <SummaryTile label='End register' value={String(selection.endAddress)} />
                     <SummaryTile label='Registers' value={String(selection.registerCount)} />
                     <SummaryTile label='Bytes' value={String(selection.byteCount)} />
+                  </div>
+
+                  <div className='rounded-2xl border border-border/70 bg-background/55 p-4'>
+                    <div className='flex flex-wrap items-center justify-between gap-3'>
+                      <div>
+                        <div className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Entity mapping</div>
+                        <div className='mt-1 text-sm text-muted-foreground'>Turn the selected register range into a reusable entity definition overlay.</div>
+                      </div>
+                      <div className='rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-right'>
+                        <div className='text-[10px] uppercase tracking-[0.18em] text-muted-foreground'>Range</div>
+                        <div className='font-mono text-xs text-foreground'>{selection.startAddress}-{selection.endAddress}</div>
+                      </div>
+                    </div>
+
+                    <div className='mt-4 grid gap-3 md:grid-cols-2'>
+                      <Field label='Entity name'>
+                        <Input aria-label='Entity name' value={entityDraft.name} onChange={(event) => setEntityDraft((current) => ({ ...current, name: event.target.value, id: current.id.trim() ? current.id : slugifyEntityId(event.target.value) }))} />
+                      </Field>
+                      <Field label='Entity id'>
+                        <Input aria-label='Entity id' value={entityDraft.id} onChange={(event) => setEntityDraft((current) => ({ ...current, id: event.target.value }))} />
+                      </Field>
+                      <Field label='Category'>
+                        <Input aria-label='Entity category' value={entityDraft.category} onChange={(event) => setEntityDraft((current) => ({ ...current, category: event.target.value }))} />
+                      </Field>
+                      <Field label='Entity type'>
+                        <Select value={entityDraft.entityType} onValueChange={(value) => setEntityDraft((current) => ({ ...current, entityType: (value ?? 'sensor') as ModbusEntityKind }))}>
+                          <SelectTrigger aria-label='Entity type' className='w-full'>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {entityTypeOptions.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                      <Field label='Data type'>
+                        <Select value={entityDraft.dataType} onValueChange={(value) => setEntityDraft((current) => ({ ...current, dataType: (value ?? 'uint16') as ModbusEntityDataType }))}>
+                          <SelectTrigger aria-label='Entity data type' className='w-full'>
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {entityDataTypeOptions.map((option) => (
+                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </Field>
+                      <Field label='Formatter / converter'>
+                        <Input aria-label='Entity formatter' value={entityDraft.formatter} onChange={(event) => setEntityDraft((current) => ({ ...current, formatter: event.target.value }))} placeholder='plain-number, custom formatter, converter id' />
+                      </Field>
+                      <Field label='Unit'>
+                        <Input aria-label='Entity unit' value={entityDraft.unit} onChange={(event) => setEntityDraft((current) => ({ ...current, unit: event.target.value }))} placeholder='°C, V, rpm' />
+                      </Field>
+                      <Field label='Scale'>
+                        <Input aria-label='Entity scale' value={entityDraft.scale} onChange={(event) => setEntityDraft((current) => ({ ...current, scale: event.target.value }))} />
+                      </Field>
+                      <Field label='Bit mask'>
+                        <Input aria-label='Entity bit mask' value={entityDraft.bitMask} onChange={(event) => setEntityDraft((current) => ({ ...current, bitMask: event.target.value }))} placeholder='0x000F' />
+                      </Field>
+                    </div>
+
+                    <div className='mt-4 flex flex-wrap items-center gap-2'>
+                      <Button type='button' onClick={saveEntityMapping}>
+                        Save mapping
+                      </Button>
+                      {activeAnnotation ? (
+                        <Button
+                          type='button'
+                          variant='ghost'
+                          onClick={() => {
+                            setActiveAnnotationId(null);
+                            setEntityDraft({
+                              id: '',
+                              name: '',
+                              category: 'Registers',
+                              entityType: 'sensor',
+                              dataType: 'uint16',
+                              formatter: '',
+                              unit: '',
+                              scale: '1',
+                              bitMask: '',
+                            });
+                          }}
+                        >
+                          Clear editor
+                        </Button>
+                      ) : null}
+                    </div>
                   </div>
 
                   {detailView === 'raw' ? (
@@ -776,6 +1057,47 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                 </div>
               )}
             </div>
+
+            {annotations.length > 0 ? (
+              <div className='rounded-2xl border border-border/70 bg-background/45 p-4'>
+                <div className='flex flex-wrap items-center justify-between gap-3'>
+                  <div>
+                    <div className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Mapped entities</div>
+                    <div className='mt-1 text-sm text-muted-foreground'>These overlays stay aligned with the matrix and use the same register ranges you selected.</div>
+                  </div>
+                  <div className='rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-right'>
+                    <div className='text-[10px] uppercase tracking-[0.18em] text-muted-foreground'>Mapped</div>
+                    <div className='font-mono text-xs text-foreground'>{annotations.length}</div>
+                  </div>
+                </div>
+
+                <div className='mt-4 space-y-2'>
+                  {annotations.map((annotation) => {
+                    const preview = annotationPreviews.get(annotation.id);
+                    return (
+                      <div key={annotation.id} className='rounded-xl border border-border/70 bg-background/70 px-3 py-3'>
+                        <div className='flex flex-wrap items-center justify-between gap-2'>
+                          <div>
+                            <div className='font-semibold text-foreground'>{annotation.name}</div>
+                            <div className='text-xs text-muted-foreground'>
+                              {annotation.id} · {annotation.entityType} · {annotation.dataType} · {annotation.startAddress}-{annotation.endAddress}
+                            </div>
+                          </div>
+                          <div className='flex flex-wrap gap-2'>
+                            <Button type='button' size='sm' variant='outline' onClick={() => loadAnnotation(annotation)}>Edit</Button>
+                            <Button type='button' size='sm' variant='ghost' onClick={() => removeAnnotation(annotation.id)}>Remove</Button>
+                          </div>
+                        </div>
+                        <div className='mt-2 font-mono text-sm text-foreground'>{preview?.value ?? 'Pending'}</div>
+                        <div className='mt-1 text-xs text-muted-foreground'>
+                          {buildEntitySnippet(annotation, scanResult?.startRegister ?? 0)}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : null}
 
             {scanResult ? (
               <div className='rounded-2xl border border-border/70 bg-background/45 p-4'>
@@ -908,4 +1230,58 @@ function parsePositiveInteger(value: string, fallbackValue: number) {
 
 function toByteHex(value: number) {
   return `0x${value.toString(16).toUpperCase().padStart(2, '0')}`;
+}
+
+function parseOptionalInteger(value: string) {
+  const normalized = value.trim();
+  if (!normalized) {
+    return null;
+  }
+
+  if (/^0x[0-9a-f]+$/i.test(normalized)) {
+    return Number.parseInt(normalized.slice(2), 16);
+  }
+
+  if (/^\d+$/.test(normalized)) {
+    return Number.parseInt(normalized, 10);
+  }
+
+  return null;
+}
+
+function parseDecimal(value: string, fallbackValue: number) {
+  const parsed = Number.parseFloat(value.trim());
+  return Number.isFinite(parsed) ? parsed : fallbackValue;
+}
+
+function slugifyEntityId(value: string) {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '');
+}
+
+function rangesOverlap(left: ModbusMatrixAnnotation, right: ModbusMatrixAnnotation) {
+  return Math.max(left.startAddress, right.startAddress) <= Math.min(left.endAddress, right.endAddress);
+}
+
+function toMaskLabel(value: number) {
+  return `0x${value.toString(16).toUpperCase()}`;
+}
+
+function buildEntitySnippet(annotation: ModbusMatrixAnnotation, startRegister: number) {
+  const byteOffset = (annotation.startAddress - startRegister) * 2;
+  const fields = [
+    `"id": "${annotation.id}"`,
+    `"type": "${annotation.entityType}"`,
+    `"name": "${annotation.name}"`,
+    `"source": { "byteOffset": ${byteOffset}, "dataType": "${annotation.dataType}"${annotation.bitMask ? `, "bitMask": ${annotation.bitMask}` : ''}${annotation.unit ? `, "unit": "${annotation.unit}"` : ''}${annotation.scale && annotation.scale !== 1 ? `, "scale": ${annotation.scale}` : ''} }`,
+  ];
+
+  if (annotation.formatter) {
+    fields.push(`"display": { "formatter": "${annotation.formatter}" }`);
+  }
+
+  return `{ ${fields.join(', ')} }`;
 }

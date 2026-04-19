@@ -750,6 +750,32 @@ describe('SystemPage', () => {
     });
   });
 
+  it('maps a selected register range into a matrix entity overlay', async () => {
+    renderSystemRoute();
+
+    fireEvent.click(await screen.findByRole('button', { name: /tools/i }));
+    await screen.findByRole('button', { name: /connect & scan/i });
+    fireEvent.click(screen.getByRole('button', { name: /connect & scan/i }));
+
+    const firstRegister = await screen.findByRole('button', { name: /register 0: 0x4142/i });
+    const secondRegister = screen.getByRole('button', { name: /register 1: 0x4344/i });
+
+    fireEvent.click(firstRegister);
+    fireEvent.click(secondRegister, { shiftKey: true });
+
+    fireEvent.change(screen.getByLabelText(/entity name/i), { target: { value: 'SERIAL_NO' } });
+    fireEvent.change(screen.getByLabelText(/entity category/i), { target: { value: 'Identity' } });
+    fireEvent.mouseDown(screen.getByLabelText(/entity type/i));
+    fireEvent.click(await screen.findByText('Text'));
+    fireEvent.mouseDown(screen.getByLabelText(/entity data type/i));
+    fireEvent.click(await screen.findByText('ASCII'));
+    fireEvent.click(screen.getByRole('button', { name: /save mapping/i }));
+
+    expect(await screen.findByText('Mapped entities')).toBeInTheDocument();
+    expect(screen.getAllByText('SERIAL_NO').length).toBeGreaterThan(0);
+    expect(screen.getAllByRole('button', { name: /^edit$/i }).length).toBeGreaterThan(0);
+  });
+
   it('redirects legacy tunnel and internet speed routes to connectivity', async () => {
     const tunnelRoute = renderSystemPage('/system/tunnel');
 

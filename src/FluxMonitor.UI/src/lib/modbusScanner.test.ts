@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { buildRegisterMatrix, decodeSelection, formatRegisterValue, getSelectionSummary } from './modbusScanner';
+import {
+  buildAnnotationSegments,
+  buildRegisterMatrix,
+  decodeAnnotationPreview,
+  decodeSelection,
+  formatRegisterValue,
+  getSelectionSummary,
+} from './modbusScanner';
 import type { ModbusScannerReadResult } from '../pages/system-page/types';
 
 const scanResult: ModbusScannerReadResult = {
@@ -95,5 +102,63 @@ describe('modbusScanner helpers', () => {
       primary: '-2',
       secondary: '0xFFFE',
     });
+  });
+
+  it('decodes annotation previews and builds row overlay segments', () => {
+    const preview = decodeAnnotationPreview(scanResult, {
+      id: 'motor_temp',
+      name: 'MOTOR_TEMP',
+      category: 'Thermal',
+      entityType: 'sensor',
+      startAddress: 2,
+      endAddress: 3,
+      dataType: 'float32',
+      unit: 'C',
+      scale: 1,
+      colorIndex: 0,
+    });
+
+    expect(preview).toMatchObject({
+      value: '1 C',
+      detail: 'float32',
+    });
+
+    const rows = buildRegisterMatrix({
+      ...scanResult,
+      startRegister: 10,
+      registerCount: 8,
+      registers: Array.from({ length: 8 }, (_, index) => ({
+        address: 10 + index,
+        highByte: 0,
+        lowByte: index,
+        unsignedValue: index,
+        hexValue: `0x000${index}`,
+      })),
+    }, 4);
+    const segments = buildAnnotationSegments(rows, [{
+      id: 'serial_no',
+      name: 'SERIAL_NO',
+      category: 'Identity',
+      entityType: 'text',
+      startAddress: 11,
+      endAddress: 16,
+      dataType: 'ascii',
+      colorIndex: 1,
+    }], 4);
+
+    expect(segments.get(10)).toEqual([{
+      annotationId: 'serial_no',
+      rowAddress: 10,
+      startOffset: 1,
+      endOffset: 3,
+      isStartSegment: true,
+    }]);
+    expect(segments.get(14)).toEqual([{
+      annotationId: 'serial_no',
+      rowAddress: 14,
+      startOffset: 0,
+      endOffset: 2,
+      isStartSegment: false,
+    }]);
   });
 });

@@ -2,6 +2,8 @@ import type { ModbusScannerReadResult, ModbusScannerRegisterValue } from '../pag
 
 export type ModbusDecodeMode = 'ascii' | 'signed-int' | 'unsigned-int' | 'hex' | 'binary' | 'float';
 export type ModbusMatrixDisplayMode = 'hex' | 'unsigned' | 'signed' | 'ascii' | 'binary';
+export type ModbusEntityKind = 'sensor' | 'binary_sensor' | 'text';
+export type ModbusEntityDataType = 'uint16' | 'int16' | 'uint32' | 'int32' | 'float32' | 'float64' | 'ascii' | 'hex';
 
 export type ModbusSelectionSummary = {
   startAddress: number;
@@ -26,6 +28,34 @@ export type ModbusMatrixRow = {
 export type ModbusMatrixCellDisplay = {
   primary: string;
   secondary?: string;
+};
+
+export type ModbusMatrixAnnotation = {
+  id: string;
+  name: string;
+  category: string;
+  entityType: ModbusEntityKind;
+  startAddress: number;
+  endAddress: number;
+  dataType: ModbusEntityDataType;
+  formatter?: string;
+  unit?: string;
+  scale?: number;
+  bitMask?: number;
+  colorIndex: number;
+};
+
+export type ModbusMatrixAnnotationPreview = {
+  value: string;
+  detail?: string;
+};
+
+export type ModbusMatrixAnnotationSegment = {
+  annotationId: string;
+  rowAddress: number;
+  startOffset: number;
+  endOffset: number;
+  isStartSegment: boolean;
 };
 
 export function getSelectionSummary(
@@ -139,6 +169,126 @@ export function formatRegisterValue(
   }
 }
 
+export function decodeAnnotationPreview(
+  scan: ModbusScannerReadResult | null,
+  annotation: ModbusMatrixAnnotation,
+): ModbusMatrixAnnotationPreview {
+  const registers = getRegistersInRange(scan, annotation.startAddress, annotation.endAddress);
+  if (registers.length === 0) {
+    return { value: 'No registers selected' };
+  }
+
+  const bytes = registers.flatMap((register) => [register.highByte, register.lowByte]);
+  const scale = annotation.scale ?? 1;
+
+  switch (annotation.dataType) {
+    case 'ascii':
+      return {
+        value: bytes.map((byte) => byte >= 0x20 && byte <= 0x7e ? String.fromCharCode(byte) : '.').join('').trim() || '""',
+        detail: `${registers.length} register${registers.length === 1 ? '' : 's'}`,
+      };
+    case 'hex':
+      return {
+        value: bytes.map((byte) => byte.toString(16).toUpperCase().padStart(2, '0')).join(' '),
+        detail: `${registers.length} register${registers.length === 1 ? '' : 's'}`,
+      };
+    case 'uint16':
+    case 'int16':
+    case 'uint32':
+    case 'int32': {
+      const width = annotation.dataType.endsWith('32') ? 4 : 2;
+      if (bytes.length !== width) {
+        return { value: `Select ${width / 2} registers`, detail: annotation.dataType };
+      }
+
+      const maskedValue = applyBitMask(bytesToUnsignedBigInt(bytes), annotation.bitMask);
+      const value = annotation.dataType.startsWith('int')
+        ? signedValueFromMasked(maskedValue, width * 8)
+        : maskedValue;
+      return {
+        value: formatScaledNumeric(value, scale, annotation.unit),
+        detail: annotation.bitMask != null && annotation.bitMask !== 0 ? `mask ${toWordHex(annotation.bitMask)}` : annotation.dataType,
+      };
+    }
+    case 'float32': {
+      if (bytes.length !== 4) {
+        return { value: 'Select 2 registers', detail: 'float32' };
+      }
+
+      const view = new DataView(Uint8Array.from(bytes).buffer);
+      const value = view.getFloat32(0, false) * scale;
+      return {
+        value: `${trimNumber(value)}${annotation.unit ? ` ${annotation.unit}` : ''}`,
+        detail: annotation.formatter?.trim() || 'float32',
+      };
+    }
+    case 'float64': {
+      if (bytes.length !== 8) {
+        return { value: 'Select 4 registers', detail: 'float64' };
+      }
+
+      const view = new DataView(Uint8Array.from(bytes).buffer);
+      const value = view.getFloat64(0, false) * scale;
+      return {
+        value: `${trimNumber(value)}${annotation.unit ? ` ${annotation.unit}` : ''}`,
+        detail: annotation.formatter?.trim() || 'float64',
+      };
+    }
+    default:
+      return { value: 'Unsupported data type' };
+  }
+}
+
+export function buildAnnotationSegments(
+  rows: ModbusMatrixRow[],
+  annotations: ModbusMatrixAnnotation[],
+  columnCount: number,
+): Map<number, ModbusMatrixAnnotationSegment[]> {
+  const segmentsByRow = new Map<number, ModbusMatrixAnnotationSegment[]>();
+
+  for (const annotation of annotations) {
+    const start = Math.min(annotation.startAddress, annotation.endAddress);
+    const end = Math.max(annotation.startAddress, annotation.endAddress);
+
+    for (const row of rows) {
+      const rowStart = row.rowAddress;
+      const rowEnd = row.rowAddress + columnCount - 1;
+      const overlapStart = Math.max(start, rowStart);
+      const overlapEnd = Math.min(end, rowEnd);
+
+      if (overlapStart > overlapEnd) {
+        continue;
+      }
+
+      const segments = segmentsByRow.get(row.rowAddress) ?? [];
+      segments.push({
+        annotationId: annotation.id,
+        rowAddress: row.rowAddress,
+        startOffset: overlapStart - rowStart,
+        endOffset: overlapEnd - rowStart,
+        isStartSegment: overlapStart === start,
+      });
+      segmentsByRow.set(row.rowAddress, segments);
+    }
+  }
+
+  return segmentsByRow;
+}
+
+export function getRegistersInRange(
+  scan: ModbusScannerReadResult | null,
+  startAddress: number,
+  endAddress: number,
+): ModbusScannerRegisterValue[] {
+  if (!scan) {
+    return [];
+  }
+
+  const minAddress = Math.min(startAddress, endAddress);
+  const maxAddress = Math.max(startAddress, endAddress);
+  return scan.registers.filter((register) => register.address >= minAddress && register.address <= maxAddress);
+}
+
 function decodeAscii(bytes: number[]): ModbusDecodedValue[] {
   return [{
     label: 'ASCII',
@@ -229,4 +379,35 @@ function toAsciiChar(value: number) {
 
 function toByteBinary(value: number) {
   return value.toString(2).padStart(8, '0');
+}
+
+function applyBitMask(value: bigint, bitMask?: number) {
+  if (bitMask == null || bitMask === 0) {
+    return value;
+  }
+
+  return value & BigInt(bitMask >>> 0);
+}
+
+function signedValueFromMasked(value: bigint, bitCount: number) {
+  const bits = BigInt(bitCount);
+  const signBit = 1n << (bits - 1n);
+  return (value & signBit) === 0n ? value : value - (1n << bits);
+}
+
+function formatScaledNumeric(value: bigint, scale: number, unit?: string) {
+  const numberValue = Number(value) * scale;
+  if (Number.isFinite(numberValue) && Number.isSafeInteger(Number(value))) {
+    return `${trimNumber(numberValue)}${unit ? ` ${unit}` : ''}`;
+  }
+
+  return `${value.toString()}${unit ? ` ${unit}` : ''}`;
+}
+
+function trimNumber(value: number) {
+  return Number.isInteger(value) ? value.toString() : value.toFixed(3).replace(/\.?0+$/, '');
+}
+
+function toWordHex(value: number) {
+  return `0x${value.toString(16).toUpperCase().padStart(4, '0')}`;
 }
