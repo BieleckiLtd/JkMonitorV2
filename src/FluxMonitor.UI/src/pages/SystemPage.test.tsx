@@ -523,6 +523,23 @@ describe('SystemPage', () => {
         const request = init?.body ? JSON.parse(String(init.body)) as { startRegister?: number; registerCount?: number } : {};
         const startRegister = request.startRegister ?? 0;
         const registerCount = request.registerCount ?? 4;
+        const registerPattern = [
+          { highByte: 0x41, lowByte: 0x42, unsignedValue: 0x4142, hexValue: '0x4142' },
+          { highByte: 0x43, lowByte: 0x44, unsignedValue: 0x4344, hexValue: '0x4344' },
+          { highByte: 0x3F, lowByte: 0x80, unsignedValue: 0x3F80, hexValue: '0x3F80' },
+          { highByte: 0x00, lowByte: 0x00, unsignedValue: 0x0000, hexValue: '0x0000' },
+        ];
+        const registers = Array.from({ length: registerCount }, (_, index) => {
+          const entry = registerPattern[index % registerPattern.length];
+          return {
+            address: startRegister + index,
+            highByte: entry.highByte,
+            lowByte: entry.lowByte,
+            unsignedValue: entry.unsignedValue,
+            hexValue: entry.hexValue,
+          };
+        });
+        const firstBlockCount = Math.min(2, registerCount);
         return {
           ok: true,
           json: async () => ({
@@ -539,17 +556,14 @@ describe('SystemPage', () => {
             registerCount,
             registersPerRequest: 2,
             collectedAtUtc: '2026-03-31T10:05:00Z',
-            totalRequests: 2,
+            totalRequests: registerCount > firstBlockCount ? 2 : 1,
             blocks: [
-              { startAddress: startRegister, registerCount: Math.min(2, registerCount), attempts: 1 },
-              { startAddress: startRegister + Math.min(2, registerCount), registerCount: Math.max(0, registerCount - 2), attempts: 1 },
+              { startAddress: startRegister, registerCount: firstBlockCount, attempts: 1 },
+              ...(registerCount > firstBlockCount
+                ? [{ startAddress: startRegister + firstBlockCount, registerCount: registerCount - firstBlockCount, attempts: 1 }]
+                : []),
             ],
-            registers: [
-              { address: startRegister + 0, highByte: 0x41, lowByte: 0x42, unsignedValue: 0x4142, hexValue: '0x4142' },
-              { address: startRegister + 1, highByte: 0x43, lowByte: 0x44, unsignedValue: 0x4344, hexValue: '0x4344' },
-              { address: startRegister + 2, highByte: 0x3F, lowByte: 0x80, unsignedValue: 0x3F80, hexValue: '0x3F80' },
-              { address: startRegister + 3, highByte: 0x00, lowByte: 0x00, unsignedValue: 0x0000, hexValue: '0x0000' },
-            ].slice(0, registerCount),
+            registers,
           }),
         } as Response;
       }
@@ -705,6 +719,7 @@ describe('SystemPage', () => {
 
     expect(await screen.findByText(/probe rtu devices, inspect raw register bytes/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /connect & scan/i })).toBeInTheDocument();
+    expect(screen.queryByText(/read 30 holding registers/i)).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /connect & scan/i }));
 
@@ -715,26 +730,25 @@ describe('SystemPage', () => {
       }));
     });
 
-    expect(await screen.findByText(/connected to COM3 and read 24 holding registers/i)).toBeInTheDocument();
+    await screen.findByRole('button', { name: /register 0: 0x4142/i });
     expect(screen.getAllByText('+0').length).toBeGreaterThan(0);
     expect(screen.getByText('+9')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /register 0: 0x4142/i })).toBeInTheDocument();
     expect(screen.getByText(/select 2 registers for float32 or 4 registers for float64/i)).toBeInTheDocument();
-    expect(screen.getByText('Factory meter')).toBeInTheDocument();
   });
 
   it('loads, saves, and deletes named Modbus scanner settings', async () => {
     renderSystemRoute();
 
     fireEvent.click(await screen.findByRole('button', { name: /tools/i }));
+    await screen.findByText(/probe rtu devices, inspect raw register bytes/i);
+    fireEvent.click(screen.getByRole('button', { name: /saved settings/i }));
 
     expect(await screen.findByText('Factory meter')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /^load$/i }));
-
-    await waitFor(() => {
-      expect(screen.getByText(/loaded scanner settings 'factory meter'\./i)).toBeInTheDocument();
-    });
+    fireEvent.click(screen.getByText(/^Connection$/i).closest('button') as HTMLButtonElement);
+    fireEvent.click(screen.getByText(/^Scan window$/i).closest('button') as HTMLButtonElement);
     expect(screen.getByDisplayValue('7')).toBeInTheDocument();
     expect(screen.getByDisplayValue('100')).toBeInTheDocument();
 
@@ -742,8 +756,7 @@ describe('SystemPage', () => {
     fireEvent.change(screen.getByLabelText(/slave address/i), { target: { value: '11' } });
     fireEvent.click(screen.getByRole('button', { name: /save current/i }));
 
-    expect(await screen.findByText(/saved scanner settings 'pump room'\./i)).toBeInTheDocument();
-    expect(screen.getByText('Pump room')).toBeInTheDocument();
+    expect(await screen.findByText('Pump room')).toBeInTheDocument();
 
     const deleteButtons = screen.getAllByRole('button', { name: /delete/i });
     fireEvent.click(deleteButtons[0]);
@@ -757,7 +770,7 @@ describe('SystemPage', () => {
     renderSystemRoute();
 
     fireEvent.click(await screen.findByRole('button', { name: /tools/i }));
-    await screen.findByRole('button', { name: /connect & scan/i });
+    await screen.findByText(/probe rtu devices, inspect raw register bytes/i);
     fireEvent.click(screen.getByRole('button', { name: /connect & scan/i }));
 
     const firstRegister = await screen.findByRole('button', { name: /register 0: 0x4142/i });
@@ -783,22 +796,21 @@ describe('SystemPage', () => {
     renderSystemRoute();
 
     fireEvent.click(await screen.findByRole('button', { name: /tools/i }));
-    await screen.findByRole('button', { name: /connect & scan/i });
+    await screen.findByText(/probe rtu devices, inspect raw register bytes/i);
     fireEvent.click(screen.getByRole('button', { name: /connect & scan/i }));
 
-    expect(await screen.findByText('0-23')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /next 24-47/i }));
+    await screen.findByRole('button', { name: /register 0: 0x4142/i });
+    fireEvent.click(screen.getByRole('button', { name: /next 30-59/i }));
 
     await waitFor(() => {
       expect(globalThis.fetch).toHaveBeenLastCalledWith('/api/system/modbus-scanner/read', expect.objectContaining({
         method: 'POST',
-        body: expect.stringContaining('"startRegister":24'),
+        body: expect.stringContaining('"startRegister":30'),
       }));
     });
 
-    expect(await screen.findByText('24-47')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /register 24: 0x4142/i })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: /prev 0-23/i }));
+    expect(await screen.findByRole('button', { name: /register 30: 0x4142/i })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /prev 0-29/i }));
 
     await waitFor(() => {
       expect(globalThis.fetch).toHaveBeenLastCalledWith('/api/system/modbus-scanner/read', expect.objectContaining({

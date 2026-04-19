@@ -117,7 +117,7 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
     retryCount: '1',
     autoPollMs: '0',
     startRegister: '0',
-    registerCount: '24',
+    registerCount: '30',
     registersPerRequest: '12',
     registerKind: 'holding',
   });
@@ -148,6 +148,11 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
     unit: '',
     scale: '1',
     bitMask: '',
+  });
+  const [settingsSections, setSettingsSections] = useState({
+    saved: false,
+    connection: false,
+    scan: false,
   });
 
   useEffect(() => {
@@ -260,12 +265,7 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
       const result = validateScanResult(body as ModbusScannerReadResult);
       setScanResult(result);
       setIsConnected(true);
-      setFeedback({
-        message: connecting
-          ? `Connected to ${result.portName} and read ${result.registerCount} ${result.registerKind} registers.`
-          : `Read ${result.registerCount} ${result.registerKind} registers from ${result.portName}.`,
-        isError: false,
-      });
+      setFeedback(null);
 
       const firstRegister = result.registers[0]?.address ?? null;
       const lastRegister = result.registers[result.registers.length - 1]?.address ?? null;
@@ -316,10 +316,7 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
 
   function disconnect() {
     setIsConnected(false);
-    setFeedback({
-      message: 'Scanner disconnected. Existing register data remains available until the next scan.',
-      isError: false,
-    });
+    setFeedback(null);
   }
 
   function handleRegisterClick(address: number, extendSelection: boolean) {
@@ -373,13 +370,10 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
         throw new Error('The saved settings response was empty.');
       }
 
-      const result = body as SaveModbusScannerSettingResult;
-      setSavedSettings((current) => [result.setting, ...current.filter((item) => item.name !== result.setting.name)]);
-      setSettingsName(result.setting.name);
-      setFeedback({
-        message: result.message,
-        isError: false,
-      });
+      const savedResult = body as SaveModbusScannerSettingResult;
+      setSavedSettings((current) => [savedResult.setting, ...current.filter((item) => item.name !== savedResult.setting.name)]);
+      setSettingsName(savedResult.setting.name);
+      setFeedback(null);
     } catch (error) {
       setFeedback({
         message: error instanceof Error ? error.message : 'Unable to save scanner settings.',
@@ -393,10 +387,7 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
   function loadSetting(setting: ModbusScannerSavedSetting) {
     setForm(toFormState(setting.settings));
     setSettingsName(setting.name);
-    setFeedback({
-      message: `Loaded scanner settings '${setting.name}'.`,
-      isError: false,
-    });
+    setFeedback(null);
   }
 
   async function deleteSetting(setting: ModbusScannerSavedSetting) {
@@ -410,12 +401,8 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
         throw new Error(body && 'error' in body && body.error ? body.error : 'Unable to delete scanner settings.');
       }
 
-      const result = body as DeleteModbusScannerSettingResult | null;
       setSavedSettings((current) => current.filter((item) => item.name !== setting.name));
-      setFeedback({
-        message: result?.message ?? `Deleted scanner settings '${setting.name}'.`,
-        isError: false,
-      });
+      setFeedback(null);
     } catch (error) {
       setFeedback({
         message: error instanceof Error ? error.message : 'Unable to delete scanner settings.',
@@ -475,10 +462,7 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
       setScanResult(result);
       setSelectionStart(result.registers[0]?.address ?? null);
       setSelectionEnd(result.registers[0]?.address ?? null);
-      setFeedback({
-        message: `Showing ${result.startRegister}-${result.startRegister + result.registerCount - 1}.`,
-        isError: false,
-      });
+      setFeedback(null);
     } catch (error) {
       setFeedback({
         message: error instanceof Error ? error.message : 'Unable to change register page.',
@@ -539,10 +523,7 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
       ...current.filter((annotation) => annotation.id !== activeAnnotationId && annotation.id !== nextAnnotation.id),
     ].sort((left, right) => left.startAddress - right.startAddress));
     setActiveAnnotationId(nextAnnotation.id);
-    setFeedback({
-      message: `Mapped registers ${selection.startAddress}-${selection.endAddress} to '${nextAnnotation.name}'.`,
-      isError: false,
-    });
+    setFeedback(null);
   }
 
   function loadAnnotation(annotation: ModbusMatrixAnnotation) {
@@ -561,18 +542,23 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
       <PanelHeader
         title='Modbus Scanner'
         description='Probe RTU devices, inspect raw register bytes, and decode selected register ranges without leaving the original matrix view.'
-        aside={(
-          <div className='rounded-xl border border-border/70 bg-background/75 px-3 py-2 text-right'>
-            <div className='text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Status</div>
-            <div className='mt-1 font-mono text-xs text-foreground'>{isConnected ? 'CONNECTED' : 'IDLE'}</div>
-          </div>
-        )}
       />
       <CardContent className='space-y-5 pt-5'>
-        <div className='grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]'>
-          <div className='space-y-5'>
-            <div className='rounded-2xl border border-border/70 bg-background/45 p-4'>
-              <div className='mb-4 space-y-3 rounded-2xl border border-border/70 bg-background/55 p-3'>
+        <div className='space-y-5'>
+          <div className='rounded-2xl border border-border/70 bg-background/45 p-4'>
+            <CollapsibleSection
+              title='Saved settings'
+              description='Reusable scanner presets.'
+              isOpen={settingsSections.saved}
+              onToggle={() => setSettingsSections((current) => ({ ...current, saved: !current.saved }))}
+              aside={(
+                <div className='rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-right'>
+                  <div className='text-[10px] uppercase tracking-[0.18em] text-muted-foreground'>Saved</div>
+                  <div className='font-mono text-xs text-foreground'>{savedSettings.length}</div>
+                </div>
+              )}
+            >
+              <div className='space-y-3 rounded-2xl border border-border/70 bg-background/55 p-3'>
                 <div className='flex flex-wrap items-center justify-between gap-3'>
                   <div>
                     <div className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Saved scanner settings</div>
@@ -651,8 +637,16 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                   </div>
                 )}
               </div>
+            </CollapsibleSection>
 
-              <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-3'>
+            <div className='mt-4 space-y-3'>
+              <CollapsibleSection
+                title='Connection'
+                description='Port and serial link settings.'
+                isOpen={settingsSections.connection}
+                onToggle={() => setSettingsSections((current) => ({ ...current, connection: !current.connection }))}
+              >
+                <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
                 <Field label='COM port'>
                   <Select value={form.portName} onValueChange={(value) => setForm((current) => ({ ...current, portName: value ?? '' }))}>
                     <SelectTrigger aria-label='COM port' className='w-full'>
@@ -745,7 +739,16 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                 <Field label='Retry count'>
                   <Input aria-label='Retry count' value={form.retryCount} onChange={(event) => updateForm('retryCount', event.target.value)} />
                 </Field>
+                </div>
+              </CollapsibleSection>
 
+              <CollapsibleSection
+                title='Scan window'
+                description='Address range, paging, and Modbus request chunking.'
+                isOpen={settingsSections.scan}
+                onToggle={() => setSettingsSections((current) => ({ ...current, scan: !current.scan }))}
+              >
+                <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
                 <Field label='Auto-poll interval (ms)'>
                   <Input aria-label='Auto-poll interval' value={form.autoPollMs} onChange={(event) => updateForm('autoPollMs', event.target.value)} />
                 </Field>
@@ -763,9 +766,11 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                   <Input aria-label='Registers per request' value={form.registersPerRequest} onChange={(event) => updateForm('registersPerRequest', event.target.value)} />
                   <div className='text-[11px] text-muted-foreground'>Chunk size per Modbus read. Large scans are split into multiple requests using this value.</div>
                 </Field>
-              </div>
+                </div>
+              </CollapsibleSection>
+            </div>
 
-              <div className='mt-4 flex flex-wrap items-center gap-2'>
+            <div className='mt-4 flex flex-wrap items-center gap-2'>
                 <Button onClick={() => void runScan(true)} disabled={isLoading}>
                   {isLoading ? <LoaderCircle className='animate-spin' /> : <PlugZap />}
                   Connect & scan
@@ -777,19 +782,19 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                 <Button variant='ghost' onClick={disconnect} disabled={!isConnected || isLoading}>
                   Disconnect
                 </Button>
-              </div>
+            </div>
 
-              {feedback ? (
+            {feedback?.isError ? (
                 <div className={cn(
                   'mt-4 rounded-2xl border px-3 py-2 text-sm',
-                  feedback.isError ? 'border-rose-500/25 bg-rose-500/10 text-rose-200' : 'border-emerald-500/25 bg-emerald-500/10 text-emerald-200',
+                  'border-rose-500/25 bg-rose-500/10 text-rose-200',
                 )}>
                   {feedback.message}
                 </div>
               ) : null}
-            </div>
+          </div>
 
-            <div className='rounded-2xl border border-border/70 bg-background/45 p-4'>
+          <div className='rounded-2xl border border-border/70 bg-background/45 p-4'>
               <div className='flex flex-wrap items-center justify-between gap-3'>
                 <div>
                   <div className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Raw register matrix</div>
@@ -958,11 +963,9 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                   Connect to a device to populate the scanner matrix.
                 </div>
               )}
-            </div>
           </div>
 
-          <div className='space-y-5'>
-            <div className='rounded-2xl border border-border/70 bg-background/45 p-4'>
+          <div className='rounded-2xl border border-border/70 bg-background/45 p-4'>
               <div className='flex flex-wrap items-center justify-between gap-3'>
                 <div>
                   <div className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Selection</div>
@@ -1145,10 +1148,10 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                   <div className='mt-2'>Scan first, then click a register row to inspect bytes or decode a contiguous range.</div>
                 </div>
               )}
-            </div>
+          </div>
 
-            {annotations.length > 0 ? (
-              <div className='rounded-2xl border border-border/70 bg-background/45 p-4'>
+          {annotations.length > 0 ? (
+            <div className='rounded-2xl border border-border/70 bg-background/45 p-4'>
                 <div className='flex flex-wrap items-center justify-between gap-3'>
                   <div>
                     <div className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Mapped entities</div>
@@ -1185,11 +1188,11 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                     );
                   })}
                 </div>
-              </div>
-            ) : null}
+            </div>
+          ) : null}
 
-            {scanResult ? (
-              <div className='rounded-2xl border border-border/70 bg-background/45 p-4'>
+          {scanResult ? (
+            <div className='rounded-2xl border border-border/70 bg-background/45 p-4'>
                 <div className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Scan metadata</div>
                 <div className='mt-3 space-y-2'>
                   {scanResult.blocks.map((block) => (
@@ -1201,9 +1204,8 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                     </div>
                   ))}
                 </div>
-              </div>
-            ) : null}
-          </div>
+            </div>
+          ) : null}
         </div>
       </CardContent>
     </Card>
@@ -1259,6 +1261,46 @@ function Field({ label, children }: { label: string; children: ReactNode }) {
       <span className='block text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>{label}</span>
       {children}
     </label>
+  );
+}
+
+function CollapsibleSection({
+  title,
+  description,
+  isOpen,
+  onToggle,
+  aside,
+  children,
+}: {
+  title: string;
+  description: string;
+  isOpen: boolean;
+  onToggle: () => void;
+  aside?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <div className='rounded-2xl border border-border/70 bg-background/45'>
+      <button
+        type='button'
+        onClick={onToggle}
+        className='flex w-full items-center justify-between gap-3 px-4 py-3 text-left'
+      >
+        <div className='min-w-0'>
+          <div className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>{title}</div>
+          <div className='mt-1 text-sm text-muted-foreground'>{description}</div>
+        </div>
+        <div className='flex items-center gap-3'>
+          {aside}
+          <div className='font-mono text-xs text-muted-foreground'>{isOpen ? 'Hide' : 'Show'}</div>
+        </div>
+      </button>
+      {isOpen ? (
+        <div className='border-t border-border/70 px-4 py-4'>
+          {children}
+        </div>
+      ) : null}
+    </div>
   );
 }
 
