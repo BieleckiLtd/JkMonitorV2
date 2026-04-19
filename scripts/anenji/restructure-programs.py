@@ -74,6 +74,19 @@ for ent in doc['entities']:
         ent['category'] = new_cat
         if new_comment:
             ent['_comment'] = new_comment
+    if eid == 'output_voltage_setting':
+        ent['type'] = 'select'
+        ent['options'] = [
+            {"value": 2200, "label": "220 V"},
+            {"value": 2300, "label": "230 V"},
+            {"value": 2400, "label": "240 V"},
+        ]
+    if eid == 'output_frequency_setting':
+        ent['type'] = 'select'
+        ent['options'] = [
+            {"value": 5000, "label": "50 Hz"},
+            {"value": 6000, "label": "60 Hz"},
+        ]
 
 # ---------- 3. Add new entities ----------
 

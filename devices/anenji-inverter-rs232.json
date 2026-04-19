@@ -848,7 +848,7 @@
     },
     {
       "id": "output_voltage_setting",
-      "type": "number",
+      "type": "select",
       "name": "Output voltage",
       "category": "F1 Output",
       "source": {
@@ -864,11 +864,25 @@
       "writable": true,
       "write": {
         "address": 606
-      }
+      },
+      "options": [
+        {
+          "value": 2200,
+          "label": "220 V"
+        },
+        {
+          "value": 2300,
+          "label": "230 V"
+        },
+        {
+          "value": 2400,
+          "label": "240 V"
+        }
+      ]
     },
     {
       "id": "output_frequency_setting",
-      "type": "number",
+      "type": "select",
       "name": "Output frequency",
       "category": "F1 Output",
       "source": {
@@ -884,7 +898,17 @@
       "writable": true,
       "write": {
         "address": 607
-      }
+      },
+      "options": [
+        {
+          "value": 5000,
+          "label": "50 Hz"
+        },
+        {
+          "value": 6000,
+          "label": "60 Hz"
+        }
+      ]
     },
     {
       "id": "current_output_priority",
