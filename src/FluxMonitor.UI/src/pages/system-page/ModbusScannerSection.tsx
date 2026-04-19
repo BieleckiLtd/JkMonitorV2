@@ -8,8 +8,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { decodeSelection, getSelectionSummary, type ModbusDecodeMode } from '../../lib/modbusScanner';
 import { cn } from '../../lib/utils';
 import type {
+  DeleteModbusScannerSettingResult,
   ModbusScannerReadRequest,
   ModbusScannerReadResult,
+  ModbusScannerSavedSetting,
+  ModbusScannerSavedSettingsSnapshot,
+  SaveModbusScannerSettingRequest,
+  SaveModbusScannerSettingResult,
   SystemInterfacesResponse,
 } from './types';
 
@@ -64,7 +69,12 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
     registerKind: 'holding',
   });
   const [scanResult, setScanResult] = useState<ModbusScannerReadResult | null>(null);
+  const [savedSettings, setSavedSettings] = useState<ModbusScannerSavedSetting[]>([]);
+  const [settingsName, setSettingsName] = useState('');
+  const [settingsStorageAvailable, setSettingsStorageAvailable] = useState(true);
   const [isLoading, setIsLoading] = useState(false);
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
+  const [isDeletingSettingName, setIsDeletingSettingName] = useState<string | null>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [feedback, setFeedback] = useState<{ message: string; isError: boolean } | null>(null);
   const [selectionStart, setSelectionStart] = useState<number | null>(null);
@@ -77,6 +87,31 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
       setForm((current) => ({ ...current, portName: interfaces.serialPorts[0]?.name ?? '' }));
     }
   }, [form.portName, interfaces]);
+
+  const loadSavedSettings = useCallback(async () => {
+    try {
+      const response = await fetch('/api/system/modbus-scanner/settings', { cache: 'no-store' });
+      const body = await readJsonResponse<ModbusScannerSavedSettingsSnapshot | { error?: string }>(response);
+      if (!response.ok) {
+        throw new Error(body && 'error' in body && body.error ? body.error : 'Unable to load saved Modbus scanner settings.');
+      }
+
+      const snapshot = body as ModbusScannerSavedSettingsSnapshot | null;
+      setSavedSettings(snapshot?.settings ?? []);
+      setSettingsStorageAvailable(snapshot?.storageAvailable ?? false);
+    } catch (error) {
+      setSavedSettings([]);
+      setSettingsStorageAvailable(false);
+      setFeedback({
+        message: error instanceof Error ? error.message : 'Unable to load saved Modbus scanner settings.',
+        isError: true,
+      });
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadSavedSettings();
+  }, [loadSavedSettings]);
 
   const selection = useMemo(
     () => getSelectionSummary(scanResult, selectionStart, selectionEnd),
@@ -106,9 +141,13 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(request),
       });
-      const body = await response.json() as ModbusScannerReadResult | { error?: string };
+      const body = await readJsonResponse<ModbusScannerReadResult | { error?: string }>(response);
       if (!response.ok) {
-        throw new Error('error' in body && body.error ? body.error : 'Unable to read Modbus registers.');
+        throw new Error(body && 'error' in body && body.error ? body.error : 'Unable to read Modbus registers.');
+      }
+
+      if (!body) {
+        throw new Error('The scanner returned an empty response.');
       }
 
       const result = body as ModbusScannerReadResult;
@@ -186,6 +225,100 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
     setSelectionEnd(address);
   }
 
+  async function saveSettings() {
+    let request: ModbusScannerReadRequest;
+
+    try {
+      request = buildRequest(form);
+    } catch (error) {
+      setFeedback({
+        message: error instanceof Error ? error.message : 'Enter valid Modbus settings before saving.',
+        isError: true,
+      });
+      return;
+    }
+
+    const name = settingsName.trim();
+    if (!name) {
+      setFeedback({
+        message: 'Enter a name before saving scanner settings.',
+        isError: true,
+      });
+      return;
+    }
+
+    setIsSavingSettings(true);
+    try {
+      const response = await fetch('/api/system/modbus-scanner/settings', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name,
+          settings: request,
+        } satisfies SaveModbusScannerSettingRequest),
+      });
+      const body = await readJsonResponse<SaveModbusScannerSettingResult | { error?: string }>(response);
+      if (!response.ok) {
+        throw new Error(body && 'error' in body && body.error ? body.error : 'Unable to save scanner settings.');
+      }
+
+      if (!body) {
+        throw new Error('The saved settings response was empty.');
+      }
+
+      const result = body as SaveModbusScannerSettingResult;
+      setSavedSettings((current) => [result.setting, ...current.filter((item) => item.name !== result.setting.name)]);
+      setSettingsName(result.setting.name);
+      setFeedback({
+        message: result.message,
+        isError: false,
+      });
+    } catch (error) {
+      setFeedback({
+        message: error instanceof Error ? error.message : 'Unable to save scanner settings.',
+        isError: true,
+      });
+    } finally {
+      setIsSavingSettings(false);
+    }
+  }
+
+  function loadSetting(setting: ModbusScannerSavedSetting) {
+    setForm(toFormState(setting.settings));
+    setSettingsName(setting.name);
+    setFeedback({
+      message: `Loaded scanner settings '${setting.name}'.`,
+      isError: false,
+    });
+  }
+
+  async function deleteSetting(setting: ModbusScannerSavedSetting) {
+    setIsDeletingSettingName(setting.name);
+    try {
+      const response = await fetch(`/api/system/modbus-scanner/settings/${encodeURIComponent(setting.name)}`, {
+        method: 'DELETE',
+      });
+      const body = await readJsonResponse<DeleteModbusScannerSettingResult | { error?: string }>(response);
+      if (!response.ok) {
+        throw new Error(body && 'error' in body && body.error ? body.error : 'Unable to delete scanner settings.');
+      }
+
+      const result = body as DeleteModbusScannerSettingResult | null;
+      setSavedSettings((current) => current.filter((item) => item.name !== setting.name));
+      setFeedback({
+        message: result?.message ?? `Deleted scanner settings '${setting.name}'.`,
+        isError: false,
+      });
+    } catch (error) {
+      setFeedback({
+        message: error instanceof Error ? error.message : 'Unable to delete scanner settings.',
+        isError: true,
+      });
+    } finally {
+      setIsDeletingSettingName(null);
+    }
+  }
+
   return (
     <Card className='system-section-card'>
       <PanelHeader
@@ -202,6 +335,86 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
         <div className='grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)]'>
           <div className='space-y-5'>
             <div className='rounded-2xl border border-border/70 bg-background/45 p-4'>
+              <div className='mb-4 space-y-3 rounded-2xl border border-border/70 bg-background/55 p-3'>
+                <div className='flex flex-wrap items-center justify-between gap-3'>
+                  <div>
+                    <div className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Saved scanner settings</div>
+                    <div className='mt-1 text-sm text-muted-foreground'>Name a scanner setup once, then load it back into the form instantly.</div>
+                  </div>
+                  <div className='rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-right'>
+                    <div className='text-[10px] uppercase tracking-[0.18em] text-muted-foreground'>Saved</div>
+                    <div className='font-mono text-xs text-foreground'>{savedSettings.length}</div>
+                  </div>
+                </div>
+
+                <div className='grid gap-3 md:grid-cols-[minmax(0,1fr)_auto_auto]'>
+                  <Field label='Settings name'>
+                    <Input aria-label='Settings name' value={settingsName} onChange={(event) => setSettingsName(event.target.value)} />
+                  </Field>
+                  <div className='flex items-end'>
+                    <Button variant='outline' onClick={() => void loadSavedSettings()} disabled={isSavingSettings || isLoading}>
+                      <RefreshCcw />
+                      Reload saved
+                    </Button>
+                  </div>
+                  <div className='flex items-end'>
+                    <Button onClick={() => void saveSettings()} disabled={isSavingSettings || !settingsStorageAvailable}>
+                      {isSavingSettings ? <LoaderCircle className='animate-spin' /> : <PlugZap />}
+                      Save current
+                    </Button>
+                  </div>
+                </div>
+
+                {!settingsStorageAvailable ? (
+                  <div className='rounded-xl border border-amber-500/25 bg-amber-500/10 px-3 py-2 text-sm text-amber-100'>
+                    PostgreSQL storage is not available, so scanner settings cannot be saved yet.
+                  </div>
+                ) : savedSettings.length > 0 ? (
+                  <div className='overflow-x-auto'>
+                    <div className='min-w-[38rem] space-y-2'>
+                      <div className='grid grid-cols-[minmax(0,1.1fr)_8rem_7rem_10rem_10rem] gap-2 px-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground'>
+                        <div>Name</div>
+                        <div>Port</div>
+                        <div>Slave</div>
+                        <div>Range</div>
+                        <div>Actions</div>
+                      </div>
+                      {savedSettings.map((setting) => (
+                        <div key={setting.name} className='grid grid-cols-[minmax(0,1.1fr)_8rem_7rem_10rem_10rem] gap-2 rounded-xl border border-border/70 bg-background/70 px-2 py-3 text-sm'>
+                          <div className='min-w-0'>
+                            <div className='truncate font-semibold text-foreground'>{setting.name}</div>
+                            <div className='truncate text-xs text-muted-foreground'>{describeSetting(setting)}</div>
+                          </div>
+                          <div className='font-mono text-foreground'>{setting.settings.portName}</div>
+                          <div className='font-mono text-foreground'>{setting.settings.slaveAddress}</div>
+                          <div className='font-mono text-foreground'>
+                            {setting.settings.startRegister}-{setting.settings.startRegister + setting.settings.registerCount - 1}
+                          </div>
+                          <div className='flex flex-wrap gap-2'>
+                            <Button type='button' size='sm' variant='outline' onClick={() => loadSetting(setting)}>
+                              Load
+                            </Button>
+                            <Button
+                              type='button'
+                              size='sm'
+                              variant='ghost'
+                              onClick={() => void deleteSetting(setting)}
+                              disabled={isDeletingSettingName === setting.name}
+                            >
+                              {isDeletingSettingName === setting.name ? <LoaderCircle className='animate-spin' /> : 'Delete'}
+                            </Button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : (
+                  <div className='rounded-xl border border-dashed border-border/70 bg-muted/20 px-3 py-4 text-sm text-muted-foreground'>
+                    No named scanner settings saved yet.
+                  </div>
+                )}
+              </div>
+
               <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-3'>
                 <Field label='COM port'>
                   <Select value={form.portName} onValueChange={(value) => setForm((current) => ({ ...current, portName: value ?? '' }))}>
@@ -513,6 +726,45 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
   function updateForm<Key extends keyof ModbusScannerFormState>(key: Key, value: ModbusScannerFormState[Key]) {
     setForm((current) => ({ ...current, [key]: value }));
   }
+}
+
+function toFormState(request: ModbusScannerReadRequest): ModbusScannerFormState {
+  return {
+    portName: request.portName,
+    slaveAddress: String(request.slaveAddress),
+    baudRate: String(request.baudRate),
+    parity: request.parity,
+    dataBits: String(request.dataBits),
+    stopBits: String(request.stopBits),
+    responseTimeoutMs: String(request.responseTimeoutMs),
+    retryCount: String(request.retryCount),
+    autoPollMs: '0',
+    startRegister: String(request.startRegister),
+    registerCount: String(request.registerCount),
+    registersPerRequest: String(request.registersPerRequest),
+    registerKind: request.registerKind,
+  };
+}
+
+function describeSetting(setting: ModbusScannerSavedSetting) {
+  return `${setting.settings.registerKind} registers, ${setting.settings.baudRate} baud, ${setting.settings.parity} parity`;
+}
+
+async function readJsonResponse<T>(response: Response): Promise<T | null> {
+  if (typeof response.text === 'function') {
+    const text = await response.text();
+    if (!text.trim()) {
+      return null;
+    }
+
+    return JSON.parse(text) as T;
+  }
+
+  if (typeof response.json === 'function') {
+    return await response.json() as T;
+  }
+
+  return null;
 }
 
 function Field({ label, children }: { label: string; children: ReactNode }) {

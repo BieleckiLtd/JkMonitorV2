@@ -479,6 +479,34 @@ export type ModbusScannerReadRequest = {
   registerKind: ModbusRegisterKind;
 };
 
+export type ModbusScannerSavedSetting = {
+  name: string;
+  updatedAtUtc: string;
+  settings: ModbusScannerReadRequest;
+};
+
+export type ModbusScannerSavedSettingsSnapshot = {
+  storageAvailable: boolean;
+  settings: ModbusScannerSavedSetting[];
+};
+
+export type SaveModbusScannerSettingRequest = {
+  name: string;
+  settings: ModbusScannerReadRequest;
+};
+
+export type SaveModbusScannerSettingResult = {
+  success: boolean;
+  message: string;
+  setting: ModbusScannerSavedSetting;
+};
+
+export type DeleteModbusScannerSettingResult = {
+  success: boolean;
+  message: string;
+  name: string;
+};
+
 export type ModbusScannerReadBlock = {
   startAddress: number;
   registerCount: number;

@@ -57,6 +57,7 @@ builder.Services.AddSingleton<FluxMonitor.Backend.Services.WebTerminalService>()
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.DirectAccessStore>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.DirectAccessService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.ModbusScannerService>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.ModbusScannerSettingsStore>();
 builder.Services.AddHostedService<FluxMonitor.Backend.Services.DirectAccessBackgroundService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.HostServicesCatalogService>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.ICommandRunner, FluxMonitor.Backend.Services.ProcessCommandRunner>();
@@ -199,6 +200,9 @@ using (var scope = app.Services.CreateScope())
 
     var directAccessStore = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.DirectAccessStore>();
     await directAccessStore.InitializeAsync(CancellationToken.None);
+
+    var modbusScannerSettingsStore = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.ModbusScannerSettingsStore>();
+    await modbusScannerSettingsStore.InitializeAsync(CancellationToken.None);
 
     var directAccessService = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.DirectAccessService>();
     await directAccessService.InitializeAsync(CancellationToken.None);

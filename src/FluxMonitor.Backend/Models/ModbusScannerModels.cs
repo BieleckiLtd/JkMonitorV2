@@ -16,6 +16,39 @@ public sealed class ModbusScannerReadRequest
     public string RegisterKind { get; set; } = "holding";
 }
 
+public sealed class ModbusScannerSavedSetting
+{
+    public required string Name { get; set; }
+    public string UpdatedAtUtc { get; set; } = DateTime.UtcNow.ToString("O");
+    public required ModbusScannerReadRequest Settings { get; set; }
+}
+
+public sealed class ModbusScannerSavedSettingsSnapshot
+{
+    public bool StorageAvailable { get; set; }
+    public List<ModbusScannerSavedSetting> Settings { get; set; } = [];
+}
+
+public sealed class SaveModbusScannerSettingRequest
+{
+    public string Name { get; set; } = string.Empty;
+    public required ModbusScannerReadRequest Settings { get; set; }
+}
+
+public sealed class SaveModbusScannerSettingResult
+{
+    public bool Success { get; set; }
+    public required string Message { get; set; }
+    public required ModbusScannerSavedSetting Setting { get; set; }
+}
+
+public sealed class DeleteModbusScannerSettingResult
+{
+    public bool Success { get; set; }
+    public required string Message { get; set; }
+    public required string Name { get; set; }
+}
+
 public sealed class ModbusScannerReadResult
 {
     public required string PortName { get; set; }

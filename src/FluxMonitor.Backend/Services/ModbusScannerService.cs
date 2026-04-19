@@ -142,7 +142,7 @@ public sealed class ModbusScannerService(ILogger<ModbusScannerService> logger)
         };
     }
 
-    private static ModbusScannerReadRequest NormalizeRequest(ModbusScannerReadRequest request)
+    public static ModbusScannerReadRequest NormalizeRequest(ModbusScannerReadRequest request)
     {
         var portName = request.PortName.Trim();
         if (string.IsNullOrWhiteSpace(portName))

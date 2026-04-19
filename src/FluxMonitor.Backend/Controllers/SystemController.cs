@@ -20,6 +20,7 @@ public sealed class SystemController(
     WebTerminalService webTerminalService,
     DirectAccessService directAccessService,
     ModbusScannerService modbusScannerService,
+    ModbusScannerSettingsStore modbusScannerSettingsStore,
     HostServicesCatalogService hostServicesCatalogService,
     ILogger<SystemController> logger) : ControllerBase
 {
@@ -428,6 +429,55 @@ public sealed class SystemController(
         {
             var result = await modbusScannerService.ReadAsync(request, cancellationToken);
             return Ok(result);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { error = exception.Message });
+        }
+    }
+
+    [HttpGet("modbus-scanner/settings")]
+    public async Task<ActionResult<ModbusScannerSavedSettingsSnapshot>> GetModbusScannerSettings(CancellationToken cancellationToken)
+    {
+        var result = await modbusScannerSettingsStore.GetSnapshotAsync(cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpPost("modbus-scanner/settings")]
+    public async Task<ActionResult<SaveModbusScannerSettingResult>> SaveModbusScannerSetting(
+        [FromBody] SaveModbusScannerSettingRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var setting = await modbusScannerSettingsStore.SaveAsync(request.Name, request.Settings, cancellationToken);
+            return Ok(new SaveModbusScannerSettingResult
+            {
+                Success = true,
+                Message = $"Saved scanner settings '{setting.Name}'.",
+                Setting = setting
+            });
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { error = exception.Message });
+        }
+    }
+
+    [HttpDelete("modbus-scanner/settings/{name}")]
+    public async Task<ActionResult<DeleteModbusScannerSettingResult>> DeleteModbusScannerSetting(
+        string name,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await modbusScannerSettingsStore.DeleteAsync(name, cancellationToken);
+            return Ok(new DeleteModbusScannerSettingResult
+            {
+                Success = true,
+                Message = $"Deleted scanner settings '{name}'.",
+                Name = name
+            });
         }
         catch (InvalidOperationException exception)
         {

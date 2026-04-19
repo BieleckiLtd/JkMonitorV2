@@ -119,6 +119,26 @@ describe('SystemPage', () => {
     let sshActive = false;
     let terminalEnabled = true;
     let preferredUpdateChannel: 'dev' | 'main' = 'dev';
+    let modbusSavedSettings = [
+      {
+        name: 'Factory meter',
+        updatedAtUtc: '2026-03-31T10:00:00Z',
+        settings: {
+          portName: 'COM7',
+          slaveAddress: 7,
+          baudRate: 19200,
+          parity: 'Even',
+          dataBits: 8,
+          stopBits: 1,
+          responseTimeoutMs: 1500,
+          retryCount: 2,
+          startRegister: 100,
+          registerCount: 6,
+          registersPerRequest: 3,
+          registerKind: 'input',
+        },
+      },
+    ];
     const localAccessHostName = 'fluxmonitor';
 
     globalThis.fetch = vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -531,6 +551,49 @@ describe('SystemPage', () => {
         } as Response;
       }
 
+      if (url === '/api/system/modbus-scanner/settings' && (!init?.method || init.method === 'GET')) {
+        return {
+          ok: true,
+          json: async () => ({
+            storageAvailable: true,
+            settings: modbusSavedSettings,
+          }),
+        } as Response;
+      }
+
+      if (url === '/api/system/modbus-scanner/settings' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)) as { name: string; settings: typeof modbusSavedSettings[number]['settings'] };
+        const saved = {
+          name: body.name,
+          updatedAtUtc: '2026-03-31T10:06:00Z',
+          settings: body.settings,
+        };
+        modbusSavedSettings = [saved, ...modbusSavedSettings.filter((item) => item.name !== saved.name)];
+
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            message: `Saved scanner settings '${saved.name}'.`,
+            setting: saved,
+          }),
+        } as Response;
+      }
+
+      if (url.startsWith('/api/system/modbus-scanner/settings/') && init?.method === 'DELETE') {
+        const name = decodeURIComponent(url.split('/').pop() ?? '');
+        modbusSavedSettings = modbusSavedSettings.filter((item) => item.name !== name);
+
+        return {
+          ok: true,
+          json: async () => ({
+            success: true,
+            message: `Deleted scanner settings '${name}'.`,
+            name,
+          }),
+        } as Response;
+      }
+
       if (url.startsWith('/api/logs?')) {
         return {
           ok: true,
@@ -652,6 +715,37 @@ describe('SystemPage', () => {
     expect(await screen.findByText(/connected to COM3 and read 4 holding registers/i)).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /0x41/i })).toBeInTheDocument();
     expect(screen.getByText(/select 2 registers for float32 or 4 registers for float64/i)).toBeInTheDocument();
+    expect(screen.getByText('Factory meter')).toBeInTheDocument();
+  });
+
+  it('loads, saves, and deletes named Modbus scanner settings', async () => {
+    renderSystemRoute();
+
+    fireEvent.click(await screen.findByRole('button', { name: /tools/i }));
+
+    expect(await screen.findByText('Factory meter')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /^load$/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/loaded scanner settings 'factory meter'\./i)).toBeInTheDocument();
+    });
+    expect(screen.getByDisplayValue('7')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('100')).toBeInTheDocument();
+
+    fireEvent.change(screen.getByLabelText(/settings name/i), { target: { value: 'Pump room' } });
+    fireEvent.change(screen.getByLabelText(/slave address/i), { target: { value: '11' } });
+    fireEvent.click(screen.getByRole('button', { name: /save current/i }));
+
+    expect(await screen.findByText(/saved scanner settings 'pump room'\./i)).toBeInTheDocument();
+    expect(screen.getByText('Pump room')).toBeInTheDocument();
+
+    const deleteButtons = screen.getAllByRole('button', { name: /delete/i });
+    fireEvent.click(deleteButtons[0]);
+
+    await waitFor(() => {
+      expect(screen.queryByText('Pump room')).not.toBeInTheDocument();
+    });
   });
 
   it('redirects legacy tunnel and internet speed routes to connectivity', async () => {
