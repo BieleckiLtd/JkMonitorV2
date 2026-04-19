@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decodeSelection, getSelectionSummary } from './modbusScanner';
+import { buildRegisterMatrix, decodeSelection, formatRegisterValue, getSelectionSummary } from './modbusScanner';
 import type { ModbusScannerReadResult } from '../pages/system-page/types';
 
 const scanResult: ModbusScannerReadResult = {
@@ -54,6 +54,46 @@ describe('modbusScanner helpers', () => {
     expect(decodeSelection(floatSelection, 'float')[0]).toMatchObject({
       label: 'Float32',
       value: '1',
+    });
+  });
+
+  it('builds a row-major matrix with addresses running top-to-bottom', () => {
+    const matrix = buildRegisterMatrix({
+      ...scanResult,
+      startRegister: 10,
+      registerCount: 6,
+      registers: [
+        { address: 10, highByte: 0x00, lowByte: 0x0A, unsignedValue: 10, hexValue: '0x000A' },
+        { address: 11, highByte: 0x00, lowByte: 0x0B, unsignedValue: 11, hexValue: '0x000B' },
+        { address: 12, highByte: 0x00, lowByte: 0x0C, unsignedValue: 12, hexValue: '0x000C' },
+        { address: 13, highByte: 0x00, lowByte: 0x0D, unsignedValue: 13, hexValue: '0x000D' },
+        { address: 14, highByte: 0x00, lowByte: 0x0E, unsignedValue: 14, hexValue: '0x000E' },
+        { address: 15, highByte: 0x00, lowByte: 0x0F, unsignedValue: 15, hexValue: '0x000F' },
+      ],
+    }, 3);
+
+    expect(matrix).toHaveLength(2);
+    expect(matrix[0]).toMatchObject({ rowAddress: 10 });
+    expect(matrix[1]).toMatchObject({ rowAddress: 13 });
+    expect(matrix[0]?.cells.map((cell) => cell?.address)).toEqual([10, 11, 12]);
+    expect(matrix[1]?.cells.map((cell) => cell?.address)).toEqual([13, 14, 15]);
+  });
+
+  it('formats single register values for multiple matrix display modes', () => {
+    expect(formatRegisterValue(scanResult.registers[0]!, 'ascii')).toMatchObject({
+      primary: 'AB',
+      secondary: '0x4142',
+    });
+
+    expect(formatRegisterValue({
+      address: 9,
+      highByte: 0xff,
+      lowByte: 0xfe,
+      unsignedValue: 0xfffe,
+      hexValue: '0xFFFE',
+    }, 'signed')).toMatchObject({
+      primary: '-2',
+      secondary: '0xFFFE',
     });
   });
 });

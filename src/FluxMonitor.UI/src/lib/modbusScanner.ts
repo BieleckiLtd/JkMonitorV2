@@ -1,6 +1,7 @@
 import type { ModbusScannerReadResult, ModbusScannerRegisterValue } from '../pages/system-page/types';
 
 export type ModbusDecodeMode = 'ascii' | 'signed-int' | 'unsigned-int' | 'hex' | 'binary' | 'float';
+export type ModbusMatrixDisplayMode = 'hex' | 'unsigned' | 'signed' | 'ascii' | 'binary';
 
 export type ModbusSelectionSummary = {
   startAddress: number;
@@ -15,6 +16,16 @@ export type ModbusDecodedValue = {
   label: string;
   value: string;
   detail?: string;
+};
+
+export type ModbusMatrixRow = {
+  rowAddress: number;
+  cells: Array<ModbusScannerRegisterValue | null>;
+};
+
+export type ModbusMatrixCellDisplay = {
+  primary: string;
+  secondary?: string;
 };
 
 export function getSelectionSummary(
@@ -67,6 +78,64 @@ export function decodeSelection(
       return decodeFloat(selection.bytes);
     default:
       return [];
+  }
+}
+
+export function buildRegisterMatrix(
+  scan: ModbusScannerReadResult | null,
+  columnCount: number,
+): ModbusMatrixRow[] {
+  if (!scan || !Number.isFinite(columnCount) || columnCount < 1) {
+    return [];
+  }
+
+  const rows: ModbusMatrixRow[] = [];
+
+  for (let index = 0; index < scan.registers.length; index += columnCount) {
+    const slice = scan.registers.slice(index, index + columnCount);
+    rows.push({
+      rowAddress: slice[0]?.address ?? scan.startRegister + index,
+      cells: Array.from({ length: columnCount }, (_, offset) => slice[offset] ?? null),
+    });
+  }
+
+  return rows;
+}
+
+export function formatRegisterValue(
+  register: ModbusScannerRegisterValue,
+  mode: ModbusMatrixDisplayMode,
+): ModbusMatrixCellDisplay {
+  switch (mode) {
+    case 'hex':
+      return {
+        primary: register.hexValue,
+        secondary: `${toByteBinary(register.highByte)} ${toByteBinary(register.lowByte)}`,
+      };
+    case 'unsigned':
+      return {
+        primary: register.unsignedValue.toString(),
+        secondary: register.hexValue,
+      };
+    case 'signed':
+      return {
+        primary: toSignedWord(register.unsignedValue).toString(),
+        secondary: register.hexValue,
+      };
+    case 'ascii':
+      return {
+        primary: `${toAsciiChar(register.highByte)}${toAsciiChar(register.lowByte)}`,
+        secondary: register.hexValue,
+      };
+    case 'binary':
+      return {
+        primary: `${toByteBinary(register.highByte)} ${toByteBinary(register.lowByte)}`,
+        secondary: register.hexValue,
+      };
+    default:
+      return {
+        primary: register.hexValue,
+      };
   }
 }
 
@@ -148,4 +217,16 @@ function bytesToSignedBigInt(bytes: number[]) {
   return (unsignedValue & signBit) === 0n
     ? unsignedValue
     : unsignedValue - (1n << bitCount);
+}
+
+function toSignedWord(value: number) {
+  return value > 0x7fff ? value - 0x1_0000 : value;
+}
+
+function toAsciiChar(value: number) {
+  return value >= 0x20 && value <= 0x7e ? String.fromCharCode(value) : '.';
+}
+
+function toByteBinary(value: number) {
+  return value.toString(2).padStart(8, '0');
 }

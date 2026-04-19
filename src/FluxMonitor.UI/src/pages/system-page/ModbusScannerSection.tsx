@@ -5,7 +5,14 @@ import { Button } from '../../components/ui/button';
 import { Card, CardContent } from '../../components/ui/card';
 import { Input } from '../../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
-import { decodeSelection, getSelectionSummary, type ModbusDecodeMode } from '../../lib/modbusScanner';
+import {
+  buildRegisterMatrix,
+  decodeSelection,
+  formatRegisterValue,
+  getSelectionSummary,
+  type ModbusDecodeMode,
+  type ModbusMatrixDisplayMode,
+} from '../../lib/modbusScanner';
 import { cn } from '../../lib/utils';
 import type {
   DeleteModbusScannerSettingResult,
@@ -30,6 +37,13 @@ const decodeModes: { value: ModbusDecodeMode; label: string }[] = [
   { value: 'hex', label: 'Hex' },
   { value: 'binary', label: 'Binary' },
   { value: 'float', label: 'Float' },
+];
+const matrixDisplayModes: { value: ModbusMatrixDisplayMode; label: string }[] = [
+  { value: 'hex', label: 'Hex word' },
+  { value: 'unsigned', label: 'Unsigned' },
+  { value: 'signed', label: 'Signed' },
+  { value: 'ascii', label: 'ASCII' },
+  { value: 'binary', label: 'Binary' },
 ];
 
 type ModbusScannerFormState = {
@@ -81,6 +95,8 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
   const [selectionEnd, setSelectionEnd] = useState<number | null>(null);
   const [detailView, setDetailView] = useState<'raw' | 'decoded'>('decoded');
   const [decodeMode, setDecodeMode] = useState<ModbusDecodeMode>('float');
+  const [matrixColumns, setMatrixColumns] = useState('10');
+  const [matrixDisplayMode, setMatrixDisplayMode] = useState<ModbusMatrixDisplayMode>('hex');
 
   useEffect(() => {
     if (!form.portName && interfaces?.serialPorts.length) {
@@ -118,6 +134,8 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
     [scanResult, selectionEnd, selectionStart],
   );
   const decodedValues = useMemo(() => decodeSelection(selection, decodeMode), [decodeMode, selection]);
+  const matrixColumnCount = useMemo(() => parsePositiveInteger(matrixColumns, 10), [matrixColumns]);
+  const matrixRows = useMemo(() => buildRegisterMatrix(scanResult, matrixColumnCount), [matrixColumnCount, scanResult]);
 
   const runScan = useCallback(async (connecting: boolean) => {
     let request: ModbusScannerReadRequest;
@@ -554,47 +572,104 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
               <div className='flex flex-wrap items-center justify-between gap-3'>
                 <div>
                   <div className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Raw register matrix</div>
-                  <div className='mt-1 text-sm text-muted-foreground'>Addresses run vertically. Each row shows the two bytes returned for that register.</div>
+                  <div className='mt-1 text-sm text-muted-foreground'>Addresses run top-to-bottom. Offsets run left-to-right from <span className='font-mono'>+0</span> through the configured column count.</div>
                 </div>
-                {scanResult ? (
-                  <div className='rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-right'>
-                    <div className='text-[10px] uppercase tracking-[0.18em] text-muted-foreground'>Requests</div>
-                    <div className='font-mono text-xs text-foreground'>{scanResult.totalRequests}</div>
-                  </div>
-                ) : null}
+                <div className='flex flex-wrap items-end gap-3'>
+                  <Field label='Columns'>
+                    <Input
+                      aria-label='Matrix columns'
+                      value={matrixColumns}
+                      onChange={(event) => setMatrixColumns(event.target.value)}
+                      className='w-24'
+                    />
+                  </Field>
+                  <Field label='Cell display'>
+                    <Select value={matrixDisplayMode} onValueChange={(value) => setMatrixDisplayMode((value ?? 'hex') as ModbusMatrixDisplayMode)}>
+                      <SelectTrigger aria-label='Cell display' className='w-40'>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {matrixDisplayModes.map((mode) => (
+                          <SelectItem key={mode.value} value={mode.value}>{mode.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </Field>
+                  {scanResult ? (
+                    <div className='rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-right'>
+                      <div className='text-[10px] uppercase tracking-[0.18em] text-muted-foreground'>Requests</div>
+                      <div className='font-mono text-xs text-foreground'>{scanResult.totalRequests}</div>
+                    </div>
+                  ) : null}
+                </div>
               </div>
 
               {scanResult ? (
                 <div className='mt-4 overflow-x-auto'>
-                  <div className='min-w-[36rem]'>
-                    <div className='grid grid-cols-[8rem_1fr_1fr_1.25fr] gap-2 px-2 text-[11px] uppercase tracking-[0.18em] text-muted-foreground'>
-                      <div>Address</div>
-                      <div>Byte 0</div>
-                      <div>Byte 1</div>
-                      <div>Word</div>
-                    </div>
-                    <div className='mt-2 space-y-1'>
-                      {scanResult.registers.map((register) => {
-                        const inSelection = selection != null && register.address >= selection.startAddress && register.address <= selection.endAddress;
+                  <div className='min-w-max'>
+                    <table className='border-separate border-spacing-1.5'>
+                      <thead>
+                        <tr>
+                          <th className='min-w-24 rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-left text-[11px] uppercase tracking-[0.18em] text-muted-foreground'>
+                            Address
+                          </th>
+                          {Array.from({ length: matrixColumnCount }, (_, offset) => (
+                            <th
+                              key={offset}
+                              className='min-w-32 rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-left text-[11px] uppercase tracking-[0.18em] text-muted-foreground'
+                            >
+                              +{offset}
+                            </th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {matrixRows.map((row) => (
+                          <tr key={row.rowAddress}>
+                            <th className='rounded-xl border border-border/70 bg-background/70 px-3 py-2 text-left font-mono text-sm font-semibold text-foreground'>
+                              {row.rowAddress}
+                            </th>
+                            {row.cells.map((register, index) => {
+                              if (!register) {
+                                return (
+                                  <td
+                                    key={`${row.rowAddress}-${index}`}
+                                    className='rounded-xl border border-dashed border-border/60 bg-muted/15 px-3 py-3'
+                                  />
+                                );
+                              }
 
-                        return (
-                          <button
-                            key={register.address}
-                            type='button'
-                            onClick={(event) => handleRegisterClick(register.address, event.shiftKey)}
-                            className={cn(
-                              'grid w-full grid-cols-[8rem_1fr_1fr_1.25fr] gap-2 rounded-xl border px-2 py-2 text-left font-mono text-sm transition-colors',
-                              inSelection ? 'border-primary/35 bg-primary/10 text-foreground' : 'border-border/70 bg-background/70 hover:bg-accent/35',
-                            )}
-                          >
-                            <span className='font-semibold text-foreground'>{register.address}</span>
-                            <span>{toByteHex(register.highByte)}</span>
-                            <span>{toByteHex(register.lowByte)}</span>
-                            <span>{register.hexValue}</span>
-                          </button>
-                        );
-                      })}
-                    </div>
+                              const inSelection = selection != null
+                                && register.address >= selection.startAddress
+                                && register.address <= selection.endAddress;
+                              const display = formatRegisterValue(register, matrixDisplayMode);
+
+                              return (
+                                <td key={register.address} className='p-0 align-top'>
+                                  <button
+                                    type='button'
+                                    aria-label={`Register ${register.address}: ${display.primary}`}
+                                    onClick={(event) => handleRegisterClick(register.address, event.shiftKey)}
+                                    className={cn(
+                                      'flex min-h-20 w-full min-w-32 flex-col rounded-xl border px-3 py-3 text-left font-mono text-sm transition-colors',
+                                      inSelection ? 'border-primary/35 bg-primary/10 text-foreground' : 'border-border/70 bg-background/70 hover:bg-accent/35',
+                                    )}
+                                  >
+                                    <span className='text-[10px] uppercase tracking-[0.18em] text-muted-foreground'>@{register.address}</span>
+                                    <span className={cn('mt-2 break-all text-sm text-foreground', matrixDisplayMode === 'binary' && 'text-xs')}>
+                                      {display.primary}
+                                    </span>
+                                    {display.secondary ? (
+                                      <span className='mt-1 break-all text-[11px] text-muted-foreground'>{display.secondary}</span>
+                                    ) : null}
+                                  </button>
+                                </td>
+                              );
+                            })}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
                   </div>
                 </div>
               ) : (
@@ -817,6 +892,16 @@ function parseInteger(value: string, label: string) {
   return Number.parseInt(normalized, 10);
 }
 
-function toByteHex(value: number) {
-  return `0x${value.toString(16).toUpperCase().padStart(2, '0')}`;
+function parsePositiveInteger(value: string, fallbackValue: number) {
+  const normalized = value.trim();
+  if (!/^\d+$/.test(normalized)) {
+    return fallbackValue;
+  }
+
+  const parsed = Number.parseInt(normalized, 10);
+  if (!Number.isFinite(parsed) || parsed < 1) {
+    return fallbackValue;
+  }
+
+  return Math.min(parsed, 32);
 }

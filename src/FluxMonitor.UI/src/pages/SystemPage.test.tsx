@@ -713,7 +713,9 @@ describe('SystemPage', () => {
     });
 
     expect(await screen.findByText(/connected to COM3 and read 4 holding registers/i)).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: /0x41/i })).toBeInTheDocument();
+    expect(screen.getAllByText('+0').length).toBeGreaterThan(0);
+    expect(screen.getByText('+3')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /register 0: 0x4142/i })).toBeInTheDocument();
     expect(screen.getByText(/select 2 registers for float32 or 4 registers for float64/i)).toBeInTheDocument();
     expect(screen.getByText('Factory meter')).toBeInTheDocument();
   });
