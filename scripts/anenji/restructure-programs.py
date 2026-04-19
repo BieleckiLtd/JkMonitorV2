@@ -97,7 +97,7 @@ modbus_address_entity = {
     }
 }
 
-# F0P16 Dry Contact Mode (reg 690, settings bank, byteOffset = (690-601)*2 = 178)
+# F0P16 Dry Contact Mode (reg 689 on the tested unit, settings bank, byteOffset = (689-601)*2 = 176)
 dry_contact_entity = {
     "id": "dry_contact_mode",
     "type": "number",
@@ -105,7 +105,7 @@ dry_contact_entity = {
     "category": "F0 System",
     "source": {
         "bank": "settings",
-        "byteOffset": 178,
+        "byteOffset": 176,
         "dataType": "uint16"
     },
     "display": {
@@ -113,7 +113,7 @@ dry_contact_entity = {
     },
     "writable": True,
     "write": {
-        "address": 690
+        "address": 689
     }
 }
 
