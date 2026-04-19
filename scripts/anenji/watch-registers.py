@@ -47,6 +47,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--interval", type=float, default=1.0)
     parser.add_argument("--duration", type=float, default=75.0)
     parser.add_argument(
+        "--changes-only",
+        action="store_true",
+        help="Only print registers whose value changed after the initial sample.",
+    )
+    parser.add_argument(
         "--register",
         dest="registers",
         action="append",
@@ -97,16 +102,23 @@ def main() -> int:
                 break
 
             row: list[str] = []
+            changed_row: list[str] = []
             for reg in registers:
                 values = read_regs(ser, args.slave, reg, 1)
                 value = None if values is None else values[0]
                 marker = ""
-                if reg in last_values and last_values[reg] != value:
+                changed = reg in last_values and last_values[reg] != value
+                if changed:
                     marker = " *CHANGED*"
+                    changed_row.append(f"{reg}={value}{marker}")
                 last_values[reg] = value
                 row.append(f"{reg}={value}{marker}")
 
-            print(f"[{elapsed:6.1f}s] " + " | ".join(row))
+            if args.changes_only:
+                if changed_row:
+                    print(f"[{elapsed:6.1f}s] " + " | ".join(changed_row))
+            else:
+                print(f"[{elapsed:6.1f}s] " + " | ".join(row))
             sys.stdout.flush()
 
             next_tick += args.interval

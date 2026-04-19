@@ -35,7 +35,18 @@ public sealed class ModbusScannerService(ILogger<ModbusScannerService> logger)
         try
         {
             using var serialPort = CreatePort(normalized);
-            serialPort.Open();
+            try
+            {
+                serialPort.Open();
+            }
+            catch (UnauthorizedAccessException exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw CreatePortOpenException(normalized.PortName, exception);
+            }
+            catch (IOException exception) when (!cancellationToken.IsCancellationRequested)
+            {
+                throw CreatePortOpenException(normalized.PortName, exception);
+            }
 
             foreach (var block in blocks)
             {
@@ -70,6 +81,20 @@ public sealed class ModbusScannerService(ILogger<ModbusScannerService> logger)
         {
             _scanLock.Release();
         }
+    }
+
+    internal static InvalidOperationException CreatePortOpenException(string portName, Exception exception)
+    {
+        var detail = exception.InnerException?.Message ?? exception.Message;
+        var reason = detail.Contains("busy", StringComparison.OrdinalIgnoreCase)
+            ? $"Port '{portName}' is busy."
+            : $"Port '{portName}' could not be opened.";
+
+        return new InvalidOperationException(
+            $"{reason} Another process or an active Flux Monitor device poller may still be using it. " +
+            "If you just stopped a device, make sure it is disabled in Devices and give the poll loop a moment to release the serial port. " +
+            $"System detail: {detail}",
+            exception);
     }
 
     private async Task<byte[]> ReadBlockWithRetryAsync(

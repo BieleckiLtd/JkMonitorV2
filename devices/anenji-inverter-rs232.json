@@ -545,7 +545,7 @@
       "id": "boot_method",
       "type": "select",
       "name": "Boot method",
-      "category": "F0 System",
+      "category": "F1 Output",
       "source": {
         "bank": "status_boot_method",
         "byteOffset": 0,
@@ -832,7 +832,7 @@
       "id": "automatic_mains_output_enable",
       "type": "select",
       "name": "Automatic mains output enable",
-      "category": "F0 System",
+      "category": "F1 Output",
       "source": {
         "bank": "settings",
         "byteOffset": 178,
@@ -1816,11 +1816,32 @@
           },
           {
             "type": "parameter-table",
-            "title": "Settings",
+            "title": "F1 Output",
+            "entities": [
+              "boot_method",
+              "output_priority",
+              "automatic_mains_output_enable",
+              "output_voltage_setting",
+              "output_frequency_setting"
+            ]
+          },
+          {
+            "type": "parameter-table",
+            "title": "F0 System",
             "filter": {
-              "writable": true
-            },
-            "groupBy": "category"
+              "categories": [
+                "F0 System"
+              ]
+            }
+          },
+          {
+            "type": "parameter-table",
+            "title": "F2 Charger",
+            "filter": {
+              "categories": [
+                "F2 Battery"
+              ]
+            }
           },
           {
             "type": "parameter-table",
