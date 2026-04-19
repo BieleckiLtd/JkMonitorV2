@@ -905,3 +905,7 @@ function parsePositiveInteger(value: string, fallbackValue: number) {
 
   return Math.min(parsed, 32);
 }
+
+function toByteHex(value: number) {
+  return `0x${value.toString(16).toUpperCase().padStart(2, '0')}`;
+}
