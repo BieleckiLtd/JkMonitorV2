@@ -25,6 +25,25 @@ public sealed class ModbusRtuTests
         Assert.Equal(crc, frameCrc);
     }
 
+    [Fact]
+    public void BuildWriteSingleRegisterRequest_EncodesSingleRegisterFrame()
+    {
+        var request = ModbusRtu.BuildWriteSingleRegisterRequest(
+            slaveAddress: 0x01,
+            registerAddress: 606,
+            registerValue: 2300);
+
+        Assert.Equal(8, request.Length);
+        Assert.Equal(new byte[]
+        {
+            0x01, 0x06, 0x02, 0x5E, 0x08, 0xFC
+        }, request[..6]);
+
+        var crc = ModbusRtu.ComputeCrc16(request.AsSpan(0, 6));
+        var frameCrc = (ushort)(request[6] | (request[7] << 8));
+        Assert.Equal(crc, frameCrc);
+    }
+
     [Theory]
     [InlineData(0x1234u, 1, 0x1234, 0)]
     [InlineData(0x12345678u, 2, 0x1234, 0x5678)]
@@ -39,5 +58,17 @@ public sealed class ModbusRtuTests
         }
 
         Assert.Equal([expectedHigh, expectedLow], encoded);
+    }
+
+    [Fact]
+    public void ValidateAndExtractData_AcceptsWriteSingleRegisterResponse()
+    {
+        var response = ModbusRtu.BuildWriteSingleRegisterRequest(
+            slaveAddress: 0x01,
+            registerAddress: 607,
+            registerValue: 5000);
+
+        var payload = ModbusRtu.ValidateAndExtractData(response, expectedSlaveAddress: 0x01, expectedFunctionCode: 0x06);
+        Assert.Empty(payload.ToArray());
     }
 }

@@ -58,6 +58,25 @@ internal static class ModbusRtu
         => BuildReadRegistersRequest(slaveAddress, 0x03, startRegister, registerCount);
 
     /// <summary>
+    /// Build a Modbus RTU "Write Single Register" (function code 0x06) request.
+    /// Writes one 16-bit register value.
+    /// </summary>
+    public static byte[] BuildWriteSingleRegisterRequest(byte slaveAddress, ushort registerAddress, ushort registerValue)
+    {
+        var request = new byte[8];
+        request[0] = slaveAddress;
+        request[1] = 0x06;
+        request[2] = (byte)(registerAddress >> 8);
+        request[3] = (byte)(registerAddress & 0xFF);
+        request[4] = (byte)(registerValue >> 8);
+        request[5] = (byte)(registerValue & 0xFF);
+        var crc = ComputeCrc16(request.AsSpan(0, 6));
+        request[6] = (byte)(crc & 0xFF);
+        request[7] = (byte)((crc >> 8) & 0xFF);
+        return request;
+    }
+
+    /// <summary>
     /// Build a Modbus RTU "Write Multiple Registers" (function code 0x10) request.
     /// Writes the supplied register values as big-endian 16-bit words.
     /// </summary>
@@ -144,7 +163,7 @@ internal static class ModbusRtu
         if (frame[1] != expectedFunctionCode)
             throw new InvalidDataException($"Modbus response function code mismatch. Expected 0x{expectedFunctionCode:X2}, got 0x{frame[1]:X2}.");
 
-        if (expectedFunctionCode == 0x10)
+        if (expectedFunctionCode is 0x06 or 0x10)
         {
             if (frame.Length < 8)
                 throw new InvalidDataException($"Modbus write response too short ({frame.Length} bytes, expected 8).");

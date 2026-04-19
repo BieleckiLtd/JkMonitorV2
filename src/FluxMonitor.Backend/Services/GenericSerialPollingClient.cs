@@ -804,18 +804,79 @@ public sealed class GenericSerialPollingClient(
         int readTimeout,
         CancellationToken cancellationToken)
     {
-        var writeRequest = ModbusRtu.BuildWriteMultipleRegistersRequest(
+        var primaryFunctionCode = plan.Bank.Write?.FunctionCode ?? 0x10;
+        var result = await TryWriteSingleRegisterAsync(
+            serialPort,
             slaveAddress,
-            plan.RegisterAddress,
-            plan.RawValue,
-            plan.RegistersPerWrite);
+            plan,
+            readTimeout,
+            cancellationToken,
+            primaryFunctionCode);
+
+        if (result.Success)
+        {
+            return result;
+        }
+
+        if (plan.RegistersPerWrite == 1)
+        {
+            var fallbackFunctionCode = primaryFunctionCode == 0x06 ? (byte)0x10 : (byte)0x06;
+            logger.LogInformation(
+                "Single-register write did not persist with function code 0x{PrimaryFunctionCode:X2}. Retrying entity {EntityId} with alternate function code 0x{FallbackFunctionCode:X2}.",
+                primaryFunctionCode,
+                plan.Entity.Id,
+                fallbackFunctionCode);
+
+            var fallbackResult = await TryWriteSingleRegisterAsync(
+                serialPort,
+                slaveAddress,
+                plan,
+                readTimeout,
+                cancellationToken,
+                fallbackFunctionCode);
+
+            if (fallbackResult.Success)
+            {
+                return fallbackResult;
+            }
+        }
+
+        return result;
+    }
+
+    private async Task<EntityWriteResult> TryWriteSingleRegisterAsync(
+        SerialPort serialPort,
+        byte slaveAddress,
+        ResolvedWritePlan plan,
+        int readTimeout,
+        CancellationToken cancellationToken,
+        byte functionCode)
+    {
+        byte[] writeRequest;
+        if (functionCode == 0x06 && plan.RegistersPerWrite == 1)
+        {
+            writeRequest = ModbusRtu.BuildWriteSingleRegisterRequest(
+                slaveAddress,
+                plan.RegisterAddress,
+                (ushort)(plan.RawValue & 0xFFFF));
+        }
+        else
+        {
+            writeRequest = ModbusRtu.BuildWriteMultipleRegistersRequest(
+                slaveAddress,
+                plan.RegisterAddress,
+                plan.RawValue,
+                plan.RegistersPerWrite);
+            functionCode = 0x10;
+        }
+
         var writeResponse = await SendAndReceiveModbusAsync(
             serialPort,
             writeRequest,
             ModbusRtu.WriteResponseLength,
             readTimeout,
             cancellationToken);
-        ModbusRtu.ValidateAndExtractData(writeResponse, slaveAddress, plan.Bank.Write?.FunctionCode ?? 0x10);
+        ModbusRtu.ValidateAndExtractData(writeResponse, slaveAddress, functionCode);
 
         await Task.Delay(50, cancellationToken);
         serialPort.DiscardInBuffer();
@@ -830,7 +891,11 @@ public sealed class GenericSerialPollingClient(
         var registers = ParseHoldingRegisters(readResponse, slaveAddress, plan.RegistersPerWrite);
         var readBack = DecodeRegisterValue(registers, 0, plan.RegistersPerWrite);
         var success = readBack == plan.RawValue;
-        logger.LogInformation("Write verification completed. Success={Success}.", success);
+        logger.LogInformation(
+            "Write verification completed. Entity={EntityId}, FunctionCode=0x{FunctionCode:X2}, Success={Success}.",
+            plan.Entity.Id,
+            functionCode,
+            success);
 
         return new EntityWriteResult(
             plan.Entity.Id,
