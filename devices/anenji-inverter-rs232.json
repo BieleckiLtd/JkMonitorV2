@@ -79,6 +79,15 @@
       "pollGroup": "fast"
     },
     {
+      "_comment": "Reg 406: boot method mirror shown by the official datalogger",
+      "id": "status_boot_method",
+      "name": "Status – Boot Method",
+      "address": 406,
+      "count": 1,
+      "functionCode": 3,
+      "pollGroup": "slow"
+    },
+    {
       "_comment": "Regs 601-690: primary user-configurable settings (output/charge priority, voltages, currents, mode toggles, dry contact)",
       "id": "settings",
       "name": "Settings",
@@ -533,6 +542,34 @@
       }
     },
     {
+      "id": "boot_method",
+      "type": "select",
+      "name": "Boot method",
+      "category": "F0 System",
+      "source": {
+        "bank": "status_boot_method",
+        "byteOffset": 0,
+        "dataType": "uint16"
+      },
+      "options": [
+        {
+          "value": 0,
+          "label": "Can be powered on locally or remotely"
+        },
+        {
+          "value": 1,
+          "label": "Only local turn-on"
+        },
+        {
+          "value": 2,
+          "label": "Only remote turn-on"
+        }
+      ],
+      "display": {
+        "format": "text"
+      }
+    },
+    {
       "id": "input_mode",
       "type": "select",
       "name": "AC input voltage range",
@@ -792,9 +829,9 @@
       ]
     },
     {
-      "id": "remote_switch",
+      "id": "automatic_mains_output_enable",
       "type": "select",
-      "name": "Remote Switch",
+      "name": "Automatic mains output enable",
       "category": "F0 System",
       "source": {
         "bank": "settings",
@@ -808,11 +845,11 @@
       "options": [
         {
           "value": 0,
-          "label": "Off"
+          "label": "Disabled"
         },
         {
           "value": 1,
-          "label": "On"
+          "label": "Enabled"
         }
       ]
     },

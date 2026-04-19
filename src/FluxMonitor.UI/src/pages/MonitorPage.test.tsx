@@ -1088,6 +1088,193 @@ describe('MonitorPage', () => {
     expect(await screen.findByText(/Confirmed: 2026-04-12 13:45:30/)).toBeInTheDocument();
   });
 
+  it('disables Anenji output voltage and frequency edits while load is active', async () => {
+    useDeviceDefinitionMock.mockReturnValue({
+      version: '1',
+      device: {
+        id: 'anenji-inverter-rs232',
+        name: 'Anenji Inverter',
+        manufacturer: 'Anenji / Easun',
+        model: 'ANJ-HHS-11000W-48V',
+        category: 'inverter',
+        icon: 'zap',
+      },
+      connection: {
+        transport: { type: 'serial', defaults: {} },
+        protocol: { type: 'modbus-rtu', settings: {} },
+      },
+      dataSources: [],
+      pollGroups: {},
+      entities: [
+        {
+          id: 'output_voltage_setting',
+          type: 'select',
+          name: 'Output voltage',
+          category: 'F1 Output',
+          writable: true,
+          source: { bank: 'settings', byteOffset: 10, unit: 'V' },
+          options: [
+            { value: 2200, label: '220 V' },
+            { value: 2300, label: '230 V' },
+            { value: 2400, label: '240 V' },
+          ],
+        },
+        {
+          id: 'output_frequency_setting',
+          type: 'select',
+          name: 'Output frequency',
+          category: 'F1 Output',
+          writable: true,
+          source: { bank: 'settings', byteOffset: 12, unit: 'Hz' },
+          options: [
+            { value: 5000, label: '50 Hz' },
+            { value: 6000, label: '60 Hz' },
+          ],
+        },
+        {
+          id: 'dry_contact_mode',
+          type: 'select',
+          name: 'Dry contact mode',
+          category: 'F0 System',
+          writable: true,
+          source: { bank: 'settings', byteOffset: 16, unit: '' },
+          options: [
+            { value: 0, label: 'md1 - Warning relay' },
+            { value: 1, label: 'md2 - Neutral-ground bonding' },
+          ],
+        },
+      ],
+      computedEntities: [],
+      ui: {
+        pages: {
+          monitor: {
+            sections: [
+              {
+                type: 'parameter-table',
+                title: 'Writable settings',
+                filter: { writable: true },
+              },
+            ],
+          },
+        },
+      },
+    } satisfies DeviceDefinition);
+
+    class FakeEventSource {
+      static instances: FakeEventSource[] = [];
+
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      close = vi.fn();
+
+      constructor(public readonly url: string) {
+        FakeEventSource.instances.push(this);
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }));
+      }
+    }
+
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    render(<MonitorPage />);
+
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(1);
+    });
+
+    FakeEventSource.instances[0]?.emit({
+      devices: [
+        {
+          deviceId: 'inv-1',
+          displayName: 'Garage Inverter',
+          definitionId: 'anenji-inverter-rs232',
+          protocolHandler: 'modbus-rtu',
+          enabled: true,
+          isMaster: true,
+          latestTelemetry: {
+            collectedAt: '2026-04-19T12:00:00.000Z',
+            cells: [],
+            activeWarnings: [],
+            parameters: [
+              {
+                key: 'output_voltage_setting',
+                displayName: 'Output voltage',
+                category: 'F1 Output',
+                numericValue: 230,
+                rawValue: 2300,
+                stringValue: '230 V',
+                sortOrder: 0,
+                isWritable: true,
+                unit: 'V',
+                options: [
+                  { value: 2200, label: '220 V' },
+                  { value: 2300, label: '230 V' },
+                  { value: 2400, label: '240 V' },
+                ],
+              },
+              {
+                key: 'output_frequency_setting',
+                displayName: 'Output frequency',
+                category: 'F1 Output',
+                numericValue: 50,
+                rawValue: 5000,
+                stringValue: '50 Hz',
+                sortOrder: 1,
+                isWritable: true,
+                unit: 'Hz',
+                options: [
+                  { value: 5000, label: '50 Hz' },
+                  { value: 6000, label: '60 Hz' },
+                ],
+              },
+              {
+                key: 'output_active_power',
+                displayName: 'Load Power',
+                category: 'Output',
+                numericValue: 540,
+                rawValue: 540,
+                sortOrder: 2,
+                unit: 'W',
+              },
+              {
+                key: 'dry_contact_mode',
+                displayName: 'Dry contact mode',
+                category: 'F0 System',
+                numericValue: 1,
+                rawValue: 1,
+                stringValue: 'md2 - Neutral-ground bonding',
+                sortOrder: 3,
+                isWritable: true,
+                unit: '',
+                options: [
+                  { value: 0, label: 'md1 - Warning relay' },
+                  { value: 1, label: 'md2 - Neutral-ground bonding' },
+                ],
+              },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(await screen.findByText('Garage Inverter')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /garage inverter/i }));
+    fireEvent.click(screen.getByRole('button', { name: 'Writable settings section' }));
+
+    expect(screen.getByText('Dry contact mode')).toBeInTheDocument();
+    expect(screen.getByText('Output voltage')).toBeInTheDocument();
+    expect(screen.getByText('Output frequency')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit Output voltage' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Edit Output frequency' })).toBeDisabled();
+    expect(screen.getAllByText('Turn inverter output off before changing output voltage or frequency.')).toHaveLength(2);
+  });
+
   it('uses entity scale when editing writable numeric parameters', async () => {
     useDeviceDefinitionMock.mockReturnValue({
       version: '1',

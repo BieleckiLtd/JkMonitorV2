@@ -256,6 +256,13 @@ public sealed class DevicesController(
             if (!device.TryResolveDefinition(definitionLoader, out var definition) || definition is null)
                 return BadRequest(new { message = $"Device definition '{device.DefinitionId}' not found." });
 
+            var blockedWriteReason = GetProtectedWriteBlockReason(
+                definition.Device.Id,
+                parameterKey,
+                stateStore.GetDeviceState(deviceId)?.LatestTelemetry);
+            if (blockedWriteReason is not null)
+                return BadRequest(new { message = blockedWriteReason });
+
             var result = string.Equals(definition.Connection.Transport.Type, "ble", StringComparison.OrdinalIgnoreCase)
                 ? await genericBlePollingClient.WriteEntityAsync(
                     device, definition, parameterKey, request.RawValue, cancellationToken)
@@ -311,6 +318,17 @@ public sealed class DevicesController(
         {
             if (!device.TryResolveDefinition(definitionLoader, out var definition) || definition is null)
                 return BadRequest(new { message = $"Device definition '{device.DefinitionId}' not found." });
+
+            var latestTelemetry = stateStore.GetDeviceState(deviceId)?.LatestTelemetry;
+            foreach (var parameter in request.Parameters)
+            {
+                var blockedWriteReason = GetProtectedWriteBlockReason(
+                    definition.Device.Id,
+                    parameter.ParameterKey,
+                    latestTelemetry);
+                if (blockedWriteReason is not null)
+                    return BadRequest(new { message = blockedWriteReason });
+            }
 
             IReadOnlyList<EntityWriteResult> results;
             if (string.Equals(definition.Connection.Transport.Type, "ble", StringComparison.OrdinalIgnoreCase))
@@ -720,10 +738,59 @@ public sealed class DevicesController(
             ? $"Device started, but no successful poll completed within 8 seconds. Last error: {GetStartOutcomeError(outcome, lastError)}"
             : "Device started but no response received within 8 seconds. Check serial port and address.";
 
+    internal static string? GetProtectedWriteBlockReason(
+        string definitionId,
+        string parameterKey,
+        DeviceTelemetrySnapshot? latestTelemetry)
+    {
+        if (!string.Equals(definitionId, "anenji-inverter-rs232", StringComparison.OrdinalIgnoreCase) ||
+            !IsAnenjiProtectedOutputSetting(parameterKey))
+        {
+            return null;
+        }
+
+        return IsAnenjiOutputActive(latestTelemetry)
+            ? "Turn inverter output off before changing output voltage or frequency."
+            : null;
+    }
+
+    internal static bool IsAnenjiOutputActive(DeviceTelemetrySnapshot? latestTelemetry)
+    {
+        if (latestTelemetry?.Parameters is null)
+            return false;
+
+        return HasPositiveParameterValue(latestTelemetry.Parameters, "output_active_power") ||
+               HasPositiveParameterValue(latestTelemetry.Parameters, "load_percent") ||
+               HasPositiveParameterValue(latestTelemetry.Parameters, "output_current");
+    }
+
     private static bool IsPassiveAdvertisementDefinition(Contracts.DeviceDefinition.DeviceDefinition definition)
     {
         return string.Equals(definition.Connection.Transport.Type, "ble", StringComparison.OrdinalIgnoreCase) &&
                string.Equals(definition.Connection.Protocol.Type, "ble-advertisement", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsAnenjiProtectedOutputSetting(string parameterKey)
+        => string.Equals(parameterKey, "output_voltage_setting", StringComparison.OrdinalIgnoreCase) ||
+           string.Equals(parameterKey, "output_frequency_setting", StringComparison.OrdinalIgnoreCase);
+
+    private static bool HasPositiveParameterValue(IReadOnlyList<DeviceParameter> parameters, string parameterKey)
+    {
+        var parameter = parameters.FirstOrDefault(candidate =>
+            string.Equals(candidate.Key, parameterKey, StringComparison.OrdinalIgnoreCase));
+        if (parameter is null)
+            return false;
+
+        if (parameter.BooleanValue is true)
+            return true;
+
+        if (parameter.NumericValue is { } numericValue)
+            return Math.Abs(numericValue) > 0;
+
+        if (parameter.RawValue is { } rawValue)
+            return Math.Abs(rawValue) > 0;
+
+        return false;
     }
 
     private DeviceConfigurationsResponse BuildDeviceConfigurationResponse(IReadOnlyList<DeviceConfiguration> devices)

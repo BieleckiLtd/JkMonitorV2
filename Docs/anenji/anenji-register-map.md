@@ -150,8 +150,14 @@
 
 ## 8. Settings — Complete Map (Data Source: `settings`, addr 601, count 90)
 
-This is the core settings block. All settings use FC 0x03 for read and FC 0x10
-(write multiple, qty=1) for write.
+This is the core settings block. All settings use FC 0x03 for read. Confirmed
+Modbus-writeable settings use FC 0x10 (write multiple, qty=1) or the app's
+FC06 fallback where the firmware accepts it.
+
+Registers 606 and 607 mirror the front-panel F1P03/F1P04 output voltage and
+frequency selections, but live probing on this firmware shows they are not
+Modbus-writeable: FC 0x10 returns exception 0x07 and FC 0x06 returns no reply.
+They remain readable only in the app and device definition.
 
 `Prog` uses the inverter front-panel program numbers from the user manual. `?`
 marks a probable match that still needs LCD or write-path verification, and `—`
@@ -175,10 +181,12 @@ in the register map.
 | F0 | P09 | Buzzer mode | 603 / `buzzer_mode` | Confirmed; physical register sits in the 600 block |
 | F0 | P10 | Modbus ID setting | 865 / `modbus_address` | Confirmed live by slave switch probe |
 | F0 | P16 | Dry contact mode | 689 / `dry_contact_mode` | Confirmed by live LCD toggle; previous 689/690 app mapping was swapped |
+| F0 | — | Boot method | 406 / `boot_method` | Read-only mirror of the official datalogger boot-method text; direct writes to 406 were rejected |
+| F0 | — | Automatic mains output enable | 690 / `automatic_mains_output_enable` | Confirmed live FC10-persistent control; best match for the official datalogger wording |
 | F1 | P01 | Output source priority | 601 / `output_priority` | Confirmed |
 | F1 | P02 | AC output mode | 600 | Confirmed; not exposed as a UI entity today |
-| F1 | P03 | Output voltage | 606 / `output_voltage_setting` | Confirmed |
-| F1 | P04 | Output frequency | 607 / `output_frequency_setting` | Confirmed |
+| F1 | P03 | Output voltage | 606 / `output_voltage_setting` | LCD-side changes are mirrored here; the app now targets this register only when output/load is inactive |
+| F1 | P04 | Output frequency | 607 / `output_frequency_setting` | LCD-side changes are mirrored here; the app now targets this register only when output/load is inactive |
 | F1 | P06 | Slave output source priority | — | Manual feature present; live register still not confirmed |
 | F1 | P07 | Slave output source priority start hour | — | Manual feature present; live register still not confirmed |
 | F1 | P08 | Slave output source priority start minute | — | Manual feature present; live register still not confirmed |
@@ -232,8 +240,8 @@ in the register map.
 | 603 | 303 | W | F0P09 | Buzzer mode | 0=Off, 1=Faults+warnings, 2=Faults only, 3=All | 0 (Off) | 🔍 |
 | 604 | — | W | — | Unknown | — | 0 | ❓ |
 | 605 | 402 | **R** | — | **Current output priority** (mirror of 601) | same as 601 | 2 (SBU) | **✅ LCD** |
-| 606 | 320 | Wm | F1P03 | Output voltage | ×0.1 V (2200/2300/2400) | 2300 (230V) | 🔍 |
-| 607 | 321 | Wm | F1P04 | Output frequency | ×0.01 Hz (5000/6000) | 5000 (50Hz) | 🔍 |
+| 606 | 320 | W? | F1P03 | Output voltage | ×0.1 V (2200/2300/2400) | 2300 (230V) | ✅ Live LCD mirror; app writes are guarded to output-off state |
+| 607 | 321 | W? | F1P04 | Output frequency | ×0.01 Hz (5000/6000) | 5000 (50Hz) | ✅ Live LCD mirror; app writes are guarded to output-off state |
 | 608–629 | — | W | — | Reserved / unused | all 0 | 0 | — |
 
 ### 8.2 F2 Battery Settings (regs 630–676)
@@ -291,7 +299,13 @@ in the register map.
 | 687 | 314 | W | — | Warning mask (low word) | bitfield | 65535 (0xFFFF) | 🔍 |
 | 688 | 315 | W | — | Warning mask (high word) | bitfield | 60927 (0xEDFF) | 🔍 |
 | 689 | 316? | W | F0P16 | Dry contact mode | 0=md1 warning relay, 1=md2 neutral-ground bonding | 0 (md1) | 🔍 |
-| 690 | 420 | W | — | Remote switch | 0=Off, 1=On | 0 (Off) | 🔍 |
+| 690 | 420 | W | — | Automatic mains output enable | 0=Disabled, 1=Enabled | 0 (Disabled) | ✅ Live FC10 write |
+
+> Register 406 is a separate read-only boot-method mirror outside the 677–690 F0
+> block. Observed values are `0=Can be powered on locally or remotely`,
+> `1=Only local turn-on`, and `2=Only remote turn-on`. Direct writes to 406 via
+> FC10 and FC06 were rejected, and no writable alias was found in the nearby
+> 400–420 or 680–690 ranges.
 
 ### 8.4 F4 Factory Reset (reg 795)
 
@@ -351,7 +365,7 @@ For users familiar with the standard GM6200/SMG-II protocol:
 | 351 | 642 | +291 | F2P25? | Max battery discharge current |
 | 402 | 605 | +203 | — | Current output priority (R) |
 | 403 | 636 | +233 | — | Current charge priority (R) |
-| 420 | 689 | +269 | — | Remote switch |
+| 420 | 690 | +270 | — | Automatic mains output enable |
 | 421 | 795 | +374 | F4P01 | Reset stored PV and output load energy data |
 | 434 | 696 | +262 | F3P01 | Time setting - Year |
 | 435 | 697 | +262 | F3P02 | Time setting - Month |

@@ -1,4 +1,5 @@
 using FluxMonitor.Backend.Controllers;
+using FluxMonitor.Contracts.Status;
 using Xunit;
 
 namespace FluxMonitor.Backend.Tests;
@@ -106,5 +107,71 @@ public sealed class DevicesControllerStartTests
         Assert.Equal(
             "Bluetooth operation failed. Check System > Bluetooth and the device connection, then try again.",
             error);
+    }
+
+    [Fact]
+    public void GetProtectedWriteBlockReason_BlocksAnenjiOutputSettingWritesWhenLoadIsActive()
+    {
+        var latestTelemetry = new DeviceTelemetrySnapshot
+        {
+            CollectedAt = DateTimeOffset.UtcNow,
+            Cells = [],
+            ActiveWarnings = [],
+            Parameters =
+            [
+                new DeviceParameter
+                {
+                    Key = "output_active_power",
+                    DisplayName = "Load Power",
+                    Category = "Output",
+                    NumericValue = 540,
+                    SortOrder = 0
+                }
+            ]
+        };
+
+        var reason = DevicesController.GetProtectedWriteBlockReason(
+            "anenji-inverter-rs232",
+            "output_voltage_setting",
+            latestTelemetry);
+
+        Assert.Equal("Turn inverter output off before changing output voltage or frequency.", reason);
+    }
+
+    [Fact]
+    public void GetProtectedWriteBlockReason_AllowsAnenjiOutputSettingWritesWhenLoadIsInactive()
+    {
+        var latestTelemetry = new DeviceTelemetrySnapshot
+        {
+            CollectedAt = DateTimeOffset.UtcNow,
+            Cells = [],
+            ActiveWarnings = [],
+            Parameters =
+            [
+                new DeviceParameter
+                {
+                    Key = "output_active_power",
+                    DisplayName = "Load Power",
+                    Category = "Output",
+                    NumericValue = 0,
+                    SortOrder = 0
+                },
+                new DeviceParameter
+                {
+                    Key = "load_percent",
+                    DisplayName = "Load",
+                    Category = "Output",
+                    NumericValue = 0,
+                    SortOrder = 1
+                }
+            ]
+        };
+
+        var reason = DevicesController.GetProtectedWriteBlockReason(
+            "anenji-inverter-rs232",
+            "output_frequency_setting",
+            latestTelemetry);
+
+        Assert.Null(reason);
     }
 }

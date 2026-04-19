@@ -64,6 +64,31 @@ public sealed class DeviceDefinitionLoaderTests : IDisposable
         Assert.False(Directory.Exists(definitionsDirectory));
     }
 
+    [Fact]
+    public void LoadAll_AnenjiOutputSettingsAreWritable()
+    {
+        var loader = new DeviceDefinitionLoader(
+            "devices",
+            Path.GetFullPath(Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "..", "..", "..", "..", "..")),
+            new SimpleHttpClientFactory(),
+            NullLogger<DeviceDefinitionLoader>.Instance);
+
+        loader.LoadAll();
+
+        Assert.True(loader.TryGet("anenji-inverter-rs232", out var definition));
+        Assert.NotNull(definition);
+
+        var outputVoltage = Assert.Single(definition!.Entities, entity => entity.Id == "output_voltage_setting");
+        var outputFrequency = Assert.Single(definition.Entities, entity => entity.Id == "output_frequency_setting");
+
+        Assert.True(outputVoltage.Writable);
+        Assert.NotNull(outputVoltage.Write);
+        Assert.Equal(606, outputVoltage.Write!.Address);
+        Assert.True(outputFrequency.Writable);
+        Assert.NotNull(outputFrequency.Write);
+        Assert.Equal(607, outputFrequency.Write!.Address);
+    }
+
     public void Dispose()
     {
         if (Directory.Exists(_tempRoot))
@@ -77,3 +102,8 @@ public sealed class DeviceDefinitionLoaderTests : IDisposable
         public HttpClient CreateClient(string name) => new();
     }
 }
+
+
+
+
+

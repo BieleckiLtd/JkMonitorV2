@@ -917,7 +917,8 @@ function ParameterRow({
   const [writeResult, setWriteResult] = useState<{ success: boolean; message: string } | null>(null);
   const isSwitchSetting = isSwitchSettingParam(param.key);
   const statusChip = getSwitchStatusChip(param, telemetry, paramByKey);
-  const canEdit = Boolean(param.isWritable);
+  const editBlockedReason = getParameterEditBlockedReason(param, telemetry, paramByKey, definition);
+  const canEdit = Boolean(param.isWritable) && editBlockedReason == null;
   const value = formatParamValue(param, temperatureUnit, isSwitchSetting ? 'enabled-disabled' : 'yes-no');
   const entity = definition?.entities.find((candidate) => candidate.id === param.key);
   const displayUnit = getTemperatureDisplayUnit(param.unit, temperatureUnit) ?? param.unit;
@@ -1043,9 +1044,18 @@ function ParameterRow({
                 {value}
                 {displayUnit && <span className='ml-1 text-xs font-normal text-muted-foreground'>{displayUnit}</span>}
               </span>
-              {canEdit && (
-                <button onClick={startEdit} className='rounded p-1 text-muted-foreground/60 hover:text-primary hover:bg-primary/10 transition-colors'
-                  title='Edit parameter'>
+              {param.isWritable && (
+                <button
+                  onClick={startEdit}
+                  disabled={!canEdit}
+                  aria-label={`Edit ${param.displayName}`}
+                  className={cn(
+                    'rounded p-1 transition-colors',
+                    canEdit
+                      ? 'text-muted-foreground/60 hover:bg-primary/10 hover:text-primary'
+                      : 'cursor-not-allowed text-muted-foreground/30',
+                  )}
+                  title={editBlockedReason ?? 'Edit parameter'}>
                   <Edit2 className='h-3 w-3' />
                 </button>
               )}
@@ -1056,6 +1066,11 @@ function ParameterRow({
       {writeResult && (
         <div className={cn('mt-1 text-[10px]', writeResult.success ? 'text-emerald-400' : 'text-rose-400')}>
           {writeResult.success ? '✓ ' : '✗ '}{writeResult.message}
+        </div>
+      )}
+      {!writeResult && editBlockedReason && (
+        <div className='mt-1 text-[10px] text-muted-foreground'>
+          {editBlockedReason}
         </div>
       )}
     </div>
@@ -2225,6 +2240,49 @@ function formatCategoryTitle(category: string) {
 
 function isSwitchSettingParam(key: string): boolean {
   return key === 'charge_switch' || key === 'discharge_switch' || key === 'balancer_switch';
+}
+
+function getParameterEditBlockedReason(
+  param: DeviceParameter,
+  _telemetry: DeviceTelemetrySnapshot,
+  paramByKey: Map<string, DeviceParameter>,
+  definition?: DeviceDefinition | null,
+): string | null {
+  if (definition?.device.id !== 'anenji-inverter-rs232') {
+    return null;
+  }
+
+  if (param.key !== 'output_voltage_setting' && param.key !== 'output_frequency_setting') {
+    return null;
+  }
+
+  return isAnenjiOutputActive(paramByKey)
+    ? 'Turn inverter output off before changing output voltage or frequency.'
+    : null;
+}
+
+function isAnenjiOutputActive(paramByKey: Map<string, DeviceParameter>): boolean {
+  return hasPositiveParameterValue(paramByKey.get('output_active_power')) ||
+    hasPositiveParameterValue(paramByKey.get('load_percent')) ||
+    hasPositiveParameterValue(paramByKey.get('output_current'));
+}
+
+function hasPositiveParameterValue(param: DeviceParameter | undefined): boolean {
+  if (!param) {
+    return false;
+  }
+
+  if (param.booleanValue != null) {
+    return param.booleanValue;
+  }
+
+  const numericValue = param.numericValue != null && Number.isFinite(Number(param.numericValue))
+    ? Number(param.numericValue)
+    : param.rawValue != null && Number.isFinite(Number(param.rawValue))
+      ? Number(param.rawValue)
+      : null;
+
+  return numericValue != null && Math.abs(numericValue) > 0;
 }
 
 function buildSwitchStatusChip(
