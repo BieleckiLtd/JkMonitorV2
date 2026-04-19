@@ -79,7 +79,7 @@
       "pollGroup": "fast"
     },
     {
-      "_comment": "Regs 601-690: all user-configurable settings (output/charge priority, voltages, currents, mode toggles, Modbus address, dry contact)",
+      "_comment": "Regs 601-690: primary user-configurable settings (output/charge priority, voltages, currents, mode toggles, dry contact)",
       "id": "settings",
       "name": "Settings",
       "address": 601,
@@ -106,6 +106,19 @@
       "name": "Device Firmware",
       "address": 691,
       "count": 71,
+      "functionCode": 3,
+      "pollGroup": "slow",
+      "write": {
+        "functionCode": 16,
+        "registersPerWrite": 1
+      }
+    },
+    {
+      "_comment": "Regs 821-870: extended settings/configuration block. Reg 865 stores the live Modbus slave address.",
+      "id": "settings_ext",
+      "name": "Settings Extended",
+      "address": 821,
+      "count": 50,
       "functionCode": 3,
       "pollGroup": "slow",
       "write": {
@@ -738,8 +751,8 @@
       "name": "Modbus ID setting",
       "category": "F0 System",
       "source": {
-        "bank": "settings",
-        "byteOffset": 170,
+        "bank": "settings_ext",
+        "byteOffset": 88,
         "dataType": "uint16"
       },
       "display": {
@@ -747,7 +760,7 @@
       },
       "writable": true,
       "write": {
-        "address": 686
+        "address": 865
       }
     },
     {

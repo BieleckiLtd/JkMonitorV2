@@ -831,7 +831,7 @@ describe('MonitorPage', () => {
               { key: 'output_priority', displayName: 'Output Priority', category: 'Power Management', numericValue: 0, stringValue: 'Utility first (UTI)', sortOrder: 6, unit: '' },
               { key: 'output_voltage', displayName: 'Output Voltage', category: 'Output', numericValue: 230.4, sortOrder: 6, unit: 'V' },
               { key: 'max_charge_current', displayName: 'Max Charge Current', category: 'F2 Battery', numericValue: 100, rawValue: 100, sortOrder: 7, isWritable: true, unit: 'A' },
-              { key: 'modbus_address', displayName: 'Modbus ID setting', category: 'F0 System', numericValue: 0, rawValue: 0, sortOrder: 7, isWritable: true, unit: '' },
+              { key: 'modbus_address', displayName: 'Modbus ID setting', category: 'F0 System', numericValue: 9, rawValue: 9, sortOrder: 7, isWritable: true, unit: '' },
               { key: 'output_apparent_power', displayName: 'Output Apparent Power', category: 'Output', numericValue: 900, sortOrder: 8, unit: 'VA' },
               { key: 'output_frequency', displayName: 'Output Frequency', category: 'Output', numericValue: 49.92, sortOrder: 8, unit: 'Hz' },
               { key: 'clock_year', displayName: 'Time setting - Year', category: 'F3 Time', numericValue: 2026, rawValue: 2026, sortOrder: 9, isWritable: true, unit: '', displayFormatter: 'plain-number' },

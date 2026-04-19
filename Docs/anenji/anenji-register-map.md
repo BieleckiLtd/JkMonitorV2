@@ -173,7 +173,7 @@ in the register map.
 | F0 | P07 | Auto return to default display screen | 678 / `lcd_auto_return` | Confirmed |
 | F0 | P08 | Backlight control | 679 / `lcd_backlight` | Confirmed |
 | F0 | P09 | Buzzer mode | 603 / `buzzer_mode` | Confirmed; physical register sits in the 600 block |
-| F0 | P10 | Modbus ID setting | 686 / `modbus_address` | Confirmed |
+| F0 | P10 | Modbus ID setting | 865 / `modbus_address` | Confirmed live by slave switch probe |
 | F0 | P16 | Dry contact mode | 690 / `dry_contact_mode` | Confirmed |
 | F1 | P01 | Output source priority | 601 / `output_priority` | Confirmed |
 | F1 | P02 | AC output mode | 600 | Confirmed; not exposed as a UI entity today |
@@ -287,7 +287,7 @@ in the register map.
 | 683 | 309 | W | F0P05 | Over-temperature auto restart | 0=No, 1=Yes | 0 (No) | 🔍 |
 | 684 | 310 | W | F0P03 | Overload transfer to bypass | 0=Disable, 1=Enable | 0 (Disable) | 🔍 |
 | 685 | — | R? | — | Unknown (read-only, does not persist writes) | — | 0 | ❓ |
-| 686 | 312 | W | F0P10 | Modbus ID setting | 1–247 | 0 | 🔍 |
+| 686 | 312 | W? | — | Not the Modbus ID register on this firmware | — | 0 | ❌ |
 | 687 | 314 | W | — | Warning mask (low word) | bitfield | 65535 (0xFFFF) | 🔍 |
 | 688 | 315 | W | — | Warning mask (high word) | bitfield | 60927 (0xEDFF) | 🔍 |
 | 689 | 420 | W | — | Remote switch | 0=Off, 1=On | 1 (On) | 🔍 |
@@ -322,7 +322,7 @@ For users familiar with the standard GM6200/SMG-II protocol:
 | 308 | 682 | +374 | F0P04 | Overload auto restart |
 | 309 | 683 | +374 | F0P05 | Over-temperature auto restart |
 | 310 | 684 | +374 | F0P03 | Overload transfer to bypass |
-| 312 | 686 | +374 | F0P10 | Modbus ID setting |
+| 312 | 865 | +553 | F0P10 | Modbus ID setting (actual live register on tested unit) |
 | 313 | 656? | +343? | — | Eq enable (ERR) |
 | 314–315 | 687–688 | +373 | — | Warning mask |
 | 316? | 690 | +374? | F0P16 | Dry contact mode |
