@@ -734,7 +734,7 @@ describe('SystemPage', () => {
     expect(screen.getAllByText('+0').length).toBeGreaterThan(0);
     expect(screen.getByText('+9')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /register 0: 0x4142/i })).toBeInTheDocument();
-    expect(screen.getByText(/select 2 registers for float32 or 4 registers for float64/i)).toBeInTheDocument();
+    expect(screen.getByText(/hexadecimal/i)).toBeInTheDocument();
   });
 
   it('loads, saves, and deletes named Modbus scanner settings', async () => {

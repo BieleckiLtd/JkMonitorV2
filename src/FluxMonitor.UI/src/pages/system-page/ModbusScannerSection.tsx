@@ -1,5 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react';
-import { Binary, Cable, LoaderCircle, PlugZap, RefreshCcw, ScanSearch } from 'lucide-react';
+import { Cable, LoaderCircle, PlugZap, RefreshCcw, ScanSearch } from 'lucide-react';
 import { PanelHeader } from '../../components/PanelHeader';
 import { Button } from '../../components/ui/button';
 import { Card, CardContent } from '../../components/ui/card';
@@ -12,7 +12,6 @@ import {
   decodeSelection,
   formatRegisterValue,
   getSelectionSummary,
-  type ModbusDecodeMode,
   type ModbusEntityDataType,
   type ModbusEntityKind,
   type ModbusMatrixAnnotation,
@@ -35,14 +34,6 @@ const parityOptions = ['None', 'Even', 'Odd'];
 const dataBitsOptions = ['7', '8'];
 const stopBitsOptions = ['1', '2'];
 const registerKindOptions: ModbusScannerReadRequest['registerKind'][] = ['holding', 'input'];
-const decodeModes: { value: ModbusDecodeMode; label: string }[] = [
-  { value: 'ascii', label: 'ASCII' },
-  { value: 'signed-int', label: 'Signed int' },
-  { value: 'unsigned-int', label: 'Unsigned int' },
-  { value: 'hex', label: 'Hex' },
-  { value: 'binary', label: 'Binary' },
-  { value: 'float', label: 'Float' },
-];
 const matrixDisplayModes: { value: ModbusMatrixDisplayMode; label: string }[] = [
   { value: 'hex', label: 'Hex word' },
   { value: 'unsigned', label: 'Unsigned' },
@@ -74,7 +65,6 @@ const annotationPalette = [
 ];
 
 type ModbusEntityDraft = {
-  id: string;
   name: string;
   category: string;
   entityType: ModbusEntityKind;
@@ -132,14 +122,11 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
   const [feedback, setFeedback] = useState<{ message: string; isError: boolean } | null>(null);
   const [selectionStart, setSelectionStart] = useState<number | null>(null);
   const [selectionEnd, setSelectionEnd] = useState<number | null>(null);
-  const [detailView, setDetailView] = useState<'raw' | 'decoded'>('decoded');
-  const [decodeMode, setDecodeMode] = useState<ModbusDecodeMode>('float');
   const [matrixColumns, setMatrixColumns] = useState('10');
   const [matrixDisplayMode, setMatrixDisplayMode] = useState<ModbusMatrixDisplayMode>('hex');
   const [annotations, setAnnotations] = useState<ModbusMatrixAnnotation[]>([]);
   const [activeAnnotationId, setActiveAnnotationId] = useState<string | null>(null);
   const [entityDraft, setEntityDraft] = useState<ModbusEntityDraft>({
-    id: '',
     name: '',
     category: 'Registers',
     entityType: 'sensor',
@@ -190,7 +177,10 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
     () => getSelectionSummary(scanResult, selectionStart, selectionEnd),
     [scanResult, selectionEnd, selectionStart],
   );
-  const decodedValues = useMemo(() => decodeSelection(selection, decodeMode), [decodeMode, selection]);
+  const decodedValues = useMemo(
+    () => decodeSelection(selection, entityDataTypeToDecodeMode(entityDraft.dataType)),
+    [entityDraft.dataType, selection],
+  );
   const matrixColumnCount = useMemo(() => parsePositiveInteger(matrixColumns, 10), [matrixColumns]);
   const matrixRows = useMemo(() => buildRegisterMatrix(scanResult, matrixColumnCount), [matrixColumnCount, scanResult]);
   const activeAnnotation = useMemo(
@@ -220,7 +210,6 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
   useEffect(() => {
     if (activeAnnotation) {
       setEntityDraft({
-        id: activeAnnotation.id,
         name: activeAnnotation.name,
         category: activeAnnotation.category,
         entityType: activeAnnotation.entityType,
@@ -234,13 +223,14 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
     }
 
     if (selection) {
+      const defaultName = `REG_${selection.startAddress}_${selection.endAddress}`;
       setEntityDraft((current) => ({
         ...current,
-        name: current.name.trim() ? current.name : `REG_${selection.startAddress}_${selection.endAddress}`,
-        id: current.id.trim() ? current.id : slugifyEntityId(current.name.trim() || `REG_${selection.startAddress}_${selection.endAddress}`),
+        name: current.name.trim() ? current.name : defaultName,
+        dataType: current.name.trim() ? current.dataType : matrixDisplayModeToEntityDataType(matrixDisplayMode),
       }));
     }
-  }, [activeAnnotation, selection]);
+  }, [activeAnnotation, matrixDisplayMode, selection]);
 
   const runScan = useCallback(async (connecting: boolean) => {
     let request: ModbusScannerReadRequest;
@@ -494,10 +484,19 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
     }
 
     const name = entityDraft.name.trim();
-    const id = slugifyEntityId(entityDraft.id.trim() || name);
+    const id = slugifyEntityId(name);
     if (!name || !id) {
       setFeedback({
-        message: 'Entity name and id are required.',
+        message: 'Entity name is required.',
+        isError: true,
+      });
+      return;
+    }
+
+    const hasDuplicateName = annotations.some((annotation) => annotation.id !== activeAnnotationId && annotation.name.trim().toLowerCase() === name.toLowerCase());
+    if (hasDuplicateName) {
+      setFeedback({
+        message: 'Entity name must be unique.',
         isError: true,
       });
       return;
@@ -993,57 +992,14 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                     Click a register for a single-word selection. Shift-click another row to expand to a contiguous range.
                   </div>
                 </div>
-                <div className='inline-flex rounded-xl border border-border/70 bg-background/75 p-1'>
-                  <button
-                    type='button'
-                    onClick={() => setDetailView('raw')}
-                    className={cn(
-                      'rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
-                      detailView === 'raw' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
-                    )}
-                  >
-                    Raw
-                  </button>
-                  <button
-                    type='button'
-                    onClick={() => setDetailView('decoded')}
-                    className={cn(
-                      'rounded-lg px-3 py-1.5 text-xs font-medium transition-colors',
-                      detailView === 'decoded' ? 'bg-primary text-primary-foreground' : 'text-muted-foreground hover:bg-accent/40 hover:text-foreground',
-                    )}
-                  >
-                    Decoded
-                  </button>
-                </div>
               </div>
 
               {selection ? (
                 <div className='mt-4 space-y-4'>
-                  <div className='grid gap-3 sm:grid-cols-2'>
-                    <SummaryTile label='Start register' value={String(selection.startAddress)} />
-                    <SummaryTile label='End register' value={String(selection.endAddress)} />
-                    <SummaryTile label='Registers' value={String(selection.registerCount)} />
-                    <SummaryTile label='Bytes' value={String(selection.byteCount)} />
-                  </div>
-
                   <div className='rounded-2xl border border-border/70 bg-background/55 p-4'>
-                    <div className='flex flex-wrap items-center justify-between gap-3'>
-                      <div>
-                        <div className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>Entity mapping</div>
-                        <div className='mt-1 text-sm text-muted-foreground'>Turn the selected register range into a reusable entity definition overlay.</div>
-                      </div>
-                      <div className='rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-right'>
-                        <div className='text-[10px] uppercase tracking-[0.18em] text-muted-foreground'>Range</div>
-                        <div className='font-mono text-xs text-foreground'>{selection.startAddress}-{selection.endAddress}</div>
-                      </div>
-                    </div>
-
-                    <div className='mt-4 grid gap-3 md:grid-cols-2'>
+                    <div className='grid gap-3 md:grid-cols-2'>
                       <Field label='Entity name'>
-                        <Input aria-label='Entity name' value={entityDraft.name} onChange={(event) => setEntityDraft((current) => ({ ...current, name: event.target.value, id: current.id.trim() ? current.id : slugifyEntityId(event.target.value) }))} />
-                      </Field>
-                      <Field label='Entity id'>
-                        <Input aria-label='Entity id' value={entityDraft.id} onChange={(event) => setEntityDraft((current) => ({ ...current, id: event.target.value }))} />
+                        <Input aria-label='Entity name' value={entityDraft.name} onChange={(event) => setEntityDraft((current) => ({ ...current, name: event.target.value }))} />
                       </Field>
                       <Field label='Category'>
                         <Input aria-label='Entity category' value={entityDraft.category} onChange={(event) => setEntityDraft((current) => ({ ...current, category: event.target.value }))} />
@@ -1097,11 +1053,10 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                           onClick={() => {
                             setActiveAnnotationId(null);
                             setEntityDraft({
-                              id: '',
                               name: '',
                               category: 'Registers',
                               entityType: 'sensor',
-                              dataType: 'uint16',
+                              dataType: matrixDisplayModeToEntityDataType(matrixDisplayMode),
                               formatter: '',
                               unit: '',
                               scale: '1',
@@ -1115,49 +1070,18 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                     </div>
                   </div>
 
-                  {detailView === 'raw' ? (
-                    <div className='space-y-2'>
-                      {selection.registers.map((register) => (
-                        <div key={register.address} className='rounded-xl border border-border/70 bg-background/70 px-3 py-3 font-mono text-sm text-foreground'>
-                          <div className='flex flex-wrap items-center justify-between gap-2'>
-                            <span>Register {register.address}</span>
-                            <span>{register.hexValue}</span>
-                          </div>
-                          <div className='mt-2 text-xs text-muted-foreground'>
-                            {toByteHex(register.highByte)} {toByteHex(register.lowByte)} · unsigned {register.unsignedValue}
-                          </div>
+                  <div className='space-y-2'>
+                    {decodedValues.map((value) => (
+                      <div key={value.label} className='rounded-xl border border-border/70 bg-background/70 px-3 py-3'>
+                        <div className='flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
+                          <Cable className='h-3.5 w-3.5' />
+                          {value.label}
                         </div>
-                      ))}
-                    </div>
-                  ) : (
-                    <div className='space-y-4'>
-                      <Field label='Decode mode'>
-                        <Select value={decodeMode} onValueChange={(value) => setDecodeMode((value ?? 'float') as ModbusDecodeMode)}>
-                          <SelectTrigger aria-label='Decode mode' className='w-full'>
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            {decodeModes.map((mode) => (
-                              <SelectItem key={mode.value} value={mode.value}>{mode.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </Field>
-
-                      <div className='space-y-2'>
-                        {decodedValues.map((value) => (
-                          <div key={value.label} className='rounded-xl border border-border/70 bg-background/70 px-3 py-3'>
-                            <div className='flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
-                              {decodeMode === 'binary' ? <Binary className='h-3.5 w-3.5' /> : <Cable className='h-3.5 w-3.5' />}
-                              {value.label}
-                            </div>
-                            <div className='mt-2 break-all font-mono text-sm text-foreground'>{value.value}</div>
-                            {value.detail ? <div className='mt-1 text-xs text-muted-foreground'>{value.detail}</div> : null}
-                          </div>
-                        ))}
+                        <div className='mt-2 break-all font-mono text-sm text-foreground'>{value.value}</div>
+                        {value.detail ? <div className='mt-1 text-xs text-muted-foreground'>{value.detail}</div> : null}
                       </div>
-                    </div>
-                  )}
+                    ))}
+                  </div>
                 </div>
               ) : (
                 <div className='mt-4 rounded-2xl border border-dashed border-border/70 bg-muted/20 px-4 py-8 text-center text-sm text-muted-foreground'>
@@ -1192,7 +1116,7 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                           <div>
                             <div className='font-semibold text-foreground'>{annotation.name}</div>
                             <div className='text-xs text-muted-foreground'>
-                              {annotation.id} · {annotation.entityType} · {annotation.dataType} · {annotation.startAddress}-{annotation.endAddress}
+                              {annotation.entityType} · {annotation.dataType} · {annotation.startAddress}-{annotation.endAddress}
                             </div>
                           </div>
                           <div className='flex flex-wrap gap-2'>
@@ -1324,15 +1248,6 @@ function CollapsibleSection({
   );
 }
 
-function SummaryTile({ label, value }: { label: string; value: string }) {
-  return (
-    <div className='rounded-xl border border-border/70 bg-background/70 px-3 py-3'>
-      <div className='text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>{label}</div>
-      <div className='mt-2 font-mono text-sm text-foreground'>{value}</div>
-    </div>
-  );
-}
-
 function buildRequest(form: ModbusScannerFormState): ModbusScannerReadRequest {
   const request = {
     portName: form.portName.trim(),
@@ -1400,10 +1315,6 @@ function parsePositiveInteger(value: string, fallbackValue: number) {
   return Math.min(parsed, 32);
 }
 
-function toByteHex(value: number) {
-  return `0x${value.toString(16).toUpperCase().padStart(2, '0')}`;
-}
-
 function parseOptionalInteger(value: string) {
   const normalized = value.trim();
   if (!normalized) {
@@ -1432,6 +1343,40 @@ function slugifyEntityId(value: string) {
     .toLowerCase()
     .replace(/[^a-z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
+}
+
+function matrixDisplayModeToEntityDataType(mode: ModbusMatrixDisplayMode): ModbusEntityDataType {
+  switch (mode) {
+    case 'ascii':
+      return 'ascii';
+    case 'signed':
+      return 'int16';
+    case 'unsigned':
+      return 'uint16';
+    case 'binary':
+    case 'hex':
+    default:
+      return 'hex';
+  }
+}
+
+function entityDataTypeToDecodeMode(dataType: ModbusEntityDataType) {
+  switch (dataType) {
+    case 'ascii':
+      return 'ascii';
+    case 'int16':
+    case 'int32':
+      return 'signed-int';
+    case 'uint16':
+    case 'uint32':
+      return 'unsigned-int';
+    case 'float32':
+    case 'float64':
+      return 'float';
+    case 'hex':
+    default:
+      return 'hex';
+  }
 }
 
 function rangesOverlap(left: ModbusMatrixAnnotation, right: ModbusMatrixAnnotation) {
