@@ -257,7 +257,7 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
         throw new Error('The scanner returned an empty response.');
       }
 
-      const result = body as ModbusScannerReadResult;
+      const result = validateScanResult(body as ModbusScannerReadResult);
       setScanResult(result);
       setIsConnected(true);
       setFeedback({
@@ -423,6 +423,69 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
       });
     } finally {
       setIsDeletingSettingName(null);
+    }
+  }
+
+  async function shiftRegisterPage(direction: -1 | 1) {
+    const pageSize = parsePositiveInteger(form.registerCount, 24);
+    const currentStart = parseIntegerOrFallback(form.startRegister, 0);
+    const nextStart = Math.max(0, currentStart + direction * pageSize);
+
+    if (nextStart === currentStart) {
+      return;
+    }
+
+    setForm((current) => ({ ...current, startRegister: String(nextStart) }));
+
+    const nextForm = {
+      ...form,
+      startRegister: String(nextStart),
+    };
+
+    let request: ModbusScannerReadRequest;
+    try {
+      request = buildRequest(nextForm);
+    } catch (error) {
+      setFeedback({
+        message: error instanceof Error ? error.message : 'Enter valid Modbus settings before changing pages.',
+        isError: true,
+      });
+      return;
+    }
+
+    setIsLoading(true);
+    setFeedback(null);
+
+    try {
+      const response = await fetch('/api/system/modbus-scanner/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(request),
+      });
+      const body = await readJsonResponse<ModbusScannerReadResult | { error?: string }>(response);
+      if (!response.ok) {
+        throw new Error(body && 'error' in body && body.error ? body.error : 'Unable to read Modbus registers.');
+      }
+
+      if (!body) {
+        throw new Error('The scanner returned an empty response.');
+      }
+
+      const result = validateScanResult(body as ModbusScannerReadResult);
+      setScanResult(result);
+      setSelectionStart(result.registers[0]?.address ?? null);
+      setSelectionEnd(result.registers[0]?.address ?? null);
+      setFeedback({
+        message: `Showing ${result.startRegister}-${result.startRegister + result.registerCount - 1}.`,
+        isError: false,
+      });
+    } catch (error) {
+      setFeedback({
+        message: error instanceof Error ? error.message : 'Unable to change register page.',
+        isError: true,
+      });
+    } finally {
+      setIsLoading(false);
     }
   }
 
@@ -693,10 +756,12 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
 
                 <Field label='Register count'>
                   <Input aria-label='Register count' value={form.registerCount} onChange={(event) => updateForm('registerCount', event.target.value)} />
+                  <div className='text-[11px] text-muted-foreground'>How many registers to show in the current matrix page.</div>
                 </Field>
 
                 <Field label='Registers per request'>
                   <Input aria-label='Registers per request' value={form.registersPerRequest} onChange={(event) => updateForm('registersPerRequest', event.target.value)} />
+                  <div className='text-[11px] text-muted-foreground'>Chunk size per Modbus read. Large scans are split into multiple requests using this value.</div>
                 </Field>
               </div>
 
@@ -761,30 +826,29 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
               </div>
 
               {scanResult ? (
-                <div className='mt-4 overflow-x-auto'>
-                  <div className='min-w-max'>
-                    <div className='space-y-1.5'>
-                      <div className='grid gap-1.5' style={{ gridTemplateColumns: `8rem repeat(${matrixColumnCount}, minmax(8rem, 1fr))` }}>
-                        <div className='rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-left text-[11px] uppercase tracking-[0.18em] text-muted-foreground'>
+                <div className='mt-4'>
+                  <div className='space-y-0'>
+                    <div className='grid w-full gap-0' style={{ gridTemplateColumns: `6rem repeat(${matrixColumnCount}, minmax(0, 1fr))` }}>
+                        <div className='border border-border/70 bg-background/80 px-2 py-1.5 text-left text-[10px] uppercase tracking-[0.16em] text-muted-foreground'>
                           Address
                         </div>
                         {Array.from({ length: matrixColumnCount }, (_, offset) => (
                           <div
                             key={offset}
-                            className='rounded-xl border border-border/70 bg-background/80 px-3 py-2 text-left text-[11px] uppercase tracking-[0.18em] text-muted-foreground'
+                            className='border border-l-0 border-border/70 bg-background/80 px-2 py-1.5 text-left text-[10px] uppercase tracking-[0.16em] text-muted-foreground'
                           >
                             +{offset}
                           </div>
                         ))}
-                      </div>
+                    </div>
 
-                      {matrixRows.map((row) => (
-                        <div
-                          key={row.rowAddress}
-                          className='relative isolate grid gap-1.5'
-                          style={{ gridTemplateColumns: `8rem repeat(${matrixColumnCount}, minmax(8rem, 1fr))` }}
-                        >
-                          <div className='rounded-xl border border-border/70 bg-background/70 px-3 py-2 text-left font-mono text-sm font-semibold text-foreground'>
+                    {matrixRows.map((row) => (
+                      <div
+                        key={row.rowAddress}
+                        className='relative isolate grid gap-0'
+                        style={{ gridTemplateColumns: `6rem repeat(${matrixColumnCount}, minmax(0, 1fr))` }}
+                      >
+                          <div className='border border-t-0 border-border/70 bg-background/70 px-2 py-1.5 text-left font-mono text-xs font-semibold text-foreground'>
                             {row.rowAddress}
                           </div>
                           {row.cells.map((register, index) => {
@@ -792,7 +856,7 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                               return (
                                 <div
                                   key={`${row.rowAddress}-${index}`}
-                                  className='rounded-xl border border-dashed border-border/60 bg-muted/15 px-3 py-3'
+                                  className='border border-l-0 border-t-0 border-dashed border-border/60 bg-muted/15 px-2 py-2'
                                 />
                               );
                             }
@@ -809,16 +873,16 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                                 aria-label={`Register ${register.address}: ${display.primary}`}
                                 onClick={(event) => handleRegisterClick(register.address, event.shiftKey)}
                                 className={cn(
-                                  'relative z-0 flex min-h-20 w-full min-w-32 flex-col rounded-xl border px-3 py-3 text-left font-mono text-sm transition-colors',
+                                  'relative z-0 flex min-h-14 w-full min-w-0 flex-col border border-l-0 border-t-0 px-2 py-1.5 text-left font-mono text-xs transition-colors',
                                   inSelection ? 'border-primary/35 bg-primary/10 text-foreground' : 'border-border/70 bg-background/70 hover:bg-accent/35',
                                 )}
                               >
-                                <span className='text-[10px] uppercase tracking-[0.18em] text-muted-foreground'>@{register.address}</span>
-                                <span className={cn('mt-2 break-all text-sm text-foreground', matrixDisplayMode === 'binary' && 'text-xs')}>
+                                <span className='text-[9px] uppercase tracking-[0.14em] text-muted-foreground'>@{register.address}</span>
+                                <span className={cn('mt-1 break-all text-xs text-foreground', matrixDisplayMode === 'binary' && 'text-[10px]')}>
                                   {display.primary}
                                 </span>
                                 {display.secondary ? (
-                                  <span className='mt-1 break-all text-[11px] text-muted-foreground'>{display.secondary}</span>
+                                  <span className='mt-0.5 break-all text-[10px] text-muted-foreground'>{display.secondary}</span>
                                 ) : null}
                               </button>
                             );
@@ -835,7 +899,7 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                               <div
                                 key={`${segment.annotationId}-${segment.rowAddress}`}
                                 className={cn(
-                                  'pointer-events-none z-10 rounded-xl border px-3 py-2 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] backdrop-blur-[1px]',
+                                  'pointer-events-none z-10 border px-2 py-1 shadow-[inset_0_0_0_1px_rgba(255,255,255,0.06)] backdrop-blur-[1px]',
                                   annotationPalette[annotation.colorIndex % annotationPalette.length],
                                 )}
                                 style={{
@@ -844,23 +908,48 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                                 }}
                               >
                                 {segment.isStartSegment ? (
-                                  <div className='min-h-[3.5rem]'>
-                                    <div className='text-[10px] font-semibold uppercase tracking-[0.18em]'>{annotation.name}</div>
-                                    <div className='mt-1 truncate font-mono text-sm font-semibold'>{preview?.value ?? 'Pending'}</div>
-                                    <div className='mt-1 truncate text-[11px] opacity-75'>
+                                  <div className='min-h-[2.5rem]'>
+                                    <div className='text-[9px] font-semibold uppercase tracking-[0.14em]'>{annotation.name}</div>
+                                    <div className='mt-0.5 truncate font-mono text-xs font-semibold'>{preview?.value ?? 'Pending'}</div>
+                                    <div className='mt-0.5 truncate text-[10px] opacity-75'>
                                       {annotation.dataType}
                                       {annotation.formatter ? ` · ${annotation.formatter}` : ''}
                                       {annotation.bitMask ? ` · mask ${toMaskLabel(annotation.bitMask)}` : ''}
                                     </div>
                                   </div>
                                 ) : (
-                                  <div className='min-h-[3.5rem]' />
+                                  <div className='min-h-[2.5rem]' />
                                 )}
                               </div>
                             );
                           })}
-                        </div>
-                      ))}
+                      </div>
+                    ))}
+                  </div>
+
+                  <div className='mt-3 flex flex-wrap items-center justify-between gap-2'>
+                    <div className='font-mono text-xs text-muted-foreground'>
+                      {scanResult.startRegister}-{scanResult.startRegister + scanResult.registerCount - 1}
+                    </div>
+                    <div className='flex gap-2'>
+                      <Button
+                        type='button'
+                        variant='outline'
+                        size='sm'
+                        onClick={() => void shiftRegisterPage(-1)}
+                        disabled={isLoading || scanResult.startRegister <= 0}
+                      >
+                        Prev {Math.max(0, scanResult.startRegister - scanResult.registerCount)}-{Math.max(0, scanResult.startRegister - 1)}
+                      </Button>
+                      <Button
+                        type='button'
+                        variant='outline'
+                        size='sm'
+                        onClick={() => void shiftRegisterPage(1)}
+                        disabled={isLoading}
+                      >
+                        Next {scanResult.startRegister + scanResult.registerCount}-{scanResult.startRegister + (scanResult.registerCount * 2) - 1}
+                      </Button>
                     </div>
                   </div>
                 </div>
@@ -1205,6 +1294,17 @@ function buildRequest(form: ModbusScannerFormState): ModbusScannerReadRequest {
   return request;
 }
 
+function validateScanResult(result: ModbusScannerReadResult) {
+  if (result.registers.length !== result.registerCount) {
+    throw new Error(
+      `Scanner returned ${result.registers.length} registers for requested range ${result.startRegister}-${result.startRegister + result.registerCount - 1}. ` +
+      'Reduce the page size or registers-per-request and try again.',
+    );
+  }
+
+  return result;
+}
+
 function parseInteger(value: string, label: string) {
   const normalized = value.trim();
   if (!/^-?\d+$/.test(normalized)) {
@@ -1212,6 +1312,16 @@ function parseInteger(value: string, label: string) {
   }
 
   return Number.parseInt(normalized, 10);
+}
+
+function parseIntegerOrFallback(value: string, fallbackValue: number) {
+  const normalized = value.trim();
+  if (!/^-?\d+$/.test(normalized)) {
+    return fallbackValue;
+  }
+
+  const parsed = Number.parseInt(normalized, 10);
+  return Number.isFinite(parsed) ? parsed : fallbackValue;
 }
 
 function parsePositiveInteger(value: string, fallbackValue: number) {
