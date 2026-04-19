@@ -701,7 +701,15 @@ describe('MonitorPage', () => {
           name: 'Equipment Type',
           category: 'Device Info',
           source: { bank: 'info', byteOffset: 16, unit: '' },
-          display: { precision: 0 },
+          display: { precision: 0, formatter: 'plain-number' },
+        },
+        {
+          id: 'protocol_number',
+          type: 'number',
+          name: 'Protocol Number',
+          category: 'Device Info',
+          source: { bank: 'info', byteOffset: 18, unit: '' },
+          display: { precision: 0, formatter: 'plain-number' },
         },
         {
           id: 'firmware_version',
@@ -748,6 +756,11 @@ describe('MonitorPage', () => {
               },
               {
                 type: 'parameter-table',
+                title: 'Live Readings',
+                entities: ['state_of_charge', 'load_percent', 'inv_temperature', 'dc_temperature', 'pv_temperature'],
+              },
+              {
+                type: 'parameter-table',
                 title: 'Settings',
                 groupBy: 'category',
                 filter: { writable: true },
@@ -755,7 +768,7 @@ describe('MonitorPage', () => {
               {
                 type: 'parameter-table',
                 title: 'Device Info',
-                entities: ['serial_number', 'equipment_type', 'firmware_version', 'rated_power'],
+                entities: ['serial_number', 'equipment_type', 'protocol_number', 'firmware_version', 'rated_power'],
                 filter: { categories: ['Device Info'] },
               },
             ],
@@ -813,15 +826,20 @@ describe('MonitorPage', () => {
               { key: 'pv_power', displayName: 'PV Power', category: 'Solar', numericValue: 1280, sortOrder: 2, unit: 'W' },
               { key: 'output_active_power', displayName: 'Output Active Power', category: 'Output', numericValue: 540, sortOrder: 3, unit: 'W' },
               { key: 'state_of_charge', displayName: 'State of Charge', category: 'Battery', numericValue: 78, sortOrder: 4, unit: '%' },
+              { key: 'load_percent', displayName: 'Load', category: 'Output', numericValue: 1, sortOrder: 5, unit: '%' },
               { key: 'energy_saving_mode', displayName: 'Eco Mode', category: 'Power Management', numericValue: 1, stringValue: 'On', sortOrder: 5, unit: '' },
               { key: 'output_priority', displayName: 'Output Priority', category: 'Power Management', numericValue: 0, stringValue: 'Utility first (UTI)', sortOrder: 6, unit: '' },
               { key: 'max_charge_current', displayName: 'Max Charge Current', category: 'F2 Battery', numericValue: 100, rawValue: 100, sortOrder: 7, isWritable: true, unit: 'A' },
               { key: 'output_apparent_power', displayName: 'Output Apparent Power', category: 'Output', numericValue: 900, sortOrder: 8, unit: 'VA' },
               { key: 'clock_year', displayName: 'Time setting - Year', category: 'F3 Time', numericValue: 2026, rawValue: 2026, sortOrder: 9, isWritable: true, unit: '', displayFormatter: 'plain-number' },
+              { key: 'inv_temperature', displayName: 'INV Temperature', category: 'Temperatures', numericValue: 25, sortOrder: 9, unit: '°C' },
+              { key: 'dc_temperature', displayName: 'DC Module Temperature', category: 'Temperatures', numericValue: 16, sortOrder: 10, unit: '°C' },
+              { key: 'pv_temperature', displayName: 'MPPT Temperature', category: 'Temperatures', numericValue: 15, sortOrder: 11, unit: '°C' },
               { key: 'serial_number', displayName: 'Serial Number', category: 'Device Info', stringValue: '92B32501100891', sortOrder: 10 },
-              { key: 'equipment_type', displayName: 'Equipment Type', category: 'Device Info', numericValue: 29440, sortOrder: 11, unit: '' },
-              { key: 'firmware_version', displayName: 'Firmware Version', category: 'Device Info', stringValue: 'FW1.2.3', sortOrder: 12 },
-              { key: 'rated_power', displayName: 'Rated Power', category: 'Device Info', numericValue: 11000, sortOrder: 13, unit: 'W' },
+              { key: 'equipment_type', displayName: 'Equipment Type', category: 'Device Info', numericValue: 29440, sortOrder: 12, unit: '', displayFormatter: 'plain-number' },
+              { key: 'protocol_number', displayName: 'Protocol Number', category: 'Device Info', numericValue: 3, sortOrder: 13, unit: '', displayFormatter: 'plain-number' },
+              { key: 'firmware_version', displayName: 'Firmware Version', category: 'Device Info', stringValue: 'FW1.2.3', sortOrder: 14 },
+              { key: 'rated_power', displayName: 'Rated Power', category: 'Device Info', numericValue: 11000, sortOrder: 15, unit: 'W' },
             ],
           },
         },
@@ -849,14 +867,22 @@ describe('MonitorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /garage inverter/i }));
 
     expect(await screen.findByTestId('history-charts')).toHaveTextContent('History for inv-1');
+    const liveReadingsSection = screen.getByRole('button', { name: 'Live Readings section' });
     const chargerSection = screen.getByRole('button', { name: 'F2 Charger section' });
     const clockSection = screen.getByRole('button', { name: 'F3 Time section' });
     const deviceInfoSection = screen.getByRole('button', { name: 'Device Info section' });
+    expect(liveReadingsSection).toHaveAttribute('aria-expanded', 'false');
     expect(chargerSection).toHaveAttribute('aria-expanded', 'false');
     expect(clockSection).toHaveAttribute('aria-expanded', 'false');
     expect(deviceInfoSection).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText('Max Charge Current')).not.toBeInTheDocument();
     expect(screen.queryByText('Serial Number')).not.toBeInTheDocument();
+
+    fireEvent.click(liveReadingsSection);
+    expect(liveReadingsSection).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('MPPT Temperature')).toBeInTheDocument();
+    expect(screen.getByText('15')).toBeInTheDocument();
+    expect(screen.getAllByText((_, element) => element?.textContent === '1%').length).toBeGreaterThan(0);
 
     fireEvent.click(chargerSection);
     expect(chargerSection).toHaveAttribute('aria-expanded', 'true');
@@ -872,7 +898,9 @@ describe('MonitorPage', () => {
     expect(screen.getByText('Serial Number')).toBeInTheDocument();
     expect(screen.getByText('92B32501100891')).toBeInTheDocument();
     expect(screen.getByText('Equipment Type')).toBeInTheDocument();
-    expect(screen.getByText('29,440')).toBeInTheDocument();
+    expect(screen.getByText('29440')).toBeInTheDocument();
+    expect(screen.getByText('Protocol Number')).toBeInTheDocument();
+    expect(screen.getByText('3')).toBeInTheDocument();
     expect(screen.queryByText('2,026')).not.toBeInTheDocument();
   });
 

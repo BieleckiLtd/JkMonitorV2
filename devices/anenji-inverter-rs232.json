@@ -410,7 +410,7 @@
     {
       "id": "pv_temperature",
       "type": "sensor",
-      "name": "PV Temperature",
+      "name": "MPPT Temperature",
       "category": "Temperatures",
       "icon": "thermometer",
       "source": {
@@ -1526,6 +1526,25 @@
         "bank": "info_id",
         "byteOffset": 0,
         "dataType": "uint16"
+      },
+      "display": {
+        "precision": 0,
+        "formatter": "plain-number"
+      }
+    },
+    {
+      "id": "protocol_number",
+      "type": "sensor",
+      "name": "Protocol Number",
+      "category": "Device Info",
+      "source": {
+        "bank": "info_id",
+        "byteOffset": 26,
+        "dataType": "uint16"
+      },
+      "display": {
+        "precision": 0,
+        "formatter": "plain-number"
       }
     },
     {
@@ -1704,6 +1723,17 @@
           },
           {
             "type": "parameter-table",
+            "title": "Live Readings",
+            "entities": [
+              "state_of_charge",
+              "load_percent",
+              "inv_temperature",
+              "dc_temperature",
+              "pv_temperature"
+            ]
+          },
+          {
+            "type": "parameter-table",
             "title": "Settings",
             "filter": {
               "writable": true
@@ -1716,6 +1746,7 @@
             "entities": [
               "serial_number",
               "equipment_type",
+              "protocol_number",
               "firmware_version",
               "rated_power"
             ],
@@ -1831,6 +1862,11 @@
                 "label": "DC",
                 "color": "red",
                 "dashed": true
+              },
+              {
+                "entity": "pv_temperature",
+                "label": "MPPT",
+                "color": "amber"
               }
             ],
             "yAxis": {
