@@ -9,7 +9,6 @@ import {
   buildAnnotationSegments,
   buildRegisterMatrix,
   decodeAnnotationPreview,
-  decodeSelection,
   formatRegisterValue,
   getSelectionSummary,
   type ModbusEntityDataType,
@@ -177,10 +176,33 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
     () => getSelectionSummary(scanResult, selectionStart, selectionEnd),
     [scanResult, selectionEnd, selectionStart],
   );
-  const decodedValues = useMemo(
-    () => decodeSelection(selection, entityDataTypeToDecodeMode(entityDraft.dataType)),
-    [entityDraft.dataType, selection],
-  );
+  const selectionPreview = useMemo(() => {
+    if (!selection || !scanResult) {
+      return [];
+    }
+
+    const draftAnnotation: ModbusMatrixAnnotation = {
+      id: slugifyEntityId(entityDraft.name.trim() || `REG_${selection.startAddress}_${selection.endAddress}`),
+      name: entityDraft.name.trim() || `REG_${selection.startAddress}_${selection.endAddress}`,
+      category: entityDraft.category.trim() || 'Registers',
+      entityType: entityDraft.entityType,
+      startAddress: selection.startAddress,
+      endAddress: selection.endAddress,
+      dataType: entityDraft.dataType,
+      formatter: entityDraft.formatter.trim() || undefined,
+      unit: entityDraft.unit.trim() || undefined,
+      scale: parseDecimal(entityDraft.scale, 1),
+      bitMask: parseOptionalInteger(entityDraft.bitMask) ?? undefined,
+      colorIndex: 0,
+    };
+
+    const preview = decodeAnnotationPreview(scanResult, draftAnnotation);
+    return [{
+      label: draftAnnotation.dataType,
+      value: preview.value,
+      detail: preview.detail,
+    }];
+  }, [entityDraft, scanResult, selection]);
   const matrixColumnCount = useMemo(() => parsePositiveInteger(matrixColumns, 10), [matrixColumns]);
   const matrixRows = useMemo(() => buildRegisterMatrix(scanResult, matrixColumnCount), [matrixColumnCount, scanResult]);
   const activeAnnotation = useMemo(
@@ -901,11 +923,13 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                                 )}
                                 style={{ gridColumn: String(index + 2) }}
                               >
-                                <span className='text-[9px] uppercase tracking-[0.14em] text-muted-foreground'>@{register.address}</span>
-                                <span className={cn('mt-1 break-all text-xs text-foreground', matrixDisplayMode === 'binary' && 'text-[10px]')}>
+                                {matrixDisplayMode === 'hex' ? null : (
+                                  <span className='text-[9px] uppercase tracking-[0.14em] text-muted-foreground'>@{register.address}</span>
+                                )}
+                                <span className={cn(matrixDisplayMode === 'hex' ? 'break-all text-sm text-foreground' : 'mt-1 break-all text-xs text-foreground', matrixDisplayMode === 'binary' && 'text-[10px]')}>
                                   {display.primary}
                                 </span>
-                                {display.secondary ? (
+                                {matrixDisplayMode !== 'hex' && display.secondary ? (
                                   <span className='mt-0.5 break-all text-[10px] text-muted-foreground'>{display.secondary}</span>
                                 ) : null}
                               </button>
@@ -1071,7 +1095,7 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                   </div>
 
                   <div className='space-y-2'>
-                    {decodedValues.map((value) => (
+                    {selectionPreview.map((value) => (
                       <div key={value.label} className='rounded-xl border border-border/70 bg-background/70 px-3 py-3'>
                         <div className='flex items-center gap-2 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
                           <Cable className='h-3.5 w-3.5' />
@@ -1354,25 +1378,6 @@ function matrixDisplayModeToEntityDataType(mode: ModbusMatrixDisplayMode): Modbu
     case 'unsigned':
       return 'uint16';
     case 'binary':
-    case 'hex':
-    default:
-      return 'hex';
-  }
-}
-
-function entityDataTypeToDecodeMode(dataType: ModbusEntityDataType) {
-  switch (dataType) {
-    case 'ascii':
-      return 'ascii';
-    case 'int16':
-    case 'int32':
-      return 'signed-int';
-    case 'uint16':
-    case 'uint32':
-      return 'unsigned-int';
-    case 'float32':
-    case 'float64':
-      return 'float';
     case 'hex':
     default:
       return 'hex';
