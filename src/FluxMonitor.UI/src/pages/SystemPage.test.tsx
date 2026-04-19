@@ -790,6 +790,8 @@ describe('SystemPage', () => {
     expect(await screen.findByText('Mapped entities')).toBeInTheDocument();
     expect(screen.getAllByText('SERIAL_NO').length).toBeGreaterThan(0);
     expect(screen.getAllByRole('button', { name: /^edit$/i }).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('button', { name: /register 0: 0x4142/i })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /register 1: 0x4344/i })).not.toBeInTheDocument();
   });
 
   it('pages the scanner matrix by register count', async () => {

@@ -201,6 +201,17 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
     () => buildAnnotationSegments(matrixRows, annotations, matrixColumnCount),
     [annotations, matrixColumnCount, matrixRows],
   );
+  const coveredAnnotationAddresses = useMemo(() => {
+    const addresses = new Set<number>();
+    for (const annotation of annotations) {
+      const start = Math.min(annotation.startAddress, annotation.endAddress);
+      const end = Math.max(annotation.startAddress, annotation.endAddress);
+      for (let address = start; address <= end; address += 1) {
+        addresses.add(address);
+      }
+    }
+    return addresses;
+  }, [annotations]);
   const annotationPreviews = useMemo(
     () => new Map(annotations.map((annotation) => [annotation.id, decodeAnnotationPreview(scanResult, annotation)])),
     [annotations, scanResult],
@@ -853,7 +864,10 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                         className='relative isolate grid gap-0'
                         style={{ gridTemplateColumns: `6rem repeat(${matrixColumnCount}, minmax(0, 1fr))` }}
                       >
-                          <div className='border border-t-0 border-border/70 bg-background/70 px-2 py-1.5 text-left font-mono text-xs font-semibold text-foreground'>
+                          <div
+                            className='border border-t-0 border-border/70 bg-background/70 px-2 py-1.5 text-left font-mono text-xs font-semibold text-foreground'
+                            style={{ gridColumn: '1' }}
+                          >
                             {row.rowAddress}
                           </div>
                           {row.cells.map((register, index) => {
@@ -862,8 +876,13 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                                 <div
                                   key={`${row.rowAddress}-${index}`}
                                   className='border border-l-0 border-t-0 border-dashed border-border/60 bg-muted/15 px-2 py-2'
+                                  style={{ gridColumn: String(index + 2) }}
                                 />
                               );
+                            }
+
+                            if (coveredAnnotationAddresses.has(register.address)) {
+                              return null;
                             }
 
                             const inSelection = selection != null
@@ -881,6 +900,7 @@ export function ModbusScannerSection({ interfaces }: ModbusScannerSectionProps) 
                                   'relative z-0 flex min-h-14 w-full min-w-0 flex-col border border-l-0 border-t-0 px-2 py-1.5 text-left font-mono text-xs transition-colors',
                                   inSelection ? 'border-primary/35 bg-primary/10 text-foreground' : 'border-border/70 bg-background/70 hover:bg-accent/35',
                                 )}
+                                style={{ gridColumn: String(index + 2) }}
                               >
                                 <span className='text-[9px] uppercase tracking-[0.14em] text-muted-foreground'>@{register.address}</span>
                                 <span className={cn('mt-1 break-all text-xs text-foreground', matrixDisplayMode === 'binary' && 'text-[10px]')}>
