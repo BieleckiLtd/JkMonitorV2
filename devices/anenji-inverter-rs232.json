@@ -1719,17 +1719,15 @@
                 "label": "Load",
                 "format": "power-short"
               }
-            ]
-          },
-          {
-            "type": "parameter-table",
-            "title": "Live Readings",
+            ],
             "entities": [
-              "state_of_charge",
+              "operating_mode",
+              "energy_saving_mode",
               "load_percent",
-              "inv_temperature",
-              "dc_temperature",
-              "pv_temperature"
+              "grid_voltage",
+              "mains_frequency",
+              "output_voltage",
+              "output_frequency"
             ]
           },
           {

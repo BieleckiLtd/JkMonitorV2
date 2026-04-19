@@ -753,11 +753,7 @@ describe('MonitorPage', () => {
                   { entity: 'output_active_power', color: 'amber' },
                   { entity: 'pv_power', color: 'sky' },
                 ],
-              },
-              {
-                type: 'parameter-table',
-                title: 'Live Readings',
-                entities: ['state_of_charge', 'load_percent', 'inv_temperature', 'dc_temperature', 'pv_temperature'],
+                entities: ['operating_mode', 'energy_saving_mode', 'load_percent', 'grid_voltage', 'mains_frequency', 'output_voltage', 'output_frequency'],
               },
               {
                 type: 'parameter-table',
@@ -812,6 +808,7 @@ describe('MonitorPage', () => {
           displayName: 'Garage Inverter',
           definitionId: 'anenji-inverter-rs232',
           protocolHandler: 'modbus-rtu',
+          address: 9,
           enabled: true,
           isMaster: true,
           pollIntervalMilliseconds: 5000,
@@ -822,15 +819,21 @@ describe('MonitorPage', () => {
             activeWarnings: [],
             parameters: [
               { key: 'grid_power', displayName: 'Grid Power', category: 'Grid', numericValue: 90, sortOrder: 0, unit: 'W' },
+              { key: 'operating_mode', displayName: 'Operating Mode', category: 'Status', numericValue: 2, stringValue: 'Mains', sortOrder: 0, unit: '' },
               { key: 'battery_power', displayName: 'Battery Power', category: 'Battery', numericValue: 620, sortOrder: 1, unit: 'W' },
+              { key: 'mains_frequency', displayName: 'Mains Frequency', category: 'Grid', numericValue: 49.96, sortOrder: 1, unit: 'Hz' },
               { key: 'pv_power', displayName: 'PV Power', category: 'Solar', numericValue: 1280, sortOrder: 2, unit: 'W' },
+              { key: 'grid_voltage', displayName: 'Grid Voltage', category: 'Grid', numericValue: 240.6, sortOrder: 2, unit: 'V' },
               { key: 'output_active_power', displayName: 'Output Active Power', category: 'Output', numericValue: 540, sortOrder: 3, unit: 'W' },
               { key: 'state_of_charge', displayName: 'State of Charge', category: 'Battery', numericValue: 78, sortOrder: 4, unit: '%' },
               { key: 'load_percent', displayName: 'Load', category: 'Output', numericValue: 1, sortOrder: 5, unit: '%' },
-              { key: 'energy_saving_mode', displayName: 'Eco Mode', category: 'Power Management', numericValue: 1, stringValue: 'On', sortOrder: 5, unit: '' },
+              { key: 'energy_saving_mode', displayName: 'Power saving mode', category: 'F0 System', numericValue: 1, stringValue: 'Enabled', sortOrder: 5, unit: '' },
               { key: 'output_priority', displayName: 'Output Priority', category: 'Power Management', numericValue: 0, stringValue: 'Utility first (UTI)', sortOrder: 6, unit: '' },
+              { key: 'output_voltage', displayName: 'Output Voltage', category: 'Output', numericValue: 230.4, sortOrder: 6, unit: 'V' },
               { key: 'max_charge_current', displayName: 'Max Charge Current', category: 'F2 Battery', numericValue: 100, rawValue: 100, sortOrder: 7, isWritable: true, unit: 'A' },
+              { key: 'modbus_address', displayName: 'Modbus ID setting', category: 'F0 System', numericValue: 0, rawValue: 0, sortOrder: 7, isWritable: true, unit: '' },
               { key: 'output_apparent_power', displayName: 'Output Apparent Power', category: 'Output', numericValue: 900, sortOrder: 8, unit: 'VA' },
+              { key: 'output_frequency', displayName: 'Output Frequency', category: 'Output', numericValue: 49.92, sortOrder: 8, unit: 'Hz' },
               { key: 'clock_year', displayName: 'Time setting - Year', category: 'F3 Time', numericValue: 2026, rawValue: 2026, sortOrder: 9, isWritable: true, unit: '', displayFormatter: 'plain-number' },
               { key: 'inv_temperature', displayName: 'INV Temperature', category: 'Temperatures', numericValue: 25, sortOrder: 9, unit: '°C' },
               { key: 'dc_temperature', displayName: 'DC Module Temperature', category: 'Temperatures', numericValue: 16, sortOrder: 10, unit: '°C' },
@@ -867,22 +870,27 @@ describe('MonitorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /garage inverter/i }));
 
     expect(await screen.findByTestId('history-charts')).toHaveTextContent('History for inv-1');
-    const liveReadingsSection = screen.getByRole('button', { name: 'Live Readings section' });
+    const f0Section = screen.getByRole('button', { name: 'F0 System section' });
     const chargerSection = screen.getByRole('button', { name: 'F2 Charger section' });
     const clockSection = screen.getByRole('button', { name: 'F3 Time section' });
     const deviceInfoSection = screen.getByRole('button', { name: 'Device Info section' });
-    expect(liveReadingsSection).toHaveAttribute('aria-expanded', 'false');
+    expect(screen.queryByRole('button', { name: 'Live Readings section' })).not.toBeInTheDocument();
+    expect(f0Section).toHaveAttribute('aria-expanded', 'false');
     expect(chargerSection).toHaveAttribute('aria-expanded', 'false');
     expect(clockSection).toHaveAttribute('aria-expanded', 'false');
     expect(deviceInfoSection).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByText('Max Charge Current')).not.toBeInTheDocument();
     expect(screen.queryByText('Serial Number')).not.toBeInTheDocument();
-
-    fireEvent.click(liveReadingsSection);
-    expect(liveReadingsSection).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText('MPPT Temperature')).toBeInTheDocument();
-    expect(screen.getByText('15')).toBeInTheDocument();
+    expect(screen.queryByText('MPPT Temperature')).not.toBeInTheDocument();
+    expect(screen.getByText('Grid Voltage')).toBeInTheDocument();
+    expect(screen.getByText('Mains Frequency')).toBeInTheDocument();
+    expect(screen.getByText('Operating Mode')).toBeInTheDocument();
     expect(screen.getAllByText((_, element) => element?.textContent === '1%').length).toBeGreaterThan(0);
+
+    fireEvent.click(f0Section);
+    expect(f0Section).toHaveAttribute('aria-expanded', 'true');
+    expect(screen.getByText('Modbus ID setting')).toBeInTheDocument();
+    expect(screen.getByText('9')).toBeInTheDocument();
 
     fireEvent.click(chargerSection);
     expect(chargerSection).toHaveAttribute('aria-expanded', 'true');

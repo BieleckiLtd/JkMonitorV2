@@ -111,6 +111,7 @@ type DeviceRuntimeState = {
   sortOrder?: number;
   definitionId: string;
   protocolHandler?: string | null;
+  address?: number | null;
   enabled: boolean;
   isMaster: boolean;
   pollIntervalMilliseconds: number;
@@ -564,6 +565,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                         category={section.title ?? 'Parameters'}
                         params={params}
                         deviceId={device.deviceId}
+                        configuredDeviceAddress={device.address}
                         telemetry={compactTelemetry}
                         paramByKey={compactParamByKey}
                         definition={definition}
@@ -574,7 +576,14 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                 </>
               ) : (
                 <>
-                  {renderDefinitionSections(compactSections, compactParamByKey, compactTelemetry, dp, compactCells, selectedCellIndices, setSelectedCellIndices, device.deviceId, definition, temperatureUnit)}
+                  {renderInlineEntityStats(
+                    heroSection?.entities,
+                    compactParamByKey,
+                    definition,
+                    temperatureUnit,
+                    device.address,
+                  )}
+                  {renderDefinitionSections(compactSections, compactParamByKey, compactTelemetry, dp, compactCells, selectedCellIndices, setSelectedCellIndices, device.deviceId, device.address, definition, temperatureUnit)}
                   {paramTableSections && paramTableSections.length > 0 ? (
                     <div className='space-y-3 sm:space-y-4'>
                       {paramTableSections.map((section, idx) => {
@@ -583,11 +592,11 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                         if (section.groupBy === 'category') {
                           const catGroups = groupByCategory(params);
                           return Array.from(catGroups.entries()).map(([cat, catParams]) => (
-                            <ParameterCategoryCard key={`${idx}-${cat}`} category={cat} params={catParams} deviceId={device.deviceId} telemetry={compactTelemetry} paramByKey={compactParamByKey} definition={definition} temperatureUnit={temperatureUnit} />
+                            <ParameterCategoryCard key={`${idx}-${cat}`} category={cat} params={catParams} deviceId={device.deviceId} configuredDeviceAddress={device.address} telemetry={compactTelemetry} paramByKey={compactParamByKey} definition={definition} temperatureUnit={temperatureUnit} />
                           ));
                         }
                         return (
-                          <ParameterCategoryCard key={idx} category={section.title ?? 'Parameters'} params={params} deviceId={device.deviceId} telemetry={compactTelemetry} paramByKey={compactParamByKey} definition={definition} temperatureUnit={temperatureUnit} />
+                          <ParameterCategoryCard key={idx} category={section.title ?? 'Parameters'} params={params} deviceId={device.deviceId} configuredDeviceAddress={device.address} telemetry={compactTelemetry} paramByKey={compactParamByKey} definition={definition} temperatureUnit={temperatureUnit} />
                         );
                       })}
                     </div>
@@ -602,6 +611,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                             category={category}
                             params={compactParameters.filter(parameter => parameter.category === category)}
                             deviceId={device.deviceId}
+                            configuredDeviceAddress={device.address}
                             telemetry={compactTelemetry}
                             paramByKey={compactParamByKey}
                             definition={definition}
@@ -693,7 +703,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
         <>
           {/* Hero metrics — driven by definition */}
           {monitorSections ? (
-            renderDefinitionSections(monitorSections, paramByKey, telemetry, dp, cells, selectedCellIndices, setSelectedCellIndices, device.deviceId, definition, temperatureUnit)
+            renderDefinitionSections(monitorSections, paramByKey, telemetry, dp, cells, selectedCellIndices, setSelectedCellIndices, device.deviceId, device.address, definition, temperatureUnit)
           ) : (
             <>
               {cells.length > 0 && (
@@ -713,18 +723,18 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                 if (section.groupBy === 'category') {
                   const catGroups = groupByCategory(params);
                   return Array.from(catGroups.entries()).map(([cat, catParams]) => (
-                    <ParameterCategoryCard key={`${idx}-${cat}`} category={cat} params={catParams} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} definition={definition} temperatureUnit={temperatureUnit} />
+                    <ParameterCategoryCard key={`${idx}-${cat}`} category={cat} params={catParams} deviceId={device.deviceId} configuredDeviceAddress={device.address} telemetry={telemetry} paramByKey={paramByKey} definition={definition} temperatureUnit={temperatureUnit} />
                   ));
                 }
                 return (
-                  <ParameterCategoryCard key={idx} category={section.title ?? 'Parameters'} params={params} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} definition={definition} temperatureUnit={temperatureUnit} />
+                  <ParameterCategoryCard key={idx} category={section.title ?? 'Parameters'} params={params} deviceId={device.deviceId} configuredDeviceAddress={device.address} telemetry={telemetry} paramByKey={paramByKey} definition={definition} temperatureUnit={temperatureUnit} />
                 );
               })}
             </div>
           ) : (
             <div className='space-y-3 sm:space-y-4'>
               {sortedCategories.filter(c => c !== 'Cell Voltages').map((category) => (
-                <ParameterCategoryCard key={category} category={category} params={grouped.get(category)!} deviceId={device.deviceId} telemetry={telemetry} paramByKey={paramByKey} definition={definition} temperatureUnit={temperatureUnit} />
+                <ParameterCategoryCard key={category} category={category} params={grouped.get(category)!} deviceId={device.deviceId} configuredDeviceAddress={device.address} telemetry={telemetry} paramByKey={paramByKey} definition={definition} temperatureUnit={temperatureUnit} />
               ))}
             </div>
           )}
@@ -750,6 +760,63 @@ function HeroMetric({ icon: Icon, label, value, unit, accent, subtitle }: { icon
         <div className='rounded-xl border border-border/70 bg-background/60 p-1.5 sm:p-2.5'>
           <Icon className='h-4 w-4 text-muted-foreground' />
         </div>
+      </div>
+    </div>
+  );
+}
+
+function renderInlineEntityStats(
+  entityIds: readonly string[] | undefined,
+  paramByKey: Map<string, DeviceParameter>,
+  definition: DeviceDefinition | null | undefined,
+  temperatureUnit: TemperatureUnit,
+  configuredDeviceAddress?: number | null,
+) {
+  if (!entityIds?.length) {
+    return null;
+  }
+
+  const items = entityIds
+    .map((entityId) => {
+      const param = paramByKey.get(entityId);
+      if (!param) {
+        return null;
+      }
+
+      const displayParam = resolveDisplayedParameter(param, configuredDeviceAddress);
+      const entity = definition?.entities.find((candidate) => candidate.id === entityId);
+      const value = formatParamValue(displayParam, temperatureUnit);
+      const unit = getTemperatureDisplayUnit(displayParam.unit, temperatureUnit) ?? displayParam.unit ?? '';
+
+      return (
+        <HeroInlineMetric
+          key={entityId}
+          label={displayParam.displayName ?? entity?.name ?? entityId}
+          value={value}
+          unit={unit}
+        />
+      );
+    })
+    .filter((item): item is React.ReactNode => item != null);
+
+  if (items.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4'>
+      {items}
+    </div>
+  );
+}
+
+function HeroInlineMetric({ label, value, unit }: { label: string; value: string; unit: string }) {
+  return (
+    <div className='rounded-xl border border-border/70 bg-background/50 px-3 py-2.5'>
+      <div className='text-[10px] font-medium uppercase tracking-[0.2em] text-muted-foreground'>{label}</div>
+      <div className='mt-1 break-words text-sm font-semibold text-foreground sm:text-base'>
+        {value}
+        {unit ? <span className='ml-1 text-xs font-medium text-muted-foreground'>{unit}</span> : null}
       </div>
     </div>
   );
@@ -837,6 +904,7 @@ function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndices, onCell
 function ParameterRow({
   param,
   deviceId,
+  configuredDeviceAddress,
   telemetry,
   paramByKey,
   definition,
@@ -844,6 +912,7 @@ function ParameterRow({
 }: {
   param: DeviceParameter;
   deviceId: string;
+  configuredDeviceAddress?: number | null;
   telemetry: DeviceTelemetrySnapshot;
   paramByKey: Map<string, DeviceParameter>;
   definition?: DeviceDefinition | null;
@@ -855,22 +924,24 @@ function ParameterRow({
   const [writeResult, setWriteResult] = useState<{ success: boolean; message: string } | null>(null);
   const isSwitchSetting = isSwitchSettingParam(param.key);
   const statusChip = getSwitchStatusChip(param, telemetry, paramByKey);
-  const value = formatParamValue(param, temperatureUnit, isSwitchSetting ? 'enabled-disabled' : 'yes-no');
+  const displayParam = resolveDisplayedParameter(param, configuredDeviceAddress);
+  const canEdit = Boolean(param.isWritable) && !isConfiguredDeviceAddressRow(param.key, configuredDeviceAddress);
+  const value = formatParamValue(displayParam, temperatureUnit, isSwitchSetting ? 'enabled-disabled' : 'yes-no');
   const entity = definition?.entities.find((candidate) => candidate.id === param.key);
-  const displayUnit = getTemperatureDisplayUnit(param.unit, temperatureUnit) ?? param.unit;
+  const displayUnit = getTemperatureDisplayUnit(displayParam.unit, temperatureUnit) ?? displayParam.unit;
   const editModeLabel = entity ? 'value:' : 'raw:';
   const editValueUnit = entity
-    ? getTemperatureDisplayUnit(entity.source.unit ?? param.unit, temperatureUnit) ?? param.unit
-    : null;
+    ? getTemperatureDisplayUnit(entity.source.unit ?? displayParam.unit, temperatureUnit) ?? displayParam.unit
+    : displayParam.unit;
 
   const startEdit = useCallback(() => {
-    if (!param.isWritable) return;
-    setEditValue(param.options?.length
-      ? (param.rawValue?.toString() ?? '')
-      : formatEditableParameterInputValue(param, entity, temperatureUnit));
+    if (!canEdit) return;
+    setEditValue(displayParam.options?.length
+      ? (displayParam.rawValue?.toString() ?? '')
+      : formatEditableParameterInputValue(displayParam, entity, temperatureUnit));
     setIsEditing(true);
     setWriteResult(null);
-  }, [entity, param, temperatureUnit]);
+  }, [canEdit, displayParam, entity, temperatureUnit]);
 
   const cancelEdit = useCallback(() => {
     setIsEditing(false);
@@ -906,9 +977,9 @@ function ParameterRow({
 
       if (data.success) {
         const confirmedValue = data.readBackValue ?? rawValue;
-        const confirmationText = param.options?.length
-          ? formatSelectParameterValue(param, confirmedValue)
-          : formatParameterReadBackValue(confirmedValue, param, entity, temperatureUnit);
+        const confirmationText = displayParam.options?.length
+          ? formatSelectParameterValue(displayParam, confirmedValue)
+          : formatParameterReadBackValue(confirmedValue, displayParam, entity, temperatureUnit);
         setWriteResult({ success: true, message: `Confirmed: ${confirmationText}` });
         setIsEditing(false);
       } else {
@@ -919,7 +990,7 @@ function ParameterRow({
     } finally {
       setIsSaving(false);
     }
-  }, [deviceId, editValue, entity, param, temperatureUnit]);
+  }, [deviceId, displayParam, editValue, entity, param, temperatureUnit]);
 
   return (
     <div className='rounded-lg border border-border/50 bg-background/40 px-3 py-2'>
@@ -935,7 +1006,7 @@ function ParameterRow({
         <div className='flex items-center gap-2'>
           {isEditing ? (
             <div className='flex items-center gap-1'>
-              {param.options?.length ? (
+              {displayParam.options?.length ? (
                 <select
                   className='rounded border border-border bg-background px-2 py-0.5 text-sm font-semibold text-foreground outline-none focus:border-primary'
                   value={editValue}
@@ -943,7 +1014,7 @@ function ParameterRow({
                   disabled={isSaving}
                   autoFocus
                 >
-                  {param.options.map(opt => (
+                  {displayParam.options?.map(opt => (
                     <option key={opt.value} value={opt.value}>{opt.label}</option>
                   ))}
                 </select>
@@ -980,7 +1051,7 @@ function ParameterRow({
                 {value}
                 {displayUnit && <span className='ml-1 text-xs font-normal text-muted-foreground'>{displayUnit}</span>}
               </span>
-              {param.isWritable && (
+              {canEdit && (
                 <button onClick={startEdit} className='rounded p-1 text-muted-foreground/60 hover:text-primary hover:bg-primary/10 transition-colors'
                   title='Edit parameter'>
                   <Edit2 className='h-3 w-3' />
@@ -1003,6 +1074,7 @@ function ParameterCategoryCard({
   category,
   params,
   deviceId,
+  configuredDeviceAddress,
   telemetry,
   paramByKey,
   definition,
@@ -1011,6 +1083,7 @@ function ParameterCategoryCard({
   category: string;
   params: DeviceParameter[];
   deviceId: string;
+  configuredDeviceAddress?: number | null;
   telemetry: DeviceTelemetrySnapshot;
   paramByKey: Map<string, DeviceParameter>;
   definition?: DeviceDefinition | null;
@@ -1053,7 +1126,16 @@ function ParameterCategoryCard({
               />
             )}
             {visibleParams.map((param) => (
-              <ParameterRow key={param.key} param={param} deviceId={deviceId} telemetry={telemetry} paramByKey={paramByKey} definition={definition} temperatureUnit={temperatureUnit} />
+              <ParameterRow
+                key={param.key}
+                param={param}
+                deviceId={deviceId}
+                configuredDeviceAddress={configuredDeviceAddress}
+                telemetry={telemetry}
+                paramByKey={paramByKey}
+                definition={definition}
+                temperatureUnit={temperatureUnit}
+              />
             ))}
           </div>
         </CardContent>
@@ -1200,6 +1282,7 @@ function renderDefinitionSections(
   selectedCellIndices: number[],
   setSelectedCellIndices: React.Dispatch<React.SetStateAction<number[]>>,
   deviceId: string,
+  configuredDeviceAddress: number | null | undefined,
   definition: DeviceDefinition | null,
   temperatureUnit: TemperatureUnit,
 ) {
@@ -1277,6 +1360,13 @@ function renderDefinitionSections(
                   />
                 );
               })}
+            </div>
+          );
+        }
+        if (section.entities?.length) {
+          elements.push(
+            <div key={`section-${i}-details`}>
+              {renderInlineEntityStats(section.entities, paramByKey, definition, temperatureUnit, configuredDeviceAddress)}
             </div>
           );
         }
@@ -2342,6 +2432,30 @@ function parseCombinedClockEditValue(input: string):
 
 function padClockValue(value: number, width = 2) {
   return value.toString().padStart(width, '0');
+}
+
+function isConfiguredDeviceAddressRow(paramKey: string, configuredDeviceAddress: number | null | undefined) {
+  return paramKey === 'modbus_address'
+    && configuredDeviceAddress != null
+    && Number.isInteger(configuredDeviceAddress)
+    && configuredDeviceAddress > 0;
+}
+
+function resolveDisplayedParameter(
+  param: DeviceParameter,
+  configuredDeviceAddress: number | null | undefined,
+): DeviceParameter {
+  if (!isConfiguredDeviceAddressRow(param.key, configuredDeviceAddress)) {
+    return param;
+  }
+
+  return {
+    ...param,
+    numericValue: configuredDeviceAddress,
+    rawValue: configuredDeviceAddress,
+    stringValue: null,
+    displayFormatter: 'plain-number',
+  };
 }
 
 function formatParamValue(

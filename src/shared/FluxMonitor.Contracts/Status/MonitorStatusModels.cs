@@ -14,6 +14,8 @@ public sealed record class DeviceRuntimeState
 
     public string? ProtocolHandler { get; init; }
 
+    public byte Address { get; init; }
+
     public bool Enabled { get; init; }
 
     public bool IsMaster { get; init; }

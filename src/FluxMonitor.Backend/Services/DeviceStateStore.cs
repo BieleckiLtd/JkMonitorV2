@@ -268,6 +268,7 @@ public sealed class DeviceStateStore
             DisplayName = device.DisplayName,
             SortOrder = device.SortOrder,
             DefinitionId = device.DefinitionId,
+            Address = device.Address,
             Enabled = device.Enabled,
             IsMaster = device.IsMaster,
             PollIntervalMilliseconds = device.PollIntervalMilliseconds,
