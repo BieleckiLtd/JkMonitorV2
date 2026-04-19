@@ -831,7 +831,22 @@ describe('MonitorPage', () => {
               { key: 'output_priority', displayName: 'Output Priority', category: 'Power Management', numericValue: 0, stringValue: 'Utility first (UTI)', sortOrder: 6, unit: '' },
               { key: 'output_voltage', displayName: 'Output Voltage', category: 'Output', numericValue: 230.4, sortOrder: 6, unit: 'V' },
               { key: 'max_charge_current', displayName: 'Max Charge Current', category: 'F2 Battery', numericValue: 100, rawValue: 100, sortOrder: 7, isWritable: true, unit: 'A' },
-              { key: 'modbus_address', displayName: 'Modbus ID setting', category: 'F0 System', numericValue: 9, rawValue: 9, sortOrder: 7, isWritable: true, unit: '' },
+              { key: 'modbus_address', displayName: 'Modbus address', category: 'F0 System', numericValue: 9, rawValue: 9, sortOrder: 7, isWritable: true, unit: '' },
+              {
+                key: 'dry_contact_mode',
+                displayName: 'Dry contact mode',
+                category: 'F0 System',
+                numericValue: 1,
+                rawValue: 1,
+                stringValue: 'md2 - Neutral-ground bonding',
+                sortOrder: 8,
+                isWritable: true,
+                unit: '',
+                options: [
+                  { value: 0, label: 'md1 - Warning relay' },
+                  { value: 1, label: 'md2 - Neutral-ground bonding' },
+                ],
+              },
               { key: 'output_apparent_power', displayName: 'Output Apparent Power', category: 'Output', numericValue: 900, sortOrder: 8, unit: 'VA' },
               { key: 'output_frequency', displayName: 'Output Frequency', category: 'Output', numericValue: 49.92, sortOrder: 8, unit: 'Hz' },
               { key: 'clock_year', displayName: 'Time setting - Year', category: 'F3 Time', numericValue: 2026, rawValue: 2026, sortOrder: 9, isWritable: true, unit: '', displayFormatter: 'plain-number' },
@@ -889,8 +904,10 @@ describe('MonitorPage', () => {
 
     fireEvent.click(f0Section);
     expect(f0Section).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByText('Modbus ID setting')).toBeInTheDocument();
+    expect(screen.getByText('Modbus address')).toBeInTheDocument();
     expect(screen.getByText('9')).toBeInTheDocument();
+    expect(screen.getByText('Dry contact mode')).toBeInTheDocument();
+    expect(screen.getByText('md2 - Neutral-ground bonding')).toBeInTheDocument();
 
     fireEvent.click(chargerSection);
     expect(chargerSection).toHaveAttribute('aria-expanded', 'true');

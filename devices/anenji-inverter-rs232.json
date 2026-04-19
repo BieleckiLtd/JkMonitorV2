@@ -748,7 +748,7 @@
     {
       "id": "modbus_address",
       "type": "number",
-      "name": "Modbus ID setting",
+      "name": "Modbus address",
       "category": "F0 System",
       "source": {
         "bank": "settings_ext",
@@ -765,7 +765,7 @@
     },
     {
       "id": "dry_contact_mode",
-      "type": "number",
+      "type": "select",
       "name": "Dry contact mode",
       "category": "F0 System",
       "source": {
@@ -779,7 +779,17 @@
       "writable": true,
       "write": {
         "address": 690
-      }
+      },
+      "options": [
+        {
+          "value": 0,
+          "label": "md1 - Warning relay"
+        },
+        {
+          "value": 1,
+          "label": "md2 - Neutral-ground bonding"
+        }
+      ]
     },
     {
       "id": "remote_switch",

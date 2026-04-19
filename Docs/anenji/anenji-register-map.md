@@ -291,7 +291,7 @@ in the register map.
 | 687 | 314 | W | — | Warning mask (low word) | bitfield | 65535 (0xFFFF) | 🔍 |
 | 688 | 315 | W | — | Warning mask (high word) | bitfield | 60927 (0xEDFF) | 🔍 |
 | 689 | 420 | W | — | Remote switch | 0=Off, 1=On | 1 (On) | 🔍 |
-| 690 | 316? | W | F0P16 | Dry contact mode | numeric | 0 | 🔍 |
+| 690 | 316? | W | F0P16 | Dry contact mode | 0=md1 warning relay, 1=md2 neutral-ground bonding | 0 | 🔍 |
 
 ### 8.4 F4 Factory Reset (reg 795)
 
