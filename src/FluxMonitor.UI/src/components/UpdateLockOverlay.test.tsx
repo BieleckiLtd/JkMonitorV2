@@ -36,8 +36,8 @@ describe('UpdateLockOverlay', () => {
         success: null,
         canCancel: false,
         cancelUnavailableReason: 'The update has already been installed and the service is restarting.',
-        stepIndex: 11,
-        stepCount: 11,
+        stepIndex: 12,
+        stepCount: 12,
         percentComplete: 100,
         startedAt: '2026-04-06T09:00:00.000Z',
         updatedAt: '2026-04-06T09:00:05.000Z',
@@ -49,7 +49,7 @@ describe('UpdateLockOverlay', () => {
     expect(screen.getByText('Software update in progress')).toBeInTheDocument();
     expect(screen.getByText('Restarting Flux Monitor…')).toBeInTheDocument();
     expect(screen.getByText('Flux Monitor is restarting. The page will reload automatically when it is ready.')).toBeInTheDocument();
-    expect(screen.getByText('Step 11 of 11 - Restarting Flux Monitor…')).toBeInTheDocument();
+    expect(screen.getByText('Step 12 of 12 - Restarting Flux Monitor…')).toBeInTheDocument();
     expect(screen.getByText('Update is now being applied and can no longer be cancelled.')).toBeInTheDocument();
     expect(screen.queryByText(/heartbeat/i)).not.toBeInTheDocument();
   });

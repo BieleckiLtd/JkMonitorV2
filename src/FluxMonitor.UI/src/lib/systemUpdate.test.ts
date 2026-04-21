@@ -17,7 +17,7 @@ function createProgress(overrides: Partial<UpdateProgress> = {}): UpdateProgress
     canCancel: true,
     cancelUnavailableReason: null,
     stepIndex: 2,
-    stepCount: 11,
+    stepCount: 12,
     percentComplete: 18,
     startedAt: '2026-04-06T09:00:00.000Z',
     updatedAt: '2026-04-06T09:00:05.000Z',
@@ -42,11 +42,11 @@ describe('systemUpdate display helpers', () => {
   it('includes the current stage in the progress label', () => {
     const progress = createProgress({
       stage: 'Restarting Flux Monitor…',
-      stepIndex: 11,
-      stepCount: 11,
+      stepIndex: 12,
+      stepCount: 12,
     });
 
-    expect(getUpdateProgressLabel(progress)).toBe('Step 11 of 11 - Restarting Flux Monitor…');
+    expect(getUpdateProgressLabel(progress)).toBe('Step 12 of 12 - Restarting Flux Monitor…');
   });
 
   it('uses an informational lock message once cancellation is no longer available', () => {

@@ -245,6 +245,10 @@ public class SystemUpdateServiceTests
         Assert.True(SystemUpdateService.TryGetStageDefinition("Preparing installation folder", out var prepareStage));
         Assert.False(prepareStage.CanCancel);
         Assert.Contains("installed files are being replaced", prepareStage.CancelUnavailableReason, StringComparison.OrdinalIgnoreCase);
+
+        Assert.True(SystemUpdateService.TryGetStageDefinition("Configuring local hostname discovery", out var mdnsStage));
+        Assert.Equal(10, mdnsStage.StepIndex);
+        Assert.Equal(12, mdnsStage.StepCount);
     }
 
     [Fact]

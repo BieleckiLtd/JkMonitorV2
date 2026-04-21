@@ -322,6 +322,7 @@ public sealed class NetworkManagementServiceTests
     [Theory]
     [InlineData("Error: Failed to add/activate new connection: Not authorized to control networking.", true)]
     [InlineData("Error: Connection activation failed: insufficient privileges.", true)]
+    [InlineData("Error: Failed to add 'fluxmonitor-direct-wifi' connection: Insufficient privileges", true)]
     [InlineData("Error: No network with SSID 'missing' found.", false)]
     public void ShouldRetryNmcliWithSudo_DetectsAuthorizationFailures(string message, bool expected)
     {

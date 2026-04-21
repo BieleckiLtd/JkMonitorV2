@@ -1234,6 +1234,27 @@ install_or_update_networkmanager_tools() {
   fi
 }
 
+install_or_update_networkmanager_permissions() {
+  local current_user
+  local polkit_temp_path="$TEMP_ROOT/networkmanager.rules"
+
+  current_user="$(id -un)"
+
+  section 'Configuring NetworkManager permissions'
+
+  if [ ! -d /etc/polkit-1/rules.d ]; then
+    warn 'polkit rules folder was not found. NetworkManager changes may require root privileges.'
+    return 0
+  fi
+
+  build_networkmanager_polkit_rule "$current_user" > "$polkit_temp_path"
+  if write_elevated_file_if_changed "$polkit_temp_path" "$NETWORKMANAGER_POLKIT_RULE_PATH" 0644; then
+    info 'Configured Flux Monitor NetworkManager permissions.'
+  else
+    info 'Flux Monitor NetworkManager permissions are already in place.'
+  fi
+}
+
 build_elevation_helper_script() {
   local current_user="$1"
 
@@ -1275,7 +1296,7 @@ if [ "\$#" -lt 1 ]; then
 fi
 
 case "\$1" in
-  apt-get|dpkg|systemctl|install|mkdir|cmp|tee|sed|fuser|iw|visudo)
+  apt-get|dpkg|systemctl|install|mkdir|cmp|tee|sed|fuser|iw|visudo|nmcli)
     exec "\$@"
     ;;
   bash)
@@ -1451,6 +1472,19 @@ TimeoutStartSec=0
 
 [Install]
 WantedBy=multi-user.target
+EOF
+}
+
+build_networkmanager_polkit_rule() {
+  local current_user="$1"
+
+  cat <<EOF
+polkit.addRule(function(action, subject) {
+  if (subject.user === '$current_user'
+      && action.id.indexOf('org.freedesktop.NetworkManager.') === 0) {
+    return polkit.Result.YES;
+  }
+});
 EOF
 }
 
@@ -1782,17 +1816,6 @@ install_systemd_service() {
   local current_user
   current_user="$(id -un)"
 
-  if [ -d /etc/polkit-1/rules.d ]; then
-    run_elevated tee "$NETWORKMANAGER_POLKIT_RULE_PATH" >/dev/null <<EOF
-polkit.addRule(function(action, subject) {
-  if (subject.user === '$current_user'
-      && action.id.indexOf('org.freedesktop.NetworkManager.') === 0) {
-    return polkit.Result.YES;
-  }
-});
-EOF
-  fi
-
   run_elevated tee "$SERVICE_PATH" >/dev/null <<EOF
 [Unit]
 Description=Flux Monitor Backend
@@ -1945,6 +1968,7 @@ install_or_update_elevation_helper
 install_or_update_cloudflared_package
 install_or_update_speedtest_cli
 install_or_update_networkmanager_tools
+install_or_update_networkmanager_permissions
 
 section 'Checking ASP.NET Core runtime'
 DOTNET_CMD="$(get_dotnet)"

@@ -9,6 +9,8 @@ namespace FluxMonitor.Backend.Services;
 
 public sealed class NetworkManagementService(ILogger<NetworkManagementService> logger)
 {
+    internal const string ManagedElevationHelperPath = "/usr/local/sbin/fluxmonitor-elevate";
+
     public async Task<NetworkConnectivitySnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
     {
         var interfaces = GetBaseInterfaces();
@@ -1461,6 +1463,10 @@ public sealed class NetworkManagementService(ILogger<NetworkManagementService> l
 
         logger.LogInformation("Retrying NetworkManager command through sudo after authorization failure.");
         var elevatedResult = await RunProcessAsync("sudo", ["-n", "nmcli", .. arguments], cancellationToken);
+        if (IsSudoPasswordPromptResult(elevatedResult))
+        {
+            elevatedResult = await RunProcessAsync("sudo", ["-n", ManagedElevationHelperPath, "nmcli", .. arguments], cancellationToken);
+        }
 
         return IsSudoPasswordPromptResult(elevatedResult)
             ? result

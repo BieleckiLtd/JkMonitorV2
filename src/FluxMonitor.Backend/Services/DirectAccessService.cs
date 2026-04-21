@@ -1029,6 +1029,14 @@ public sealed class DirectAccessService(
         var elevatedResult = await RunCommandAsync("sudo", ["-n", "nmcli", .. arguments], cancellationToken);
         if (NetworkManagementService.IsSudoPasswordPromptResult(elevatedResult))
         {
+            elevatedResult = await RunCommandAsync(
+                "sudo",
+                ["-n", NetworkManagementService.ManagedElevationHelperPath, "nmcli", .. arguments],
+                cancellationToken);
+        }
+
+        if (NetworkManagementService.IsSudoPasswordPromptResult(elevatedResult))
+        {
             return result;
         }
 
