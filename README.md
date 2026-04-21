@@ -33,7 +33,7 @@ The first implementation phase establishes project scope, architecture, configur
 curl -fsSL https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/install-from-release.sh | bash -s -- https://github.com/BieleckiLtd/JkMonitorV2 dev-latest
 ```
 
-This is the preferred install path for a new Raspberry Pi. The installer downloads the latest published `dev-latest` build from GitHub Releases, installs the ASP.NET Core runtime if the Pi does not already have it, configures PostgreSQL-backed startup, provisions the local TimescaleDB extension when it bootstraps PostgreSQL on the device, disables Wi-Fi power save persistently through NetworkManager, can install and start `fluxmonitor.service`, and then prints the local/LAN URL for the web UI. The default install folder is `~/fluxmonitor`. No devices are preconfigured during install.
+This is the preferred install path for a new Raspberry Pi. The installer downloads the latest published `dev-latest` build from GitHub Releases, installs the ASP.NET Core runtime if the Pi does not already have it, configures PostgreSQL-backed startup, provisions the local TimescaleDB extension when it bootstraps PostgreSQL on the device, installs NetworkManager tools for Wi-Fi controls, disables Wi-Fi power save persistently through NetworkManager, can install and start `fluxmonitor.service`, and then prints the local/LAN URL for the web UI. The default install folder is `~/fluxmonitor`. No devices are preconfigured during install.
 
 - New install on Windows x64 from the published GitHub release:
 
@@ -49,7 +49,7 @@ curl -fsSL https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts
 
 - Already installed from source locally: use `./scripts/update.ps1` or `./scripts/update.sh` inside the installed folder to refresh from the default `dev` branch.
 
-The release installers download published builds from GitHub Releases, install only the ASP.NET Core runtime when needed, start the app with storage configured but no preloaded devices, and print LAN URLs that can be opened from another PC on the network.
+The release installers download published builds from GitHub Releases, install the ASP.NET Core runtime and required device-side helpers when needed, start the app with storage configured but no preloaded devices, and print LAN URLs that can be opened from another PC on the network.
 
 The source installer remains available for local development and debugging.
 

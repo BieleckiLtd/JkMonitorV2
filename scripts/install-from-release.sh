@@ -1196,6 +1196,32 @@ install_or_update_speedtest_cli() {
   fi
 }
 
+install_or_update_networkmanager_tools() {
+  section 'Installing NetworkManager tools'
+
+  if ! command -v apt-get >/dev/null 2>&1; then
+    warn 'apt-get is not available on this host. Skipping automatic NetworkManager package installation.'
+    return 0
+  fi
+
+  info 'Installing or updating NetworkManager from the system package repository.'
+  if ! run_elevated apt-get update >&2 || ! run_elevated apt-get install -y network-manager >&2; then
+    warn 'NetworkManager could not be installed. Wi-Fi controls and fallback local access may remain unavailable.'
+    return 0
+  fi
+
+  if command -v systemctl >/dev/null 2>&1; then
+    run_elevated systemctl enable NetworkManager.service >/dev/null 2>&1 || true
+    run_elevated systemctl start NetworkManager.service >/dev/null 2>&1 || true
+  fi
+
+  if command -v nmcli >/dev/null 2>&1; then
+    info 'NetworkManager command-line tools are available.'
+  else
+    warn 'The network-manager package installed, but nmcli is still not available on PATH.'
+  fi
+}
+
 write_local_file_if_changed() {
   local source_path="$1"
   local target_path="$2"
@@ -1807,6 +1833,7 @@ write_cloudflared_start_script
 
 install_or_update_cloudflared_package
 install_or_update_speedtest_cli
+install_or_update_networkmanager_tools
 
 section 'Checking ASP.NET Core runtime'
 DOTNET_CMD="$(get_dotnet)"
