@@ -20,6 +20,8 @@ MDNS_SERVICE_NAME='avahi-daemon.service'
 NETWORKMANAGER_POLKIT_RULE_PATH='/etc/polkit-1/rules.d/50-fluxmonitor-networkmanager.rules'
 NETWORKMANAGER_WIFI_POWERSAVE_CONFIG_PATH='/etc/NetworkManager/conf.d/50-fluxmonitor-wifi-powersave-off.conf'
 SYSTEMD_POLKIT_RULE_PATH='/etc/polkit-1/rules.d/51-fluxmonitor-systemd.rules'
+ELEVATION_HELPER_PATH='/usr/local/sbin/fluxmonitor-elevate'
+ELEVATION_SUDOERS_PATH='/etc/sudoers.d/fluxmonitor-elevate'
 TUNNEL_SERVICE_NAME='cloudflared.service'
 TUNNEL_SERVICE_PATH="/etc/systemd/system/$TUNNEL_SERVICE_NAME"
 SSH_SERVICE_NAME='ssh.service'
@@ -116,9 +118,17 @@ muted() {
   paint "$COLOR_MUTED" "$1"
 }
 
+can_use_elevation_helper() {
+  [ -x "$ELEVATION_HELPER_PATH" ] \
+    && command -v sudo >/dev/null 2>&1 \
+    && sudo -n "$ELEVATION_HELPER_PATH" --check-user "$(id -un)" >/dev/null 2>&1
+}
+
 run_elevated() {
   if [ "$(id -u)" -eq 0 ]; then
     "$@"
+  elif can_use_elevation_helper; then
+    sudo -n "$ELEVATION_HELPER_PATH" "$@"
   else
     sudo "$@"
   fi
@@ -129,6 +139,8 @@ run_as_postgres() {
 
   if [ "$(id -u)" -eq 0 ]; then
     su postgres -c "$command"
+  elif can_use_elevation_helper; then
+    sudo -n "$ELEVATION_HELPER_PATH" --as-postgres "$command"
   else
     sudo -u postgres bash -lc "$command"
   fi
@@ -1222,6 +1234,104 @@ install_or_update_networkmanager_tools() {
   fi
 }
 
+build_elevation_helper_script() {
+  local current_user="$1"
+
+  cat <<EOF
+#!/usr/bin/env bash
+set -euo pipefail
+
+ALLOWED_USER='$current_user'
+
+require_allowed_user() {
+  if [ "\${SUDO_USER:-}" = "\$ALLOWED_USER" ]; then
+    return 0
+  fi
+
+  echo "fluxmonitor-elevate can only be used by \$ALLOWED_USER." >&2
+  exit 1
+}
+
+require_allowed_user
+
+if [ "\${1:-}" = '--check-user' ]; then
+  [ "\${2:-}" = "\$ALLOWED_USER" ]
+  exit \$?
+fi
+
+if [ "\${1:-}" = '--as-postgres' ]; then
+  shift
+  if [ "\$#" -ne 1 ]; then
+    echo 'Usage: fluxmonitor-elevate --as-postgres <command>' >&2
+    exit 2
+  fi
+
+  exec su postgres -c "\$1"
+fi
+
+if [ "\$#" -lt 1 ]; then
+  echo 'Usage: fluxmonitor-elevate <allowed-command> [args...]' >&2
+  exit 2
+fi
+
+case "\$1" in
+  apt-get|dpkg|systemctl|install|mkdir|cmp|tee|sed|fuser|iw|visudo)
+    exec "\$@"
+    ;;
+  bash)
+    case "\${2:-}" in
+      */.fluxmonitor-installer/FluxMonitor-install-*/install-timescaledb-repository.sh)
+        exec "\$@"
+        ;;
+    esac
+    ;;
+esac
+
+echo "fluxmonitor-elevate does not allow this command: \$*" >&2
+exit 126
+EOF
+}
+
+build_elevation_sudoers_rule() {
+  local current_user="$1"
+
+  cat <<EOF
+$current_user ALL=(root) NOPASSWD: $ELEVATION_HELPER_PATH *
+EOF
+}
+
+install_or_update_elevation_helper() {
+  local current_user
+  local helper_temp_path="$TEMP_ROOT/fluxmonitor-elevate"
+  local sudoers_temp_path="$TEMP_ROOT/fluxmonitor-elevate.sudoers"
+
+  current_user="$(id -un)"
+
+  section 'Configuring managed update permissions'
+
+  if ! command -v sudo >/dev/null 2>&1 && [ "$(id -u)" -ne 0 ]; then
+    warn 'sudo is not available on this host. In-app updates may require a manual terminal update.'
+    return 0
+  fi
+
+  build_elevation_helper_script "$current_user" > "$helper_temp_path"
+  build_elevation_sudoers_rule "$current_user" > "$sudoers_temp_path"
+
+  run_elevated install -m 0755 "$helper_temp_path" "$ELEVATION_HELPER_PATH"
+
+  if command -v visudo >/dev/null 2>&1; then
+    run_elevated visudo -cf "$sudoers_temp_path" >/dev/null
+  fi
+
+  run_elevated install -m 0440 "$sudoers_temp_path" "$ELEVATION_SUDOERS_PATH"
+
+  if can_use_elevation_helper; then
+    info 'Managed update elevation helper is ready.'
+  else
+    warn 'Managed update elevation helper was installed, but passwordless sudo verification failed.'
+  fi
+}
+
 write_local_file_if_changed() {
   local source_path="$1"
   local target_path="$2"
@@ -1831,6 +1941,7 @@ write_start_script
 write_configure_script
 write_cloudflared_start_script
 
+install_or_update_elevation_helper
 install_or_update_cloudflared_package
 install_or_update_speedtest_cli
 install_or_update_networkmanager_tools

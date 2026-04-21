@@ -922,6 +922,14 @@ public sealed class SystemUpdateService(
         }
 
         if (combinedLines.Any(line =>
+                line.Contains("sudo: a password is required", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("sudo: a terminal is required", StringComparison.OrdinalIgnoreCase)
+                || line.Contains("sudo: sorry, you must have a tty", StringComparison.OrdinalIgnoreCase)))
+        {
+            return "The updater needs managed sudo permissions before it can refresh system packages and services from the app. Run the release installer once from an SSH terminal, then retry in-app updates.";
+        }
+
+        if (combinedLines.Any(line =>
                 line.Contains("No compatible ASP.NET Core 10 runtime was found", StringComparison.OrdinalIgnoreCase)
                 || line.Contains("An ASP.NET Core 10 runtime is required", StringComparison.OrdinalIgnoreCase)))
         {

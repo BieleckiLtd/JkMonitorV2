@@ -51,6 +51,8 @@ curl -fsSL https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts
 
 The release installers download published builds from GitHub Releases, install the ASP.NET Core runtime and required device-side helpers when needed, start the app with storage configured but no preloaded devices, and print LAN URLs that can be opened from another PC on the network.
 
+If an older managed install reports `sudo: a password is required` during an in-app update, run the release installer once from an SSH terminal. That refresh installs the managed update permission helper used by later in-app updates.
+
 The source installer remains available for local development and debugging.
 
 ## Windows desktop app

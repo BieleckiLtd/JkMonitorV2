@@ -278,6 +278,16 @@ public class SystemUpdateServiceTests
     }
 
     [Fact]
+    public void CreateFriendlyFailureDetail_ReportsMissingManagedSudoClearly()
+    {
+        var detail = SystemUpdateService.CreateFriendlyFailureDetail(
+            ["Configuring first run"],
+            ["sudo: a password is required"]);
+
+        Assert.Contains("managed sudo permissions", detail, StringComparison.OrdinalIgnoreCase);
+    }
+
+    [Fact]
     public void CancelUpdate_WhenNoUpdateIsRunning_ReturnsFriendlyError()
     {
         var service = CreateService(new StubHttpClientFactory(new StubHttpMessageHandler(_ => new HttpResponseMessage(HttpStatusCode.NotFound))));
