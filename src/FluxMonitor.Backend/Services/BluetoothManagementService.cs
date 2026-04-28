@@ -8,6 +8,8 @@ namespace FluxMonitor.Backend.Services;
 
 public sealed class BluetoothManagementService(ILogger<BluetoothManagementService> logger)
 {
+    private const string ElevationHelperPath = "/usr/local/sbin/fluxmonitor-elevate";
+
     public async Task<BluetoothRuntimeSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
     {
         if (!OperatingSystem.IsLinux())
@@ -220,7 +222,12 @@ public sealed class BluetoothManagementService(ILogger<BluetoothManagementServic
             }
         }
 
-        var result = await RunProcessAsync("sudo", ["-n", "btmgmt", "power", "on"], cancellationToken);
+        var result = await RunElevationHelperAsync(["--btmgmt-power-on"], cancellationToken);
+        if (!result.Succeeded && LooksLikeMissingOrOutdatedElevationHelper(result))
+        {
+            result = await RunProcessAsync("sudo", ["-n", "btmgmt", "power", "on"], cancellationToken);
+        }
+
         if (!result.Succeeded && !LooksLikeTransientPowerOnResult(result))
         {
             logger.LogWarning(
@@ -537,7 +544,46 @@ public sealed class BluetoothManagementService(ILogger<BluetoothManagementServic
 
     private async Task<bool> ClearBluetoothSoftBlockAsync(CancellationToken cancellationToken)
     {
-        var result = await RunProcessAsync(
+        var result = await RunElevationHelperAsync(["--clear-bluetooth-rfkill"], cancellationToken);
+        if (!result.Succeeded && LooksLikeMissingOrOutdatedElevationHelper(result))
+        {
+            result = await RunLegacyBluetoothRfkillClearAsync(cancellationToken);
+        }
+
+        if (!result.Succeeded)
+        {
+            logger.LogWarning(
+                "Failed to clear Bluetooth rfkill soft block. ExitCode={ExitCode}. StdOut={StandardOutput}. StdErr={ErrorOutput}.",
+                result.ExitCode,
+                result.StandardOutput,
+                result.ErrorOutput);
+            return false;
+        }
+
+        var remainingState = GetBluetoothRfkillState();
+        var cleared = remainingState?.SoftBlocked != true;
+        if (cleared)
+        {
+            logger.LogInformation("Bluetooth rfkill soft block cleared successfully.");
+        }
+        else
+        {
+            logger.LogWarning("Bluetooth rfkill soft block remained set after the clear attempt.");
+        }
+
+        return cleared;
+    }
+
+    private static Task<ProcessResult> RunElevationHelperAsync(
+        IReadOnlyList<string> arguments,
+        CancellationToken cancellationToken)
+    {
+        return RunProcessAsync("sudo", ["-n", ElevationHelperPath, .. arguments], cancellationToken);
+    }
+
+    private static Task<ProcessResult> RunLegacyBluetoothRfkillClearAsync(CancellationToken cancellationToken)
+    {
+        return RunProcessAsync(
             "sudo",
             [
                 "-n",
@@ -562,29 +608,6 @@ if persist_root.exists():
 """
             ],
             cancellationToken);
-
-        if (!result.Succeeded)
-        {
-            logger.LogWarning(
-                "Failed to clear Bluetooth rfkill soft block. ExitCode={ExitCode}. StdOut={StandardOutput}. StdErr={ErrorOutput}.",
-                result.ExitCode,
-                result.StandardOutput,
-                result.ErrorOutput);
-            return false;
-        }
-
-        var remainingState = GetBluetoothRfkillState();
-        var cleared = remainingState?.SoftBlocked != true;
-        if (cleared)
-        {
-            logger.LogInformation("Bluetooth rfkill soft block cleared successfully.");
-        }
-        else
-        {
-            logger.LogWarning("Bluetooth rfkill soft block remained set after the clear attempt.");
-        }
-
-        return cleared;
     }
 
     private static async Task<bool> ObservePowerStateAsync(
@@ -618,6 +641,15 @@ if persist_root.exists():
         var combined = $"{result.StandardOutput}\n{result.ErrorOutput}";
         return combined.Contains("Busy", StringComparison.OrdinalIgnoreCase)
             || combined.Contains("0x0a", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikeMissingOrOutdatedElevationHelper(ProcessResult result)
+    {
+        var combined = $"{result.StandardOutput}\n{result.ErrorOutput}";
+        return combined.Contains("No such file", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("not found", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("does not allow", StringComparison.OrdinalIgnoreCase)
+            || combined.Contains("unrecognized option", StringComparison.OrdinalIgnoreCase);
     }
 
     private static string? ReadTrimmedFile(string path)

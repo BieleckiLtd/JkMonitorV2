@@ -22,6 +22,7 @@ NETWORKMANAGER_WIFI_POWERSAVE_CONFIG_PATH='/etc/NetworkManager/conf.d/50-fluxmon
 SYSTEMD_POLKIT_RULE_PATH='/etc/polkit-1/rules.d/51-fluxmonitor-systemd.rules'
 ELEVATION_HELPER_PATH='/usr/local/sbin/fluxmonitor-elevate'
 ELEVATION_SUDOERS_PATH='/etc/sudoers.d/fluxmonitor-elevate'
+BLUETOOTH_SERVICE_NAME='bluetooth.service'
 TUNNEL_SERVICE_NAME='cloudflared.service'
 TUNNEL_SERVICE_PATH="/etc/systemd/system/$TUNNEL_SERVICE_NAME"
 SSH_SERVICE_NAME='ssh.service'
@@ -510,7 +511,7 @@ storage = monitor.get('Storage') if isinstance(monitor, dict) else None
 provider = storage.get('Provider') if isinstance(storage, dict) else None
 connection_string = storage.get('ConnectionString') if isinstance(storage, dict) else None
 
-if isinstance(provider, str) and provider.lower() == 'timescaledb' and isinstance(connection_string, str) and connection_string.strip():
+if isinstance(provider, str) and provider.lower() in {'timescaledb', 'postgresql', 'postgres'} and isinstance(connection_string, str) and connection_string.strip():
     raise SystemExit(0)
 
 raise SystemExit(1)
@@ -518,7 +519,7 @@ PY
     return $?
   fi
 
-  grep -Eq '"Provider"[[:space:]]*:[[:space:]]*"TimescaleDb"' "$config_path" || return 1
+  grep -Eiq '"Provider"[[:space:]]*:[[:space:]]*"(TimescaleDb|PostgreSql|Postgres)"' "$config_path" || return 1
   grep -Eq '"ConnectionString"[[:space:]]*:[[:space:]]*"[^"]+"' "$config_path" || return 1
 }
 
@@ -1007,6 +1008,23 @@ maybe_provision_local_timescaledb_for_connection_string() {
   ensure_timescaledb_for_local_database "$database_name"
 }
 
+resolve_storage_provider_for_connection_string() {
+  local connection_string="$1"
+
+  if [ -z "$connection_string" ] || ! is_local_connection_string "$connection_string"; then
+    printf '%s\n' 'TimescaleDb'
+    return
+  fi
+
+  if maybe_provision_local_timescaledb_for_connection_string "$connection_string"; then
+    printf '%s\n' 'TimescaleDb'
+    return
+  fi
+
+  warn 'TimescaleDB is not available for this local PostgreSQL install. Configuring plain PostgreSQL storage.' >&2
+  printf '%s\n' 'PostgreSql'
+}
+
 read_connection_string_from_configuration_file() {
   local config_path="$1"
 
@@ -1089,8 +1107,6 @@ bootstrap_local_postgres_connection_string() {
   if [ "$(run_as_postgres "psql -tAc \"SELECT 1 FROM pg_database WHERE datname = '$database_name'\" postgres" | tr -d '[:space:]')" != '1' ]; then
     run_as_postgres "createdb -O $role_name $database_name" >/dev/null 2>&1 || true
   fi
-
-  maybe_provision_local_timescaledb_for_connection_string "Host=127.0.0.1;Port=5432;Database=$database_name;Username=$role_name;Password=$password" || true
 
   printf 'Host=127.0.0.1;Port=5432;Database=%s;Username=%s;Password=%s\n' "$database_name" "$role_name" "$password"
 }
@@ -1255,6 +1271,53 @@ install_or_update_networkmanager_permissions() {
   fi
 }
 
+clear_bluetooth_rfkill_soft_block() {
+  if [ "$(id -u)" -eq 0 ]; then
+    "$ELEVATION_HELPER_PATH" --clear-bluetooth-rfkill >/dev/null 2>&1 || true
+    return 0
+  fi
+
+  if can_use_elevation_helper; then
+    sudo -n "$ELEVATION_HELPER_PATH" --clear-bluetooth-rfkill >/dev/null 2>&1 || true
+  fi
+}
+
+install_or_update_bluetooth_support() {
+  local packages
+
+  section 'Configuring Bluetooth support'
+
+  if command -v apt-get >/dev/null 2>&1; then
+    packages=(bluez rfkill)
+    info 'Installing or updating Bluetooth support packages.'
+    if ! run_elevated apt-get update >&2; then
+      warn 'The package index could not be refreshed before installing Bluetooth support packages.'
+    fi
+
+    if apt-cache show pi-bluetooth >/dev/null 2>&1; then
+      packages+=(pi-bluetooth)
+    fi
+
+    if ! run_elevated apt-get install -y "${packages[@]}" >&2; then
+      warn 'Bluetooth support packages could not be installed automatically. BLE scans may remain unavailable.'
+    fi
+  else
+    warn 'apt-get is not available on this host. Skipping automatic Bluetooth package installation.'
+  fi
+
+  if command -v systemctl >/dev/null 2>&1; then
+    run_elevated systemctl enable "$BLUETOOTH_SERVICE_NAME" >/dev/null 2>&1 || true
+    run_elevated systemctl start "$BLUETOOTH_SERVICE_NAME" >/dev/null 2>&1 || true
+  fi
+
+  if command -v rfkill >/dev/null 2>&1; then
+    run_elevated rfkill unblock bluetooth >/dev/null 2>&1 || true
+  fi
+
+  clear_bluetooth_rfkill_soft_block
+  info 'Bluetooth service and rfkill state were checked.'
+}
+
 build_elevation_helper_script() {
   local current_user="$1"
 
@@ -1265,6 +1328,10 @@ set -euo pipefail
 ALLOWED_USER='$current_user'
 
 require_allowed_user() {
+  if [ "\$(id -u)" -eq 0 ] && [ -z "\${SUDO_USER:-}" ]; then
+    return 0
+  fi
+
   if [ "\${SUDO_USER:-}" = "\$ALLOWED_USER" ]; then
     return 0
   fi
@@ -1290,13 +1357,44 @@ if [ "\${1:-}" = '--as-postgres' ]; then
   exec su postgres -c "\$1"
 fi
 
+clear_bluetooth_rfkill() {
+  local path
+  local file
+
+  for path in /sys/class/rfkill/rfkill*; do
+    [ -d "\$path" ] || continue
+    [ -f "\$path/type" ] || continue
+    [ "\$(cat "\$path/type" 2>/dev/null)" = 'bluetooth' ] || continue
+    if [ -f "\$path/soft" ]; then
+      printf '0\n' > "\$path/soft"
+    fi
+  done
+
+  if [ -d /var/lib/systemd/rfkill ]; then
+    for file in /var/lib/systemd/rfkill/*bluetooth*; do
+      [ -f "\$file" ] || continue
+      printf '0\n' > "\$file"
+    done
+  fi
+}
+
+case "\${1:-}" in
+  --clear-bluetooth-rfkill)
+    clear_bluetooth_rfkill
+    exit 0
+    ;;
+  --btmgmt-power-on)
+    exec btmgmt power on
+    ;;
+esac
+
 if [ "\$#" -lt 1 ]; then
   echo 'Usage: fluxmonitor-elevate <allowed-command> [args...]' >&2
   exit 2
 fi
 
 case "\$1" in
-  apt-get|dpkg|systemctl|install|mkdir|cmp|tee|sed|fuser|iw|visudo|nmcli)
+  apt-get|dpkg|systemctl|install|mkdir|cmp|tee|sed|fuser|iw|visudo|nmcli|rfkill)
     exec "\$@"
     ;;
   bash)
@@ -1660,7 +1758,7 @@ cat > "$writable_config" <<JSON
 {
   "Monitor": {
     "Storage": {
-      "Provider": "TimescaleDb",
+      "Provider": "PostgreSql",
       "ConnectionString": "$connection_string"
     }
   }
@@ -1969,6 +2067,7 @@ install_or_update_cloudflared_package
 install_or_update_speedtest_cli
 install_or_update_networkmanager_tools
 install_or_update_networkmanager_permissions
+install_or_update_bluetooth_support
 
 section 'Checking ASP.NET Core runtime'
 DOTNET_CMD="$(get_dotnet)"
@@ -2005,17 +2104,17 @@ TARGET_CONFIG="$APP_ROOT/appsettings.Production.Local.json"
 
 if [ "$reused_existing_configuration" = 'false' ]; then
   CONNECTION_STRING="$(get_required_connection_string)"
+  STORAGE_PROVIDER="$(resolve_storage_provider_for_connection_string "$CONNECTION_STRING")"
   cat > "$TARGET_CONFIG" <<EOF
 {
   "Monitor": {
     "Storage": {
-      "Provider": "TimescaleDb",
+      "Provider": "$STORAGE_PROVIDER",
       "ConnectionString": "$CONNECTION_STRING"
     }
   }
 }
 EOF
-  maybe_provision_local_timescaledb_for_connection_string "$CONNECTION_STRING" || true
 elif [ -n "${EXISTING_CONNECTION_STRING:-}" ]; then
   maybe_provision_local_timescaledb_for_connection_string "$EXISTING_CONNECTION_STRING" || true
 fi

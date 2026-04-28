@@ -44,6 +44,17 @@ public sealed class SetupConfigurationServiceTests : IDisposable
     }
 
     [Fact]
+    public void GetState_AcceptsPlainPostgreSqlStorage()
+    {
+        var service = CreateService(storageProvider: "PostgreSql");
+
+        var state = service.GetState();
+
+        Assert.False(state.SetupRequired);
+        Assert.True(state.UseDatabase);
+    }
+
+    [Fact]
     public void Apply_AlwaysWritesTimescaleDbStorage()
     {
         var service = CreateService();
@@ -159,7 +170,8 @@ public sealed class SetupConfigurationServiceTests : IDisposable
     private SetupConfigurationService CreateService(
         string? contentRootPath = null,
         string environmentName = "Test",
-        bool storageConfiguredAtStartup = true)
+        bool storageConfiguredAtStartup = true,
+        string storageProvider = "TimescaleDb")
     {
         var effectiveContentRoot = contentRootPath ?? _tempRootPath;
         Directory.CreateDirectory(effectiveContentRoot);
@@ -167,7 +179,7 @@ public sealed class SetupConfigurationServiceTests : IDisposable
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                ["Monitor:Storage:Provider"] = storageConfiguredAtStartup ? "TimescaleDb" : "None",
+                ["Monitor:Storage:Provider"] = storageConfiguredAtStartup ? storageProvider : "None",
                 ["Monitor:Storage:ConnectionString"] = storageConfiguredAtStartup ? "Host=localhost;Database=seed;" : null,
                 ["Monitor:Storage:Retention:RawSecondsWindowMinutes"] = "10",
                 ["Monitor:Storage:Retention:PersistedBucketMinutes"] = "5",

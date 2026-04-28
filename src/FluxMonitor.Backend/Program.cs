@@ -12,7 +12,9 @@ var monitorSection = builder.Configuration.GetSection("Monitor");
 var storageProvider = monitorSection.GetValue<string>("Storage:Provider");
 var storageConnectionString = monitorSection.GetValue<string>("Storage:ConnectionString");
 var storageConfigured =
-    string.Equals(storageProvider, "TimescaleDb", StringComparison.OrdinalIgnoreCase) &&
+    (string.Equals(storageProvider, "TimescaleDb", StringComparison.OrdinalIgnoreCase) ||
+     string.Equals(storageProvider, "PostgreSql", StringComparison.OrdinalIgnoreCase) ||
+     string.Equals(storageProvider, "Postgres", StringComparison.OrdinalIgnoreCase)) &&
     !string.IsNullOrWhiteSpace(storageConnectionString);
 var configuredLogStorageOptions = builder.Configuration.GetSection("Monitor:LogStorage").Get<LogStorageOptions>();
 var logStorageOptions = LogStorageOptions.Resolve(

@@ -173,6 +173,9 @@ public sealed class TimescaleTelemetryRepository(
 
     private string GetPersistedBucketDescription() => $"{GetPersistedBucketMinutes()}-minute";
 
+    private static bool IsTimescaleStorageProvider(string? provider)
+        => string.Equals(provider, "TimescaleDb", StringComparison.OrdinalIgnoreCase);
+
     public async Task InitializeAsync(CancellationToken cancellationToken)
     {
         if (_initialized)
@@ -191,7 +194,8 @@ public sealed class TimescaleTelemetryRepository(
             await using var connection = new NpgsqlConnection(_storage.ConnectionString);
             await connection.OpenAsync(cancellationToken);
 
-            var useTimescale = await TryEnableTimescaleAsync(connection, cancellationToken);
+            var useTimescale = IsTimescaleStorageProvider(_storage.Provider) &&
+                await TryEnableTimescaleAsync(connection, cancellationToken);
 
             // A PostgreSQL FATAL error (e.g. timescaledb not preloaded) kills the
             // backend process and closes the connection.  Re-open before continuing.

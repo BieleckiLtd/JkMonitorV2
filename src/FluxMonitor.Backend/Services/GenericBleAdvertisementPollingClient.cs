@@ -21,6 +21,7 @@ public sealed class GenericBleAdvertisementPollingClient(
     ITelemetryRepository telemetryRepository,
     CellVoltageSmoothingFilter smoothingFilter,
     NotificationEvaluator notificationEvaluator,
+    BluetoothManagementService bluetoothManagementService,
     ILogger<GenericBleAdvertisementPollingClient> logger) : IDevicePollingClient, IPassiveBleAdvertisementMonitor, IDisposable
 {
     private readonly SemaphoreSlim _scannerLock = new(1, 1);
@@ -234,7 +235,11 @@ public sealed class GenericBleAdvertisementPollingClient(
                 ?? throw new InvalidOperationException("No Bluetooth adapter was found.");
 
             if (!await adapter.GetAsync<bool>("Powered"))
-                await adapter.SetAsync("Powered", true);
+            {
+                var powerResult = await bluetoothManagementService.SetPowerAsync(enabled: true, cancellationToken);
+                if (!powerResult.Success)
+                    throw new InvalidOperationException(powerResult.Message);
+            }
 
             foreach (var device in await adapter.GetDevicesAsync())
             {
@@ -279,7 +284,11 @@ public sealed class GenericBleAdvertisementPollingClient(
                 try
                 {
                     if (!await adapter.GetAsync<bool>("Powered"))
-                        await adapter.SetAsync("Powered", true);
+                    {
+                        var powerResult = await bluetoothManagementService.SetPowerAsync(enabled: true, cancellationToken);
+                        if (!powerResult.Success)
+                            throw new InvalidOperationException(powerResult.Message);
+                    }
 
                     if (!await adapter.GetAsync<bool>("Discovering"))
                         await adapter.StartDiscoveryAsync();

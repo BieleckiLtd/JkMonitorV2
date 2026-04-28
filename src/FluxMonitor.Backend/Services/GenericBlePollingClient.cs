@@ -19,6 +19,7 @@ namespace FluxMonitor.Backend.Services;
 public sealed class GenericBlePollingClient(
     DefinitionDrivenTelemetryBuilder telemetryBuilder,
     DeviceDefinitionLoader definitionLoader,
+    BluetoothManagementService bluetoothManagementService,
     ILogger<GenericBlePollingClient> logger) : IDevicePollingClient, IDisposable
 {
     private readonly ConcurrentDictionary<string, BleSession> _sessions = new(StringComparer.OrdinalIgnoreCase);
@@ -313,7 +314,11 @@ public sealed class GenericBlePollingClient(
             ?? throw new InvalidOperationException("No Bluetooth adapter was found.");
 
         if (!await adapter.GetAsync<bool>("Powered"))
-            await adapter.SetAsync("Powered", true);
+        {
+            var powerResult = await bluetoothManagementService.SetPowerAsync(enabled: true, cancellationToken);
+            if (!powerResult.Success)
+                throw new InvalidOperationException(powerResult.Message);
+        }
 
         var devices = new ConcurrentDictionary<string, Device>(StringComparer.OrdinalIgnoreCase);
         var expectedServiceUuid = definition is not null && IsDefinitionSupported(definition)
@@ -459,7 +464,11 @@ public sealed class GenericBlePollingClient(
             ?? throw new InvalidOperationException("No Bluetooth adapter was found.");
 
         if (!await adapter.GetAsync<bool>("Powered"))
-            await adapter.SetAsync("Powered", true);
+        {
+            var powerResult = await bluetoothManagementService.SetPowerAsync(enabled: true, cancellationToken);
+            if (!powerResult.Success)
+                throw new InvalidOperationException(powerResult.Message);
+        }
 
         try
         {

@@ -323,7 +323,9 @@ public sealed class SetupConfigurationService(
         var provider = configuration.GetValue<string>("Monitor:Storage:Provider");
         var connectionString = configuration.GetValue<string>("Monitor:Storage:ConnectionString");
 
-        return string.Equals(provider, "TimescaleDb", StringComparison.OrdinalIgnoreCase)
+        return (string.Equals(provider, "TimescaleDb", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(provider, "PostgreSql", StringComparison.OrdinalIgnoreCase)
+                || string.Equals(provider, "Postgres", StringComparison.OrdinalIgnoreCase))
             && !string.IsNullOrWhiteSpace(connectionString);
     }
 
