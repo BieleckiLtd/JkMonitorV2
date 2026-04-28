@@ -10,6 +10,10 @@ param(
 
     [string]$DeviceHost = 'pi@fm.local',
 
+    [string]$FallbackDeviceHost = 'pi@fm-ssh.fluxmonitor.com',
+
+    [string]$FallbackProxyCommand = 'cloudflared access ssh --hostname %h',
+
     [string]$Repository,
 
     [int]$WaitSeconds = 0,
@@ -42,6 +46,10 @@ function Require-Command([string]$CommandName) {
     if (-not (Get-Command $CommandName -ErrorAction SilentlyContinue)) {
         throw "Required command not found: $CommandName"
     }
+}
+
+function Test-CommandExists([string]$CommandName) {
+    return $null -ne (Get-Command $CommandName -ErrorAction SilentlyContinue)
 }
 
 function Invoke-GitCapture([string[]]$Arguments) {
@@ -241,6 +249,62 @@ function Assert-ReleaseAssetExists([string]$RepositorySlug, [string]$Tag, [strin
     [void](Get-ReleaseAsset -RepositorySlug $RepositorySlug -Tag $Tag -AssetName $AssetName)
 }
 
+function Invoke-RemoteDeploy {
+    param(
+        [string]$PrimaryHost,
+        [string]$FallbackHost,
+        [string]$ProxyCommand,
+        [string]$ScriptContent
+    )
+
+    $commonArgs = @(
+        '-o', 'BatchMode=yes',
+        '-o', 'ConnectTimeout=15',
+        '-o', 'ServerAliveInterval=30',
+        '-o', 'ServerAliveCountMax=4',
+        '-o', 'StrictHostKeyChecking=no'
+    )
+
+    $attempts = @(
+        @{
+            Host = $PrimaryHost
+            ExtraArgs = @()
+        }
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($FallbackHost) -and $FallbackHost -ne $PrimaryHost) {
+        $attempts += @{
+            Host = $FallbackHost
+            ExtraArgs = @('-o', "ProxyCommand=$ProxyCommand")
+        }
+    }
+
+    $failures = New-Object System.Collections.Generic.List[string]
+
+    foreach ($attempt in $attempts) {
+        $host = [string]$attempt.Host
+        $extraArgs = [string[]]$attempt.ExtraArgs
+
+        if ($extraArgs.Count -gt 0 -and -not (Test-CommandExists 'cloudflared')) {
+            $failures.Add("Remote fallback '$host' requires cloudflared on PATH.")
+            continue
+        }
+
+        Write-Step "Deploying to $host"
+        $ScriptContent | & ssh @commonArgs @extraArgs $host 'bash -s'
+        if ($LASTEXITCODE -eq 0) {
+            return
+        }
+
+        $failures.Add("SSH deploy via '$host' failed with exit code $LASTEXITCODE.")
+        if ($host -eq $PrimaryHost -and $attempts.Count -gt 1) {
+            Write-Info 'Primary SSH target failed. Trying Cloudflare Access fallback.'
+        }
+    }
+
+    throw ($failures -join ' ')
+}
+
 function Wait-ForReleaseChecksum(
     [string]$RepositorySlug,
     [string]$Tag,
@@ -424,10 +488,10 @@ $remoteScript = $remoteScript.Replace('__RELEASE_TAG__', $ReleaseTag)
 $remoteScript = $remoteScript.Replace('__LINUX_ASSET_NAME__', $linuxAssetName)
 $remoteScript = $remoteScript.Replace('__CURRENT_COMMIT__', $currentCommit)
 
-Write-Step "Deploying to $DeviceHost"
-$remoteScript | & ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=4 -o StrictHostKeyChecking=no $DeviceHost 'bash -s'
-if ($LASTEXITCODE -ne 0) {
-    throw "SSH deploy failed with exit code $LASTEXITCODE."
-}
+Invoke-RemoteDeploy `
+    -PrimaryHost $DeviceHost `
+    -FallbackHost $FallbackDeviceHost `
+    -ProxyCommand $FallbackProxyCommand `
+    -ScriptContent $remoteScript
 
 Write-Step 'Publish workflow completed'

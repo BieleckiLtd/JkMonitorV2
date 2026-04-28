@@ -6,6 +6,8 @@ REMOTE_NAME=${REMOTE_NAME:-origin}
 BRANCH=${BRANCH:-dev}
 RELEASE_TAG=${RELEASE_TAG:-dev-latest}
 PI_HOST=${PI_HOST:-pi@fm.local}
+FALLBACK_PI_HOST=${FALLBACK_PI_HOST:-pi@fm-ssh.fluxmonitor.com}
+FALLBACK_PROXY_COMMAND=${FALLBACK_PROXY_COMMAND:-cloudflared access ssh --hostname %h}
 REPOSITORY=${REPOSITORY:-}
 WAIT_SECONDS=${WAIT_SECONDS:-0}
 ARTIFACT_TIMEOUT_SECONDS=${ARTIFACT_TIMEOUT_SECONDS:-600}
@@ -25,6 +27,44 @@ require_cmd() {
     echo "Required command not found: $1" >&2
     exit 1
   fi
+}
+
+deploy_via_ssh() {
+  local remote_script="$1"
+  local common_opts=(
+    -o BatchMode=yes
+    -o ConnectTimeout=15
+    -o ServerAliveInterval=30
+    -o ServerAliveCountMax=4
+    -o StrictHostKeyChecking=no
+  )
+
+  log "Deploying to $PI_HOST"
+  printf '%s\n' "$remote_script" | ssh "${common_opts[@]}" "$PI_HOST" bash -s
+  local primary_exit=$?
+  if (( primary_exit == 0 )); then
+    return
+  fi
+
+  if [[ -z "$FALLBACK_PI_HOST" || "$FALLBACK_PI_HOST" == "$PI_HOST" ]]; then
+    echo "SSH deploy failed via '$PI_HOST' with exit code $primary_exit." >&2
+    exit "$primary_exit"
+  fi
+
+  if ! command -v cloudflared >/dev/null 2>&1; then
+    echo "SSH deploy failed via '$PI_HOST' with exit code $primary_exit, and fallback host '$FALLBACK_PI_HOST' requires cloudflared on PATH." >&2
+    exit "$primary_exit"
+  fi
+
+  log "Primary SSH target failed. Trying Cloudflare Access fallback via $FALLBACK_PI_HOST"
+  printf '%s\n' "$remote_script" | ssh "${common_opts[@]}" -o "ProxyCommand=$FALLBACK_PROXY_COMMAND" "$FALLBACK_PI_HOST" bash -s
+  local fallback_exit=$?
+  if (( fallback_exit == 0 )); then
+    return
+  fi
+
+  echo "SSH deploy failed via '$PI_HOST' and '$FALLBACK_PI_HOST' (fallback exit code $fallback_exit)." >&2
+  exit "$fallback_exit"
 }
 
 ensure_git_identity() {
@@ -400,8 +440,7 @@ log "Expected Linux release checksum: $EXPECTED_RELEASE_SHA256"
 
 require_cmd ssh
 
-log "Deploying to $PI_HOST"
-ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=30 -o ServerAliveCountMax=4 -o StrictHostKeyChecking=no "$PI_HOST" bash -s <<EOF
+REMOTE_SCRIPT=$(cat <<EOF
 set -euo pipefail
 expected_sha256='$EXPECTED_RELEASE_SHA256'
 repository_slug='$REPOSITORY_SLUG'
@@ -465,5 +504,8 @@ else
   }
 fi
 EOF
+)
+
+deploy_via_ssh "$REMOTE_SCRIPT"
 
 log 'Publish workflow completed'

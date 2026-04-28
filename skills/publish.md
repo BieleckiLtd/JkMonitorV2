@@ -13,7 +13,7 @@ Complete the publish flow end-to-end without handing work back to the user:
 3. If there are no local changes, skip commit creation and continue with the current remote state.
 4. After a push, start polling GitHub Releases immediately and re-check every 30 seconds until the updated artifact appears.
 5. Confirm that the `dev-latest` Linux release artifact is available from GitHub Releases and capture its published checksum.
-6. SSH to `pi@fm.local`, confirm GitHub still serves that exact checksum for the release tag, and run the GitHub release installer with the expected checksum pinned.
+6. SSH to `pi@fm.local`, or retry through `pi@fm-ssh.fluxmonitor.com` via Cloudflare Access SSH if the device is not reachable on the local network, confirm GitHub still serves that exact checksum for the release tag, and run the GitHub release installer with the expected checksum pinned.
 7. Verify the installer recorded the same checksum on the device, and verify the deployed service is healthy and reports the expected release tag and source revision in `api/health`.
 
 ## Source Of Truth
@@ -32,6 +32,19 @@ wget -qO- https://raw.githubusercontent.com/BieleckiLtd/JkMonitorV2/dev/scripts/
 ```
 
 The release installer is also the update path. Do not branch to a separate source-based deploy flow unless the user explicitly asks for it.
+
+When SSH from the local network is unavailable, use the Cloudflare Access fallback:
+
+```bash
+ssh pi@fm-ssh.fluxmonitor.com -o ProxyCommand="cloudflared access ssh --hostname %h"
+```
+
+Known remote host aliases:
+
+```bash
+ssh pi@fmzero-ssh.fluxmonitor.com -o ProxyCommand="cloudflared access ssh --hostname %h"
+ssh pi@fm-ssh.fluxmonitor.com -o ProxyCommand="cloudflared access ssh --hostname %h"
+```
 
 ## Expected Verification
 
@@ -52,4 +65,5 @@ The runtime health payload should expose build metadata so publish can confirm t
 - Prefer the release artifact deployment path over source deployment.
 - Do not require `gh` or ask the user to log into the GitHub CLI for this workflow.
 - Use public GitHub HTTP APIs to observe the release artifact unless authenticated access is explicitly required.
+- Prefer the LAN SSH target first, but do not treat mDNS reachability failure as a hard stop until the Cloudflare Access SSH fallback has been tried.
 - If the current branch is not `dev`, stop and explain the mismatch instead of resetting the branch.
