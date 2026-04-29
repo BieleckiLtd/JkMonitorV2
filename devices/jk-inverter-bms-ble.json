@@ -482,10 +482,142 @@
       "id": "lcd_buzzer_trigger",
       "type": "sensor",
       "name": "LCD Buzzer Trigger",
-      "category": "System",
+      "category": "Triggers",
       "source": {
         "bank": "info",
         "byteOffset": 228,
+        "dataType": "uint8"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "dry_1_trigger",
+      "type": "sensor",
+      "name": "DRY 1 Trigger",
+      "category": "Triggers",
+      "source": {
+        "bank": "info",
+        "byteOffset": 229,
+        "dataType": "uint8"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "dry_2_trigger",
+      "type": "sensor",
+      "name": "DRY 2 Trigger",
+      "category": "Triggers",
+      "source": {
+        "bank": "info",
+        "byteOffset": 230,
+        "dataType": "uint8"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "lcd_buzzer_trigger_value",
+      "type": "number",
+      "name": "LCD Buzzer Trigger Value",
+      "category": "Triggers",
+      "source": {
+        "bank": "info",
+        "byteOffset": 232,
+        "dataType": "uint32"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "lcd_buzzer_release_value",
+      "type": "number",
+      "name": "LCD Buzzer Release Value",
+      "category": "Triggers",
+      "source": {
+        "bank": "info",
+        "byteOffset": 236,
+        "dataType": "uint32"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "dry_1_trigger_value",
+      "type": "number",
+      "name": "DRY 1 Trigger Value",
+      "category": "Triggers",
+      "source": {
+        "bank": "info",
+        "byteOffset": 240,
+        "dataType": "uint32"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "dry_1_release_value",
+      "type": "number",
+      "name": "DRY 1 Release Value",
+      "category": "Triggers",
+      "source": {
+        "bank": "info",
+        "byteOffset": 244,
+        "dataType": "uint32"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "dry_2_trigger_value",
+      "type": "number",
+      "name": "DRY 2 Trigger Value",
+      "category": "Triggers",
+      "source": {
+        "bank": "info",
+        "byteOffset": 248,
+        "dataType": "uint32"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "dry_2_release_value",
+      "type": "number",
+      "name": "DRY 2 Release Value",
+      "category": "Triggers",
+      "source": {
+        "bank": "info",
+        "byteOffset": 252,
+        "dataType": "uint32"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "uart1_protocol",
+      "type": "sensor",
+      "name": "UART 1 Protocol",
+      "category": "Communication",
+      "source": {
+        "bank": "info",
+        "byteOffset": 178,
+        "dataType": "uint8"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "can_protocol",
+      "type": "sensor",
+      "name": "CAN Protocol",
+      "category": "Communication",
+      "source": {
+        "bank": "info",
+        "byteOffset": 179,
+        "dataType": "uint8"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "uart2_protocol",
+      "type": "sensor",
+      "name": "UART 2 Protocol",
+      "category": "Communication",
+      "source": {
+        "bank": "info",
+        "byteOffset": 212,
         "dataType": "uint8"
       },
       "display": { "precision": 0 }
@@ -1080,6 +1212,8 @@
                 "System",
                 "Charging",
                 "Discharging",
+                "Communication",
+                "Triggers",
                 "F2 Charger"
               ]
             },

@@ -50,12 +50,25 @@ public sealed class JkBleDefinitionTests
         Assert.Contains("dry_contact_1", entityIds);
         Assert.Contains("dry_contact_2", entityIds);
         Assert.Contains("lcd_buzzer_trigger", entityIds);
+        Assert.Contains("dry_1_trigger", entityIds);
+        Assert.Contains("dry_2_trigger", entityIds);
+        Assert.Contains("lcd_buzzer_trigger_value", entityIds);
+        Assert.Contains("lcd_buzzer_release_value", entityIds);
+        Assert.Contains("dry_1_trigger_value", entityIds);
+        Assert.Contains("dry_1_release_value", entityIds);
+        Assert.Contains("dry_2_trigger_value", entityIds);
+        Assert.Contains("dry_2_release_value", entityIds);
+        Assert.Contains("uart1_protocol", entityIds);
+        Assert.Contains("can_protocol", entityIds);
+        Assert.Contains("uart2_protocol", entityIds);
 
         Assert.Equal("Thermal Protection", Assert.Single(definition.Entities, entity => entity.Id == "mos_temperature").Category);
         Assert.Equal("Thermal Protection", Assert.Single(definition.Entities, entity => entity.Id == "battery_temp_3").Category);
         Assert.Equal("Charging", Assert.Single(definition.Entities, entity => entity.Id == "charge_status").Category);
         Assert.Equal("System", Assert.Single(definition.Entities, entity => entity.Id == "heating_status").Category);
         Assert.Equal("System", Assert.Single(definition.Entities, entity => entity.Id == "pcl_module_state").Category);
+        Assert.Equal("Triggers", Assert.Single(definition.Entities, entity => entity.Id == "lcd_buzzer_trigger").Category);
+        Assert.Equal("Communication", Assert.Single(definition.Entities, entity => entity.Id == "uart1_protocol").Category);
 
         var pages = definition.Ui?.Pages;
         Assert.NotNull(pages);
@@ -72,7 +85,7 @@ public sealed class JkBleDefinitionTests
         Assert.Equal("category", configurationSection.GroupBy);
         Assert.NotNull(configurationSection.Filter?.Categories);
         Assert.Equal(
-            ["Cell Protection", "Current Protection", "Thermal Protection", "Balance Settings", "SOC Settings", "System", "Charging", "Discharging", "F2 Charger"],
+            ["Cell Protection", "Current Protection", "Thermal Protection", "Balance Settings", "SOC Settings", "System", "Charging", "Discharging", "Communication", "Triggers", "F2 Charger"],
             configurationSection.Filter!.Categories);
 
         var statusGlyphs = monitor.Card?.StatusGlyphs;

@@ -608,8 +608,96 @@ describe('MonitorPage', () => {
           id: 'lcd_buzzer_trigger',
           type: 'number',
           name: 'LCD Buzzer Trigger',
-          category: 'System',
+          category: 'Triggers',
           source: { bank: 'info', byteOffset: 0, unit: '' },
+          display: { precision: 0 },
+        },
+        {
+          id: 'dry_1_trigger',
+          type: 'number',
+          name: 'DRY 1 Trigger',
+          category: 'Triggers',
+          source: { bank: 'info', byteOffset: 1, unit: '' },
+          display: { precision: 0 },
+        },
+        {
+          id: 'dry_2_trigger',
+          type: 'number',
+          name: 'DRY 2 Trigger',
+          category: 'Triggers',
+          source: { bank: 'info', byteOffset: 2, unit: '' },
+          display: { precision: 0 },
+        },
+        {
+          id: 'lcd_buzzer_trigger_value',
+          type: 'number',
+          name: 'LCD Buzzer Trigger Value',
+          category: 'Triggers',
+          source: { bank: 'info', byteOffset: 4, unit: '' },
+          display: { precision: 0 },
+        },
+        {
+          id: 'lcd_buzzer_release_value',
+          type: 'number',
+          name: 'LCD Buzzer Release Value',
+          category: 'Triggers',
+          source: { bank: 'info', byteOffset: 8, unit: '' },
+          display: { precision: 0 },
+        },
+        {
+          id: 'dry_1_trigger_value',
+          type: 'number',
+          name: 'DRY 1 Trigger Value',
+          category: 'Triggers',
+          source: { bank: 'info', byteOffset: 12, unit: '' },
+          display: { precision: 0 },
+        },
+        {
+          id: 'dry_1_release_value',
+          type: 'number',
+          name: 'DRY 1 Release Value',
+          category: 'Triggers',
+          source: { bank: 'info', byteOffset: 16, unit: '' },
+          display: { precision: 0 },
+        },
+        {
+          id: 'dry_2_trigger_value',
+          type: 'number',
+          name: 'DRY 2 Trigger Value',
+          category: 'Triggers',
+          source: { bank: 'info', byteOffset: 20, unit: '' },
+          display: { precision: 0 },
+        },
+        {
+          id: 'dry_2_release_value',
+          type: 'number',
+          name: 'DRY 2 Release Value',
+          category: 'Triggers',
+          source: { bank: 'info', byteOffset: 24, unit: '' },
+          display: { precision: 0 },
+        },
+        {
+          id: 'uart1_protocol',
+          type: 'number',
+          name: 'UART 1 Protocol',
+          category: 'Communication',
+          source: { bank: 'info', byteOffset: 28, unit: '' },
+          display: { precision: 0 },
+        },
+        {
+          id: 'can_protocol',
+          type: 'number',
+          name: 'CAN Protocol',
+          category: 'Communication',
+          source: { bank: 'info', byteOffset: 29, unit: '' },
+          display: { precision: 0 },
+        },
+        {
+          id: 'uart2_protocol',
+          type: 'number',
+          name: 'UART 2 Protocol',
+          category: 'Communication',
+          source: { bank: 'info', byteOffset: 30, unit: '' },
           display: { precision: 0 },
         },
         {
@@ -663,7 +751,7 @@ describe('MonitorPage', () => {
                 type: 'parameter-table',
                 title: 'Configuration',
                 filter: {
-                  categories: ['Cell Protection', 'Current Protection', 'Thermal Protection', 'Balance Settings', 'SOC Settings', 'System', 'Charging', 'Discharging', 'F2 Charger'],
+                  categories: ['Cell Protection', 'Current Protection', 'Thermal Protection', 'Balance Settings', 'SOC Settings', 'System', 'Charging', 'Discharging', 'Communication', 'Triggers', 'F2 Charger'],
                 },
                 groupBy: 'category',
               },
@@ -736,8 +824,19 @@ describe('MonitorPage', () => {
               { key: 'pcl_module_state', displayName: 'Par-Limiter (PCL Module)', category: 'System', booleanValue: false, sortOrder: 14, unit: '' },
               { key: 'dry_contact_1', displayName: 'DRY1 Alarm', category: 'System', booleanValue: false, sortOrder: 15, unit: '' },
               { key: 'dry_contact_2', displayName: 'DRY2 Alarm', category: 'System', booleanValue: true, sortOrder: 16, unit: '' },
-              { key: 'lcd_buzzer_trigger', displayName: 'LCD Buzzer Trigger', category: 'System', numericValue: 3, sortOrder: 17, unit: '' },
-              { key: 'charge_switch', displayName: 'Charge Switch', category: 'Charging', numericValue: 1, rawValue: 1, sortOrder: 18, isWritable: true, unit: '' },
+              { key: 'lcd_buzzer_trigger', displayName: 'LCD Buzzer Trigger', category: 'Triggers', numericValue: 3, sortOrder: 17, unit: '' },
+              { key: 'dry_1_trigger', displayName: 'DRY 1 Trigger', category: 'Triggers', numericValue: 2, sortOrder: 18, unit: '' },
+              { key: 'dry_2_trigger', displayName: 'DRY 2 Trigger', category: 'Triggers', numericValue: 4, sortOrder: 19, unit: '' },
+              { key: 'lcd_buzzer_trigger_value', displayName: 'LCD Buzzer Trigger Value', category: 'Triggers', numericValue: 80, sortOrder: 20, unit: '' },
+              { key: 'lcd_buzzer_release_value', displayName: 'LCD Buzzer Release Value', category: 'Triggers', numericValue: 60, sortOrder: 21, unit: '' },
+              { key: 'dry_1_trigger_value', displayName: 'DRY 1 Trigger Value', category: 'Triggers', numericValue: 90, sortOrder: 22, unit: '' },
+              { key: 'dry_1_release_value', displayName: 'DRY 1 Release Value', category: 'Triggers', numericValue: 70, sortOrder: 23, unit: '' },
+              { key: 'dry_2_trigger_value', displayName: 'DRY 2 Trigger Value', category: 'Triggers', numericValue: 95, sortOrder: 24, unit: '' },
+              { key: 'dry_2_release_value', displayName: 'DRY 2 Release Value', category: 'Triggers', numericValue: 75, sortOrder: 25, unit: '' },
+              { key: 'uart1_protocol', displayName: 'UART 1 Protocol', category: 'Communication', numericValue: 1, sortOrder: 26, unit: '' },
+              { key: 'can_protocol', displayName: 'CAN Protocol', category: 'Communication', numericValue: 2, sortOrder: 27, unit: '' },
+              { key: 'uart2_protocol', displayName: 'UART 2 Protocol', category: 'Communication', numericValue: 3, sortOrder: 28, unit: '' },
+              { key: 'charge_switch', displayName: 'Charge Switch', category: 'Charging', numericValue: 1, rawValue: 1, sortOrder: 29, isWritable: true, unit: '' },
             ],
           },
         },
@@ -771,7 +870,18 @@ describe('MonitorPage', () => {
     expect(screen.getByText('Time Enter Sleep')).toBeInTheDocument();
     expect(screen.getByText('Par-Limiter (PCL Module)')).toBeInTheDocument();
     expect(screen.getByText('DRY2 Alarm')).toBeInTheDocument();
+    expect(screen.queryByText('LCD Buzzer Trigger')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Communication section' }));
+    expect(screen.getByText('UART 1 Protocol')).toBeInTheDocument();
+    expect(screen.getByText('CAN Protocol')).toBeInTheDocument();
+    expect(screen.getByText('UART 2 Protocol')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Triggers section' }));
     expect(screen.getByText('LCD Buzzer Trigger')).toBeInTheDocument();
+    expect(screen.getByText('LCD Buzzer Trigger Value')).toBeInTheDocument();
+    expect(screen.getByText('DRY 1 Trigger')).toBeInTheDocument();
+    expect(screen.getByText('DRY 2 Release Value')).toBeInTheDocument();
   });
 
   it('renders inverter cards as compact expandable summaries with synchronized power units and header badges', async () => {
