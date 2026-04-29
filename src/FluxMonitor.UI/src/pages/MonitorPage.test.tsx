@@ -892,7 +892,7 @@ describe('MonitorPage', () => {
     expect(screen.queryByText('Succeeded')).not.toBeInTheDocument();
     expect(screen.getByText('53.21')).toBeInTheDocument();
     expect(screen.queryByTestId('history-charts')).not.toBeInTheDocument();
-    expect(screen.queryByText('Charge Switch')).not.toBeInTheDocument();
+    expect(screen.queryByText('Charging')).not.toBeInTheDocument();
     expect(screen.queryByText('Charge Status')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: /house battery/i }));
@@ -908,11 +908,14 @@ describe('MonitorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Charging section' }));
     expect(screen.getByText('Charge Status')).toBeInTheDocument();
     expect(screen.getByText('Charge Status Time')).toBeInTheDocument();
-    expect(screen.getByText('Charge Switch')).toBeInTheDocument();
+    const chargingSwitchLabel = screen.getAllByText('Charging').find((element) => element.tagName === 'SPAN');
+    expect(chargingSwitchLabel).toBeInTheDocument();
+    expect(screen.getByText('Active')).toBeInTheDocument();
     expect(screen.getByText('RCV Time')).toBeInTheDocument();
     expect(screen.getByText('RFV Time')).toBeInTheDocument();
     expect(screen.getByText('0.1')).toBeInTheDocument();
     expect(screen.getByText('0.2')).toBeInTheDocument();
+    expect(chargingSwitchLabel?.compareDocumentPosition(screen.getByText('Charge Status')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getAllByText((_, element) => element?.textContent === '0.1 h').length).toBeGreaterThan(0);
     expect(screen.getAllByText((_, element) => element?.textContent === '0.2 h').length).toBeGreaterThan(0);
 

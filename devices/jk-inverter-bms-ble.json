@@ -1377,7 +1377,7 @@
             "traces": [
               { "entity": "min_cell_voltage",   "label": "Min",   "color": "red" },
               { "entity": "max_cell_voltage",   "label": "Max",   "color": "emerald" },
-              { "entity": "delta_cell_voltage", "label": "Delta", "color": "blue", "dashed": true }
+              { "entity": "delta_cell_voltage", "label": "Delta", "color": "blue", "dashed": true, "secondaryAxis": true }
             ],
             "yAxis": { "unit": "V", "label": "Cell Voltage" }
           },

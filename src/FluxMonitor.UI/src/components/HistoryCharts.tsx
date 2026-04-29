@@ -600,6 +600,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
               lines={[
                 { key: 'minCellVoltageVolts', color: '#f87171', name: 'Min Cell' },
                 { key: 'maxCellVoltageVolts', color: '#34d399', name: 'Max Cell' },
+                { key: 'deltaCellVoltageVolts', color: '#60a5fa', name: 'Delta', dashed: true, secondaryAxis: true },
               ]}
               getDecimalsForKey={getDecimalsForKey}
               getUnitForKey={getUnitForKey}
@@ -625,7 +626,13 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
   );
 }
 
-type LineSpec = { key: string; color: string; name: string };
+type LineSpec = {
+  key: string;
+  color: string;
+  name: string;
+  dashed?: boolean;
+  secondaryAxis?: boolean;
+};
 type ChartInteractionState = {
   activeTooltipIndex?: number;
   activeIndex?: number;
@@ -667,6 +674,8 @@ function renderDefinitionCharts(
       key: t.entity,
       color: resolveChartColor(t.color),
       name: t.label ?? t.entity,
+      dashed: t.dashed,
+      secondaryAxis: t.secondaryAxis,
     }));
 
     const isSocChart = lines.length === 1 && chart.traces?.[0]?.entity === 'state_of_charge';
@@ -728,6 +737,7 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
   subtitle?: React.ReactNode;
 }) {
   const activePoint = getActivePoint(data, hoveredTime, selectedTime);
+  const hasSecondaryAxis = lines.some((line) => line.secondaryAxis);
   const activeValueText = lines.length === 1 ? formatActiveValues(activePoint, lines, getDecimalsForKey, getUnitForKey) : null;
   const renderTooltipContent = useCallback((tooltipState: {
     active?: boolean;
@@ -829,7 +839,14 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
         >
           <CartesianGrid strokeDasharray='3 3' stroke='var(--border)' opacity={0.4} />
           <XAxis dataKey='time' tick={xTickStyle} tickLine={false} axisLine={false} {...(todayXTicks ? { ticks: todayXTicks } : {})} />
-          <YAxis orientation='right' width={32} tick={yTickStyle} tickLine={false} axisLine={false} domain={domain ?? ['auto', 'auto']} />
+          {hasSecondaryAxis ? (
+            <>
+              <YAxis yAxisId='primary' orientation='left' width={32} tick={yTickStyle} tickLine={false} axisLine={false} domain={domain ?? ['auto', 'auto']} />
+              <YAxis yAxisId='secondary' orientation='right' width={32} tick={yTickStyle} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
+            </>
+          ) : (
+            <YAxis yAxisId='primary' orientation='right' width={32} tick={yTickStyle} tickLine={false} axisLine={false} domain={domain ?? ['auto', 'auto']} />
+          )}
           <Tooltip
             content={renderTooltipContent}
           />
@@ -839,10 +856,12 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
               key={l.key}
               type='monotone'
               dataKey={l.key}
+              yAxisId={l.secondaryAxis ? 'secondary' : 'primary'}
               stroke={l.color}
               name={l.name}
               dot={false}
               strokeWidth={1.5}
+              strokeDasharray={l.dashed ? '4 4' : undefined}
               connectNulls
               isAnimationActive={false}
             />
