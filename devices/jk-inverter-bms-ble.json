@@ -209,6 +209,22 @@
       "display": { "precision": 1 },
       "role": "temperature"
     },
+    {
+      "id": "battery_temp_3",
+      "type": "sensor",
+      "name": "Battery Temp 3",
+      "category": "Temperatures",
+      "icon": "thermometer",
+      "source": {
+        "bank": "live",
+        "byteOffset": 252,
+        "dataType": "int16",
+        "scale": 0.1,
+        "unit": "°C"
+      },
+      "display": { "precision": 1 },
+      "role": "temperature"
+    },
 
     {
       "_comment": "=== LIVE DATA — Pack Status ===",
@@ -371,6 +387,108 @@
         { "value": 1, "label": "Absorption" },
         { "value": 2, "label": "Float" }
       ]
+    },
+    {
+      "id": "heating_status",
+      "type": "binary_sensor",
+      "name": "Heating Status",
+      "category": "Heating",
+      "source": {
+        "bank": "live",
+        "byteOffset": 209,
+        "dataType": "uint8",
+        "trueValue": 1
+      }
+    },
+    {
+      "id": "emergency_time_countdown",
+      "type": "sensor",
+      "name": "Emergency Timer",
+      "category": "Heating",
+      "source": {
+        "bank": "live",
+        "byteOffset": 212,
+        "dataType": "uint16",
+        "unit": "s"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "heating_current",
+      "type": "sensor",
+      "name": "Heat Current",
+      "category": "Heating",
+      "source": {
+        "bank": "live",
+        "byteOffset": 230,
+        "dataType": "int16",
+        "scale": 0.001,
+        "unit": "A"
+      },
+      "display": { "precision": 3 }
+    },
+    {
+      "id": "time_enter_sleep",
+      "type": "sensor",
+      "name": "Time Enter Sleep",
+      "category": "Heating",
+      "source": {
+        "bank": "live",
+        "byteOffset": 264,
+        "dataType": "uint32",
+        "unit": "s"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "pcl_module_state",
+      "type": "binary_sensor",
+      "name": "Par-Limiter (PCL Module)",
+      "category": "Outputs",
+      "source": {
+        "bank": "live",
+        "byteOffset": 268,
+        "dataType": "uint8",
+        "trueValue": 1
+      }
+    },
+    {
+      "id": "dry_contact_1",
+      "type": "binary_sensor",
+      "name": "DRY1 Alarm",
+      "category": "Outputs",
+      "source": {
+        "bank": "live",
+        "byteOffset": 275,
+        "dataType": "uint8",
+        "bitMask": 2,
+        "trueValue": 2
+      }
+    },
+    {
+      "id": "dry_contact_2",
+      "type": "binary_sensor",
+      "name": "DRY2 Alarm",
+      "category": "Outputs",
+      "source": {
+        "bank": "live",
+        "byteOffset": 275,
+        "dataType": "uint8",
+        "bitMask": 4,
+        "trueValue": 4
+      }
+    },
+    {
+      "id": "lcd_buzzer_trigger",
+      "type": "sensor",
+      "name": "LCD Buzzer Trigger",
+      "category": "Outputs",
+      "source": {
+        "bank": "info",
+        "byteOffset": 228,
+        "dataType": "uint8"
+      },
+      "display": { "precision": 0 }
     },
 
     {
@@ -922,8 +1040,8 @@
             {
               "type": "state",
               "states": [
-                { "entity": "charging_active", "equals": true, "icon": "battery-charging", "color": "green", "title": "Charging" },
-                { "entity": "discharging_active", "equals": true, "icon": "battery-discharging", "color": "orange", "title": "Discharging" }
+                { "entity": "charging_enabled", "equals": true, "icon": "battery-charging", "color": "green", "title": "Charging" },
+                { "entity": "discharging_enabled", "equals": true, "icon": "battery-discharging", "color": "orange", "title": "Discharging" }
               ]
             }
           ]
@@ -951,14 +1069,29 @@
           },
           {
             "type": "parameter-table",
-            "title": "Configuration",
-            "filter": { "writable": true },
-            "groupBy": "category"
+            "title": "Temperatures",
+            "entities": ["mos_temperature", "battery_temp_1", "battery_temp_2", "battery_temp_3"]
           },
           {
             "type": "parameter-table",
             "title": "Charging",
             "entities": ["charge_status", "charge_status_time_elapsed"]
+          },
+          {
+            "type": "parameter-table",
+            "title": "Heating & Sleep",
+            "entities": ["heating_status", "heating_current", "emergency_time_countdown", "time_enter_sleep"]
+          },
+          {
+            "type": "parameter-table",
+            "title": "Outputs & Limits",
+            "entities": ["pcl_module_state", "dry_contact_1", "dry_contact_2", "lcd_buzzer_trigger"]
+          },
+          {
+            "type": "parameter-table",
+            "title": "Configuration",
+            "filter": { "writable": true },
+            "groupBy": "category"
           },
           {
             "type": "parameter-table",

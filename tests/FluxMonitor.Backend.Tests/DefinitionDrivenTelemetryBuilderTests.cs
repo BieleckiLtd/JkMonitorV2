@@ -32,17 +32,25 @@ public sealed class DefinitionDrivenTelemetryBuilderTests
         WriteUInt32LittleEndian(live, 144, 52800);
         WriteInt32LittleEndian(live, 152, -12500);
         WriteInt16LittleEndian(live, 156, 245);
+        WriteInt16LittleEndian(live, 230, 5932);
+        WriteInt16LittleEndian(live, 252, 268);
         live[166] = 1;
         live[167] = 87;
         WriteUInt32LittleEndian(live, 176, 123);
         live[192] = 1;
         live[193] = 0;
+        live[209] = 1;
+        WriteUInt16LittleEndian(live, 212, 45);
+        WriteUInt32LittleEndian(live, 264, 86400);
+        live[268] = 1;
+        live[275] = 0x06;
 
         WriteUInt32LittleEndian(config, 0, 51200);
 
         WriteAscii(info, 0, 16, "JK_PB2A16S15P");
         WriteAscii(info, 16, 8, "14.XA");
         WriteAscii(info, 24, 8, "14.20");
+        info[228] = 3;
 
         var builder = new DefinitionDrivenTelemetryBuilder(new ExpressionEvaluator());
         var result = builder.BuildPollResult(
@@ -74,6 +82,26 @@ public sealed class DefinitionDrivenTelemetryBuilderTests
         var smartSleep = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "smart_sleep_voltage");
         Assert.NotNull(smartSleep);
         Assert.Equal(51.200m, smartSleep!.NumericValue);
+
+        var batteryTemp3 = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "battery_temp_3");
+        var heatingStatus = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "heating_status");
+        var heatingCurrent = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "heating_current");
+        var emergencyTimer = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "emergency_time_countdown");
+        var timeEnterSleep = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "time_enter_sleep");
+        var pclModule = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "pcl_module_state");
+        var dry1Alarm = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "dry_contact_1");
+        var dry2Alarm = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "dry_contact_2");
+        var lcdBuzzerTrigger = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "lcd_buzzer_trigger");
+
+        Assert.Equal(26.8m, batteryTemp3?.NumericValue);
+        Assert.True(heatingStatus?.BooleanValue);
+        Assert.Equal(5.932m, heatingCurrent?.NumericValue);
+        Assert.Equal(45m, emergencyTimer?.NumericValue);
+        Assert.Equal(86400m, timeEnterSleep?.NumericValue);
+        Assert.True(pclModule?.BooleanValue);
+        Assert.True(dry1Alarm?.BooleanValue);
+        Assert.True(dry2Alarm?.BooleanValue);
+        Assert.Equal(3m, lcdBuzzerTrigger?.NumericValue);
     }
 
     [Fact]
