@@ -929,6 +929,55 @@ describe('MonitorPage', () => {
     expect(screen.queryByText('2,026')).not.toBeInTheDocument();
   });
 
+  it('keeps inverter cards collapsed while the definition is still loading', async () => {
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify([
+      {
+        deviceId: 'inv-1',
+        displayName: 'Garage Inverter',
+        definitionId: 'anenji-inverter-rs232',
+        enabled: true,
+        isMaster: true,
+        pollIntervalMilliseconds: 500,
+        lastOutcome: 'Succeeded',
+        latestTelemetry: {
+          collectedAt: '2026-04-12T12:00:00.000Z',
+          cells: [],
+          activeWarnings: [],
+          parameters: [
+            {
+              key: 'max_charge_current',
+              displayName: 'Max Charge Current',
+              category: 'Charger',
+              numericValue: 60,
+              stringValue: '60',
+              unit: 'A',
+              sortOrder: 1,
+            },
+          ],
+        },
+      },
+    ]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    class FakeEventSource {
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      close = vi.fn();
+
+      constructor(public readonly url: string) {}
+    }
+
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+
+    render(<MonitorPage />);
+
+    expect(await screen.findByRole('button', { name: /garage inverter/i })).toBeInTheDocument();
+    expect(screen.queryByTestId('history-charts')).not.toBeInTheDocument();
+    expect(screen.queryByText('Max Charge Current')).not.toBeInTheDocument();
+  });
+
   it('renders inverter clock settings as a combined date and time editor', async () => {
     useDeviceDefinitionMock.mockReturnValue({
       version: '1',

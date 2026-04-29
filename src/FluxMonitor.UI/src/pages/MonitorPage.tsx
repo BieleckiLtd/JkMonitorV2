@@ -152,6 +152,43 @@ function getRelativeAdvertisementAgeSeconds(collectedAt: string | null | undefin
   return Math.max(0, Math.round((nowMs - collectedMs) / 1000));
 }
 
+function resolveCompactMonitorCardKind(
+  device: DeviceRuntimeState,
+  definition: DeviceDefinition | null,
+): 'environment' | 'inverter' | 'jk-bms' | null {
+  const category = definition?.device.category?.toLowerCase();
+  if (category === 'environment') {
+    return 'environment';
+  }
+
+  if (category === 'inverter') {
+    return 'inverter';
+  }
+
+  if (definition?.device.manufacturer?.toLowerCase() === 'jk') {
+    return 'jk-bms';
+  }
+
+  const definitionId = device.definitionId.trim().toLowerCase();
+  if (!definitionId) {
+    return null;
+  }
+
+  if (definitionId.includes('thermo') || definitionId.includes('hygrometer') || definitionId.includes('environment')) {
+    return 'environment';
+  }
+
+  if (definitionId.includes('inverter')) {
+    return 'inverter';
+  }
+
+  if (definitionId.startsWith('jk') || definitionId.includes('jk-bms')) {
+    return 'jk-bms';
+  }
+
+  return null;
+}
+
 type SwitchStatusChip = {
   label: string;
   className: string;
@@ -353,9 +390,10 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
   const isFailing = device.lastOutcome === 'Failed';
   const dp = device.displayPrecision ?? defaultPrecision;
   const [selectedCellIndices, setSelectedCellIndices] = useState<number[]>([]);
-  const isEnvironment = definition?.device.category === 'environment';
-  const isInverter = definition?.device.category === 'inverter';
-  const isJkBms = definition?.device.manufacturer?.toLowerCase() === 'jk';
+  const compactMonitorCardKind = resolveCompactMonitorCardKind(device, definition);
+  const isEnvironment = compactMonitorCardKind === 'environment';
+  const isInverter = compactMonitorCardKind === 'inverter';
+  const isJkBms = compactMonitorCardKind === 'jk-bms';
   const [isExpanded, setIsExpanded] = useState(false);
 
   // Build a fast lookup by entity key for definition-driven rendering
