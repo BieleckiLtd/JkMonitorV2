@@ -564,7 +564,14 @@ describe('DevicesPage', () => {
 
     fireEvent.click(await screen.findByText(/definition overrides/i));
 
-    fireEvent.change(await screen.findByDisplayValue('4321'), { target: { value: '2500' } });
+    const pollIntervalInput = await screen.findByDisplayValue('4321');
+    fireEvent.change(pollIntervalInput, { target: { value: '2500' } });
+
+    const putCallBeforeBlur = vi.mocked(globalThis.fetch).mock.calls.find(([input, init]) =>
+      String(input) === '/api/devices/config' && init?.method === 'PUT');
+    expect(putCallBeforeBlur).toBeUndefined();
+
+    fireEvent.blur(pollIntervalInput);
 
     await waitFor(() => {
       const putCall = vi.mocked(globalThis.fetch).mock.calls.find(([input, init]) =>

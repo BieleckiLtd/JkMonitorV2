@@ -489,6 +489,23 @@ function parseArrayInput(rawValue: string, currentValue: unknown[], path: string
     .filter((entry) => Number.isFinite(entry));
 }
 
+function areEditorValuesEqual(left: unknown, right: unknown) {
+  if (Array.isArray(left) && Array.isArray(right)) {
+    return left.length === right.length && left.every((entry, index) => entry === right[index]);
+  }
+
+  return left === right;
+}
+
+function parsePrimitiveInput(rawValue: string, currentValue: PrimitiveEditorValue) {
+  if (typeof currentValue !== 'number') {
+    return rawValue;
+  }
+
+  const parsed = Number(rawValue || '0');
+  return Number.isFinite(parsed) ? parsed : currentValue;
+}
+
 function getEditorInputValue(value: PrimitiveEditorValue) {
   if (value == null) {
     return '';
@@ -715,6 +732,65 @@ function getActionResultMessage(result: StartStopResult) {
   return error || 'Action completed.';
 }
 
+type DefinitionEditorInputProps = {
+  fieldKey: string;
+  label: string;
+  disabled: boolean;
+  path: string[];
+  value: PrimitiveEditorValue | unknown[];
+  onCommit: (path: string[], nextValue: unknown) => void;
+  renderSaveState: (fieldKey: string) => ReactNode;
+  helperText?: string;
+};
+
+function DefinitionEditorTextInput({
+  fieldKey,
+  label,
+  disabled,
+  path,
+  value,
+  onCommit,
+  renderSaveState,
+  helperText,
+}: DefinitionEditorInputProps) {
+  const initialValue = Array.isArray(value)
+    ? value.join(', ')
+    : getEditorInputValue(value as PrimitiveEditorValue);
+  const [draftValue, setDraftValue] = useState(initialValue);
+
+  useEffect(() => {
+    setDraftValue(initialValue);
+  }, [initialValue]);
+
+  const commitValue = useCallback(() => {
+    const nextValue = Array.isArray(value)
+      ? parseArrayInput(draftValue, value, path)
+      : parsePrimitiveInput(draftValue, value as PrimitiveEditorValue);
+
+    if (!areEditorValuesEqual(nextValue, value)) {
+      onCommit(path, nextValue);
+    }
+  }, [draftValue, onCommit, path, value]);
+
+  return (
+    <label key={fieldKey} className='min-w-0 space-y-2 text-sm text-foreground'>
+      <div className='flex min-w-0 items-center justify-between gap-2'>
+        <span className='block min-w-0 text-xs font-medium uppercase tracking-[0.18em] leading-snug text-muted-foreground'>{label}</span>
+        {renderSaveState(fieldKey)}
+      </div>
+      <Input
+        type={typeof value === 'number' ? 'number' : 'text'}
+        step={typeof value === 'number' ? 'any' : undefined}
+        value={draftValue}
+        disabled={disabled}
+        onChange={(event) => setDraftValue(event.target.value)}
+        onBlur={commitValue}
+      />
+      {helperText ? <p className='text-[11px] text-muted-foreground'>{helperText}</p> : null}
+    </label>
+  );
+}
+
 function renderDefinitionEditorFields(
   value: Record<string, unknown>,
   path: string[],
@@ -728,21 +804,21 @@ function renderDefinitionEditorFields(
     .map(([key, entry]) => {
       const fieldPath = [...path, key];
       const fieldKey = fieldPath.join('.');
+      const label = humanizeKey(key);
 
       if (Array.isArray(entry)) {
         return (
-          <label key={fieldKey} className='space-y-2 text-sm text-foreground'>
-            <div className='flex items-center justify-between gap-2'>
-              <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{humanizeKey(key)}</span>
-              {renderSaveState(fieldKey)}
-            </div>
-            <Input
-              value={entry.join(', ')}
-              disabled={disabled}
-              onChange={(event) => onChange(fieldPath, parseArrayInput(event.target.value, entry, fieldPath))}
-            />
-            <p className='text-[11px] text-muted-foreground'>Comma-separated values.</p>
-          </label>
+          <DefinitionEditorTextInput
+            key={fieldKey}
+            fieldKey={fieldKey}
+            label={label}
+            disabled={disabled}
+            path={fieldPath}
+            value={entry}
+            onCommit={onChange}
+            renderSaveState={renderSaveState}
+            helperText='Comma-separated values.'
+          />
         );
       }
 
@@ -752,11 +828,11 @@ function renderDefinitionEditorFields(
             key={fieldKey}
             className={cn(
               'space-y-3 rounded-xl border border-border/70 bg-background/60 p-4',
-              depth > 0 ? 'md:col-span-2 xl:col-span-4' : '',
+              depth === 0 ? 'md:col-span-2 xl:col-span-2' : 'md:col-span-2 xl:col-span-4',
             )}
           >
             <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{humanizeKey(key)}</div>
-            <div className='grid gap-3 md:grid-cols-2 xl:grid-cols-4'>
+            <div className='grid gap-3 sm:grid-cols-2'>
               {renderDefinitionEditorFields(entry, fieldPath, disabled, onChange, renderSaveState, depth + 1)}
             </div>
           </div>
@@ -782,22 +858,16 @@ function renderDefinitionEditorFields(
 
       const isNumberField = typeof entry === 'number';
       return (
-        <label key={fieldKey} className='space-y-2 text-sm text-foreground'>
-          <div className='flex items-center justify-between gap-2'>
-            <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{humanizeKey(key)}</span>
-            {renderSaveState(fieldKey)}
-          </div>
-          <Input
-            type={isNumberField ? 'number' : 'text'}
-            step={isNumberField ? 'any' : undefined}
-            value={getEditorInputValue(entry as PrimitiveEditorValue)}
-            disabled={disabled}
-            onChange={(event) => {
-              const rawValue = event.target.value;
-              onChange(fieldPath, isNumberField ? Number(rawValue || '0') : rawValue);
-            }}
-          />
-        </label>
+        <DefinitionEditorTextInput
+          key={fieldKey}
+          fieldKey={fieldKey}
+          label={label}
+          disabled={disabled}
+          path={fieldPath}
+          value={entry as PrimitiveEditorValue}
+          onCommit={onChange}
+          renderSaveState={renderSaveState}
+        />
       );
     });
 }
