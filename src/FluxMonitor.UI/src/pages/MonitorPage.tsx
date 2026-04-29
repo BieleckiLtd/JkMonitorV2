@@ -378,7 +378,7 @@ export function MonitorPage() {
 }
 
 function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: number }) {
-  const definition = useDeviceDefinition(device.definitionId);
+  const definition = useDeviceDefinition(device.definitionId, device.deviceId);
   const temperatureUnit: TemperatureUnit = device.temperatureUnit === 'f' ? 'f' : 'c';
   const telemetry = device.latestTelemetry;
   const parameters = telemetry?.parameters ?? [];

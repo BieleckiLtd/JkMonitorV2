@@ -4,13 +4,17 @@ import type { DeviceDefinition, DeviceDefinitionSummary } from '../types/deviceD
 /** In-memory cache for loaded definitions (survives re-renders, cleared on page reload). */
 const definitionCache = new Map<string, DeviceDefinition>();
 
+function getDefinitionCacheKey(definitionId: string, deviceId?: string | null) {
+  return deviceId ? `${definitionId}::${deviceId}` : definitionId;
+}
+
 /**
  * Fetches and caches a device definition by its id.
  * Returns null while loading or if no definitionId is provided.
  */
-export function useDeviceDefinition(definitionId: string | null | undefined) {
+export function useDeviceDefinition(definitionId: string | null | undefined, deviceId?: string | null) {
   const [definition, setDefinition] = useState<DeviceDefinition | null>(
-    definitionId ? definitionCache.get(definitionId) ?? null : null
+    definitionId ? definitionCache.get(getDefinitionCacheKey(definitionId, deviceId)) ?? null : null
   );
 
   useEffect(() => {
@@ -19,7 +23,9 @@ export function useDeviceDefinition(definitionId: string | null | undefined) {
       return;
     }
 
-    const cached = definitionCache.get(definitionId);
+    const cacheKey = getDefinitionCacheKey(definitionId, deviceId);
+
+    const cached = definitionCache.get(cacheKey);
     if (cached) {
       setDefinition(cached);
     } else {
@@ -30,10 +36,11 @@ export function useDeviceDefinition(definitionId: string | null | undefined) {
 
     const load = async () => {
       try {
-        const resp = await fetch(`/api/definitions/${encodeURIComponent(definitionId)}`, { cache: 'no-store' });
+        const query = deviceId ? `?deviceId=${encodeURIComponent(deviceId)}` : '';
+        const resp = await fetch(`/api/definitions/${encodeURIComponent(definitionId)}${query}`, { cache: 'no-store' });
         if (!resp.ok || cancelled) return;
         const data = (await resp.json()) as DeviceDefinition;
-        definitionCache.set(definitionId, data);
+        definitionCache.set(cacheKey, data);
         if (!cancelled) setDefinition(data);
       } catch {
         // Silently fail — the page will just render with the legacy layout
@@ -42,7 +49,7 @@ export function useDeviceDefinition(definitionId: string | null | undefined) {
 
     void load();
     return () => { cancelled = true; };
-  }, [definitionId]);
+  }, [definitionId, deviceId]);
 
   return definition;
 }

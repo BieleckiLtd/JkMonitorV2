@@ -49,7 +49,7 @@ public sealed class DefinitionsController(
     }
 
     [HttpGet("{id}")]
-    public IActionResult GetById(string id, [FromQuery] bool preferCatalog = false)
+    public IActionResult GetById(string id, [FromQuery] bool preferCatalog = false, [FromQuery] string? deviceId = null)
     {
         RefreshLocalDefinitions();
 
@@ -60,7 +60,7 @@ public sealed class DefinitionsController(
             return Ok(catalogDefinition);
         }
 
-        if (!TryResolveDefinition(id, out var definition) || definition is null)
+        if (!TryResolveDefinition(id, deviceId, out var definition) || definition is null)
         {
             return NotFound(new { message = $"Device definition '{id}' not found." });
         }
@@ -73,7 +73,7 @@ public sealed class DefinitionsController(
     {
         RefreshLocalDefinitions();
 
-        if (!TryResolveDefinition(id, out var definition) || definition is null)
+        if (!TryResolveDefinition(id, null, out var definition) || definition is null)
         {
             return NotFound(new { message = $"Device definition '{id}' not found." });
         }
@@ -103,7 +103,7 @@ public sealed class DefinitionsController(
     {
         RefreshLocalDefinitions();
 
-        if (!TryResolveDefinition(id, out var definition) || definition is null)
+        if (!TryResolveDefinition(id, null, out var definition) || definition is null)
         {
             return NotFound(new { message = $"Device definition '{id}' not found." });
         }
@@ -143,8 +143,22 @@ public sealed class DefinitionsController(
         }
     }
 
-    private bool TryResolveDefinition(string definitionId, out DeviceDefinition? definition)
+    private bool TryResolveDefinition(string definitionId, string? deviceId, out DeviceDefinition? definition)
     {
+        if (!string.IsNullOrWhiteSpace(deviceId))
+        {
+            var matchedDevice = deviceConfigStore.GetDevices().FirstOrDefault(device =>
+                string.Equals(device.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(device.DefinitionId, definitionId, StringComparison.OrdinalIgnoreCase));
+
+            if (matchedDevice is not null &&
+                matchedDevice.TryResolveDefinition(definitionLoader, out definition) &&
+                definition is not null)
+            {
+                return true;
+            }
+        }
+
         foreach (var device in deviceConfigStore.GetDevices())
         {
             if (!string.Equals(device.DefinitionId, definitionId, StringComparison.OrdinalIgnoreCase))
