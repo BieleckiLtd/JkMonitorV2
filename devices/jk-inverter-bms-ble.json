@@ -5,7 +5,6 @@
   "device": {
     "id": "jk-inverter-bms-ble",
     "name": "JK Inverter BMS (BLE)",
-      "category": "Thermal Protection",
     "model": "JK-PB2A16S20P",
     "category": "energy-storage",
     "description": "JK Inverter BMS with Bluetooth Low Energy interface for LiFePO4 battery packs. Supports up to 32 cells, charge/discharge/balance control, and comprehensive protection. Connects wirelessly via BLE GATT service 0xFFE0.",
@@ -76,7 +75,12 @@
       "responseFrameType": 3,
       "headerSize": 6,
       "optional": true,
-      "pollGroup": "slow"
+      "pollGroup": "slow",
+      "write": {
+        "type": "frame-register",
+        "addressBase": 1,
+        "addressStepBytes": 4
+      }
     }
   ],
 
@@ -588,7 +592,7 @@
     },
     {
       "id": "uart1_protocol",
-      "type": "sensor",
+      "type": "number",
       "name": "UART 1 Protocol",
       "category": "Communication",
       "source": {
@@ -596,11 +600,16 @@
         "byteOffset": 178,
         "dataType": "uint8"
       },
-      "display": { "precision": 0 }
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": {
+        "address": 166,
+        "valueLength": 1
+      }
     },
     {
       "id": "can_protocol",
-      "type": "sensor",
+      "type": "number",
       "name": "CAN Protocol",
       "category": "Communication",
       "source": {
@@ -608,11 +617,16 @@
         "byteOffset": 179,
         "dataType": "uint8"
       },
-      "display": { "precision": 0 }
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": {
+        "address": 167,
+        "valueLength": 1
+      }
     },
     {
       "id": "uart2_protocol",
-      "type": "sensor",
+      "type": "number",
       "name": "UART 2 Protocol",
       "category": "Communication",
       "source": {
@@ -620,7 +634,29 @@
         "byteOffset": 212,
         "dataType": "uint8"
       },
-      "display": { "precision": 0 }
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": {
+        "address": 168,
+        "valueLength": 1
+      }
+    },
+    {
+      "id": "uart3_protocol",
+      "type": "number",
+      "name": "UART 3 Protocol",
+      "category": "Communication",
+      "source": {
+        "bank": "info",
+        "byteOffset": 231,
+        "dataType": "uint8"
+      },
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": {
+        "address": 181,
+        "valueLength": 1
+      }
     },
 
     {
@@ -628,7 +664,7 @@
       "id": "smart_sleep_voltage",
       "type": "number",
       "name": "Smart Sleep Voltage",
-      "category": "Cell Protection",
+      "category": "System",
       "source": { "bank": "config", "byteOffset": 0, "dataType": "uint32", "scale": 0.001, "unit": "V" },
       "display": { "precision": 3 },
       "writable": true
@@ -766,6 +802,19 @@
       "writable": true,
       "write": {
         "address": 179,
+        "valueLength": 1
+      }
+    },
+    {
+      "id": "cell_request_float_voltage_time",
+      "type": "number",
+      "name": "RFV Time",
+      "category": "Charging",
+      "source": { "bank": "info", "byteOffset": 261, "dataType": "uint8", "scale": 0.1, "unit": "h" },
+      "display": { "precision": 1 },
+      "writable": true,
+      "write": {
+        "address": 180,
         "valueLength": 1
       }
     },
@@ -923,7 +972,7 @@
       "id": "charge_switch",
       "type": "switch",
       "name": "Charge Switch",
-      "category": "System",
+      "category": "Charging",
       "source": { "bank": "config", "byteOffset": 112, "dataType": "uint32" },
       "writable": true
     },

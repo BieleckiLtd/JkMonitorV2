@@ -61,14 +61,30 @@ public sealed class JkBleDefinitionTests
         Assert.Contains("uart1_protocol", entityIds);
         Assert.Contains("can_protocol", entityIds);
         Assert.Contains("uart2_protocol", entityIds);
+        Assert.Contains("uart3_protocol", entityIds);
+        Assert.Contains("cell_request_float_voltage_time", entityIds);
 
         Assert.Equal("Thermal Protection", Assert.Single(definition.Entities, entity => entity.Id == "mos_temperature").Category);
         Assert.Equal("Thermal Protection", Assert.Single(definition.Entities, entity => entity.Id == "battery_temp_3").Category);
         Assert.Equal("Charging", Assert.Single(definition.Entities, entity => entity.Id == "charge_status").Category);
+        Assert.Equal("Charging", Assert.Single(definition.Entities, entity => entity.Id == "charge_status_time_elapsed").Category);
+        Assert.Equal("Charging", Assert.Single(definition.Entities, entity => entity.Id == "cell_charge_request_voltage").Category);
+        Assert.Equal("Charging", Assert.Single(definition.Entities, entity => entity.Id == "charge_switch").Category);
         Assert.Equal("System", Assert.Single(definition.Entities, entity => entity.Id == "heating_status").Category);
+        Assert.Equal("System", Assert.Single(definition.Entities, entity => entity.Id == "smart_sleep_voltage").Category);
         Assert.Equal("System", Assert.Single(definition.Entities, entity => entity.Id == "pcl_module_state").Category);
         Assert.Equal("Triggers", Assert.Single(definition.Entities, entity => entity.Id == "lcd_buzzer_trigger").Category);
         Assert.Equal("Communication", Assert.Single(definition.Entities, entity => entity.Id == "uart1_protocol").Category);
+        Assert.Equal("Communication", Assert.Single(definition.Entities, entity => entity.Id == "uart3_protocol").Category);
+
+        var communicationEntities = definition.Entities
+            .Where(entity => entity.Category == "Communication")
+            .Select(entity => entity.Id)
+            .ToArray();
+        Assert.Equal(["uart1_protocol", "can_protocol", "uart2_protocol", "uart3_protocol"], communicationEntities);
+        Assert.All(
+            definition.Entities.Where(entity => communicationEntities.Contains(entity.Id)),
+            entity => Assert.True(entity.Writable));
 
         var pages = definition.Ui?.Pages;
         Assert.NotNull(pages);

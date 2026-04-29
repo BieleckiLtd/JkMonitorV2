@@ -683,6 +683,7 @@ describe('MonitorPage', () => {
           category: 'Communication',
           source: { bank: 'info', byteOffset: 28, unit: '' },
           display: { precision: 0 },
+          writable: true,
         },
         {
           id: 'can_protocol',
@@ -691,6 +692,7 @@ describe('MonitorPage', () => {
           category: 'Communication',
           source: { bank: 'info', byteOffset: 29, unit: '' },
           display: { precision: 0 },
+          writable: true,
         },
         {
           id: 'uart2_protocol',
@@ -699,6 +701,16 @@ describe('MonitorPage', () => {
           category: 'Communication',
           source: { bank: 'info', byteOffset: 30, unit: '' },
           display: { precision: 0 },
+          writable: true,
+        },
+        {
+          id: 'uart3_protocol',
+          type: 'number',
+          name: 'UART 3 Protocol',
+          category: 'Communication',
+          source: { bank: 'info', byteOffset: 31, unit: '' },
+          display: { precision: 0 },
+          writable: true,
         },
         {
           id: 'charge_switch',
@@ -836,6 +848,7 @@ describe('MonitorPage', () => {
               { key: 'uart1_protocol', displayName: 'UART 1 Protocol', category: 'Communication', numericValue: 1, sortOrder: 26, unit: '' },
               { key: 'can_protocol', displayName: 'CAN Protocol', category: 'Communication', numericValue: 2, sortOrder: 27, unit: '' },
               { key: 'uart2_protocol', displayName: 'UART 2 Protocol', category: 'Communication', numericValue: 3, sortOrder: 28, unit: '' },
+              { key: 'uart3_protocol', displayName: 'UART 3 Protocol', category: 'Communication', numericValue: 15, sortOrder: 29, isWritable: true, unit: '' },
               { key: 'charge_switch', displayName: 'Charge Switch', category: 'Charging', numericValue: 1, rawValue: 1, sortOrder: 29, isWritable: true, unit: '' },
             ],
           },
@@ -876,6 +889,7 @@ describe('MonitorPage', () => {
     expect(screen.getByText('UART 1 Protocol')).toBeInTheDocument();
     expect(screen.getByText('CAN Protocol')).toBeInTheDocument();
     expect(screen.getByText('UART 2 Protocol')).toBeInTheDocument();
+    expect(screen.getByText('UART 3 Protocol')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Triggers section' }));
     expect(screen.getByText('LCD Buzzer Trigger')).toBeInTheDocument();
