@@ -20,84 +20,17 @@ import {
   isCelsiusUnit,
   type TemperatureUnit,
 } from '../lib/temperatureUnits';
-
-type DeviceParameter = {
-  key: string;
-  displayName: string;
-  category: string;
-  numericValue?: number | null;
-  stringValue?: string | null;
-  booleanValue?: boolean | null;
-  unit?: string | null;
-  sortOrder: number;
-  isWritable?: boolean;
-  rawValue?: number | null;
-  options?: { value: number; label: string }[] | null;
-  displayFormatter?: string | null;
-  displayPrecision?: number | null;
-};
-
-type ParameterWriteResult = {
-  success: boolean;
-  message: string;
-};
-
-type BatchWriteResponse = {
-  success?: boolean;
-  results?: {
-    parameterKey?: string;
-    success?: boolean;
-    writtenValue?: number;
-    readBackValue?: number;
-    error?: string | null;
-  }[];
-  message?: string;
-};
-
-type CellVoltageSnapshot = {
-  index: number;
-  voltageVolts: number;
-};
-
-type DeviceTelemetrySnapshot = {
-  collectedAt: string;
-  cellCount?: number | null;
-  totalVoltageVolts?: number | null;
-  currentAmps?: number | null;
-  powerWatts?: number | null;
-  stateOfChargePercent?: number | null;
-  minCellVoltageVolts?: number | null;
-  maxCellVoltageVolts?: number | null;
-  averageCellVoltageVolts?: number | null;
-  deltaCellVoltageVolts?: number | null;
-  mosTemperatureCelsius?: number | null;
-  ambientTemperatureCelsius?: number | null;
-  batteryTemperatureCelsius?: number | null;
-  cycleCount?: number | null;
-  warningFlags?: number | null;
-  statusFlags?: number | null;
-  protocolVersion?: number | null;
-  softwareVersion?: string | null;
-  manufacturerId?: string | null;
-  chargingEnabled?: boolean | null;
-  dischargingEnabled?: boolean | null;
-  balancingEnabled?: boolean | null;
-  batteryOnline?: boolean | null;
-  cells: CellVoltageSnapshot[];
-  activeWarnings: string[];
-  parameters: DeviceParameter[];
-  numericValues?: Record<string, number | null>;
-};
-
-type DisplayPrecision = {
-  voltage: number;
-  cellVoltage: number;
-  current: number;
-  power: number;
-  temperature: number;
-  soc: number;
-  deltaVoltage: number;
-};
+import { CellVoltageChart } from './monitor-page/CellVoltageChart';
+import type {
+  BatchWriteResponse,
+  CellVoltageSnapshot,
+  DeviceParameter,
+  DeviceRuntimeState,
+  DeviceRuntimeStateStreamEnvelope,
+  DeviceTelemetrySnapshot,
+  DisplayPrecision,
+  ParameterWriteResult,
+} from './monitor-page/types';
 
 const defaultPrecision: DisplayPrecision = { voltage: 2, cellVoltage: 3, current: 1, power: 0, temperature: 1, soc: 0, deltaVoltage: 3 };
 const inverterCompactHeroMetrics: UiMetricDefinition[] = [
@@ -110,30 +43,6 @@ const inverterCompactHeroMetrics: UiMetricDefinition[] = [
 function hasCompactInverterPowerMetrics(paramByKey: Map<string, DeviceParameter>) {
   return inverterCompactHeroMetrics.every(metric => paramByKey.has(metric.entity));
 }
-
-type DeviceRuntimeState = {
-  deviceId: string;
-  displayName: string;
-  sortOrder?: number;
-  definitionId: string;
-  protocolHandler?: string | null;
-  address?: number | null;
-  enabled: boolean;
-  isMaster: boolean;
-  pollIntervalMilliseconds: number;
-  lastPollStartedAt?: string | null;
-  lastPollCompletedAt?: string | null;
-  lastOutcome: string;
-  lastError?: string | null;
-  lastPersistedAt?: string | null;
-  displayPrecision?: DisplayPrecision | null;
-  temperatureUnit?: string | null;
-  latestTelemetry?: DeviceTelemetrySnapshot | null;
-};
-
-type DeviceRuntimeStateStreamEnvelope = {
-  devices: DeviceRuntimeState[];
-};
 
 const reconnectDelayMs = 2000;
 const fallbackRefreshIntervalMs = 2000;
@@ -858,85 +767,6 @@ function HeroInlineMetric({ label, value, unit }: { label: string; value: string
         {unit ? <span className='ml-1 text-xs font-medium text-muted-foreground'>{unit}</span> : null}
       </div>
     </div>
-  );
-}
-
-function CellVoltageChart({ cells, minV, maxV, avgV, selectedCellIndices, onCellClick }: { cells: CellVoltageSnapshot[]; minV?: number | null; maxV?: number | null; avgV?: number | null; selectedCellIndices?: number[]; onCellClick?: (index: number) => void }) {
-  const sorted = [...cells].sort((a, b) => a.index - b.index);
-  const voltages = sorted.map(c => c.voltageVolts);
-  const absMin = Math.min(...voltages);
-  const absMax = Math.max(...voltages);
-  const spread = Math.max(absMax - absMin, 0.001);
-  // Split-axis: bottom portion covers 0V to just below the data range,
-  // top portion uses a power curve (exponent 3) so 1mV near the top produces
-  // a much larger visual difference than 1mV near the bottom of the detail zone.
-  const basePct = 55;
-  const detailPct = 100 - basePct;
-  const detailFloor = Math.max(absMin - spread * 2, 0);
-  const detailCeil = absMax + spread * 0.5;
-  const detailRange = Math.max(detailCeil - detailFloor, 0.001);
-
-  function barPct(v: number): number {
-    if (v <= detailFloor) return Math.max((v / Math.max(detailFloor, 0.001)) * basePct, 4);
-    const t = (v - detailFloor) / detailRange;          // 0..1 linear
-    return basePct + Math.pow(t, 3) * detailPct;        // cubic: top mV differences are largest
-  }
-
-  return (
-    <Card className='bg-card/85 shadow-sm'>
-      <CardHeader className='border-b border-border/60 pb-3'>
-        <CardTitle className='flex flex-col gap-3 text-sm lg:flex-row lg:items-center lg:justify-between'>
-          <div className='flex flex-wrap items-center gap-3'>
-            <div className='flex items-center gap-2' title='Cell voltages are smoothed using an Exponential Moving Average (EMA) with output hysteresis. The EMA dampens ±2mV measurement noise while tracking real trends. Hysteresis holds the reported millivolt value until the smoothed average has moved at least 1mV, preventing rounding oscillation at millivolt boundaries. A breakout threshold snaps to raw readings when sudden genuine voltage changes exceed 5mV.'>
-              <Battery className='h-4 w-4 text-muted-foreground' />
-              Cell Voltages
-            </div>
-          </div>
-          <div className='flex flex-wrap gap-x-4 gap-y-1 text-xs font-normal text-muted-foreground'>
-            {minV != null && <span>Min: <span className='font-semibold text-foreground'>{minV.toFixed(3)}V</span></span>}
-            {avgV != null && <span>Avg: <span className='font-semibold text-foreground'>{avgV.toFixed(3)}V</span></span>}
-            {maxV != null && <span>Max: <span className='font-semibold text-foreground'>{maxV.toFixed(3)}V</span></span>}
-            {minV != null && maxV != null && <span>Δ: <span className='font-semibold text-foreground'>{(maxV - minV).toFixed(3)}V</span></span>}
-          </div>
-        </CardTitle>
-      </CardHeader>
-      <CardContent className='px-1 pt-2 sm:px-4 sm:pt-3'>
-        <div className='pb-1 sm:pb-2'>
-          <div
-            className='mx-1 grid items-end gap-px pt-2 sm:mx-2 sm:gap-0.5 sm:pt-3'
-            style={{ height: '164px', gridTemplateColumns: `repeat(${sorted.length}, minmax(0, 1fr))` }}
-          >
-          {sorted.map((cell) => {
-            const pct = barPct(cell.voltageVolts);
-            const isMin = cell.voltageVolts === absMin && absMin !== absMax;
-            const isMax = cell.voltageVolts === absMax && absMin !== absMax;
-            const isSelected = selectedCellIndices?.includes(cell.index) ?? false;
-
-            return (
-              <div
-                key={cell.index}
-                className='flex h-full min-w-0 flex-col items-center justify-end cursor-pointer'
-                onClick={(e) => { e.stopPropagation(); onCellClick?.(cell.index); }}
-              >
-                <div
-                  className={cn(
-                    'w-full rounded-t transition-all duration-500',
-                    isSelected ? 'bg-violet-500/90' :
-                    isMin ? 'bg-rose-500/80' : isMax ? 'bg-emerald-500/80' : 'bg-primary/60'
-                  )}
-                  style={{ height: `${pct}%`, minHeight: '4px' }}
-                />
-                <div className='mt-0.5 text-[7px] text-muted-foreground leading-none sm:text-[9px]'>{cell.index}</div>
-                <div className='text-[6px] font-semibold tabular-nums whitespace-nowrap text-muted-foreground/80 leading-none sm:text-[8px]'>
-                  {cell.voltageVolts.toFixed(3)}
-                </div>
-              </div>
-            );
-          })}
-          </div>
-        </div>
-      </CardContent>
-    </Card>
   );
 }
 
