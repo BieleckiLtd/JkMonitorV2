@@ -914,7 +914,8 @@
             "title": "Current",
             "type": "line-chart",
             "traces": [
-              { "entity": "current", "label": "Current", "color": "blue" }
+              { "entity": "current", "label": "Current", "color": "blue" },
+              { "entity": "total_voltage", "label": "Pack Voltage", "color": "emerald", "secondaryAxis": true }
             ],
             "yAxis": { "unit": "A", "label": "Current" }
           },
