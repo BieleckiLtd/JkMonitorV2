@@ -34,6 +34,7 @@ type DeviceParameter = {
   rawValue?: number | null;
   options?: { value: number; label: string }[] | null;
   displayFormatter?: string | null;
+  displayPrecision?: number | null;
 };
 
 type ParameterWriteResult = {
@@ -104,6 +105,10 @@ const inverterCompactHeroMetrics: UiMetricDefinition[] = [
   { entity: 'pv_power', icon: 'zap', color: 'amber', label: 'Solar', format: 'power-short' },
   { entity: 'output_active_power', icon: 'gauge', color: 'blue', label: 'Load', format: 'power-short' },
 ];
+
+function hasCompactInverterPowerMetrics(paramByKey: Map<string, DeviceParameter>) {
+  return inverterCompactHeroMetrics.every(metric => paramByKey.has(metric.entity));
+}
 
 type DeviceRuntimeState = {
   deviceId: string;
@@ -424,7 +429,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
     const compactWarnings = compactTelemetry.activeWarnings ?? [];
     const compactParamByKey = new Map(compactParameters.map(p => [p.key, p]));
     const heroSection = monitorSections?.find(s => s.type === 'hero-metrics');
-    const heroMetrics = isInverter
+    const heroMetrics = isInverter || hasCompactInverterPowerMetrics(compactParamByKey)
       ? inverterCompactHeroMetrics
       : heroSection?.metrics ?? [];
     const batteryParam = compactParamByKey.get('battery_pct');
@@ -818,7 +823,7 @@ function renderInlineEntityStats(
       }
 
       const entity = definition?.entities.find((candidate) => candidate.id === entityId);
-      const value = formatParamValue(param, temperatureUnit);
+      const value = formatParamValue(param, temperatureUnit, 'yes-no', entity?.display?.precision ?? param.displayPrecision);
       const unit = getTemperatureDisplayUnit(param.unit, temperatureUnit) ?? param.unit ?? '';
 
       return (
@@ -957,8 +962,13 @@ function ParameterRow({
   const statusChip = getSwitchStatusChip(param, telemetry, paramByKey);
   const editBlockedReason = getParameterEditBlockedReason(param, telemetry, paramByKey, definition);
   const canEdit = Boolean(param.isWritable) && editBlockedReason == null;
-  const value = formatParamValue(param, temperatureUnit, isSwitchSetting ? 'enabled-disabled' : 'yes-no');
   const entity = definition?.entities.find((candidate) => candidate.id === param.key);
+  const value = formatParamValue(
+    param,
+    temperatureUnit,
+    isSwitchSetting ? 'enabled-disabled' : 'yes-no',
+    entity?.display?.precision ?? param.displayPrecision,
+  );
   const displayUnit = getTemperatureDisplayUnit(param.unit, temperatureUnit) ?? param.unit;
   const editModeLabel = entity ? 'value:' : 'raw:';
   const editValueUnit = entity
@@ -1080,7 +1090,7 @@ function ParameterRow({
             <>
               <span className='text-sm font-semibold text-foreground'>
                 {value}
-                {displayUnit && <span className='ml-1 text-xs font-normal text-muted-foreground'>{displayUnit}</span>}
+                {displayUnit && <span className='ml-1 text-xs font-normal text-muted-foreground'> {displayUnit}</span>}
               </span>
               {param.isWritable && (
                 <button
@@ -2522,6 +2532,7 @@ function formatParamValue(
   param: DeviceParameter,
   temperatureUnit: TemperatureUnit,
   booleanStyle: 'yes-no' | 'enabled-disabled' = 'yes-no',
+  displayPrecision?: number | null,
 ): string {
   if (param.booleanValue != null) {
     if (booleanStyle === 'enabled-disabled') {
@@ -2540,6 +2551,16 @@ function formatParamValue(
       : sourceValue;
     if (displayValue == null || !Number.isFinite(displayValue)) {
       return nd;
+    }
+
+    const precision = displayPrecision ?? param.displayPrecision;
+    if (precision != null && Number.isInteger(precision) && precision >= 0) {
+      return param.displayFormatter === 'plain-number'
+        ? displayValue.toFixed(precision)
+        : displayValue.toLocaleString(undefined, {
+          minimumFractionDigits: precision,
+          maximumFractionDigits: precision,
+        });
     }
 
     if (Number.isInteger(displayValue)) {

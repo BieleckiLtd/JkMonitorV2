@@ -541,6 +541,24 @@ describe('MonitorPage', () => {
           display: { precision: 0 },
         },
         {
+          id: 'cell_request_charge_voltage_time',
+          type: 'number',
+          name: 'RCV Time',
+          category: 'Charging',
+          source: { bank: 'info', byteOffset: 32, unit: 'h', scale: 0.1 },
+          display: { precision: 1 },
+          writable: true,
+        },
+        {
+          id: 'cell_request_float_voltage_time',
+          type: 'number',
+          name: 'RFV Time',
+          category: 'Charging',
+          source: { bank: 'info', byteOffset: 33, unit: 'h', scale: 0.1 },
+          display: { precision: 1 },
+          writable: true,
+        },
+        {
           id: 'charge_status',
           type: 'select',
           name: 'Charge Status',
@@ -720,6 +738,15 @@ describe('MonitorPage', () => {
           source: { bank: 'config', byteOffset: 0, unit: '' },
           display: { precision: 0 },
         },
+        {
+          id: 'voltage_calibration',
+          type: 'number',
+          name: 'Voltage Calibration',
+          category: 'System',
+          source: { bank: 'config', byteOffset: 4, unit: 'V', scale: 0.001 },
+          display: { precision: 3 },
+          writable: true,
+        },
       ],
       computedEntities: [],
       ui: {
@@ -823,12 +850,14 @@ describe('MonitorPage', () => {
               { key: 'state_of_charge', displayName: 'State of Charge', category: 'Pack Status', numericValue: 78, sortOrder: 3, unit: '%' },
               { key: 'charging_enabled', displayName: 'Charging', category: 'Status', booleanValue: true, sortOrder: 3, unit: '' },
               { key: 'discharging_enabled', displayName: 'Discharging', category: 'Status', booleanValue: true, sortOrder: 3, unit: '' },
-              { key: 'mos_temperature', displayName: 'MOS Temperature', category: 'Thermal Protection', numericValue: 21.7, sortOrder: 4, unit: '°C' },
-              { key: 'battery_temp_1', displayName: 'Battery Temp 1', category: 'Thermal Protection', numericValue: 19.5, sortOrder: 5, unit: '°C' },
-              { key: 'battery_temp_2', displayName: 'Battery Temp 2', category: 'Thermal Protection', numericValue: 20.1, sortOrder: 6, unit: '°C' },
-              { key: 'battery_temp_3', displayName: 'Battery Temp 3', category: 'Thermal Protection', numericValue: 19.8, sortOrder: 7, unit: '°C' },
+              { key: 'mos_temperature', displayName: 'MOS Temperature', category: 'Thermal Protection', numericValue: 21.733, sortOrder: 4, unit: '°C' },
+              { key: 'battery_temp_1', displayName: 'Battery Temp 1', category: 'Thermal Protection', numericValue: 19.544, sortOrder: 5, unit: '°C' },
+              { key: 'battery_temp_2', displayName: 'Battery Temp 2', category: 'Thermal Protection', numericValue: 20.122, sortOrder: 6, unit: '°C' },
+              { key: 'battery_temp_3', displayName: 'Battery Temp 3', category: 'Thermal Protection', numericValue: 19.866, sortOrder: 7, unit: '°C' },
               { key: 'charge_status', displayName: 'Charge Status', category: 'Charging', numericValue: 2, rawValue: 2, stringValue: 'Float', sortOrder: 8, unit: '' },
               { key: 'charge_status_time_elapsed', displayName: 'Charge Status Time', category: 'Charging', numericValue: 90, sortOrder: 9, unit: 's' },
+              { key: 'cell_request_charge_voltage_time', displayName: 'RCV Time', category: 'Charging', numericValue: 0.1, rawValue: 1, sortOrder: 10, isWritable: true, unit: 'h' },
+              { key: 'cell_request_float_voltage_time', displayName: 'RFV Time', category: 'Charging', numericValue: 0.2, rawValue: 2, sortOrder: 11, isWritable: true, unit: 'h' },
               { key: 'heating_status', displayName: 'Heating Status', category: 'System', booleanValue: false, sortOrder: 10, unit: '' },
               { key: 'heating_current', displayName: 'Heat Current', category: 'System', numericValue: 0.511, sortOrder: 11, unit: 'A' },
               { key: 'emergency_time_countdown', displayName: 'Emergency Timer', category: 'System', numericValue: 45, sortOrder: 12, unit: 's' },
@@ -836,20 +865,21 @@ describe('MonitorPage', () => {
               { key: 'pcl_module_state', displayName: 'Par-Limiter (PCL Module)', category: 'System', booleanValue: false, sortOrder: 14, unit: '' },
               { key: 'dry_contact_1', displayName: 'DRY1 Alarm', category: 'System', booleanValue: false, sortOrder: 15, unit: '' },
               { key: 'dry_contact_2', displayName: 'DRY2 Alarm', category: 'System', booleanValue: true, sortOrder: 16, unit: '' },
-              { key: 'lcd_buzzer_trigger', displayName: 'LCD Buzzer Trigger', category: 'Triggers', numericValue: 3, sortOrder: 17, unit: '' },
-              { key: 'dry_1_trigger', displayName: 'DRY 1 Trigger', category: 'Triggers', numericValue: 2, sortOrder: 18, unit: '' },
-              { key: 'dry_2_trigger', displayName: 'DRY 2 Trigger', category: 'Triggers', numericValue: 4, sortOrder: 19, unit: '' },
-              { key: 'lcd_buzzer_trigger_value', displayName: 'LCD Buzzer Trigger Value', category: 'Triggers', numericValue: 80, sortOrder: 20, unit: '' },
-              { key: 'lcd_buzzer_release_value', displayName: 'LCD Buzzer Release Value', category: 'Triggers', numericValue: 60, sortOrder: 21, unit: '' },
-              { key: 'dry_1_trigger_value', displayName: 'DRY 1 Trigger Value', category: 'Triggers', numericValue: 90, sortOrder: 22, unit: '' },
-              { key: 'dry_1_release_value', displayName: 'DRY 1 Release Value', category: 'Triggers', numericValue: 70, sortOrder: 23, unit: '' },
-              { key: 'dry_2_trigger_value', displayName: 'DRY 2 Trigger Value', category: 'Triggers', numericValue: 95, sortOrder: 24, unit: '' },
-              { key: 'dry_2_release_value', displayName: 'DRY 2 Release Value', category: 'Triggers', numericValue: 75, sortOrder: 25, unit: '' },
+              { key: 'lcd_buzzer_trigger', displayName: 'LCD Buzzer Trigger', category: 'Triggers', numericValue: 3, sortOrder: 17, isWritable: true, unit: '' },
+              { key: 'dry_1_trigger', displayName: 'DRY 1 Trigger', category: 'Triggers', numericValue: 2, sortOrder: 18, isWritable: true, unit: '' },
+              { key: 'dry_2_trigger', displayName: 'DRY 2 Trigger', category: 'Triggers', numericValue: 4, sortOrder: 19, isWritable: true, unit: '' },
+              { key: 'lcd_buzzer_trigger_value', displayName: 'LCD Buzzer Trigger Value', category: 'Triggers', numericValue: 80, sortOrder: 20, isWritable: true, unit: '' },
+              { key: 'lcd_buzzer_release_value', displayName: 'LCD Buzzer Release Value', category: 'Triggers', numericValue: 60, sortOrder: 21, isWritable: true, unit: '' },
+              { key: 'dry_1_trigger_value', displayName: 'DRY 1 Trigger Value', category: 'Triggers', numericValue: 90, sortOrder: 22, isWritable: true, unit: '' },
+              { key: 'dry_1_release_value', displayName: 'DRY 1 Release Value', category: 'Triggers', numericValue: 70, sortOrder: 23, isWritable: true, unit: '' },
+              { key: 'dry_2_trigger_value', displayName: 'DRY 2 Trigger Value', category: 'Triggers', numericValue: 95, sortOrder: 24, isWritable: true, unit: '' },
+              { key: 'dry_2_release_value', displayName: 'DRY 2 Release Value', category: 'Triggers', numericValue: 75, sortOrder: 25, isWritable: true, unit: '' },
               { key: 'uart1_protocol', displayName: 'UART 1 Protocol', category: 'Communication', numericValue: 1, sortOrder: 26, unit: '' },
               { key: 'can_protocol', displayName: 'CAN Protocol', category: 'Communication', numericValue: 2, sortOrder: 27, unit: '' },
               { key: 'uart2_protocol', displayName: 'UART 2 Protocol', category: 'Communication', numericValue: 3, sortOrder: 28, unit: '' },
               { key: 'uart3_protocol', displayName: 'UART 3 Protocol', category: 'Communication', numericValue: 15, sortOrder: 29, isWritable: true, unit: '' },
               { key: 'charge_switch', displayName: 'Charge Switch', category: 'Charging', numericValue: 1, rawValue: 1, sortOrder: 29, isWritable: true, unit: '' },
+              { key: 'voltage_calibration', displayName: 'Voltage Calibration', category: 'System', numericValue: 53.2, rawValue: 53200, sortOrder: 30, isWritable: true, unit: 'V' },
             ],
           },
         },
@@ -871,11 +901,20 @@ describe('MonitorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Thermal Protection section' }));
     expect(screen.getByText('Battery Temp 3')).toBeInTheDocument();
     expect(screen.getByText('MOS Temperature')).toBeInTheDocument();
+    expect(screen.getByText('21.7')).toBeInTheDocument();
+    expect(screen.getByText('19.9')).toBeInTheDocument();
+    expect(screen.queryByText('21.733')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Charging section' }));
     expect(screen.getByText('Charge Status')).toBeInTheDocument();
     expect(screen.getByText('Charge Status Time')).toBeInTheDocument();
     expect(screen.getByText('Charge Switch')).toBeInTheDocument();
+    expect(screen.getByText('RCV Time')).toBeInTheDocument();
+    expect(screen.getByText('RFV Time')).toBeInTheDocument();
+    expect(screen.getByText('0.1')).toBeInTheDocument();
+    expect(screen.getByText('0.2')).toBeInTheDocument();
+    expect(screen.getAllByText((_, element) => element?.textContent === '0.1 h').length).toBeGreaterThan(0);
+    expect(screen.getAllByText((_, element) => element?.textContent === '0.2 h').length).toBeGreaterThan(0);
 
     fireEvent.click(screen.getByRole('button', { name: 'System section' }));
     expect(screen.getByText('Heating Status')).toBeInTheDocument();
@@ -883,6 +922,7 @@ describe('MonitorPage', () => {
     expect(screen.getByText('Time Enter Sleep')).toBeInTheDocument();
     expect(screen.getByText('Par-Limiter (PCL Module)')).toBeInTheDocument();
     expect(screen.getByText('DRY2 Alarm')).toBeInTheDocument();
+    expect(screen.getByText('Voltage Calibration')).toBeInTheDocument();
     expect(screen.queryByText('LCD Buzzer Trigger')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Communication section' }));
@@ -896,6 +936,8 @@ describe('MonitorPage', () => {
     expect(screen.getByText('LCD Buzzer Trigger Value')).toBeInTheDocument();
     expect(screen.getByText('DRY 1 Trigger')).toBeInTheDocument();
     expect(screen.getByText('DRY 2 Release Value')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Edit LCD Buzzer Trigger' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Edit DRY 2 Release Value' })).toBeEnabled();
   });
 
   it('renders inverter cards as compact expandable summaries with synchronized power units and header badges', async () => {
@@ -1213,6 +1255,116 @@ describe('MonitorPage', () => {
     expect(screen.getByText('Protocol Number')).toBeInTheDocument();
     expect(screen.getByText('3')).toBeInTheDocument();
     expect(screen.queryByText('2,026')).not.toBeInTheDocument();
+  });
+
+  it('keeps inverter power hero metrics for JK V15 telemetry with grid, battery, solar, and load power values', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-04-12T12:00:04.000Z').getTime());
+
+    useDeviceDefinitionMock.mockReturnValue({
+      version: '1',
+      device: {
+        id: 'jk-v15',
+        name: 'JK V15',
+        manufacturer: 'JK',
+        model: 'V15',
+        category: 'energy-storage',
+        icon: 'battery',
+      },
+      connection: {
+        transport: { type: 'ble', defaults: {} },
+        protocol: { type: 'ble-frame', settings: {} },
+      },
+      dataSources: [],
+      pollGroups: {},
+      entities: [
+        { id: 'grid_power', type: 'number', name: 'Grid Power', category: 'Grid', source: { bank: 'live', byteOffset: 0, unit: 'W' }, display: { precision: 0 } },
+        { id: 'battery_power', type: 'number', name: 'Battery Power', category: 'Battery', source: { bank: 'live', byteOffset: 2, unit: 'W' }, display: { precision: 0 } },
+        { id: 'pv_power', type: 'number', name: 'PV Power', category: 'Solar', source: { bank: 'live', byteOffset: 4, unit: 'W' }, display: { precision: 0 } },
+        { id: 'output_active_power', type: 'number', name: 'Output Active Power', category: 'Output', source: { bank: 'live', byteOffset: 6, unit: 'W' }, display: { precision: 0 } },
+        { id: 'total_voltage', type: 'number', name: 'Total Voltage', category: 'Pack Status', source: { bank: 'live', byteOffset: 8, unit: 'V' }, display: { precision: 2 } },
+      ],
+      computedEntities: [],
+      ui: {
+        pages: {
+          monitor: {
+            sections: [
+              {
+                type: 'hero-metrics',
+                metrics: [
+                  { entity: 'total_voltage', color: 'emerald' },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    } satisfies DeviceDefinition);
+
+    class FakeEventSource {
+      static instances: FakeEventSource[] = [];
+
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      close = vi.fn();
+
+      constructor(public readonly url: string) {
+        FakeEventSource.instances.push(this);
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }));
+      }
+    }
+
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    render(<MonitorPage />);
+
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(1);
+    });
+
+    FakeEventSource.instances[0]?.emit({
+      devices: [
+        {
+          deviceId: '40904494583P',
+          displayName: 'JK V15',
+          definitionId: 'jk-v15',
+          protocolHandler: 'ble-frame',
+          enabled: true,
+          isMaster: true,
+          pollIntervalMilliseconds: 1000,
+          lastOutcome: 'Succeeded',
+          latestTelemetry: {
+            collectedAt: '2026-04-12T12:00:00.000Z',
+            cells: [],
+            activeWarnings: [],
+            parameters: [
+              { key: 'grid_power', displayName: 'Grid Power', category: 'Grid', numericValue: 90, sortOrder: 0, unit: 'W' },
+              { key: 'battery_power', displayName: 'Battery Power', category: 'Battery', numericValue: 620, sortOrder: 1, unit: 'W' },
+              { key: 'pv_power', displayName: 'PV Power', category: 'Solar', numericValue: 1280, sortOrder: 2, unit: 'W' },
+              { key: 'output_active_power', displayName: 'Output Active Power', category: 'Output', numericValue: 540, sortOrder: 3, unit: 'W' },
+              { key: 'total_voltage', displayName: 'Total Voltage', category: 'Pack Status', numericValue: 53.2, sortOrder: 4, unit: 'V' },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(await screen.findByText('JK V15')).toBeInTheDocument();
+    expect(screen.getByText('Grid')).toBeInTheDocument();
+    expect(screen.getByText('Battery')).toBeInTheDocument();
+    expect(screen.getByText('Solar')).toBeInTheDocument();
+    expect(screen.getByText('Load')).toBeInTheDocument();
+    expect(screen.getByText('0.1')).toBeInTheDocument();
+    expect(screen.getByText('0.6')).toBeInTheDocument();
+    expect(screen.getByText('1.3')).toBeInTheDocument();
+    expect(screen.getByText('0.5')).toBeInTheDocument();
+    expect(screen.queryByText('Total Voltage')).not.toBeInTheDocument();
   });
 
   it('keeps inverter cards collapsed while the definition is still loading', async () => {

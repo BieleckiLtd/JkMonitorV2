@@ -1845,25 +1845,26 @@ public sealed class TimescaleTelemetryRepository(
         DeviceDefinition definition)
     {
         var values = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+        var timeSeriesEntities = ResolveTimeSeriesEntities(definition);
 
         foreach (var parameter in sample.Snapshot.Parameters)
         {
-            if (parameter.NumericValue.HasValue)
+            if (parameter.NumericValue.HasValue && ShouldStoreTimeSeriesEntity(timeSeriesEntities, parameter.Key))
             {
                 values[parameter.Key] = decimal.ToDouble(parameter.NumericValue.Value);
             }
         }
 
-        AddSnapshotValue(values, FindEntityKeyByRole(definition, "total-voltage") ?? "total_voltage", sample.Snapshot.TotalVoltageVolts);
-        AddSnapshotValue(values, FindEntityKeyByRole(definition, "current") ?? "current", sample.Snapshot.CurrentAmps);
-        AddSnapshotValue(values, ResolvePowerSensorName(definition), sample.Snapshot.PowerWatts);
-        AddSnapshotValue(values, FindEntityKeyByRole(definition, "state-of-charge") ?? "state_of_charge", sample.Snapshot.StateOfChargePercent);
-        AddSnapshotValue(values, "min_cell_voltage", sample.Snapshot.MinCellVoltageVolts);
-        AddSnapshotValue(values, "max_cell_voltage", sample.Snapshot.MaxCellVoltageVolts);
-        AddSnapshotValue(values, "avg_cell_voltage", sample.Snapshot.AverageCellVoltageVolts);
-        AddSnapshotValue(values, "delta_cell_voltage", sample.Snapshot.DeltaCellVoltageVolts);
-        AddSnapshotValue(values, ResolveMosTemperatureSensorName(definition), sample.Snapshot.MosTemperatureCelsius);
-        AddSnapshotValue(values, ResolveBatteryTemperatureSensorName(definition), sample.Snapshot.BatteryTemperatureCelsius);
+        AddSnapshotValue(values, FindEntityKeyByRole(definition, "total-voltage") ?? "total_voltage", sample.Snapshot.TotalVoltageVolts, timeSeriesEntities);
+        AddSnapshotValue(values, FindEntityKeyByRole(definition, "current") ?? "current", sample.Snapshot.CurrentAmps, timeSeriesEntities);
+        AddSnapshotValue(values, ResolvePowerSensorName(definition), sample.Snapshot.PowerWatts, timeSeriesEntities);
+        AddSnapshotValue(values, FindEntityKeyByRole(definition, "state-of-charge") ?? "state_of_charge", sample.Snapshot.StateOfChargePercent, timeSeriesEntities);
+        AddSnapshotValue(values, "min_cell_voltage", sample.Snapshot.MinCellVoltageVolts, timeSeriesEntities);
+        AddSnapshotValue(values, "max_cell_voltage", sample.Snapshot.MaxCellVoltageVolts, timeSeriesEntities);
+        AddSnapshotValue(values, "avg_cell_voltage", sample.Snapshot.AverageCellVoltageVolts, timeSeriesEntities);
+        AddSnapshotValue(values, "delta_cell_voltage", sample.Snapshot.DeltaCellVoltageVolts, timeSeriesEntities);
+        AddSnapshotValue(values, ResolveMosTemperatureSensorName(definition), sample.Snapshot.MosTemperatureCelsius, timeSeriesEntities);
+        AddSnapshotValue(values, ResolveBatteryTemperatureSensorName(definition), sample.Snapshot.BatteryTemperatureCelsius, timeSeriesEntities);
 
         var cellEntityKey = FindCellArrayEntityKey(definition) ?? "cell_voltage";
         foreach (var cell in sample.Snapshot.Cells)
@@ -1874,13 +1875,36 @@ public sealed class TimescaleTelemetryRepository(
         return values;
     }
 
-    private static void AddSnapshotValue(IDictionary<string, double> values, string? sensorName, decimal? value)
+    private static void AddSnapshotValue(
+        IDictionary<string, double> values,
+        string? sensorName,
+        decimal? value,
+        ISet<string>? timeSeriesEntities)
     {
-        if (!string.IsNullOrWhiteSpace(sensorName) && value.HasValue)
+        if (!string.IsNullOrWhiteSpace(sensorName) &&
+            value.HasValue &&
+            ShouldStoreTimeSeriesEntity(timeSeriesEntities, sensorName))
         {
             values[sensorName] = decimal.ToDouble(value.Value);
         }
     }
+
+    private static ISet<string>? ResolveTimeSeriesEntities(DeviceDefinition definition)
+    {
+        var timeSeries = definition.Storage?.TimeSeries;
+        if (timeSeries is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        return timeSeries
+            .Select(mapping => mapping.Entity)
+            .Where(entity => !string.IsNullOrWhiteSpace(entity))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+    }
+
+    private static bool ShouldStoreTimeSeriesEntity(ISet<string>? timeSeriesEntities, string sensorName)
+        => timeSeriesEntities is null || timeSeriesEntities.Contains(sensorName);
 
     private static string ResolvePowerSensorName(DeviceDefinition definition)
         => FindEntityKeyByRole(definition, "power")

@@ -364,6 +364,14 @@
       "role": "discharging-enabled"
     },
     {
+      "id": "charge_switch",
+      "type": "switch",
+      "name": "Charge Switch",
+      "category": "Charging",
+      "source": { "bank": "config", "byteOffset": 112, "dataType": "uint32" },
+      "writable": true
+    },
+    {
       "id": "charge_status_time_elapsed",
       "type": "sensor",
       "name": "Charge Status Time",
@@ -484,7 +492,7 @@
     },
     {
       "id": "lcd_buzzer_trigger",
-      "type": "sensor",
+      "type": "number",
       "name": "LCD Buzzer Trigger",
       "category": "Triggers",
       "source": {
@@ -492,11 +500,16 @@
         "byteOffset": 228,
         "dataType": "uint8"
       },
-      "display": { "precision": 0 }
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": {
+        "address": 169,
+        "valueLength": 1
+      }
     },
     {
       "id": "dry_1_trigger",
-      "type": "sensor",
+      "type": "number",
       "name": "DRY 1 Trigger",
       "category": "Triggers",
       "source": {
@@ -504,11 +517,16 @@
         "byteOffset": 229,
         "dataType": "uint8"
       },
-      "display": { "precision": 0 }
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": {
+        "address": 170,
+        "valueLength": 1
+      }
     },
     {
       "id": "dry_2_trigger",
-      "type": "sensor",
+      "type": "number",
       "name": "DRY 2 Trigger",
       "category": "Triggers",
       "source": {
@@ -516,7 +534,12 @@
         "byteOffset": 230,
         "dataType": "uint8"
       },
-      "display": { "precision": 0 }
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": {
+        "address": 171,
+        "valueLength": 1
+      }
     },
     {
       "id": "lcd_buzzer_trigger_value",
@@ -528,7 +551,12 @@
         "byteOffset": 232,
         "dataType": "uint32"
       },
-      "display": { "precision": 0 }
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": {
+        "address": 172,
+        "valueLength": 4
+      }
     },
     {
       "id": "lcd_buzzer_release_value",
@@ -540,7 +568,12 @@
         "byteOffset": 236,
         "dataType": "uint32"
       },
-      "display": { "precision": 0 }
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": {
+        "address": 173,
+        "valueLength": 4
+      }
     },
     {
       "id": "dry_1_trigger_value",
@@ -552,7 +585,12 @@
         "byteOffset": 240,
         "dataType": "uint32"
       },
-      "display": { "precision": 0 }
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": {
+        "address": 174,
+        "valueLength": 4
+      }
     },
     {
       "id": "dry_1_release_value",
@@ -564,7 +602,12 @@
         "byteOffset": 244,
         "dataType": "uint32"
       },
-      "display": { "precision": 0 }
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": {
+        "address": 175,
+        "valueLength": 4
+      }
     },
     {
       "id": "dry_2_trigger_value",
@@ -576,7 +619,12 @@
         "byteOffset": 248,
         "dataType": "uint32"
       },
-      "display": { "precision": 0 }
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": {
+        "address": 176,
+        "valueLength": 4
+      }
     },
     {
       "id": "dry_2_release_value",
@@ -588,7 +636,12 @@
         "byteOffset": 252,
         "dataType": "uint32"
       },
-      "display": { "precision": 0 }
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": {
+        "address": 177,
+        "valueLength": 4
+      }
     },
     {
       "id": "uart1_protocol",
@@ -797,7 +850,7 @@
       "type": "number",
       "name": "RCV Time",
       "category": "Charging",
-      "source": { "bank": "config", "byteOffset": 260, "dataType": "uint8", "scale": 0.1, "unit": "h" },
+      "source": { "bank": "info", "byteOffset": 260, "dataType": "uint8", "scale": 0.1, "unit": "h" },
       "display": { "precision": 1 },
       "writable": true,
       "write": {
@@ -879,9 +932,13 @@
       "type": "number",
       "name": "SCP Delay",
       "category": "Current Protection",
-      "source": { "bank": "config", "byteOffset": 128, "dataType": "uint32", "unit": "μs" },
+      "source": { "bank": "config", "byteOffset": 144, "dataType": "uint32", "unit": "μs" },
       "display": { "precision": 0 },
-      "writable": true
+      "writable": true,
+      "write": {
+        "address": 33,
+        "valueLength": 4
+      }
     },
 
     {
@@ -969,18 +1026,10 @@
       "writable": true
     },
     {
-      "id": "charge_switch",
-      "type": "switch",
-      "name": "Charge Switch",
-      "category": "Charging",
-      "source": { "bank": "config", "byteOffset": 112, "dataType": "uint32" },
-      "writable": true
-    },
-    {
       "id": "discharge_switch",
       "type": "switch",
       "name": "Discharge Switch",
-      "category": "System",
+      "category": "Discharging",
       "source": { "bank": "config", "byteOffset": 116, "dataType": "uint32" },
       "writable": true
     },
@@ -988,9 +1037,22 @@
       "id": "balancer_switch",
       "type": "switch",
       "name": "Balancer Switch",
-      "category": "System",
+      "category": "Balance Settings",
       "source": { "bank": "config", "byteOffset": 120, "dataType": "uint32" },
       "writable": true
+    },
+    {
+      "id": "voltage_calibration",
+      "type": "number",
+      "name": "Voltage Calibration",
+      "category": "System",
+      "source": { "bank": "config", "byteOffset": 128, "dataType": "uint32", "scale": 0.001, "unit": "V" },
+      "display": { "precision": 3 },
+      "writable": true,
+      "write": {
+        "address": 100,
+        "valueLength": 4
+      }
     },
     {
       "id": "nominal_battery_capacity",
@@ -1188,9 +1250,7 @@
       { "entity": "state_of_charge",    "aggregate": "last", "column": "soc_pct" },
       { "entity": "min_cell_voltage",   "aggregate": "min", "column": "min_cell_v" },
       { "entity": "max_cell_voltage",   "aggregate": "max", "column": "max_cell_v" },
-      { "entity": "delta_cell_voltage", "aggregate": "avg", "column": "delta_cell_v" },
-      { "entity": "mos_temperature",    "aggregate": "avg", "column": "mos_temp_c" },
-      { "entity": "battery_temp_1",     "aggregate": "avg", "column": "battery_temp_c" }
+      { "entity": "delta_cell_voltage", "aggregate": "max", "column": "delta_cell_v" }
     ],
     "cellVoltages": {
       "entity": "cell_voltages",
@@ -1309,22 +1369,12 @@
             "yAxis": { "unit": "%", "label": "SOC", "domain": [0, 100] }
           },
           {
-            "title": "Temperatures",
-            "type": "line-chart",
-            "traces": [
-              { "entity": "mos_temperature", "label": "MOS",      "color": "red" },
-              { "entity": "battery_temp_1",  "label": "Battery 1", "color": "orange" },
-              { "entity": "battery_temp_2",  "label": "Battery 2", "color": "yellow" }
-            ],
-            "yAxis": { "unit": "°C", "label": "Temperature" }
-          },
-          {
             "title": "Cell Voltage Spread",
             "type": "line-chart",
             "traces": [
               { "entity": "min_cell_voltage",   "label": "Min",   "color": "red" },
               { "entity": "max_cell_voltage",   "label": "Max",   "color": "emerald" },
-              { "entity": "avg_cell_voltage",   "label": "Avg",   "color": "blue", "dashed": true }
+              { "entity": "delta_cell_voltage", "label": "Delta", "color": "blue", "dashed": true }
             ],
             "yAxis": { "unit": "V", "label": "Cell Voltage" }
           },

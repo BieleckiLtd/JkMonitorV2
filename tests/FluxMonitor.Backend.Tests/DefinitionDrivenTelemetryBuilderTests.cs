@@ -46,11 +46,14 @@ public sealed class DefinitionDrivenTelemetryBuilderTests
         live[275] = 0x06;
 
         WriteUInt32LittleEndian(config, 0, 51200);
+        WriteUInt32LittleEndian(config, 128, 53200);
 
         WriteAscii(info, 0, 16, "JK_PB2A16S15P");
         WriteAscii(info, 16, 8, "14.XA");
         WriteAscii(info, 24, 8, "14.20");
         info[228] = 3;
+        info[260] = 1;
+        info[261] = 2;
 
         var builder = new DefinitionDrivenTelemetryBuilder(new ExpressionEvaluator());
         var result = builder.BuildPollResult(
@@ -92,6 +95,9 @@ public sealed class DefinitionDrivenTelemetryBuilderTests
         var dry1Alarm = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "dry_contact_1");
         var dry2Alarm = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "dry_contact_2");
         var lcdBuzzerTrigger = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "lcd_buzzer_trigger");
+        var rcvTime = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "cell_request_charge_voltage_time");
+        var rfvTime = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "cell_request_float_voltage_time");
+        var voltageCalibration = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "voltage_calibration");
 
         Assert.Equal(26.8m, batteryTemp3?.NumericValue);
         Assert.True(heatingStatus?.BooleanValue);
@@ -102,6 +108,10 @@ public sealed class DefinitionDrivenTelemetryBuilderTests
         Assert.True(dry1Alarm?.BooleanValue);
         Assert.True(dry2Alarm?.BooleanValue);
         Assert.Equal(3m, lcdBuzzerTrigger?.NumericValue);
+        Assert.True(lcdBuzzerTrigger?.IsWritable);
+        Assert.Equal(0.1m, rcvTime?.NumericValue);
+        Assert.Equal(0.2m, rfvTime?.NumericValue);
+        Assert.Equal(53.200m, voltageCalibration?.NumericValue);
     }
 
     [Fact]

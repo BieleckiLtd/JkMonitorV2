@@ -856,7 +856,6 @@ function renderDefinitionEditorFields(
         );
       }
 
-      const isNumberField = typeof entry === 'number';
       return (
         <DefinitionEditorTextInput
           key={fieldKey}
