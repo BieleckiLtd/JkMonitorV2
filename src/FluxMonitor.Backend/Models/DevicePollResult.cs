@@ -5,7 +5,8 @@ namespace FluxMonitor.Backend.Models;
 public sealed record DevicePollResult(
     DeviceTelemetrySnapshot Snapshot,
     IReadOnlyDictionary<string, string> RawRegisters,
-    string RawFrameHex);
+    string RawFrameHex,
+    IReadOnlyDictionary<string, decimal?>? NumericValues = null);
 
 public sealed record WriteRegisterResult(
     bool Success,

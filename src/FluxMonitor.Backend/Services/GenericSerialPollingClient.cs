@@ -444,7 +444,11 @@ public sealed class GenericSerialPollingClient(
             Parameters = parameters
         };
 
-        return new DevicePollResult(snapshot, rawRegisters, string.Empty);
+        return new DevicePollResult(
+            snapshot,
+            rawRegisters,
+            string.Empty,
+            new Dictionary<string, decimal?>(entityValues, StringComparer.OrdinalIgnoreCase));
     }
 
     #region Entity Parsing

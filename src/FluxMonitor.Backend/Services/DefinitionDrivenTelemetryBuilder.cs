@@ -246,7 +246,11 @@ public sealed class DefinitionDrivenTelemetryBuilder(ExpressionEvaluator express
             Parameters = parameters
         };
 
-        return new DevicePollResult(snapshot, rawRegisters, rawFrameHex);
+        return new DevicePollResult(
+            snapshot,
+            rawRegisters,
+            rawFrameHex,
+            new Dictionary<string, decimal?>(entityValues, StringComparer.OrdinalIgnoreCase));
     }
 
     private static void ParseCellArray(

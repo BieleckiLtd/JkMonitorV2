@@ -139,7 +139,58 @@ public sealed class DevicesController(
         var fromValue = from ?? GetDefaultHistoryFrom(resolution, toValue);
 
         var normalizedResolution = NormalizeHistoryResolution(resolution, persistedResolution);
-        var points = await telemetryRepository.QueryHistoryAsync(deviceId, normalizedResolution, bucketValueKind, fromValue, toValue, cancellationToken);
+        var device = deviceConfigStore.GetDevices().FirstOrDefault(d =>
+            string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase));
+        if (device is null)
+        {
+            return Ok(new
+            {
+                deviceId,
+                resolution = normalizedResolution,
+                bucketView = TimescaleTelemetryRepository.FormatBucketValueKind(bucketValueKind),
+                from = fromValue,
+                to = toValue,
+                entities = Array.Empty<string>(),
+                points = Array.Empty<object>()
+            });
+        }
+
+        if (!device.TryResolveDefinition(definitionLoader, out var definition) || definition is null)
+        {
+            return BadRequest(new { message = $"Device definition '{device.DefinitionId}' not found." });
+        }
+
+        var requestedEntities = definition.Storage?.TimeSeries
+            .Select(mapping => mapping.Entity)
+            .Where(entity => !string.IsNullOrWhiteSpace(entity))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray() ?? [];
+
+        IReadOnlyList<SeriesHistoryDataPoint> seriesPoints = requestedEntities.Length == 0
+            ? []
+            : await telemetryRepository.QuerySeriesHistoryAsync(
+                deviceId,
+                requestedEntities,
+                normalizedResolution,
+                bucketValueKind,
+                fromValue,
+                toValue,
+                cancellationToken);
+
+        var points = seriesPoints.Select(point =>
+        {
+            var row = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["timestamp"] = point.Timestamp
+            };
+            foreach (var value in point.Values)
+            {
+                row[value.Key] = value.Value;
+            }
+
+            return row;
+        }).ToArray();
+
         return Ok(new
         {
             deviceId,
@@ -147,6 +198,7 @@ public sealed class DevicesController(
             bucketView = TimescaleTelemetryRepository.FormatBucketValueKind(bucketValueKind),
             from = fromValue,
             to = toValue,
+            entities = requestedEntities,
             points
         });
     }

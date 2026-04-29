@@ -30,8 +30,6 @@ public interface ITelemetryRepository
 
     Task CompressHistoricalDataAsync(CancellationToken cancellationToken);
 
-    Task<IReadOnlyList<HistoryDataPoint>> QueryHistoryAsync(string deviceId, string resolution, BucketValueKind bucketValueKind, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken);
-
     Task<IReadOnlyList<CellHistoryDataPoint>> QueryCellHistoryAsync(string deviceId, int cellIndex, string resolution, BucketValueKind bucketValueKind, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken);
 
     Task<IReadOnlyList<SeriesHistoryDataPoint>> QuerySeriesHistoryAsync(
@@ -70,18 +68,6 @@ public sealed record CompressionStats(
     string CompressedSizeFormatted,
     double CompressionRatio);
 
-public sealed record HistoryDataPoint(
-    DateTimeOffset Timestamp,
-    double? TotalVoltageVolts,
-    double? CurrentAmps,
-    double? PowerWatts,
-    double? StateOfChargePercent,
-    double? MinCellVoltageVolts,
-    double? MaxCellVoltageVolts,
-    double? DeltaCellVoltageVolts,
-    double? MosTemperatureCelsius,
-    double? BatteryTemperatureCelsius);
-
 public sealed record CellHistoryDataPoint(
     DateTimeOffset Timestamp,
     double? VoltageVolts);
@@ -103,9 +89,6 @@ public sealed class NoOpTelemetryRepository : ITelemetryRepository
         => Task.CompletedTask;
 
     public Task CompressHistoricalDataAsync(CancellationToken cancellationToken) => Task.CompletedTask;
-
-    public Task<IReadOnlyList<HistoryDataPoint>> QueryHistoryAsync(string deviceId, string resolution, BucketValueKind bucketValueKind, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
-        => Task.FromResult<IReadOnlyList<HistoryDataPoint>>([]);
 
     public Task<IReadOnlyList<CellHistoryDataPoint>> QueryCellHistoryAsync(string deviceId, int cellIndex, string resolution, BucketValueKind bucketValueKind, DateTimeOffset from, DateTimeOffset to, CancellationToken cancellationToken)
         => Task.FromResult<IReadOnlyList<CellHistoryDataPoint>>([]);
@@ -307,47 +290,6 @@ public sealed class TimescaleTelemetryRepository(
             rowsToPersist.Count);
     }
 
-    public async Task<IReadOnlyList<HistoryDataPoint>> QueryHistoryAsync(
-        string deviceId,
-        string resolution,
-        BucketValueKind bucketValueKind,
-        DateTimeOffset from,
-        DateTimeOffset to,
-        CancellationToken cancellationToken)
-    {
-        await InitializeAsync(cancellationToken);
-
-        var device = deviceConfigStore.GetDevices().FirstOrDefault(d =>
-            string.Equals(d.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase));
-        if (device is null)
-        {
-            return [];
-        }
-
-        var definition = device.ResolveDefinition(definitionLoader);
-        var sensors = ResolveHistorySensors(definition);
-        var sensorNames = sensors
-            .AsEnumerable()
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Cast<string>()
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        if (sensorNames.Length == 0)
-        {
-            return [];
-        }
-
-        if (string.Equals(resolution, "1s", StringComparison.Ordinal))
-        {
-            return QueryBufferedHistory(deviceId, sensors, bucketValueKind, from, to);
-        }
-
-        return ShouldUseMinuteHistoryCache(resolution)
-            ? QueryBufferedMinuteHistory(deviceId, sensors, bucketValueKind, from, to)
-            : await QueryPersistedHistoryAsync(deviceId, sensors, resolution, bucketValueKind, from, to, cancellationToken);
-    }
-
     public async Task<IReadOnlyList<CellHistoryDataPoint>> QueryCellHistoryAsync(
         string deviceId,
         int cellIndex,
@@ -367,7 +309,7 @@ public sealed class TimescaleTelemetryRepository(
         }
 
         var definition = device.ResolveDefinition(definitionLoader);
-        var cellEntityKey = FindCellArrayEntityKey(definition);
+        var cellEntityKey = definition.Storage?.CellVoltages?.Entity;
         if (string.IsNullOrWhiteSpace(cellEntityKey))
         {
             return [];
@@ -1203,165 +1145,6 @@ public sealed class TimescaleTelemetryRepository(
         await transaction.CommitAsync(cancellationToken);
     }
 
-    private IReadOnlyList<HistoryDataPoint> QueryBufferedHistory(
-        string deviceId,
-        ResolvedHistorySensors sensors,
-        BucketValueKind bucketValueKind,
-        DateTimeOffset from,
-        DateTimeOffset to)
-    {
-        List<BufferedSnapshot> samples;
-
-        lock (_stateGate)
-        {
-            if (!_recentSamples.TryGetValue(deviceId, out var queue))
-            {
-                return [];
-            }
-
-            samples = queue
-                .Where(sample => sample.Timestamp >= from && sample.Timestamp <= to)
-                .ToList();
-        }
-
-        if (samples.Count == 0)
-        {
-            return [];
-        }
-
-        var points = new SortedDictionary<DateTimeOffset, HistoryPointAccumulator>();
-
-        foreach (var sample in samples)
-        {
-            var secondBucket = AlignToBucketBoundaryFloor(sample.Timestamp, "1s");
-            if (!points.TryGetValue(secondBucket, out var accumulator))
-            {
-                accumulator = new HistoryPointAccumulator();
-                points[secondBucket] = accumulator;
-            }
-
-            accumulator.Add(sample.Timestamp, sample.Measurements, sensors);
-        }
-
-        return points
-            .Select(entry => entry.Value.ToHistoryDataPoint(entry.Key, bucketValueKind))
-            .ToArray();
-    }
-
-    private IReadOnlyList<HistoryDataPoint> QueryBufferedMinuteHistory(
-        string deviceId,
-        ResolvedHistorySensors sensors,
-        BucketValueKind bucketValueKind,
-        DateTimeOffset from,
-        DateTimeOffset to)
-    {
-        List<MeasurementValueRow> rows = [];
-        var sensorNames = sensors
-            .AsEnumerable()
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Cast<string>()
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        lock (_stateGate)
-        {
-            var now = DateTimeOffset.UtcNow;
-            PromoteCompletedMinuteBucketsLocked(AlignToBucketBoundaryFloor(now, "1m"));
-            TrimRecentMinuteHistoryLocked(now.Subtract(MinuteHistoryWindow));
-
-            if (_recentMinuteHistory.TryGetValue(deviceId, out var queue))
-            {
-                rows.AddRange(queue.Where(row =>
-                    sensorNames.Contains(row.SensorName) &&
-                    row.Time >= from &&
-                    row.Time <= to));
-            }
-
-            rows.AddRange(_pendingMinuteBuckets
-                .Where(entry =>
-                    string.Equals(entry.Key.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase) &&
-                    sensorNames.Contains(entry.Key.SensorName) &&
-                    entry.Key.Time >= from &&
-                    entry.Key.Time <= to &&
-                    entry.Value.HasValue)
-                .OrderBy(entry => entry.Key.Time)
-                .ThenBy(entry => entry.Key.SensorName, StringComparer.OrdinalIgnoreCase)
-                .Select(entry => new MeasurementValueRow(
-                    entry.Key.BucketMinutes,
-                    entry.Key.Time,
-                    entry.Key.DeviceId,
-                    entry.Key.SensorName,
-                    entry.Value.Min,
-                    entry.Value.Max,
-                    entry.Value.Average,
-                    entry.Value.Last)));
-        }
-
-        if (rows.Count == 0)
-        {
-            return [];
-        }
-
-        var points = new SortedDictionary<DateTimeOffset, HistoryPointAccumulator>();
-        foreach (var row in rows.OrderBy(row => row.Time).ThenBy(row => row.SensorName, StringComparer.OrdinalIgnoreCase))
-        {
-            if (!points.TryGetValue(row.Time, out var accumulator))
-            {
-                accumulator = new HistoryPointAccumulator();
-                points[row.Time] = accumulator;
-            }
-
-            accumulator.Add(row.SensorName, row.GetValue(bucketValueKind), sensors);
-        }
-
-        return points
-            .Select(entry => entry.Value.ToHistoryDataPoint(entry.Key, bucketValueKind))
-            .ToArray();
-    }
-
-    private async Task<IReadOnlyList<HistoryDataPoint>> QueryPersistedHistoryAsync(
-        string deviceId,
-        ResolvedHistorySensors sensors,
-        string resolution,
-        BucketValueKind bucketValueKind,
-        DateTimeOffset from,
-        DateTimeOffset to,
-        CancellationToken cancellationToken)
-    {
-        var bucketMinutes = GetBucketMinutes(resolution);
-        var effectiveFrom = AlignToBucketBoundaryFloor(from, resolution);
-        var sensorNames = sensors
-            .AsEnumerable()
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Cast<string>()
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToArray();
-
-        var rows = await LoadPersistedMeasurementRowsAsync(deviceId, bucketMinutes, sensorNames, effectiveFrom, to, cancellationToken);
-        rows.AddRange(GetPendingMeasurementRows(deviceId, bucketMinutes, sensorNames, effectiveFrom, to));
-
-        if (rows.Count == 0)
-        {
-            return [];
-        }
-
-        var points = new SortedDictionary<DateTimeOffset, HistoryPointAccumulator>();
-        foreach (var row in rows.OrderBy(row => row.Time))
-        {
-            if (!points.TryGetValue(row.Time, out var accumulator))
-            {
-                accumulator = new HistoryPointAccumulator();
-                points[row.Time] = accumulator;
-            }
-
-            accumulator.Add(row.SensorName, row.GetValue(bucketValueKind), sensors);
-        }
-
-        return points
-            .Select(entry => entry.Value.ToHistoryDataPoint(entry.Key, bucketValueKind))
-            .ToArray();
-    }
-
     private IReadOnlyList<CellHistoryDataPoint> QueryBufferedCellHistory(
         string deviceId,
         string sensorName,
@@ -1840,61 +1623,47 @@ public sealed class TimescaleTelemetryRepository(
         return TimeSpan.FromMinutes(configuredMinutes > 0 ? configuredMinutes : 10);
     }
 
-    private static Dictionary<string, double> BuildNumericMeasurements(
+    internal static Dictionary<string, double> BuildNumericMeasurements(
         DevicePollResult sample,
         DeviceDefinition definition)
     {
         var values = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-        var timeSeriesEntities = ResolveTimeSeriesEntities(definition);
+        var timeSeriesEntities = ResolveConfiguredTimeSeriesEntities(definition);
+        var numericValues = sample.NumericValues is { Count: > 0 }
+            ? sample.NumericValues
+            : sample.Snapshot.Parameters
+                .Where(parameter => parameter.NumericValue.HasValue)
+                .ToDictionary(
+                    parameter => parameter.Key,
+                    parameter => (decimal?)parameter.NumericValue,
+                    StringComparer.OrdinalIgnoreCase);
 
-        foreach (var parameter in sample.Snapshot.Parameters)
+        foreach (var entity in timeSeriesEntities)
         {
-            if (parameter.NumericValue.HasValue && ShouldStoreTimeSeriesEntity(timeSeriesEntities, parameter.Key))
+            if (numericValues.TryGetValue(entity, out var value) && value.HasValue)
             {
-                values[parameter.Key] = decimal.ToDouble(parameter.NumericValue.Value);
+                values[entity] = decimal.ToDouble(value.Value);
             }
         }
 
-        AddSnapshotValue(values, FindEntityKeyByRole(definition, "total-voltage") ?? "total_voltage", sample.Snapshot.TotalVoltageVolts, timeSeriesEntities);
-        AddSnapshotValue(values, FindEntityKeyByRole(definition, "current") ?? "current", sample.Snapshot.CurrentAmps, timeSeriesEntities);
-        AddSnapshotValue(values, ResolvePowerSensorName(definition), sample.Snapshot.PowerWatts, timeSeriesEntities);
-        AddSnapshotValue(values, FindEntityKeyByRole(definition, "state-of-charge") ?? "state_of_charge", sample.Snapshot.StateOfChargePercent, timeSeriesEntities);
-        AddSnapshotValue(values, "min_cell_voltage", sample.Snapshot.MinCellVoltageVolts, timeSeriesEntities);
-        AddSnapshotValue(values, "max_cell_voltage", sample.Snapshot.MaxCellVoltageVolts, timeSeriesEntities);
-        AddSnapshotValue(values, "avg_cell_voltage", sample.Snapshot.AverageCellVoltageVolts, timeSeriesEntities);
-        AddSnapshotValue(values, "delta_cell_voltage", sample.Snapshot.DeltaCellVoltageVolts, timeSeriesEntities);
-        AddSnapshotValue(values, ResolveMosTemperatureSensorName(definition), sample.Snapshot.MosTemperatureCelsius, timeSeriesEntities);
-        AddSnapshotValue(values, ResolveBatteryTemperatureSensorName(definition), sample.Snapshot.BatteryTemperatureCelsius, timeSeriesEntities);
-
-        var cellEntityKey = FindCellArrayEntityKey(definition) ?? "cell_voltage";
-        foreach (var cell in sample.Snapshot.Cells)
+        var cellEntityKey = definition.Storage?.CellVoltages?.Entity;
+        if (!string.IsNullOrWhiteSpace(cellEntityKey))
         {
-            values[BuildCellSensorName(cellEntityKey, cell.Index)] = decimal.ToDouble(cell.VoltageVolts);
+            foreach (var cell in sample.Snapshot.Cells)
+            {
+                values[BuildCellSensorName(cellEntityKey, cell.Index)] = decimal.ToDouble(cell.VoltageVolts);
+            }
         }
 
         return values;
     }
 
-    private static void AddSnapshotValue(
-        IDictionary<string, double> values,
-        string? sensorName,
-        decimal? value,
-        ISet<string>? timeSeriesEntities)
-    {
-        if (!string.IsNullOrWhiteSpace(sensorName) &&
-            value.HasValue &&
-            ShouldStoreTimeSeriesEntity(timeSeriesEntities, sensorName))
-        {
-            values[sensorName] = decimal.ToDouble(value.Value);
-        }
-    }
-
-    private static ISet<string>? ResolveTimeSeriesEntities(DeviceDefinition definition)
+    private static ISet<string> ResolveConfiguredTimeSeriesEntities(DeviceDefinition definition)
     {
         var timeSeries = definition.Storage?.TimeSeries;
         if (timeSeries is not { Count: > 0 })
         {
-            return null;
+            return new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         }
 
         return timeSeries
@@ -1903,43 +1672,9 @@ public sealed class TimescaleTelemetryRepository(
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
     }
 
-    private static bool ShouldStoreTimeSeriesEntity(ISet<string>? timeSeriesEntities, string sensorName)
-        => timeSeriesEntities is null || timeSeriesEntities.Contains(sensorName);
-
-    private static string ResolvePowerSensorName(DeviceDefinition definition)
-        => FindEntityKeyByRole(definition, "power")
-           ?? definition.ComputedEntities.FirstOrDefault(entity =>
-               string.Equals(entity.Id, "computed_power", StringComparison.OrdinalIgnoreCase))?.Id
-           ?? "computed_power";
-
     private bool ShouldUseMinuteHistoryCache(string resolution)
         => string.Equals(resolution, "1m", StringComparison.Ordinal) &&
            GetPersistedBucketMinutes() != 1;
-
-    private static string? ResolveMosTemperatureSensorName(DeviceDefinition definition)
-        => definition.Entities.FirstOrDefault(entity =>
-               string.Equals(entity.Id, "mos_temperature", StringComparison.OrdinalIgnoreCase))?.Id
-           ?? FindFirstTemperatureEntityKey(definition)
-           ?? "mos_temperature";
-
-    private static string? ResolveBatteryTemperatureSensorName(DeviceDefinition definition)
-        => definition.Entities.FirstOrDefault(entity =>
-               string.Equals(entity.Id, "battery_temp_1", StringComparison.OrdinalIgnoreCase))?.Id
-           ?? definition.Entities.FirstOrDefault(entity =>
-               string.Equals(entity.Id, "battery_temp_2", StringComparison.OrdinalIgnoreCase))?.Id
-           ?? FindBatteryTemperatureEntityKey(definition)
-           ?? "battery_temp_1";
-
-    private static ResolvedHistorySensors ResolveHistorySensors(DeviceDefinition definition) => new(
-        FindEntityKeyByRole(definition, "total-voltage") ?? "total_voltage",
-        FindEntityKeyByRole(definition, "current") ?? "current",
-        ResolvePowerSensorName(definition),
-        FindEntityKeyByRole(definition, "state-of-charge") ?? "state_of_charge",
-        "min_cell_voltage",
-        "max_cell_voltage",
-        "delta_cell_voltage",
-        ResolveMosTemperatureSensorName(definition),
-        ResolveBatteryTemperatureSensorName(definition));
 
     private static TimeSpan GetBucketSize(string resolution)
     {
@@ -1999,21 +1734,6 @@ public sealed class TimescaleTelemetryRepository(
                string.Equals(entity.Role, role, StringComparison.OrdinalIgnoreCase))?.Id
            ?? definition.ComputedEntities.FirstOrDefault(entity =>
                string.Equals(entity.Role, role, StringComparison.OrdinalIgnoreCase))?.Id;
-
-    private static string? FindCellArrayEntityKey(DeviceDefinition definition)
-        => definition.Entities.FirstOrDefault(entity =>
-               string.Equals(entity.Role, "cell-voltages", StringComparison.OrdinalIgnoreCase))?.Id
-           ?? definition.Entities.FirstOrDefault(entity =>
-               string.Equals(entity.Type, "cell_array", StringComparison.OrdinalIgnoreCase))?.Id;
-
-    private static string? FindFirstTemperatureEntityKey(DeviceDefinition definition)
-        => definition.Entities.FirstOrDefault(entity =>
-               string.Equals(entity.Role, "temperature", StringComparison.OrdinalIgnoreCase))?.Id;
-
-    private static string? FindBatteryTemperatureEntityKey(DeviceDefinition definition)
-        => definition.Entities.FirstOrDefault(entity =>
-               string.Equals(entity.Role, "temperature", StringComparison.OrdinalIgnoreCase) &&
-               !string.Equals(entity.Id, "mos_temperature", StringComparison.OrdinalIgnoreCase))?.Id;
 
     private static string BuildCellSensorName(string cellEntityKey, int cellIndex)
         => $"{cellEntityKey}:{cellIndex}";
@@ -2151,100 +1871,6 @@ public sealed class TimescaleTelemetryRepository(
         }
     }
 
-    private sealed class HistoryPointAccumulator
-    {
-        private readonly NumericAccumulator _totalVoltage = new();
-        private readonly NumericAccumulator _current = new();
-        private readonly NumericAccumulator _power = new();
-        private readonly NumericAccumulator _soc = new();
-        private readonly NumericAccumulator _minCell = new();
-        private readonly NumericAccumulator _maxCell = new();
-        private readonly NumericAccumulator _deltaCell = new();
-        private readonly NumericAccumulator _mosTemp = new();
-        private readonly NumericAccumulator _batteryTemp = new();
-
-        public void Add(DateTimeOffset timestamp, IReadOnlyDictionary<string, double> measurements, ResolvedHistorySensors sensors)
-        {
-            TryAdd(measurements, sensors.TotalVoltage, _totalVoltage, timestamp);
-            TryAdd(measurements, sensors.Current, _current, timestamp);
-            TryAdd(measurements, sensors.Power, _power, timestamp);
-            TryAdd(measurements, sensors.StateOfCharge, _soc, timestamp);
-            TryAdd(measurements, sensors.MinCellVoltage, _minCell, timestamp);
-            TryAdd(measurements, sensors.MaxCellVoltage, _maxCell, timestamp);
-            TryAdd(measurements, sensors.DeltaCellVoltage, _deltaCell, timestamp);
-            TryAdd(measurements, sensors.MosTemperature, _mosTemp, timestamp);
-            TryAdd(measurements, sensors.BatteryTemperature, _batteryTemp, timestamp);
-        }
-
-        public void Add(string sensorName, double value, ResolvedHistorySensors sensors)
-        {
-            if (Matches(sensorName, sensors.TotalVoltage))
-            {
-                _totalVoltage.Add(value);
-            }
-            else if (Matches(sensorName, sensors.Current))
-            {
-                _current.Add(value);
-            }
-            else if (Matches(sensorName, sensors.Power))
-            {
-                _power.Add(value);
-            }
-            else if (Matches(sensorName, sensors.StateOfCharge))
-            {
-                _soc.Add(value);
-            }
-            else if (Matches(sensorName, sensors.MinCellVoltage))
-            {
-                _minCell.Add(value);
-            }
-            else if (Matches(sensorName, sensors.MaxCellVoltage))
-            {
-                _maxCell.Add(value);
-            }
-            else if (Matches(sensorName, sensors.DeltaCellVoltage))
-            {
-                _deltaCell.Add(value);
-            }
-            else if (Matches(sensorName, sensors.MosTemperature))
-            {
-                _mosTemp.Add(value);
-            }
-            else if (Matches(sensorName, sensors.BatteryTemperature))
-            {
-                _batteryTemp.Add(value);
-            }
-        }
-
-        public HistoryDataPoint ToHistoryDataPoint(DateTimeOffset timestamp, BucketValueKind bucketValueKind) => new(
-            timestamp,
-            _totalVoltage.GetValue(bucketValueKind),
-            _current.GetValue(bucketValueKind),
-            _power.GetValue(bucketValueKind),
-            _soc.GetValue(bucketValueKind),
-            _minCell.GetValue(bucketValueKind),
-            _maxCell.GetValue(bucketValueKind),
-            _deltaCell.GetValue(bucketValueKind),
-            _mosTemp.GetValue(bucketValueKind),
-            _batteryTemp.GetValue(bucketValueKind));
-
-        private static bool Matches(string sensorName, string? expected)
-            => !string.IsNullOrWhiteSpace(expected) &&
-               string.Equals(sensorName, expected, StringComparison.OrdinalIgnoreCase);
-
-        private static void TryAdd(
-            IReadOnlyDictionary<string, double> measurements,
-            string? sensorName,
-            NumericAccumulator accumulator,
-            DateTimeOffset timestamp)
-        {
-            if (!string.IsNullOrWhiteSpace(sensorName) && measurements.TryGetValue(sensorName, out var value))
-            {
-                accumulator.Add(timestamp, value);
-            }
-        }
-    }
-
     private sealed class SeriesPointAccumulator
     {
         private readonly Dictionary<string, NumericAccumulator> _accumulators = new(StringComparer.OrdinalIgnoreCase);
@@ -2300,28 +1926,4 @@ public sealed class TimescaleTelemetryRepository(
                 NormalizePersistedBucketMinutes(storage.Retention.PersistedBucketMinutes));
     }
 
-    private readonly record struct ResolvedHistorySensors(
-        string? TotalVoltage,
-        string? Current,
-        string? Power,
-        string? StateOfCharge,
-        string? MinCellVoltage,
-        string? MaxCellVoltage,
-        string? DeltaCellVoltage,
-        string? MosTemperature,
-        string? BatteryTemperature)
-    {
-        public IEnumerable<string?> AsEnumerable()
-        {
-            yield return TotalVoltage;
-            yield return Current;
-            yield return Power;
-            yield return StateOfCharge;
-            yield return MinCellVoltage;
-            yield return MaxCellVoltage;
-            yield return DeltaCellVoltage;
-            yield return MosTemperature;
-            yield return BatteryTemperature;
-        }
-    }
 }
