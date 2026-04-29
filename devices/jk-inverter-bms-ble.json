@@ -343,6 +343,35 @@
       },
       "role": "discharging-enabled"
     },
+    {
+      "id": "charge_status_time_elapsed",
+      "type": "sensor",
+      "name": "Charge Status Time",
+      "category": "Charging",
+      "source": {
+        "bank": "live",
+        "byteOffset": 272,
+        "dataType": "uint16",
+        "unit": "s"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "charge_status",
+      "type": "select",
+      "name": "Charge Status",
+      "category": "Charging",
+      "source": {
+        "bank": "live",
+        "byteOffset": 274,
+        "dataType": "uint8"
+      },
+      "options": [
+        { "value": 0, "label": "Bulk" },
+        { "value": 1, "label": "Absorption" },
+        { "value": 2, "label": "Float" }
+      ]
+    },
 
     {
       "_comment": "=== CONFIG — Cell Protection ===",
@@ -476,6 +505,19 @@
       "source": { "bank": "config", "byteOffset": 44, "dataType": "uint32", "scale": 0.001, "unit": "A" },
       "display": { "precision": 1 },
       "writable": true
+    },
+    {
+      "id": "cell_request_charge_voltage_time",
+      "type": "number",
+      "name": "RCV Time",
+      "category": "Charging",
+      "source": { "bank": "config", "byteOffset": 260, "dataType": "uint8", "scale": 0.1, "unit": "h" },
+      "display": { "precision": 1 },
+      "writable": true,
+      "write": {
+        "address": 179,
+        "valueLength": 1
+      }
     },
 
     {
@@ -712,6 +754,27 @@
       "name": "Vendor",
       "category": "Device Info",
       "source": { "bank": "info", "byteOffset": 128, "dataType": "ascii", "length": 16 }
+    },
+    {
+      "id": "device_address",
+      "type": "sensor",
+      "name": "Device Address",
+      "category": "Device Info",
+      "source": { "bank": "config", "byteOffset": 264, "dataType": "uint8" },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "re_bulk_soc",
+      "type": "number",
+      "name": "Re-Bulk SOC",
+      "category": "Charging",
+      "source": { "bank": "info", "byteOffset": 272, "dataType": "uint8", "unit": "%" },
+      "display": { "precision": 0 },
+      "writable": true,
+      "write": {
+        "address": 183,
+        "valueLength": 1
+      }
     }
   ],
 
@@ -891,6 +954,11 @@
             "title": "Configuration",
             "filter": { "writable": true },
             "groupBy": "category"
+          },
+          {
+            "type": "parameter-table",
+            "title": "Charging",
+            "entities": ["charge_status", "charge_status_time_elapsed"]
           },
           {
             "type": "parameter-table",
