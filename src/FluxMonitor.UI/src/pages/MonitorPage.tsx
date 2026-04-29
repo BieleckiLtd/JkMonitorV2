@@ -40,8 +40,19 @@ const inverterCompactHeroMetrics: UiMetricDefinition[] = [
   { entity: 'output_active_power', icon: 'gauge', color: 'blue', label: 'Load', format: 'power-short' },
 ];
 
+const packCompactHeroMetrics: UiMetricDefinition[] = [
+  { entity: 'total_voltage', icon: 'zap', color: 'emerald' },
+  { entity: 'current', icon: 'activity', color: 'blue' },
+  { entity: 'power', icon: 'gauge', color: 'amber', format: 'power-short' },
+  { entity: 'state_of_charge', icon: 'battery', color: 'green' },
+];
+
 function hasCompactInverterPowerMetrics(paramByKey: Map<string, DeviceParameter>) {
   return inverterCompactHeroMetrics.every(metric => paramByKey.has(metric.entity));
+}
+
+function hasCompactPackMetrics(paramByKey: Map<string, DeviceParameter>) {
+  return packCompactHeroMetrics.every(metric => paramByKey.has(metric.entity));
 }
 
 const reconnectDelayMs = 2000;
@@ -67,41 +78,8 @@ function getRelativeAdvertisementAgeSeconds(collectedAt: string | null | undefin
   return Math.max(0, Math.round((nowMs - collectedMs) / 1000));
 }
 
-function resolveCompactMonitorCardKind(
-  device: DeviceRuntimeState,
-  definition: DeviceDefinition | null,
-): 'environment' | 'inverter' | 'jk-bms' | null {
-  const category = definition?.device.category?.toLowerCase();
-  if (category === 'environment') {
-    return 'environment';
-  }
-
-  if (category === 'inverter') {
-    return 'inverter';
-  }
-
-  if (definition?.device.manufacturer?.toLowerCase() === 'jk') {
-    return 'jk-bms';
-  }
-
-  const definitionId = device.definitionId.trim().toLowerCase();
-  if (!definitionId) {
-    return null;
-  }
-
-  if (definitionId.includes('thermo') || definitionId.includes('hygrometer') || definitionId.includes('environment')) {
-    return 'environment';
-  }
-
-  if (definitionId.includes('inverter')) {
-    return 'inverter';
-  }
-
-  if (definitionId.startsWith('jk') || definitionId.includes('jk-bms')) {
-    return 'jk-bms';
-  }
-
-  return null;
+function shouldUseCompactMonitorCard(definition: DeviceDefinition | null) {
+  return definition?.ui?.pages?.monitor?.card != null;
 }
 
 type SwitchStatusChip = {
@@ -305,10 +283,10 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
   const isFailing = device.lastOutcome === 'Failed';
   const dp = device.displayPrecision ?? defaultPrecision;
   const [selectedCellIndices, setSelectedCellIndices] = useState<number[]>([]);
-  const compactMonitorCardKind = resolveCompactMonitorCardKind(device, definition);
-  const isEnvironment = compactMonitorCardKind === 'environment';
-  const isInverter = compactMonitorCardKind === 'inverter';
-  const isJkBms = compactMonitorCardKind === 'jk-bms';
+  const usesCompactMonitorCard = shouldUseCompactMonitorCard(definition);
+  const deviceCategory = definition?.device.category?.toLowerCase();
+  const isEnvironment = deviceCategory === 'environment';
+  const isInverter = deviceCategory === 'inverter';
   const [isExpanded, setIsExpanded] = useState(false);
 
   // Build a fast lookup by entity key for definition-driven rendering
@@ -331,17 +309,17 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
   // Determine which sections to render for parameters
   const paramTableSections = monitorSections?.filter(s => s.type === 'parameter-table');
 
-  // Environment devices and JK BMS units use a compact expandable card.
-  if (isEnvironment || ((isInverter || isJkBms) && telemetry)) {
+  // Compact monitor cards are definition-driven.
+  if (usesCompactMonitorCard && (telemetry || isPassiveAdvertisement)) {
     const compactTelemetry = telemetry ?? emptyTelemetrySnapshot;
     const compactParameters = compactTelemetry.parameters ?? [];
     const compactCells = compactTelemetry.cells ?? [];
     const compactWarnings = compactTelemetry.activeWarnings ?? [];
     const compactParamByKey = new Map(compactParameters.map(p => [p.key, p]));
     const heroSection = monitorSections?.find(s => s.type === 'hero-metrics');
-    const heroMetrics = isInverter || hasCompactInverterPowerMetrics(compactParamByKey)
+    const heroMetrics = hasCompactInverterPowerMetrics(compactParamByKey)
       ? inverterCompactHeroMetrics
-      : heroSection?.metrics ?? [];
+      : heroSection?.metrics ?? (hasCompactPackMetrics(compactParamByKey) ? packCompactHeroMetrics : []);
     const batteryParam = compactParamByKey.get('battery_pct');
     const batteryValue = batteryParam?.numericValue;
     const signalValue = compactParamByKey.get('signal_strength_pct')?.numericValue;
@@ -488,12 +466,10 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
           </div>
 
           {/* Accent bar at bottom of collapsed card */}
-          {!isExpanded && (
-            <div className={cn(
-              'h-0.5',
-              isHealthy ? 'bg-emerald-500/40' : isFailing ? 'bg-rose-500/40' : 'bg-border/60'
-            )} />
-          )}
+          <div className={cn(
+            'h-0.5',
+            isHealthy ? 'bg-emerald-500/40' : isFailing ? 'bg-rose-500/40' : 'bg-border/60'
+          )} />
 
           {/* Expanded content: history charts + parameter tables */}
           {isExpanded && (
@@ -575,13 +551,6 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
             </div>
           )}
         </div>
-
-        {device.lastError && (
-          <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300'>
-            {device.lastError}
-          </div>
-        )}
-
         {compactWarnings.length > 0 && (
           <div className='flex items-start gap-3 rounded-xl border border-amber-500/20 bg-amber-500/10 px-3 py-3 sm:px-4'>
             <AlertTriangle className='mt-0.5 h-4 w-4 shrink-0 text-amber-400' />
