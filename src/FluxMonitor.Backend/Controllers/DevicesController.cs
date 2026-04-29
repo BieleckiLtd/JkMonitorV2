@@ -3,6 +3,7 @@ using System.Text.Json;
 using FluxMonitor.Backend.Models;
 using FluxMonitor.Backend.Services;
 using FluxMonitor.Contracts.Configuration;
+using FluxMonitor.Contracts.DeviceDefinition;
 using FluxMonitor.Contracts.Status;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Options;
@@ -309,7 +310,7 @@ public sealed class DevicesController(
                 return BadRequest(new { message = $"Device definition '{device.DefinitionId}' not found." });
 
             var blockedWriteReason = GetProtectedWriteBlockReason(
-                definition.Device.Id,
+                definition,
                 parameterKey,
                 stateStore.GetDeviceState(deviceId)?.LatestTelemetry);
             if (blockedWriteReason is not null)
@@ -375,7 +376,7 @@ public sealed class DevicesController(
             foreach (var parameter in request.Parameters)
             {
                 var blockedWriteReason = GetProtectedWriteBlockReason(
-                    definition.Device.Id,
+                    definition,
                     parameter.ParameterKey,
                     latestTelemetry);
                 if (blockedWriteReason is not null)
@@ -791,29 +792,34 @@ public sealed class DevicesController(
             : "Device started but no response received within 8 seconds. Check serial port and address.";
 
     internal static string? GetProtectedWriteBlockReason(
-        string definitionId,
+        DeviceDefinition definition,
         string parameterKey,
         DeviceTelemetrySnapshot? latestTelemetry)
     {
-        if (!string.Equals(definitionId, "anenji-inverter-rs232", StringComparison.OrdinalIgnoreCase) ||
-            !IsAnenjiProtectedOutputSetting(parameterKey))
-        {
+        var entity = definition.Entities.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, parameterKey, StringComparison.OrdinalIgnoreCase));
+        var guard = entity?.Write?.Guard;
+        if (guard is null)
             return null;
+
+        var message = string.IsNullOrWhiteSpace(guard.Message)
+            ? "Write is blocked by the current device state."
+            : guard.Message;
+
+        if (guard.AnyNonZero.Any(entityId => HasNonZeroEntityValue(latestTelemetry, entityId)))
+            return message;
+
+        if (!string.IsNullOrWhiteSpace(guard.BlockWhen))
+        {
+            var result = new ExpressionEvaluator().Evaluate(
+                guard.BlockWhen,
+                BuildNumericValueMap(latestTelemetry),
+                latestTelemetry?.Cells);
+            if (result.HasValue && result.Value != 0)
+                return message;
         }
 
-        return IsAnenjiOutputActive(latestTelemetry)
-            ? "Turn inverter output off before changing output voltage or frequency."
-            : null;
-    }
-
-    internal static bool IsAnenjiOutputActive(DeviceTelemetrySnapshot? latestTelemetry)
-    {
-        if (latestTelemetry?.Parameters is null)
-            return false;
-
-        return HasPositiveParameterValue(latestTelemetry.Parameters, "output_active_power") ||
-               HasPositiveParameterValue(latestTelemetry.Parameters, "load_percent") ||
-               HasPositiveParameterValue(latestTelemetry.Parameters, "output_current");
+        return null;
     }
 
     private static bool IsPassiveAdvertisementDefinition(Contracts.DeviceDefinition.DeviceDefinition definition)
@@ -822,27 +828,51 @@ public sealed class DevicesController(
                string.Equals(definition.Connection.Protocol.Type, "ble-advertisement", StringComparison.OrdinalIgnoreCase);
     }
 
-    private static bool IsAnenjiProtectedOutputSetting(string parameterKey)
-        => string.Equals(parameterKey, "output_voltage_setting", StringComparison.OrdinalIgnoreCase) ||
-           string.Equals(parameterKey, "output_frequency_setting", StringComparison.OrdinalIgnoreCase);
-
-    private static bool HasPositiveParameterValue(IReadOnlyList<DeviceParameter> parameters, string parameterKey)
+    private static bool HasNonZeroEntityValue(DeviceTelemetrySnapshot? latestTelemetry, string entityId)
     {
-        var parameter = parameters.FirstOrDefault(candidate =>
-            string.Equals(candidate.Key, parameterKey, StringComparison.OrdinalIgnoreCase));
-        if (parameter is null)
+        if (latestTelemetry is null)
             return false;
 
-        if (parameter.BooleanValue is true)
-            return true;
+        if (latestTelemetry.NumericValues.TryGetValue(entityId, out var numericValue) &&
+            numericValue.HasValue)
+        {
+            return numericValue.Value != 0;
+        }
 
-        if (parameter.NumericValue is { } numericValue)
-            return Math.Abs(numericValue) > 0;
+        var parameter = latestTelemetry.Parameters.FirstOrDefault(candidate =>
+            string.Equals(candidate.Key, entityId, StringComparison.OrdinalIgnoreCase));
+        return parameter is not null && GetParameterNumericValue(parameter) is { } parameterValue && parameterValue != 0;
+    }
 
-        if (parameter.RawValue is { } rawValue)
-            return Math.Abs(rawValue) > 0;
+    private static Dictionary<string, decimal?> BuildNumericValueMap(DeviceTelemetrySnapshot? latestTelemetry)
+    {
+        var values = new Dictionary<string, decimal?>(StringComparer.OrdinalIgnoreCase);
+        if (latestTelemetry is null)
+            return values;
 
-        return false;
+        foreach (var entry in latestTelemetry.NumericValues)
+        {
+            values[entry.Key] = entry.Value;
+        }
+
+        foreach (var parameter in latestTelemetry.Parameters)
+        {
+            if (!values.ContainsKey(parameter.Key) && GetParameterNumericValue(parameter) is { } value)
+                values[parameter.Key] = value;
+        }
+
+        return values;
+    }
+
+    private static decimal? GetParameterNumericValue(DeviceParameter parameter)
+    {
+        if (parameter.NumericValue.HasValue)
+            return parameter.NumericValue.Value;
+        if (parameter.BooleanValue.HasValue)
+            return parameter.BooleanValue.Value ? 1m : 0m;
+        if (parameter.RawValue.HasValue)
+            return parameter.RawValue.Value;
+        return null;
     }
 
     private DeviceConfigurationsResponse BuildDeviceConfigurationResponse(IReadOnlyList<DeviceConfiguration> devices)

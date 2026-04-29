@@ -86,6 +86,7 @@ type DeviceTelemetrySnapshot = {
   cells: CellVoltageSnapshot[];
   activeWarnings: string[];
   parameters: DeviceParameter[];
+  numericValues?: Record<string, number | null>;
 };
 
 type DisplayPrecision = {
@@ -2292,30 +2293,37 @@ function isSwitchSettingParam(key: string): boolean {
 
 function getParameterEditBlockedReason(
   param: DeviceParameter,
-  _telemetry: DeviceTelemetrySnapshot,
+  telemetry: DeviceTelemetrySnapshot,
   paramByKey: Map<string, DeviceParameter>,
   definition?: DeviceDefinition | null,
 ): string | null {
-  if (definition?.device.id !== 'anenji-inverter-rs232') {
+  const entity = definition?.entities.find((candidate) => candidate.id === param.key);
+  const guard = entity?.write?.guard;
+  if (!guard) {
     return null;
   }
 
-  if (param.key !== 'output_voltage_setting' && param.key !== 'output_frequency_setting') {
-    return null;
-  }
+  const message = guard.message ?? 'Write is blocked by the current device state.';
 
-  return isAnenjiOutputActive(paramByKey)
-    ? 'Turn inverter output off before changing output voltage or frequency.'
+  return guard.anyNonZero?.some((entityId) => hasNonZeroEntityValue(entityId, telemetry, paramByKey))
+    ? message
     : null;
 }
 
-function isAnenjiOutputActive(paramByKey: Map<string, DeviceParameter>): boolean {
-  return hasPositiveParameterValue(paramByKey.get('output_active_power')) ||
-    hasPositiveParameterValue(paramByKey.get('load_percent')) ||
-    hasPositiveParameterValue(paramByKey.get('output_current'));
+function hasNonZeroEntityValue(
+  entityId: string,
+  telemetry: DeviceTelemetrySnapshot,
+  paramByKey: Map<string, DeviceParameter>,
+): boolean {
+  const numericValue = telemetry.numericValues?.[entityId];
+  if (numericValue != null && Number.isFinite(Number(numericValue))) {
+    return Math.abs(Number(numericValue)) > 0;
+  }
+
+  return hasNonZeroParameterValue(paramByKey.get(entityId));
 }
 
-function hasPositiveParameterValue(param: DeviceParameter | undefined): boolean {
+function hasNonZeroParameterValue(param: DeviceParameter | undefined): boolean {
   if (!param) {
     return false;
   }

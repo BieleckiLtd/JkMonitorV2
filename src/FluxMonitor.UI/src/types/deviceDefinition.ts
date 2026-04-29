@@ -140,6 +140,13 @@ export type EntityWriteDefinition = {
   valueLength?: number;
   groupStartAddress?: number;
   groupRegisterCount?: number;
+  guard?: EntityWriteGuardDefinition;
+};
+
+export type EntityWriteGuardDefinition = {
+  anyNonZero?: string[];
+  blockWhen?: string;
+  message?: string;
 };
 
 export type EntitySourceDefinition = {

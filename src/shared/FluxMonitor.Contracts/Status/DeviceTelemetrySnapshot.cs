@@ -60,4 +60,6 @@ public sealed record class DeviceTelemetrySnapshot
     public required IReadOnlyList<string> ActiveWarnings { get; init; }
 
     public IReadOnlyList<DeviceParameter> Parameters { get; init; } = [];
+
+    public IReadOnlyDictionary<string, decimal?> NumericValues { get; init; } = new Dictionary<string, decimal?>();
 }

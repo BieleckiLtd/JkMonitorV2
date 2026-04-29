@@ -175,7 +175,7 @@
         "unit": "°C"
       },
       "display": { "precision": 1 },
-      "role": "temperature"
+      "role": "mos-temperature"
     },
     {
       "id": "battery_temp_1",
@@ -191,7 +191,7 @@
         "unit": "°C"
       },
       "display": { "precision": 1 },
-      "role": "temperature"
+      "role": "battery-temperature"
     },
     {
       "id": "battery_temp_2",
@@ -723,7 +723,8 @@
       "category": "Cells",
       "expression": "min(cell_voltages)",
       "unit": "V",
-      "display": { "precision": 3 }
+      "display": { "precision": 3 },
+      "role": "min-cell-voltage"
     },
     {
       "id": "max_cell_voltage",
@@ -732,7 +733,8 @@
       "category": "Cells",
       "expression": "max(cell_voltages)",
       "unit": "V",
-      "display": { "precision": 3 }
+      "display": { "precision": 3 },
+      "role": "max-cell-voltage"
     },
     {
       "id": "avg_cell_voltage",
@@ -742,6 +744,7 @@
       "expression": "avg(cell_voltages)",
       "unit": "V",
       "display": { "precision": 3 },
+      "role": "average-cell-voltage",
       "fallbackFor": "avg_cell_voltage_hw"
     },
     {
@@ -752,7 +755,7 @@
       "expression": "max(cell_voltages) - min(cell_voltages)",
       "unit": "V",
       "display": { "precision": 3 },
-      "role": "delta-voltage",
+      "role": "delta-cell-voltage",
       "fallbackFor": "delta_cell_voltage_hw"
     },
     {

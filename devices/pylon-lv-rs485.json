@@ -321,7 +321,8 @@
         "scale": 0.001,
         "unit": "V"
       },
-      "display": { "precision": 3 }
+      "display": { "precision": 3 },
+      "role": "max-cell-voltage"
     },
     {
       "id": "min_cell_voltage",
@@ -335,7 +336,8 @@
         "scale": 0.001,
         "unit": "V"
       },
-      "display": { "precision": 3 }
+      "display": { "precision": 3 },
+      "role": "min-cell-voltage"
     },
 
     {
@@ -938,8 +940,8 @@
       "expression": "sys_avg_cell_temp_raw - 273.1",
       "unit": "°C",
       "display": { "precision": 1 },
-      "role": "temperature",
-      "_comment": "Hits hardcoded ID 'battery_temp_1' in telemetry builder. Source: V3.5 system avg cell temp."
+      "role": "battery-temperature",
+      "_comment": "Source: V3.5 system avg cell temp."
     },
     {
       "id": "max_cell_temp_celsius",
@@ -967,7 +969,7 @@
       "expression": "sys_mosfet_avg_temp_raw - 273.1",
       "unit": "°C",
       "display": { "precision": 1 },
-      "_comment": "Hits hardcoded ID 'mos_temperature' in telemetry builder."
+      "role": "mos-temperature"
     },
     {
       "id": "mosfet_max_temp_celsius",
@@ -1052,6 +1054,7 @@
       "expression": "avg(cell_voltages)",
       "unit": "V",
       "display": { "precision": 3 },
+      "role": "average-cell-voltage",
       "_comment": "Only available when per-battery CID2=0x42 responds (individual cell data)."
     },
     {
@@ -1061,7 +1064,8 @@
       "category": "Cells",
       "expression": "max_cell_voltage - min_cell_voltage",
       "unit": "V",
-      "display": { "precision": 3 }
+      "display": { "precision": 3 },
+      "role": "delta-cell-voltage"
     },
 
     {

@@ -1,4 +1,5 @@
 using FluxMonitor.Backend.Controllers;
+using FluxMonitor.Contracts.DeviceDefinition;
 using FluxMonitor.Contracts.Status;
 using Xunit;
 
@@ -131,7 +132,7 @@ public sealed class DevicesControllerStartTests
         };
 
         var reason = DevicesController.GetProtectedWriteBlockReason(
-            "anenji-inverter-rs232",
+            CreateDefinitionWithOutputWriteGuards(),
             "output_voltage_setting",
             latestTelemetry);
 
@@ -168,10 +169,60 @@ public sealed class DevicesControllerStartTests
         };
 
         var reason = DevicesController.GetProtectedWriteBlockReason(
-            "anenji-inverter-rs232",
+            CreateDefinitionWithOutputWriteGuards(),
             "output_frequency_setting",
             latestTelemetry);
 
         Assert.Null(reason);
     }
+
+    private static DeviceDefinition CreateDefinitionWithOutputWriteGuards() => new()
+    {
+        Version = "test",
+        Device = new DeviceMetadata { Id = "test-inverter", Name = "Test Inverter" },
+        Connection = new ConnectionDefinition
+        {
+            Transport = new TransportDefinition { Type = "serial" },
+            Protocol = new ProtocolDefinition { Type = "test" }
+        },
+        DataSources = [],
+        PollGroups = new Dictionary<string, PollGroupDefinition>(),
+        Entities =
+        [
+            new EntityDefinition
+            {
+                Id = "output_voltage_setting",
+                Type = "select",
+                Name = "Output voltage",
+                Category = "Output",
+                Source = new EntitySourceDefinition { Bank = "settings", ByteOffset = 0 },
+                Writable = true,
+                Write = new EntityWriteDefinition
+                {
+                    Address = 606,
+                    Guard = CreateOutputInactiveGuard()
+                }
+            },
+            new EntityDefinition
+            {
+                Id = "output_frequency_setting",
+                Type = "select",
+                Name = "Output frequency",
+                Category = "Output",
+                Source = new EntitySourceDefinition { Bank = "settings", ByteOffset = 2 },
+                Writable = true,
+                Write = new EntityWriteDefinition
+                {
+                    Address = 607,
+                    Guard = CreateOutputInactiveGuard()
+                }
+            }
+        ]
+    };
+
+    private static EntityWriteGuardDefinition CreateOutputInactiveGuard() => new()
+    {
+        AnyNonZero = ["output_active_power", "load_percent", "output_current"],
+        Message = "Turn inverter output off before changing output voltage or frequency."
+    };
 }

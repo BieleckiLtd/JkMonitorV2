@@ -1600,6 +1600,12 @@ describe('MonitorPage', () => {
           category: 'F1 Output',
           writable: true,
           source: { bank: 'settings', byteOffset: 10, unit: 'V' },
+          write: {
+            guard: {
+              anyNonZero: ['output_active_power', 'load_percent', 'output_current'],
+              message: 'Turn inverter output off before changing output voltage or frequency.',
+            },
+          },
           options: [
             { value: 2200, label: '220 V' },
             { value: 2300, label: '230 V' },
@@ -1613,6 +1619,12 @@ describe('MonitorPage', () => {
           category: 'F1 Output',
           writable: true,
           source: { bank: 'settings', byteOffset: 12, unit: 'Hz' },
+          write: {
+            guard: {
+              anyNonZero: ['output_active_power', 'load_percent', 'output_current'],
+              message: 'Turn inverter output off before changing output voltage or frequency.',
+            },
+          },
           options: [
             { value: 5000, label: '50 Hz' },
             { value: 6000, label: '60 Hz' },

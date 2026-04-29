@@ -900,7 +900,11 @@
       },
       "writable": true,
       "write": {
-        "address": 606
+        "address": 606,
+        "guard": {
+          "anyNonZero": ["output_active_power", "load_percent", "output_current"],
+          "message": "Turn inverter output off before changing output voltage or frequency."
+        }
       },
       "options": [
         {
@@ -934,7 +938,11 @@
       },
       "writable": true,
       "write": {
-        "address": 607
+        "address": 607,
+        "guard": {
+          "anyNonZero": ["output_active_power", "load_percent", "output_current"],
+          "message": "Turn inverter output off before changing output voltage or frequency."
+        }
       },
       "options": [
         {

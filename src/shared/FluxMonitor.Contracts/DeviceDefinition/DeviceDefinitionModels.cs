@@ -374,6 +374,17 @@ public sealed class EntityWriteDefinition
     public int? GroupStartAddress { get; init; }
 
     public int? GroupRegisterCount { get; init; }
+
+    public EntityWriteGuardDefinition? Guard { get; init; }
+}
+
+public sealed class EntityWriteGuardDefinition
+{
+    public IReadOnlyList<string> AnyNonZero { get; init; } = [];
+
+    public string? BlockWhen { get; init; }
+
+    public string? Message { get; init; }
 }
 
 public sealed class EntitySourceDefinition

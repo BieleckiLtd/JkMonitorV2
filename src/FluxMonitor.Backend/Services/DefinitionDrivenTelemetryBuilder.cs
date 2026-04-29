@@ -222,28 +222,29 @@ public sealed class DefinitionDrivenTelemetryBuilder(ExpressionEvaluator express
             CellCount = orderedCells.Length == 0 ? null : orderedCells.Length,
             TotalVoltageVolts = GetRoleValue(entityValues, definition, "total-voltage"),
             CurrentAmps = GetRoleValue(entityValues, definition, "current"),
-            PowerWatts = GetRoleValue(entityValues, definition, "power") ?? GetComputedValue(entityValues, "computed_power"),
+            PowerWatts = GetRoleValue(entityValues, definition, "power"),
             StateOfChargePercent = GetRoleValue(entityValues, definition, "state-of-charge"),
-            MinCellVoltageVolts = entityValues.GetValueOrDefault("min_cell_voltage"),
-            MaxCellVoltageVolts = entityValues.GetValueOrDefault("max_cell_voltage"),
-            AverageCellVoltageVolts = entityValues.GetValueOrDefault("avg_cell_voltage"),
-            DeltaCellVoltageVolts = entityValues.GetValueOrDefault("delta_cell_voltage"),
-            MosTemperatureCelsius = GetFirstRoleValue(entityValues, definition, "temperature", "mos_temperature"),
+            MinCellVoltageVolts = GetRoleValue(entityValues, definition, "min-cell-voltage"),
+            MaxCellVoltageVolts = GetRoleValue(entityValues, definition, "max-cell-voltage"),
+            AverageCellVoltageVolts = GetRoleValue(entityValues, definition, "average-cell-voltage"),
+            DeltaCellVoltageVolts = GetRoleValue(entityValues, definition, "delta-cell-voltage"),
+            MosTemperatureCelsius = GetRoleValue(entityValues, definition, "mos-temperature"),
             AmbientTemperatureCelsius = null,
-            BatteryTemperatureCelsius = GetFirstRoleValue(entityValues, definition, "temperature", "battery_temp_1"),
+            BatteryTemperatureCelsius = GetRoleValue(entityValues, definition, "battery-temperature"),
             CycleCount = GetRoleValue(entityValues, definition, "cycle-count") is { } cc ? (int)cc : null,
             WarningFlags = alarmFlagValue,
             StatusFlags = null,
             ProtocolVersion = null,
-            SoftwareVersion = entityStringValues.GetValueOrDefault("software_version"),
-            ManufacturerId = entityStringValues.GetValueOrDefault("manufacturer_device_id"),
+            SoftwareVersion = GetRoleStringValue(entityStringValues, definition, "software-version"),
+            ManufacturerId = GetRoleStringValue(entityStringValues, definition, "manufacturer-id"),
             ChargingEnabled = GetRoleBool(entityValues, definition, "charging-enabled"),
             DischargingEnabled = GetRoleBool(entityValues, definition, "discharging-enabled"),
             BalancingEnabled = GetRoleBool(entityValues, definition, "balancing-enabled"),
             BatteryOnline = true,
             Cells = orderedCells,
             ActiveWarnings = activeWarnings,
-            Parameters = parameters
+            Parameters = parameters,
+            NumericValues = new Dictionary<string, decimal?>(entityValues, StringComparer.OrdinalIgnoreCase)
         };
 
         return new DevicePollResult(
@@ -386,26 +387,22 @@ public sealed class DefinitionDrivenTelemetryBuilder(ExpressionEvaluator express
         return null;
     }
 
-    private static decimal? GetFirstRoleValue(
-        IReadOnlyDictionary<string, decimal?> values,
-        DeviceDefinition definition,
-        string role,
-        string preferredId)
-    {
-        if (values.TryGetValue(preferredId, out var preferred) && preferred.HasValue)
-            return preferred;
-
-        return GetRoleValue(values, definition, role);
-    }
-
     private static bool? GetRoleBool(IReadOnlyDictionary<string, decimal?> values, DeviceDefinition definition, string role)
     {
         var value = GetRoleValue(values, definition, role);
         return value.HasValue ? value.Value != 0 : null;
     }
 
-    private static decimal? GetComputedValue(IReadOnlyDictionary<string, decimal?> values, string id)
-        => values.GetValueOrDefault(id);
+    private static string? GetRoleStringValue(
+        IReadOnlyDictionary<string, string?> values,
+        DeviceDefinition definition,
+        string role)
+    {
+        var entity = definition.Entities.FirstOrDefault(e => string.Equals(e.Role, role, StringComparison.OrdinalIgnoreCase));
+        return entity is not null && values.TryGetValue(entity.Id, out var value)
+            ? value
+            : null;
+    }
 
     private static ushort ReadUInt16(ReadOnlySpan<byte> data, bool isLittleEndian)
         => isLittleEndian

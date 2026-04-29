@@ -226,24 +226,10 @@ public sealed class NotificationEvaluator(
 
     private static double? ResolveEntityValue(string entityId, DeviceTelemetrySnapshot snapshot)
     {
-        // Map well-known entity IDs to snapshot properties
-        return entityId.ToLowerInvariant() switch
-        {
-            "total_voltage" => (double?)snapshot.TotalVoltageVolts,
-            "current" => (double?)snapshot.CurrentAmps,
-            "power" => (double?)snapshot.PowerWatts,
-            "state_of_charge" or "soc" => (double?)snapshot.StateOfChargePercent,
-            "mos_temperature" => (double?)snapshot.MosTemperatureCelsius,
-            "battery_temp_1" or "battery_temp_2" => (double?)snapshot.BatteryTemperatureCelsius,
-            "ambient_temperature" => (double?)snapshot.AmbientTemperatureCelsius,
-            "delta_cell_voltage" => (double?)snapshot.DeltaCellVoltageVolts,
-            "min_cell_voltage" => (double?)snapshot.MinCellVoltageVolts,
-            "max_cell_voltage" => (double?)snapshot.MaxCellVoltageVolts,
-            "avg_cell_voltage" => (double?)snapshot.AverageCellVoltageVolts,
-            "cycle_count" => snapshot.CycleCount,
-            "warning_flags" or "alarm_flags" => snapshot.WarningFlags,
-            _ => ResolveFromParameters(entityId, snapshot)
-        };
+        if (snapshot.NumericValues.TryGetValue(entityId, out var value) && value.HasValue)
+            return (double)value.Value;
+
+        return ResolveFromParameters(entityId, snapshot);
     }
 
     private static double? ResolveFromParameters(string entityId, DeviceTelemetrySnapshot snapshot)
@@ -256,17 +242,11 @@ public sealed class NotificationEvaluator(
 
     private static void PopulateSnapshotParameters(Expression expression, DeviceTelemetrySnapshot snapshot)
     {
-        if (snapshot.TotalVoltageVolts.HasValue) expression.Parameters["total_voltage"] = (double)snapshot.TotalVoltageVolts.Value;
-        if (snapshot.CurrentAmps.HasValue) expression.Parameters["current"] = (double)snapshot.CurrentAmps.Value;
-        if (snapshot.PowerWatts.HasValue) expression.Parameters["power"] = (double)snapshot.PowerWatts.Value;
-        if (snapshot.StateOfChargePercent.HasValue) expression.Parameters["soc"] = (double)snapshot.StateOfChargePercent.Value;
-        if (snapshot.MosTemperatureCelsius.HasValue) expression.Parameters["mos_temperature"] = (double)snapshot.MosTemperatureCelsius.Value;
-        if (snapshot.BatteryTemperatureCelsius.HasValue) expression.Parameters["battery_temp"] = (double)snapshot.BatteryTemperatureCelsius.Value;
-        if (snapshot.AmbientTemperatureCelsius.HasValue) expression.Parameters["ambient_temperature"] = (double)snapshot.AmbientTemperatureCelsius.Value;
-        if (snapshot.DeltaCellVoltageVolts.HasValue) expression.Parameters["delta_cell_voltage"] = (double)snapshot.DeltaCellVoltageVolts.Value;
-        if (snapshot.MinCellVoltageVolts.HasValue) expression.Parameters["min_cell_voltage"] = (double)snapshot.MinCellVoltageVolts.Value;
-        if (snapshot.MaxCellVoltageVolts.HasValue) expression.Parameters["max_cell_voltage"] = (double)snapshot.MaxCellVoltageVolts.Value;
-        if (snapshot.AverageCellVoltageVolts.HasValue) expression.Parameters["avg_cell_voltage"] = (double)snapshot.AverageCellVoltageVolts.Value;
+        foreach (var value in snapshot.NumericValues)
+        {
+            if (value.Value.HasValue)
+                expression.Parameters[value.Key] = (double)value.Value.Value;
+        }
 
         // Expose all dynamic parameters so expressions can reference any device entity.
         if (snapshot.Parameters is not null)
