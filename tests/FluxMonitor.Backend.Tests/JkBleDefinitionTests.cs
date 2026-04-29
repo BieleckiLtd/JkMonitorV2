@@ -51,16 +51,29 @@ public sealed class JkBleDefinitionTests
         Assert.Contains("dry_contact_2", entityIds);
         Assert.Contains("lcd_buzzer_trigger", entityIds);
 
+        Assert.Equal("Thermal Protection", Assert.Single(definition.Entities, entity => entity.Id == "mos_temperature").Category);
+        Assert.Equal("Thermal Protection", Assert.Single(definition.Entities, entity => entity.Id == "battery_temp_3").Category);
+        Assert.Equal("Charging", Assert.Single(definition.Entities, entity => entity.Id == "charge_status").Category);
+        Assert.Equal("System", Assert.Single(definition.Entities, entity => entity.Id == "heating_status").Category);
+        Assert.Equal("System", Assert.Single(definition.Entities, entity => entity.Id == "pcl_module_state").Category);
+
         var pages = definition.Ui?.Pages;
         Assert.NotNull(pages);
 
         var monitor = pages!["monitor"];
         var sections = monitor.Sections;
         Assert.NotNull(sections);
-        Assert.Contains(sections!, section => section.Title == "Temperatures" && section.Entities is ["mos_temperature", "battery_temp_1", "battery_temp_2", "battery_temp_3"]);
-        Assert.Contains(sections!, section => section.Title == "Charging" && section.Entities is ["charge_status", "charge_status_time_elapsed"]);
-        Assert.Contains(sections!, section => section.Title == "Heating & Sleep" && section.Entities is ["heating_status", "heating_current", "emergency_time_countdown", "time_enter_sleep"]);
-        Assert.Contains(sections!, section => section.Title == "Outputs & Limits" && section.Entities is ["pcl_module_state", "dry_contact_1", "dry_contact_2", "lcd_buzzer_trigger"]);
+        Assert.DoesNotContain(sections!, section => section.Title == "Temperatures");
+        Assert.DoesNotContain(sections!, section => section.Title == "Charging" && section.Entities is ["charge_status", "charge_status_time_elapsed"]);
+        Assert.DoesNotContain(sections!, section => section.Title == "Heating & Sleep");
+        Assert.DoesNotContain(sections!, section => section.Title == "Outputs & Limits");
+
+        var configurationSection = Assert.Single(sections!, section => section.Title == "Configuration");
+        Assert.Equal("category", configurationSection.GroupBy);
+        Assert.NotNull(configurationSection.Filter?.Categories);
+        Assert.Equal(
+            ["Cell Protection", "Current Protection", "Thermal Protection", "Balance Settings", "SOC Settings", "System", "Charging", "Discharging", "F2 Charger"],
+            configurationSection.Filter!.Categories);
 
         var statusGlyphs = monitor.Card?.StatusGlyphs;
         Assert.NotNull(statusGlyphs);

@@ -504,7 +504,7 @@ describe('MonitorPage', () => {
           id: 'mos_temperature',
           type: 'number',
           name: 'MOS Temperature',
-          category: 'Temperatures',
+          category: 'Thermal Protection',
           source: { bank: 'live', byteOffset: 2, unit: '°C' },
           display: { precision: 1 },
         },
@@ -512,7 +512,7 @@ describe('MonitorPage', () => {
           id: 'battery_temp_1',
           type: 'number',
           name: 'Battery Temp 1',
-          category: 'Temperatures',
+          category: 'Thermal Protection',
           source: { bank: 'live', byteOffset: 4, unit: '°C' },
           display: { precision: 1 },
         },
@@ -520,7 +520,7 @@ describe('MonitorPage', () => {
           id: 'battery_temp_2',
           type: 'number',
           name: 'Battery Temp 2',
-          category: 'Temperatures',
+          category: 'Thermal Protection',
           source: { bank: 'live', byteOffset: 6, unit: '°C' },
           display: { precision: 1 },
         },
@@ -528,7 +528,7 @@ describe('MonitorPage', () => {
           id: 'battery_temp_3',
           type: 'number',
           name: 'Battery Temp 3',
-          category: 'Temperatures',
+          category: 'Thermal Protection',
           source: { bank: 'live', byteOffset: 8, unit: '°C' },
           display: { precision: 1 },
         },
@@ -556,14 +556,14 @@ describe('MonitorPage', () => {
           id: 'heating_status',
           type: 'binary_sensor',
           name: 'Heating Status',
-          category: 'Heating',
+          category: 'System',
           source: { bank: 'live', byteOffset: 13, dataType: 'uint8', trueValue: 1 },
         },
         {
           id: 'heating_current',
           type: 'number',
           name: 'Heat Current',
-          category: 'Heating',
+          category: 'System',
           source: { bank: 'live', byteOffset: 14, unit: 'A' },
           display: { precision: 3 },
         },
@@ -571,7 +571,7 @@ describe('MonitorPage', () => {
           id: 'emergency_time_countdown',
           type: 'number',
           name: 'Emergency Timer',
-          category: 'Heating',
+          category: 'System',
           source: { bank: 'live', byteOffset: 16, unit: 's' },
           display: { precision: 0 },
         },
@@ -579,7 +579,7 @@ describe('MonitorPage', () => {
           id: 'time_enter_sleep',
           type: 'number',
           name: 'Time Enter Sleep',
-          category: 'Heating',
+          category: 'System',
           source: { bank: 'live', byteOffset: 18, unit: 's' },
           display: { precision: 0 },
         },
@@ -587,28 +587,28 @@ describe('MonitorPage', () => {
           id: 'pcl_module_state',
           type: 'binary_sensor',
           name: 'Par-Limiter (PCL Module)',
-          category: 'Outputs',
+          category: 'System',
           source: { bank: 'live', byteOffset: 20, dataType: 'uint8', trueValue: 1 },
         },
         {
           id: 'dry_contact_1',
           type: 'binary_sensor',
           name: 'DRY1 Alarm',
-          category: 'Outputs',
+          category: 'System',
           source: { bank: 'live', byteOffset: 21, dataType: 'uint8', trueValue: 1 },
         },
         {
           id: 'dry_contact_2',
           type: 'binary_sensor',
           name: 'DRY2 Alarm',
-          category: 'Outputs',
+          category: 'System',
           source: { bank: 'live', byteOffset: 22, dataType: 'uint8', trueValue: 1 },
         },
         {
           id: 'lcd_buzzer_trigger',
           type: 'number',
           name: 'LCD Buzzer Trigger',
-          category: 'Outputs',
+          category: 'System',
           source: { bank: 'info', byteOffset: 0, unit: '' },
           display: { precision: 0 },
         },
@@ -616,7 +616,7 @@ describe('MonitorPage', () => {
           id: 'charge_switch',
           type: 'number',
           name: 'Charge Switch',
-          category: 'Configuration',
+          category: 'Charging',
           source: { bank: 'config', byteOffset: 0, unit: '' },
           display: { precision: 0 },
         },
@@ -661,28 +661,11 @@ describe('MonitorPage', () => {
               },
               {
                 type: 'parameter-table',
-                title: 'Temperatures',
-                entities: ['mos_temperature', 'battery_temp_1', 'battery_temp_2', 'battery_temp_3'],
-              },
-              {
-                type: 'parameter-table',
-                title: 'Charging',
-                entities: ['charge_status', 'charge_status_time_elapsed'],
-              },
-              {
-                type: 'parameter-table',
-                title: 'Heating & Sleep',
-                entities: ['heating_status', 'heating_current', 'emergency_time_countdown', 'time_enter_sleep'],
-              },
-              {
-                type: 'parameter-table',
-                title: 'Outputs & Limits',
-                entities: ['pcl_module_state', 'dry_contact_1', 'dry_contact_2', 'lcd_buzzer_trigger'],
-              },
-              {
-                type: 'parameter-table',
                 title: 'Configuration',
-                filter: { writable: true },
+                filter: {
+                  categories: ['Cell Protection', 'Current Protection', 'Thermal Protection', 'Balance Settings', 'SOC Settings', 'System', 'Charging', 'Discharging', 'F2 Charger'],
+                },
+                groupBy: 'category',
               },
             ],
           },
@@ -740,21 +723,21 @@ describe('MonitorPage', () => {
               { key: 'state_of_charge', displayName: 'State of Charge', category: 'Pack Status', numericValue: 78, sortOrder: 3, unit: '%' },
               { key: 'charging_enabled', displayName: 'Charging', category: 'Status', booleanValue: true, sortOrder: 3, unit: '' },
               { key: 'discharging_enabled', displayName: 'Discharging', category: 'Status', booleanValue: true, sortOrder: 3, unit: '' },
-              { key: 'mos_temperature', displayName: 'MOS Temperature', category: 'Temperatures', numericValue: 21.7, sortOrder: 4, unit: '°C' },
-              { key: 'battery_temp_1', displayName: 'Battery Temp 1', category: 'Temperatures', numericValue: 19.5, sortOrder: 5, unit: '°C' },
-              { key: 'battery_temp_2', displayName: 'Battery Temp 2', category: 'Temperatures', numericValue: 20.1, sortOrder: 6, unit: '°C' },
-              { key: 'battery_temp_3', displayName: 'Battery Temp 3', category: 'Temperatures', numericValue: 19.8, sortOrder: 7, unit: '°C' },
+              { key: 'mos_temperature', displayName: 'MOS Temperature', category: 'Thermal Protection', numericValue: 21.7, sortOrder: 4, unit: '°C' },
+              { key: 'battery_temp_1', displayName: 'Battery Temp 1', category: 'Thermal Protection', numericValue: 19.5, sortOrder: 5, unit: '°C' },
+              { key: 'battery_temp_2', displayName: 'Battery Temp 2', category: 'Thermal Protection', numericValue: 20.1, sortOrder: 6, unit: '°C' },
+              { key: 'battery_temp_3', displayName: 'Battery Temp 3', category: 'Thermal Protection', numericValue: 19.8, sortOrder: 7, unit: '°C' },
               { key: 'charge_status', displayName: 'Charge Status', category: 'Charging', numericValue: 2, rawValue: 2, stringValue: 'Float', sortOrder: 8, unit: '' },
               { key: 'charge_status_time_elapsed', displayName: 'Charge Status Time', category: 'Charging', numericValue: 90, sortOrder: 9, unit: 's' },
-              { key: 'heating_status', displayName: 'Heating Status', category: 'Heating', booleanValue: false, sortOrder: 10, unit: '' },
-              { key: 'heating_current', displayName: 'Heat Current', category: 'Heating', numericValue: 0.511, sortOrder: 11, unit: 'A' },
-              { key: 'emergency_time_countdown', displayName: 'Emergency Timer', category: 'Heating', numericValue: 45, sortOrder: 12, unit: 's' },
-              { key: 'time_enter_sleep', displayName: 'Time Enter Sleep', category: 'Heating', numericValue: 86400, sortOrder: 13, unit: 's' },
-              { key: 'pcl_module_state', displayName: 'Par-Limiter (PCL Module)', category: 'Outputs', booleanValue: false, sortOrder: 14, unit: '' },
-              { key: 'dry_contact_1', displayName: 'DRY1 Alarm', category: 'Outputs', booleanValue: false, sortOrder: 15, unit: '' },
-              { key: 'dry_contact_2', displayName: 'DRY2 Alarm', category: 'Outputs', booleanValue: true, sortOrder: 16, unit: '' },
-              { key: 'lcd_buzzer_trigger', displayName: 'LCD Buzzer Trigger', category: 'Outputs', numericValue: 3, sortOrder: 17, unit: '' },
-              { key: 'charge_switch', displayName: 'Charge Switch', category: 'Configuration', numericValue: 1, rawValue: 1, sortOrder: 18, isWritable: true, unit: '' },
+              { key: 'heating_status', displayName: 'Heating Status', category: 'System', booleanValue: false, sortOrder: 10, unit: '' },
+              { key: 'heating_current', displayName: 'Heat Current', category: 'System', numericValue: 0.511, sortOrder: 11, unit: 'A' },
+              { key: 'emergency_time_countdown', displayName: 'Emergency Timer', category: 'System', numericValue: 45, sortOrder: 12, unit: 's' },
+              { key: 'time_enter_sleep', displayName: 'Time Enter Sleep', category: 'System', numericValue: 86400, sortOrder: 13, unit: 's' },
+              { key: 'pcl_module_state', displayName: 'Par-Limiter (PCL Module)', category: 'System', booleanValue: false, sortOrder: 14, unit: '' },
+              { key: 'dry_contact_1', displayName: 'DRY1 Alarm', category: 'System', booleanValue: false, sortOrder: 15, unit: '' },
+              { key: 'dry_contact_2', displayName: 'DRY2 Alarm', category: 'System', booleanValue: true, sortOrder: 16, unit: '' },
+              { key: 'lcd_buzzer_trigger', displayName: 'LCD Buzzer Trigger', category: 'System', numericValue: 3, sortOrder: 17, unit: '' },
+              { key: 'charge_switch', displayName: 'Charge Switch', category: 'Charging', numericValue: 1, rawValue: 1, sortOrder: 18, isWritable: true, unit: '' },
             ],
           },
         },
@@ -773,26 +756,22 @@ describe('MonitorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /house battery/i }));
 
     expect(await screen.findByTestId('history-charts')).toHaveTextContent('History for jk-1');
-    fireEvent.click(screen.getByRole('button', { name: 'Temperatures section' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Thermal Protection section' }));
     expect(screen.getByText('Battery Temp 3')).toBeInTheDocument();
     expect(screen.getByText('MOS Temperature')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('button', { name: 'Charging section' }));
     expect(screen.getByText('Charge Status')).toBeInTheDocument();
     expect(screen.getByText('Charge Status Time')).toBeInTheDocument();
+    expect(screen.getByText('Charge Switch')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Heating & Sleep section' }));
+    fireEvent.click(screen.getByRole('button', { name: 'System section' }));
     expect(screen.getByText('Heating Status')).toBeInTheDocument();
     expect(screen.getByText('Heat Current')).toBeInTheDocument();
     expect(screen.getByText('Time Enter Sleep')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Outputs & Limits section' }));
     expect(screen.getByText('Par-Limiter (PCL Module)')).toBeInTheDocument();
     expect(screen.getByText('DRY2 Alarm')).toBeInTheDocument();
     expect(screen.getByText('LCD Buzzer Trigger')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: 'Configuration section' }));
-    expect(screen.getByText('Charge Switch')).toBeInTheDocument();
   });
 
   it('renders inverter cards as compact expandable summaries with synchronized power units and header badges', async () => {

@@ -5,7 +5,7 @@
   "device": {
     "id": "jk-inverter-bms-ble",
     "name": "JK Inverter BMS (BLE)",
-    "manufacturer": "JK",
+      "category": "Thermal Protection",
     "model": "JK-PB2A16S20P",
     "category": "energy-storage",
     "description": "JK Inverter BMS with Bluetooth Low Energy interface for LiFePO4 battery packs. Supports up to 32 cells, charge/discharge/balance control, and comprehensive protection. Connects wirelessly via BLE GATT service 0xFFE0.",
@@ -165,7 +165,7 @@
       "id": "mos_temperature",
       "type": "sensor",
       "name": "MOS Temperature",
-      "category": "Temperatures",
+      "category": "Thermal Protection",
       "icon": "thermometer",
       "source": {
         "bank": "live",
@@ -181,7 +181,7 @@
       "id": "battery_temp_1",
       "type": "sensor",
       "name": "Battery Temp 1",
-      "category": "Temperatures",
+      "category": "Thermal Protection",
       "icon": "thermometer",
       "source": {
         "bank": "live",
@@ -197,7 +197,7 @@
       "id": "battery_temp_2",
       "type": "sensor",
       "name": "Battery Temp 2",
-      "category": "Temperatures",
+      "category": "Thermal Protection",
       "icon": "thermometer",
       "source": {
         "bank": "live",
@@ -213,7 +213,7 @@
       "id": "battery_temp_3",
       "type": "sensor",
       "name": "Battery Temp 3",
-      "category": "Temperatures",
+      "category": "Thermal Protection",
       "icon": "thermometer",
       "source": {
         "bank": "live",
@@ -392,7 +392,7 @@
       "id": "heating_status",
       "type": "binary_sensor",
       "name": "Heating Status",
-      "category": "Heating",
+      "category": "System",
       "source": {
         "bank": "live",
         "byteOffset": 209,
@@ -404,7 +404,7 @@
       "id": "emergency_time_countdown",
       "type": "sensor",
       "name": "Emergency Timer",
-      "category": "Heating",
+      "category": "System",
       "source": {
         "bank": "live",
         "byteOffset": 212,
@@ -417,7 +417,7 @@
       "id": "heating_current",
       "type": "sensor",
       "name": "Heat Current",
-      "category": "Heating",
+      "category": "System",
       "source": {
         "bank": "live",
         "byteOffset": 230,
@@ -431,7 +431,7 @@
       "id": "time_enter_sleep",
       "type": "sensor",
       "name": "Time Enter Sleep",
-      "category": "Heating",
+      "category": "System",
       "source": {
         "bank": "live",
         "byteOffset": 264,
@@ -444,7 +444,7 @@
       "id": "pcl_module_state",
       "type": "binary_sensor",
       "name": "Par-Limiter (PCL Module)",
-      "category": "Outputs",
+      "category": "System",
       "source": {
         "bank": "live",
         "byteOffset": 268,
@@ -456,7 +456,7 @@
       "id": "dry_contact_1",
       "type": "binary_sensor",
       "name": "DRY1 Alarm",
-      "category": "Outputs",
+      "category": "System",
       "source": {
         "bank": "live",
         "byteOffset": 275,
@@ -469,7 +469,7 @@
       "id": "dry_contact_2",
       "type": "binary_sensor",
       "name": "DRY2 Alarm",
-      "category": "Outputs",
+      "category": "System",
       "source": {
         "bank": "live",
         "byteOffset": 275,
@@ -482,7 +482,7 @@
       "id": "lcd_buzzer_trigger",
       "type": "sensor",
       "name": "LCD Buzzer Trigger",
-      "category": "Outputs",
+      "category": "System",
       "source": {
         "bank": "info",
         "byteOffset": 228,
@@ -1069,28 +1069,20 @@
           },
           {
             "type": "parameter-table",
-            "title": "Temperatures",
-            "entities": ["mos_temperature", "battery_temp_1", "battery_temp_2", "battery_temp_3"]
-          },
-          {
-            "type": "parameter-table",
-            "title": "Charging",
-            "entities": ["charge_status", "charge_status_time_elapsed"]
-          },
-          {
-            "type": "parameter-table",
-            "title": "Heating & Sleep",
-            "entities": ["heating_status", "heating_current", "emergency_time_countdown", "time_enter_sleep"]
-          },
-          {
-            "type": "parameter-table",
-            "title": "Outputs & Limits",
-            "entities": ["pcl_module_state", "dry_contact_1", "dry_contact_2", "lcd_buzzer_trigger"]
-          },
-          {
-            "type": "parameter-table",
             "title": "Configuration",
-            "filter": { "writable": true },
+            "filter": {
+              "categories": [
+                "Cell Protection",
+                "Current Protection",
+                "Thermal Protection",
+                "Balance Settings",
+                "SOC Settings",
+                "System",
+                "Charging",
+                "Discharging",
+                "F2 Charger"
+              ]
+            },
             "groupBy": "category"
           },
           {

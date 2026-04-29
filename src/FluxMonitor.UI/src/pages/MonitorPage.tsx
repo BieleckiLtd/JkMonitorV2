@@ -2247,12 +2247,12 @@ function CategoryIcon({ category }: { category: string }) {
     case 'Cell Voltages':
       return <Battery className='h-4 w-4 text-emerald-400' />;
     case 'Temperatures':
+    case 'Thermal Protection':
       return <Thermometer className='h-4 w-4 text-amber-400' />;
     case 'Status':
       return <Activity className='h-4 w-4 text-primary' />;
     case 'Cell Protection':
     case 'Current Protection':
-    case 'Thermal Protection':
       return <Shield className='h-4 w-4 text-rose-400' />;
     case 'Balance Settings':
     case 'SOC Settings':
