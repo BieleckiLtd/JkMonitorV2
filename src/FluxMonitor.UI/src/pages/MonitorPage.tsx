@@ -957,8 +957,8 @@ function ParameterCategoryCard({
   const displayCategory = formatCategoryTitle(category);
 
   return (
-    <Card className='border border-border/80 bg-card/85 shadow-sm'>
-      <CardHeader className='pb-0'>
+    <Card className='gap-0 border border-border/80 bg-card/85 py-0 shadow-sm'>
+      <CardHeader className='gap-0 px-0 pb-0'>
         <button
           type='button'
           onClick={() => setIsExpanded((expanded) => !expanded)}
@@ -976,7 +976,7 @@ function ParameterCategoryCard({
         </button>
       </CardHeader>
       {isExpanded && (
-        <CardContent className='pt-3'>
+        <CardContent className='px-0 pt-0'>
           <div className='grid gap-2'>
             {combinedClockParams != null && (
               <CombinedClockParameterRow
