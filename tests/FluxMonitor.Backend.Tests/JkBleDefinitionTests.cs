@@ -134,6 +134,45 @@ public sealed class JkBleDefinitionTests
             definition.Entities.Where(entity => communicationEntities.Contains(entity.Id)),
             entity => Assert.True(entity.Writable));
 
+        var uart1Protocol = Assert.Single(definition.Entities, entity => entity.Id == "uart1_protocol");
+        var canProtocol = Assert.Single(definition.Entities, entity => entity.Id == "can_protocol");
+        var uart2Protocol = Assert.Single(definition.Entities, entity => entity.Id == "uart2_protocol");
+        var uart3Protocol = Assert.Single(definition.Entities, entity => entity.Id == "uart3_protocol");
+
+        Assert.Equal("select", uart1Protocol.Type);
+        Assert.Equal("select", canProtocol.Type);
+        Assert.Equal("select", uart2Protocol.Type);
+        Assert.Equal("select", uart3Protocol.Type);
+
+        Assert.NotNull(uart1Protocol.Options);
+        Assert.NotNull(canProtocol.Options);
+        Assert.NotNull(uart2Protocol.Options);
+        Assert.NotNull(uart3Protocol.Options);
+
+        var uart1Options = uart1Protocol.Options!;
+        var canOptions = canProtocol.Options!;
+        var uart2Options = uart2Protocol.Options!;
+        var uart3Options = uart3Protocol.Options!;
+
+        Assert.Equal(21, uart1Options.Count);
+        Assert.Equal(21, canOptions.Count);
+        Assert.Equal(
+            uart1Options.Select(option => (option.Value, option.Label)).ToArray(),
+            uart2Options.Select(option => (option.Value, option.Label)).ToArray());
+        Assert.Equal(
+            uart1Options.Select(option => (option.Value, option.Label)).ToArray(),
+            uart3Options.Select(option => (option.Value, option.Label)).ToArray());
+
+        Assert.Equal("000 - 4G-GPS Remote module Common protocol V4.2", uart1Options[0].Label);
+        Assert.Equal("005 - PYLON_low_voltage_Protocol_RS485_V3.5", uart1Options[5].Label);
+        Assert.Equal("011 - UART1 User customization", uart1Options[11].Label);
+        Assert.Equal("020 - RS485 Protocol 20", uart1Options[20].Label);
+
+        Assert.Equal("000 - JK BMS CAN Protocol (250K) V2.0", canOptions[0].Label);
+        Assert.Equal("002 - PYLON-Low-voltage-V1.2", canOptions[2].Label);
+        Assert.Equal("012 - CAN BUS User customization", canOptions[12].Label);
+        Assert.Equal("020 - CAN BUS Protocol 020", canOptions[20].Label);
+
         var pages = definition.Ui?.Pages;
         Assert.NotNull(pages);
 
