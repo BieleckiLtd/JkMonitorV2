@@ -836,7 +836,12 @@ function ParameterRow({
 
   return (
     <div className='rounded-lg border border-border/50 bg-background/40 px-3 py-2'>
-      <div className='flex items-center justify-between gap-3'>
+      <div className={cn(
+        'gap-3',
+        isEditing
+          ? 'flex flex-col items-stretch sm:flex-row sm:items-center sm:justify-between'
+          : 'flex items-center justify-between'
+      )}>
         <span className='flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground'>
           <span>{displayName}</span>
           {statusChip ? (
@@ -845,12 +850,12 @@ function ParameterRow({
             </span>
           ) : null}
         </span>
-        <div className='flex items-center gap-2'>
+        <div className={cn('flex items-center gap-2', isEditing && 'min-w-0 w-full sm:w-auto')}>
           {isEditing ? (
-            <div className='flex items-center gap-1'>
+            <div className='flex min-w-0 w-full flex-wrap items-center gap-1 sm:justify-end'>
               {param.options?.length ? (
                 <select
-                  className='rounded border border-border bg-background px-2 py-0.5 text-sm font-semibold text-foreground outline-none focus:border-primary'
+                  className='min-w-0 w-full rounded border border-border bg-background px-2 py-0.5 text-sm font-semibold text-foreground outline-none focus:border-primary sm:max-w-full sm:flex-1'
                   value={editValue}
                   onChange={e => setEditValue(e.target.value)}
                   disabled={isSaving}
@@ -868,7 +873,7 @@ function ParameterRow({
                     step={entity ? getEditableDisplayStep(entity, param, temperatureUnit) : 'any'}
                     inputMode='decimal'
                     aria-label={`Set ${displayName}`}
-                    className='w-24 rounded border border-border bg-background px-2 py-0.5 text-sm font-semibold text-foreground outline-none focus:border-primary'
+                    className='w-full rounded border border-border bg-background px-2 py-0.5 text-sm font-semibold text-foreground outline-none focus:border-primary sm:w-24'
                     value={editValue}
                     onChange={e => setEditValue(e.target.value)}
                     onKeyDown={e => { if (e.key === 'Enter') void saveValue(); if (e.key === 'Escape') cancelEdit(); }}
