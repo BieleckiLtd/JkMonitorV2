@@ -370,10 +370,20 @@
     },
     {
       "id": "charge_switch",
-      "type": "switch",
+      "type": "select",
       "name": "Charge Switch",
       "category": "Charging",
       "source": { "bank": "config", "byteOffset": 112, "dataType": "uint32" },
+      "options": [
+        {
+          "value": 0,
+          "label": "Disabled"
+        },
+        {
+          "value": 1,
+          "label": "Enabled"
+        }
+      ],
       "writable": true
     },
     {
@@ -497,7 +507,7 @@
     },
     {
       "id": "lcd_buzzer_trigger",
-      "type": "number",
+      "type": "select",
       "name": "LCD Buzzer Trigger",
       "category": "Triggers",
       "source": {
@@ -505,7 +515,64 @@
         "byteOffset": 228,
         "dataType": "uint8"
       },
-      "display": { "precision": 0 },
+      "options": [
+        {
+          "value": 0,
+          "label": "00 - OFF"
+        },
+        {
+          "value": 1,
+          "label": "01 - Low SOC"
+        },
+        {
+          "value": 2,
+          "label": "02 - Battery Over Voltage"
+        },
+        {
+          "value": 3,
+          "label": "03 - Battery Under Voltage"
+        },
+        {
+          "value": 4,
+          "label": "04 - Battery Cell Over Voltage"
+        },
+        {
+          "value": 5,
+          "label": "05 - Battery Cell Under Voltage"
+        },
+        {
+          "value": 6,
+          "label": "06 - Charge Over Current"
+        },
+        {
+          "value": 7,
+          "label": "07 - Discharge Over Current"
+        },
+        {
+          "value": 8,
+          "label": "08 - Battery Over Temperature"
+        },
+        {
+          "value": 9,
+          "label": "09 - MOSFET Over Temperature"
+        },
+        {
+          "value": 10,
+          "label": "10 - System Alarm"
+        },
+        {
+          "value": 11,
+          "label": "11 - Battery Low Temperature"
+        },
+        {
+          "value": 12,
+          "label": "12 -  Remote Control"
+        },
+        {
+          "value": 13,
+          "label": "13 - Above SOC"
+        }
+      ],
       "writable": true,
       "write": {
         "address": 169,
@@ -514,7 +581,7 @@
     },
     {
       "id": "dry_1_trigger",
-      "type": "number",
+      "type": "select",
       "name": "DRY 1 Trigger",
       "category": "Triggers",
       "source": {
@@ -522,7 +589,64 @@
         "byteOffset": 229,
         "dataType": "uint8"
       },
-      "display": { "precision": 0 },
+      "options": [
+        {
+          "value": 0,
+          "label": "00 - OFF"
+        },
+        {
+          "value": 1,
+          "label": "01 - Low SOC"
+        },
+        {
+          "value": 2,
+          "label": "02 - Battery Over Voltage"
+        },
+        {
+          "value": 3,
+          "label": "03 - Battery Under Voltage"
+        },
+        {
+          "value": 4,
+          "label": "04 - Battery Cell Over Voltage"
+        },
+        {
+          "value": 5,
+          "label": "05 - Battery Cell Under Voltage"
+        },
+        {
+          "value": 6,
+          "label": "06 - Charge Over Current"
+        },
+        {
+          "value": 7,
+          "label": "07 - Discharge Over Current"
+        },
+        {
+          "value": 8,
+          "label": "08 - Battery Over Temperature"
+        },
+        {
+          "value": 9,
+          "label": "09 - MOSFET Over Temperature"
+        },
+        {
+          "value": 10,
+          "label": "10 - System Alarm"
+        },
+        {
+          "value": 11,
+          "label": "11 - Battery Low Temperature"
+        },
+        {
+          "value": 12,
+          "label": "12 -  Remote Control"
+        },
+        {
+          "value": 13,
+          "label": "13 - Above SOC"
+        }
+      ],
       "writable": true,
       "write": {
         "address": 170,
@@ -531,7 +655,7 @@
     },
     {
       "id": "dry_2_trigger",
-      "type": "number",
+      "type": "select",
       "name": "DRY 2 Trigger",
       "category": "Triggers",
       "source": {
@@ -539,7 +663,64 @@
         "byteOffset": 230,
         "dataType": "uint8"
       },
-      "display": { "precision": 0 },
+      "options": [
+        {
+          "value": 0,
+          "label": "00 - OFF"
+        },
+        {
+          "value": 1,
+          "label": "01 - Low SOC"
+        },
+        {
+          "value": 2,
+          "label": "02 - Battery Over Voltage"
+        },
+        {
+          "value": 3,
+          "label": "03 - Battery Under Voltage"
+        },
+        {
+          "value": 4,
+          "label": "04 - Battery Cell Over Voltage"
+        },
+        {
+          "value": 5,
+          "label": "05 - Battery Cell Under Voltage"
+        },
+        {
+          "value": 6,
+          "label": "06 - Charge Over Current"
+        },
+        {
+          "value": 7,
+          "label": "07 - Discharge Over Current"
+        },
+        {
+          "value": 8,
+          "label": "08 - Battery Over Temperature"
+        },
+        {
+          "value": 9,
+          "label": "09 - MOSFET Over Temperature"
+        },
+        {
+          "value": 10,
+          "label": "10 - System Alarm"
+        },
+        {
+          "value": 11,
+          "label": "11 - Battery Low Temperature"
+        },
+        {
+          "value": 12,
+          "label": "12 -  Remote Control"
+        },
+        {
+          "value": 13,
+          "label": "13 - Above SOC"
+        }
+      ],
       "writable": true,
       "write": {
         "address": 171,
@@ -1372,18 +1553,38 @@
     },
     {
       "id": "discharge_switch",
-      "type": "switch",
+      "type": "select",
       "name": "Discharge Switch",
       "category": "Discharging",
       "source": { "bank": "config", "byteOffset": 116, "dataType": "uint32" },
+      "options": [
+        {
+          "value": 0,
+          "label": "Disabled"
+        },
+        {
+          "value": 1,
+          "label": "Enabled"
+        }
+      ],
       "writable": true
     },
     {
       "id": "balancer_switch",
-      "type": "switch",
+      "type": "select",
       "name": "Balancer Switch",
       "category": "Balance Settings",
       "source": { "bank": "config", "byteOffset": 120, "dataType": "uint32" },
+      "options": [
+        {
+          "value": 0,
+          "label": "Disabled"
+        },
+        {
+          "value": 1,
+          "label": "Enabled"
+        }
+      ],
       "writable": true
     },
     {

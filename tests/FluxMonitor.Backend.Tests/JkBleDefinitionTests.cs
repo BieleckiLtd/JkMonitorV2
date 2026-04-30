@@ -125,6 +125,52 @@ public sealed class JkBleDefinitionTests
             definition.Entities.Where(entity => triggerEntityIds.Contains(entity.Id)),
             entity => Assert.True(entity.Writable));
 
+        var lcdBuzzerTrigger = Assert.Single(definition.Entities, entity => entity.Id == "lcd_buzzer_trigger");
+        var dry1Trigger = Assert.Single(definition.Entities, entity => entity.Id == "dry_1_trigger");
+        var dry2Trigger = Assert.Single(definition.Entities, entity => entity.Id == "dry_2_trigger");
+
+        Assert.Equal("select", lcdBuzzerTrigger.Type);
+        Assert.Equal("select", dry1Trigger.Type);
+        Assert.Equal("select", dry2Trigger.Type);
+
+        Assert.NotNull(lcdBuzzerTrigger.Options);
+        Assert.NotNull(dry1Trigger.Options);
+        Assert.NotNull(dry2Trigger.Options);
+
+        var lcdBuzzerTriggerOptions = lcdBuzzerTrigger.Options!;
+        var dry1TriggerOptions = dry1Trigger.Options!;
+        var dry2TriggerOptions = dry2Trigger.Options!;
+
+        Assert.Equal(14, lcdBuzzerTriggerOptions.Count);
+        Assert.Equal(
+            lcdBuzzerTriggerOptions.Select(option => (option.Value, option.Label)).ToArray(),
+            dry1TriggerOptions.Select(option => (option.Value, option.Label)).ToArray());
+        Assert.Equal(
+            lcdBuzzerTriggerOptions.Select(option => (option.Value, option.Label)).ToArray(),
+            dry2TriggerOptions.Select(option => (option.Value, option.Label)).ToArray());
+
+        Assert.Equal("00 - OFF", lcdBuzzerTriggerOptions[0].Label);
+        Assert.Equal("01 - Low SOC", lcdBuzzerTriggerOptions[1].Label);
+        Assert.Equal("10 - System Alarm", lcdBuzzerTriggerOptions[10].Label);
+        Assert.Equal("13 - Above SOC", lcdBuzzerTriggerOptions[13].Label);
+
+        var chargeSwitch = Assert.Single(definition.Entities, entity => entity.Id == "charge_switch");
+        var dischargeSwitch = Assert.Single(definition.Entities, entity => entity.Id == "discharge_switch");
+        var balancerSwitch = Assert.Single(definition.Entities, entity => entity.Id == "balancer_switch");
+
+        Assert.Equal("select", chargeSwitch.Type);
+        Assert.Equal("select", dischargeSwitch.Type);
+        Assert.Equal("select", balancerSwitch.Type);
+
+        Assert.NotNull(chargeSwitch.Options);
+        Assert.NotNull(dischargeSwitch.Options);
+        Assert.NotNull(balancerSwitch.Options);
+
+        var expectedSwitchOptions = new[] { (0, "Disabled"), (1, "Enabled") };
+        Assert.Equal(expectedSwitchOptions, chargeSwitch.Options!.Select(option => (option.Value, option.Label)).ToArray());
+        Assert.Equal(expectedSwitchOptions, dischargeSwitch.Options!.Select(option => (option.Value, option.Label)).ToArray());
+        Assert.Equal(expectedSwitchOptions, balancerSwitch.Options!.Select(option => (option.Value, option.Label)).ToArray());
+
         var communicationEntities = definition.Entities
             .Where(entity => entity.Category == "Communication")
             .Select(entity => entity.Id)
