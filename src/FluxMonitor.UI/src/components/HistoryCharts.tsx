@@ -725,6 +725,9 @@ const yTickStyle = { fontSize: 9, fill: 'var(--muted-foreground)' };
 const tooltipContentStyle = { backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '0.5rem', fontSize: 12, color: 'var(--foreground)' };
 const tooltipLabelStyle = { color: 'var(--muted-foreground)' };
 const legendStyle = { fontSize: 11, paddingTop: 4, color: 'var(--muted-foreground)' };
+const chartMargin = { top: 4, right: 8, bottom: 0, left: 8 };
+const singleAxisWidth = 48;
+const dualAxisWidth = 44;
 
 function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitForKey, hoveredTime, selectedTime, onHover, onSelect, todayXTicks, subtitle }: {
   title: string; data: ChartDataPoint[]; lines: LineSpec[];
@@ -832,7 +835,7 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
       <ResponsiveContainer width='100%' height={180}>
         <LineChart
           data={data}
-          margin={{ top: 4, right: 0, bottom: 0, left: 0 }}
+          margin={chartMargin}
           onMouseMove={handleChartMove}
           onMouseLeave={handleChartLeave}
           onClick={handleChartClick}
@@ -841,11 +844,11 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
           <XAxis dataKey='time' tick={xTickStyle} tickLine={false} axisLine={false} {...(todayXTicks ? { ticks: todayXTicks } : {})} />
           {hasSecondaryAxis ? (
             <>
-              <YAxis yAxisId='primary' orientation='left' width={32} tick={yTickStyle} tickLine={false} axisLine={false} domain={domain ?? ['auto', 'auto']} />
-              <YAxis yAxisId='secondary' orientation='right' width={32} tick={yTickStyle} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
+              <YAxis yAxisId='primary' orientation='left' width={dualAxisWidth} tick={yTickStyle} tickLine={false} axisLine={false} domain={domain ?? ['auto', 'auto']} />
+              <YAxis yAxisId='secondary' orientation='right' width={dualAxisWidth} tick={yTickStyle} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
             </>
           ) : (
-            <YAxis yAxisId='primary' orientation='right' width={32} tick={yTickStyle} tickLine={false} axisLine={false} domain={domain ?? ['auto', 'auto']} />
+            <YAxis yAxisId='primary' orientation='right' width={singleAxisWidth} tick={yTickStyle} tickLine={false} axisLine={false} domain={domain ?? ['auto', 'auto']} />
           )}
           <Tooltip
             content={renderTooltipContent}
@@ -967,7 +970,7 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
       <ResponsiveContainer width='100%' height={180}>
         <AreaChart
           data={data}
-          margin={{ top: 4, right: 0, bottom: 0, left: 0 }}
+          margin={chartMargin}
           onMouseMove={handleChartMove}
           onMouseLeave={handleChartLeave}
           onClick={handleChartClick}
@@ -980,7 +983,7 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
           </defs>
           <CartesianGrid strokeDasharray='3 3' stroke='var(--border)' opacity={0.4} />
           <XAxis dataKey='time' tick={xTickStyle} tickLine={false} axisLine={false} {...(todayXTicks ? { ticks: todayXTicks } : {})} />
-          <YAxis orientation='right' width={32} tick={yTickStyle} tickLine={false} axisLine={false} domain={[0, 100]} />
+          <YAxis orientation='right' width={singleAxisWidth} tick={yTickStyle} tickLine={false} axisLine={false} domain={[0, 100]} />
           <Tooltip content={renderTooltipContent} />
           <Legend wrapperStyle={legendStyle} />
           <Area
@@ -1124,7 +1127,7 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
       <ResponsiveContainer width='100%' height={180}>
         <AreaChart
           data={energyData}
-          margin={{ top: 4, right: 0, bottom: 0, left: 0 }}
+          margin={chartMargin}
           onMouseMove={handleChartMove}
           onMouseLeave={handleChartLeave}
           onClick={handleChartClick}
@@ -1143,7 +1146,7 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
           </defs>
           <CartesianGrid strokeDasharray='3 3' stroke='var(--border)' opacity={0.4} />
           <XAxis dataKey='time' tick={xTickStyle} tickLine={false} axisLine={false} {...(todayXTicks ? { ticks: todayXTicks } : {})} />
-          <YAxis orientation='right' width={32} tick={yTickStyle} tickLine={false} axisLine={false} domain={yDomain} tickFormatter={yTickFormatter} />
+          <YAxis orientation='right' width={singleAxisWidth} tick={yTickStyle} tickLine={false} axisLine={false} domain={yDomain} tickFormatter={yTickFormatter} />
           <Tooltip
             contentStyle={tooltipContentStyle}
             labelStyle={tooltipLabelStyle}
@@ -1243,14 +1246,14 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hove
       <ResponsiveContainer width='100%' height={180}>
         <LineChart
           data={data}
-          margin={{ top: 4, right: 0, bottom: 0, left: 0 }}
+          margin={chartMargin}
           onMouseMove={handleChartMove}
           onMouseLeave={handleChartLeave}
           onClick={handleChartClick}
         >
           <CartesianGrid strokeDasharray='3 3' stroke='var(--border)' opacity={0.4} />
           <XAxis dataKey='time' tick={xTickStyle} tickLine={false} axisLine={false} />
-          <YAxis orientation='right' width={32} tick={yTickStyle} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
+          <YAxis orientation='right' width={singleAxisWidth} tick={yTickStyle} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
           <Tooltip
             contentStyle={tooltipContentStyle}
             labelStyle={tooltipLabelStyle}
