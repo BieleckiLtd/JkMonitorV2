@@ -22,6 +22,17 @@ public static class ConfiguredDeviceDefinitionExtensions
         ArgumentNullException.ThrowIfNull(device);
         ArgumentNullException.ThrowIfNull(definitionLoader);
 
+        // Use the latest catalog definition immediately unless this device has an
+        // explicit per-device override snapshot. That keeps shipped definition
+        // fixes active without waiting for snapshot reconciliation.
+        if (!device.HasDefinitionOverride &&
+            !string.IsNullOrWhiteSpace(device.DefinitionId) &&
+            definitionLoader.TryGet(device.DefinitionId, out definition) &&
+            definition is not null)
+        {
+            return true;
+        }
+
         if (!string.IsNullOrWhiteSpace(device.DefinitionJson))
         {
             try
