@@ -862,7 +862,7 @@ function ParameterRow({
         'gap-3',
         isEditing
           ? 'flex flex-col items-stretch sm:flex-row sm:items-center sm:justify-between'
-          : 'flex items-center justify-between'
+            : 'flex items-start justify-between'
       )}>
         <span className='flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground'>
           <span>{displayName}</span>
@@ -872,7 +872,12 @@ function ParameterRow({
             </span>
           ) : null}
         </span>
-        <div className={cn('flex items-center gap-2', isEditing && 'min-w-0 w-full sm:w-auto')}>
+          <div className={cn(
+            'flex items-start gap-2',
+            isEditing
+              ? 'min-w-0 w-full sm:w-auto'
+              : 'min-w-0 flex-1 justify-end'
+          )}>
           {isEditing ? (
             <div className='flex min-w-0 w-full flex-wrap items-center gap-1 sm:justify-end'>
               {param.options?.length ? (
@@ -916,7 +921,7 @@ function ParameterRow({
             </div>
           ) : (
             <>
-              <span className='text-sm font-semibold text-foreground'>
+              <span className='min-w-0 break-words text-right text-sm font-semibold text-foreground whitespace-normal'>
                 {value}
                 {displayUnit && <span className='ml-1 text-xs font-normal text-muted-foreground'> {displayUnit}</span>}
               </span>
@@ -926,7 +931,7 @@ function ParameterRow({
                   disabled={!canEdit}
                   aria-label={`Edit ${displayName}`}
                   className={cn(
-                    'rounded p-1 transition-colors',
+                    'shrink-0 rounded p-1 transition-colors',
                     canEdit
                       ? 'text-muted-foreground/60 hover:bg-primary/10 hover:text-primary'
                       : 'cursor-not-allowed text-muted-foreground/30',
