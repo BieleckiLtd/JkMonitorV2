@@ -36,6 +36,7 @@ public sealed class DefinitionDrivenTelemetryBuilderTests
         WriteInt16LittleEndian(live, 252, 268);
         live[166] = 1;
         live[167] = 87;
+        WriteUInt32LittleEndian(config, 128, 5);
         WriteUInt32LittleEndian(live, 176, 123);
         live[192] = 1;
         live[193] = 0;
@@ -46,7 +47,6 @@ public sealed class DefinitionDrivenTelemetryBuilderTests
         live[275] = 0x06;
 
         WriteUInt32LittleEndian(config, 0, 51200);
-        WriteUInt32LittleEndian(config, 128, 53200);
 
         WriteAscii(info, 0, 16, "JK_PB2A16S15P");
         WriteAscii(info, 16, 8, "14.XA");
@@ -97,6 +97,7 @@ public sealed class DefinitionDrivenTelemetryBuilderTests
         var lcdBuzzerTrigger = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "lcd_buzzer_trigger");
         var rcvTime = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "cell_request_charge_voltage_time");
         var rfvTime = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "cell_request_float_voltage_time");
+        var scpDelay = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "scp_delay");
         var voltageCalibration = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "voltage_calibration");
 
         Assert.Equal(26.8m, batteryTemp3?.NumericValue);
@@ -111,7 +112,48 @@ public sealed class DefinitionDrivenTelemetryBuilderTests
         Assert.True(lcdBuzzerTrigger?.IsWritable);
         Assert.Equal(0.1m, rcvTime?.NumericValue);
         Assert.Equal(0.2m, rfvTime?.NumericValue);
-        Assert.Equal(53.200m, voltageCalibration?.NumericValue);
+        Assert.Equal(5m, scpDelay?.NumericValue);
+        Assert.Equal(52.800m, voltageCalibration?.NumericValue);
+    }
+
+    [Fact]
+    public void BuildPollResult_MapsJkInverterBleScpDelayAndVoltageCalibrationToDistinctSources()
+    {
+        var loader = new DeviceDefinitionLoader(
+            "devices",
+            RepositoryRoot,
+            new StubHttpClientFactory(),
+            NullLogger<DeviceDefinitionLoader>.Instance);
+        loader.LoadFromJson(File.ReadAllText(Path.Combine(RepositoryRoot, "devices", "jk-inverter-bms-ble.json")));
+
+        var definition = loader.Get("jk-inverter-bms-ble");
+        var live = new byte[293];
+        var config = new byte[293];
+        var info = new byte[293];
+
+        WriteUInt32LittleEndian(live, 144, 53360);
+        WriteUInt32LittleEndian(config, 128, 5);
+
+        var builder = new DefinitionDrivenTelemetryBuilder(new ExpressionEvaluator());
+        var result = builder.BuildPollResult(
+            definition,
+            new Dictionary<string, byte[]>
+            {
+                ["live"] = live,
+                ["config"] = config,
+                ["info"] = info
+            },
+            new DateTimeOffset(2026, 4, 30, 12, 0, 0, TimeSpan.Zero));
+
+        var scpDelay = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "scp_delay");
+        var voltageCalibration = result.Snapshot.Parameters.FirstOrDefault(p => p.Key == "voltage_calibration");
+
+        Assert.NotNull(scpDelay);
+        Assert.NotNull(voltageCalibration);
+        Assert.Equal(5m, scpDelay!.NumericValue);
+        Assert.Equal(5L, scpDelay.RawValue);
+        Assert.Equal(53.360m, voltageCalibration!.NumericValue);
+        Assert.Equal(53360L, voltageCalibration.RawValue);
     }
 
     [Fact]

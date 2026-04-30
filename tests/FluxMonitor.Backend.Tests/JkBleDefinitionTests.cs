@@ -26,6 +26,7 @@ public sealed class JkBleDefinitionTests
 
         Assert.Equal("notify-stream", liveBank.ReadMode);
         Assert.Equal(0x97, liveBank.Command);
+        Assert.NotNull(liveBank.Write);
     }
 
     [Fact]
@@ -80,6 +81,13 @@ public sealed class JkBleDefinitionTests
         Assert.Equal("Triggers", Assert.Single(definition.Entities, entity => entity.Id == "lcd_buzzer_trigger").Category);
         Assert.Equal("Communication", Assert.Single(definition.Entities, entity => entity.Id == "uart1_protocol").Category);
         Assert.Equal("Communication", Assert.Single(definition.Entities, entity => entity.Id == "uart3_protocol").Category);
+
+        var scpDelay = Assert.Single(definition.Entities, entity => entity.Id == "scp_delay");
+        var voltageCalibration = Assert.Single(definition.Entities, entity => entity.Id == "voltage_calibration");
+        Assert.Equal("config", scpDelay.Source.Bank);
+        Assert.Equal(128, scpDelay.Source.ByteOffset);
+        Assert.Equal("live", voltageCalibration.Source.Bank);
+        Assert.Equal(144, voltageCalibration.Source.ByteOffset);
 
         var chargingEntityIds = definition.Entities
             .Where(entity => entity.Category == "Charging")
