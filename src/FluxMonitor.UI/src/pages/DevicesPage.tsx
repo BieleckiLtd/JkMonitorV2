@@ -606,15 +606,61 @@ function getAvailableRememberedDeviceIds(
   });
 }
 
+function normalizeDeviceId(value: string | null | undefined) {
+  return (value ?? '').trim().toLowerCase();
+}
+
+function getDuplicateDeviceIdClientKeys(devices: DeviceConfiguration[]) {
+  const clientKeysByDeviceId = new Map<string, string[]>();
+
+  for (const device of devices) {
+    const normalizedDeviceId = normalizeDeviceId(device.deviceId);
+    if (!normalizedDeviceId) {
+      continue;
+    }
+
+    const clientKeys = clientKeysByDeviceId.get(normalizedDeviceId) ?? [];
+    clientKeys.push(device.clientKey);
+    clientKeysByDeviceId.set(normalizedDeviceId, clientKeys);
+  }
+
+  const duplicateClientKeys = new Set<string>();
+  for (const clientKeys of clientKeysByDeviceId.values()) {
+    if (clientKeys.length < 2) {
+      continue;
+    }
+
+    for (const clientKey of clientKeys) {
+      duplicateClientKeys.add(clientKey);
+    }
+  }
+
+  return duplicateClientKeys;
+}
+
+function createDefaultDeviceId(_index: number, devices: DeviceConfiguration[]) {
+  const existingIds = new Set(devices.map((device) => normalizeDeviceId(device.deviceId)).filter((entry) => entry.length > 0));
+  let nextIndex = 1;
+  let candidate = `device-${nextIndex}`;
+
+  while (existingIds.has(candidate)) {
+    nextIndex += 1;
+    candidate = `device-${nextIndex}`;
+  }
+
+  return candidate;
+}
+
 const defaultDevice = (
   index: number,
   definition: DeviceDefinitionSummary,
   definitionSnapshot: DeviceDefinition,
+  devices: DeviceConfiguration[],
   familyName?: string,
 ): DeviceConfiguration => ({
   clientKey: createDeviceClientKey(),
   persistedId: null,
-  deviceId: `device-${index}`,
+  deviceId: createDefaultDeviceId(index, devices),
   displayName: familyName ?? stripConnectionSuffix(definition.name),
   sortOrder: index - 1,
   definitionId: definition.id,
@@ -667,7 +713,7 @@ function createBleDeviceFromCandidate(
   const deviceId = createUniqueDeviceId(preferredId, devices);
 
   return {
-    ...defaultDevice(devices.length + 1, definition, definitionSnapshot, familyName),
+    ...defaultDevice(devices.length + 1, definition, definitionSnapshot, devices, familyName),
     deviceId,
     displayName: candidate.displayName || familyName || stripConnectionSuffix(definition.name),
     transportPortName: candidate.address,
@@ -918,6 +964,7 @@ export function DevicesPage({
   const devicesRef = useRef<DeviceConfiguration[]>([]);
   const initialLoadDone = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const duplicateDeviceIdClientKeys = getDuplicateDeviceIdClientKeys(devices);
   const visibleDeviceEntries = devices.flatMap((device, index) => (
     !selectedDeviceId || device.deviceId === selectedDeviceId
       ? [{ device, index }]
@@ -1025,6 +1072,14 @@ export function DevicesPage({
         ...device,
         sortOrder: index,
       }));
+      const duplicateClientKeys = getDuplicateDeviceIdClientKeys(orderedDevices);
+      const firstDuplicateDevice = orderedDevices.find((device) => duplicateClientKeys.has(device.clientKey));
+      if (firstDuplicateDevice) {
+        setAutoSaveTarget({ deviceClientKey: firstDuplicateDevice.clientKey, fieldKey: 'deviceId' });
+        setAutoSaveStatus('error');
+        return false;
+      }
+
       const devicesPayload = orderedDevices.map(serializeDevice);
       const response = await fetch('/api/devices/config', {
         method: 'PUT',
@@ -1044,10 +1099,12 @@ export function DevicesPage({
       window.setTimeout(() => {
         setAutoSaveStatus((current) => current === 'saved' ? 'idle' : current);
       }, 2000);
+      return true;
     } catch {
       setAutoSaveStatus('error');
+      return false;
     }
-  }, []);
+  }, [setAutoSaveTarget]);
 
   useEffect(() => {
     if (!initialLoadDone.current || saveDirty === 0 || editingDeviceIdClientKey) return;
@@ -1327,7 +1384,7 @@ export function DevicesPage({
     let nextDeviceId = '';
 
     setDevices((current) => {
-      const nextDevice = defaultDevice(current.length + 1, definition, definitionSnapshot, familyName);
+      const nextDevice = defaultDevice(current.length + 1, definition, definitionSnapshot, current, familyName);
       nextDeviceId = nextDevice.deviceId;
       return [...current, nextDevice];
     });
@@ -1446,7 +1503,7 @@ export function DevicesPage({
         };
         let nextDeviceId = '';
         setDevices((current) => {
-          const nextDevice = defaultDevice(current.length + 1, summary, definitionSnapshot, stripConnectionSuffix(summary.name));
+          const nextDevice = defaultDevice(current.length + 1, summary, definitionSnapshot, current, stripConnectionSuffix(summary.name));
           nextDeviceId = nextDevice.deviceId;
           return [...current, nextDevice];
         });
@@ -1487,7 +1544,18 @@ export function DevicesPage({
     setDeviceActions((current) => ({ ...current, [clientKey]: { loading: true } }));
 
     try {
-      await saveDevicesNow();
+      const didSave = await saveDevicesNow();
+      if (!didSave) {
+        setDeviceActions((current) => ({
+          ...current,
+          [clientKey]: {
+            loading: false,
+            result: { deviceId, message: 'Resolve duplicate device IDs before starting this device.' },
+          },
+        }));
+        return;
+      }
+
       const response = await fetch(`/api/devices/${encodeURIComponent(deviceId)}/start`, { method: 'POST' });
       const data = (await response.json()) as StartStopResult;
       setDeviceActions((current) => ({ ...current, [clientKey]: { loading: false, result: data } }));
@@ -1843,6 +1911,7 @@ export function DevicesPage({
                       list={rememberedIdsForDevice.length > 0 ? deviceIdListId : undefined}
                       value={device.deviceId}
                       disabled={device.enabled}
+                      aria-invalid={duplicateDeviceIdClientKeys.has(device.clientKey)}
                       onFocus={() => setEditingDeviceIdClientKey(device.clientKey)}
                       onBlur={() => setEditingDeviceIdClientKey((current) => current === device.clientKey ? null : current)}
                       onChange={(event) => updateDevice(index, 'deviceId', event.target.value)}
@@ -1853,6 +1922,9 @@ export function DevicesPage({
                           <option key={deviceId} value={deviceId} />
                         ))}
                       </datalist>
+                    ) : null}
+                    {duplicateDeviceIdClientKeys.has(device.clientKey) ? (
+                      <p className='text-[11px] text-destructive'>Device ID must be unique.</p>
                     ) : null}
                     <p className='text-[11px] text-muted-foreground'>Choose a remembered ID or type a new one. IDs already used by other devices are hidden.</p>
                   </div>

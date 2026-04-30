@@ -472,6 +472,143 @@ describe('DevicesPage', () => {
     }, { timeout: 1500 });
   });
 
+  it('blocks duplicate device ids from being saved', async () => {
+    initialDevicesResponse = [
+      {
+        persistedId: 1,
+        deviceId: 'device-1',
+        displayName: 'Battery 1',
+        definitionId: 'jk-inverter-bms',
+        definitionVersion: '1.0.0',
+        transportPortName: 'COM3',
+        bleSettingsPin: null,
+        address: 1,
+        isMaster: false,
+        pollIntervalMilliseconds: 1000,
+        enabled: false,
+        cellVoltageSmoothingFactor: 0,
+        cellVoltageSmoothingBreakoutMillivolts: 0,
+        displayPrecision: {
+          voltage: 2,
+          cellVoltage: 3,
+          current: 1,
+          power: 0,
+          temperature: 1,
+          soc: 0,
+          deltaVoltage: 3,
+        },
+        hasDefinitionOverride: false,
+        definition: definitionDetailsById['jk-inverter-bms'],
+      },
+      {
+        persistedId: 2,
+        deviceId: 'device-2',
+        displayName: 'Battery 2',
+        definitionId: 'jk-inverter-bms',
+        definitionVersion: '1.0.0',
+        transportPortName: 'COM4',
+        bleSettingsPin: null,
+        address: 2,
+        isMaster: false,
+        pollIntervalMilliseconds: 1000,
+        enabled: false,
+        cellVoltageSmoothingFactor: 0,
+        cellVoltageSmoothingBreakoutMillivolts: 0,
+        displayPrecision: {
+          voltage: 2,
+          cellVoltage: 3,
+          current: 1,
+          power: 0,
+          temperature: 1,
+          soc: 0,
+          deltaVoltage: 3,
+        },
+        hasDefinitionOverride: false,
+        definition: definitionDetailsById['jk-inverter-bms'],
+      },
+    ];
+
+    renderPage();
+
+    const deviceIdInputs = await screen.findAllByDisplayValue(/device-[12]/);
+    fireEvent.focus(deviceIdInputs[1]);
+    fireEvent.change(deviceIdInputs[1], { target: { value: 'device-1' } });
+
+    expect(await screen.findAllByText('Device ID must be unique.')).toHaveLength(2);
+
+    fireEvent.blur(screen.getAllByDisplayValue('device-1')[1]);
+    await new Promise((resolve) => window.setTimeout(resolve, 700));
+
+    expect(vi.mocked(globalThis.fetch).mock.calls.find(([input, init]) =>
+      String(input) === '/api/devices/config' && init?.method === 'PUT')).toBeUndefined();
+  });
+
+  it('assigns a collision-free default device id when adding a device', async () => {
+    initialDevicesResponse = [
+      {
+        persistedId: 1,
+        deviceId: 'device-1',
+        displayName: 'Battery 1',
+        definitionId: 'jk-inverter-bms',
+        definitionVersion: '1.0.0',
+        transportPortName: 'COM3',
+        bleSettingsPin: null,
+        address: 1,
+        isMaster: false,
+        pollIntervalMilliseconds: 1000,
+        enabled: false,
+        cellVoltageSmoothingFactor: 0,
+        cellVoltageSmoothingBreakoutMillivolts: 0,
+        displayPrecision: {
+          voltage: 2,
+          cellVoltage: 3,
+          current: 1,
+          power: 0,
+          temperature: 1,
+          soc: 0,
+          deltaVoltage: 3,
+        },
+        hasDefinitionOverride: false,
+        definition: definitionDetailsById['jk-inverter-bms'],
+      },
+      {
+        persistedId: 2,
+        deviceId: 'device-3',
+        displayName: 'Battery 3',
+        definitionId: 'jk-inverter-bms',
+        definitionVersion: '1.0.0',
+        transportPortName: 'COM4',
+        bleSettingsPin: null,
+        address: 2,
+        isMaster: false,
+        pollIntervalMilliseconds: 1000,
+        enabled: false,
+        cellVoltageSmoothingFactor: 0,
+        cellVoltageSmoothingBreakoutMillivolts: 0,
+        displayPrecision: {
+          voltage: 2,
+          cellVoltage: 3,
+          current: 1,
+          power: 0,
+          temperature: 1,
+          soc: 0,
+          deltaVoltage: 3,
+        },
+        hasDefinitionOverride: false,
+        definition: definitionDetailsById['jk-inverter-bms'],
+      },
+    ];
+
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /add device/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using usb \/ serial/i }));
+
+    expect(await screen.findByDisplayValue('device-2')).toBeInTheDocument();
+    expect(screen.queryAllByDisplayValue('device-1')).toHaveLength(1);
+    expect(screen.queryAllByDisplayValue('device-3')).toHaveLength(1);
+  });
+
   it('offers remembered device ids except ones already used by other devices', async () => {
     initialDevicesResponse = [
       {
