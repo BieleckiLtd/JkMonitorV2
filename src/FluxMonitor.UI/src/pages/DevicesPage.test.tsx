@@ -432,6 +432,11 @@ describe('DevicesPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using usb \/ serial/i }));
 
     const deviceIdInput = await screen.findByDisplayValue('device-1');
+    await waitFor(() => {
+      expect(vi.mocked(globalThis.fetch).mock.calls.find(([input, init]) =>
+        String(input) === '/api/devices/config' && init?.method === 'PUT')).toBeDefined();
+    });
+    vi.mocked(globalThis.fetch).mockClear();
     deviceIdInput.focus();
 
     fireEvent.change(deviceIdInput, { target: { value: 'device-1a' } });
@@ -448,27 +453,33 @@ describe('DevicesPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using usb \/ serial/i }));
 
     const deviceIdInput = await screen.findByDisplayValue('device-1');
+    await waitFor(() => {
+      expect(vi.mocked(globalThis.fetch).mock.calls.find(([input, init]) =>
+        String(input) === '/api/devices/config' && init?.method === 'PUT')).toBeDefined();
+    });
+
+    const getConfigSaveCount = () => vi.mocked(globalThis.fetch).mock.calls.filter(([input, init]) =>
+      String(input) === '/api/devices/config' && init?.method === 'PUT').length;
+    const initialConfigSaveCount = getConfigSaveCount();
+
     deviceIdInput.focus();
 
     fireEvent.change(deviceIdInput, { target: { value: 'device-1a' } });
     await new Promise((resolve) => window.setTimeout(resolve, 700));
 
     expect(screen.getByDisplayValue('device-1a')).toHaveFocus();
-    expect(vi.mocked(globalThis.fetch).mock.calls.find(([input, init]) =>
-      String(input) === '/api/devices/config' && init?.method === 'PUT')).toBeUndefined();
+    expect(getConfigSaveCount()).toBe(initialConfigSaveCount);
 
     fireEvent.change(screen.getByDisplayValue('device-1a'), { target: { value: 'device-1ab' } });
     await new Promise((resolve) => window.setTimeout(resolve, 700));
 
     expect(screen.getByDisplayValue('device-1ab')).toHaveFocus();
-    expect(vi.mocked(globalThis.fetch).mock.calls.find(([input, init]) =>
-      String(input) === '/api/devices/config' && init?.method === 'PUT')).toBeUndefined();
+    expect(getConfigSaveCount()).toBe(initialConfigSaveCount);
 
     fireEvent.blur(screen.getByDisplayValue('device-1ab'));
 
     await waitFor(() => {
-      expect(vi.mocked(globalThis.fetch).mock.calls.find(([input, init]) =>
-        String(input) === '/api/devices/config' && init?.method === 'PUT')).toBeDefined();
+      expect(getConfigSaveCount()).toBeGreaterThan(initialConfigSaveCount);
     }, { timeout: 1500 });
   });
 

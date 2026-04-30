@@ -971,6 +971,10 @@ export function DevicesPage({
       : []
   ));
   const selectedDeviceMissing = selectedDeviceId != null && devices.length > 0 && visibleDeviceEntries.length === 0;
+  const isAddRoute = initialShowAddPicker;
+  const isDeviceDetailRoute = selectedDeviceId != null;
+  const showOverviewHeader = !isAddRoute && !isDeviceDetailRoute;
+  const showConfiguredDevices = !isAddRoute;
 
   devicesRef.current = devices;
 
@@ -1095,6 +1099,7 @@ export function DevicesPage({
       const data = (await response.json()) as DeviceConfigurationResponse;
       setDevices((current) => mergeDeviceConfigurations(data.devices, current));
       setRememberedDeviceIds(data.rememberedDeviceIds ?? []);
+      window.dispatchEvent(new Event('devices:config-changed'));
       setAutoSaveStatus('saved');
       window.setTimeout(() => {
         setAutoSaveStatus((current) => current === 'saved' ? 'idle' : current);
@@ -1123,6 +1128,11 @@ export function DevicesPage({
     setAutoSaveStatus('idle');
     setSaveDirty((value) => value + 1);
   }, [setAutoSaveTarget]);
+
+  const persistDevicesImmediately = useCallback(async (nextDevices: DeviceConfiguration[]) => {
+    setDevices(nextDevices);
+    return saveDevicesNow(nextDevices);
+  }, [saveDevicesNow]);
 
   const updateDevice = useCallback(<K extends keyof DeviceConfiguration>(index: number, key: K, value: DeviceConfiguration[K]) => {
     setDevices((current) => current.map((device, deviceIndex) => {
@@ -1381,20 +1391,20 @@ export function DevicesPage({
     const definition = explicitDefinition ?? definitionsRef.current.find((entry) => entry.id === definitionId);
     if (!definition || !definition.isTransportSupported) return;
     const definitionSnapshot = await loadDefinitionSnapshot(definitionId);
-    let nextDeviceId = '';
-
-    setDevices((current) => {
-      const nextDevice = defaultDevice(current.length + 1, definition, definitionSnapshot, current, familyName);
-      nextDeviceId = nextDevice.deviceId;
-      return [...current, nextDevice];
-    });
-    setShowAddPicker(false);
     setUploadError(null);
-    markDirty();
-    if (nextDeviceId) {
-      navigate(`/devices/${encodeURIComponent(nextDeviceId)}`);
+    const currentDevices = devicesRef.current;
+    const nextDevice = defaultDevice(currentDevices.length + 1, definition, definitionSnapshot, currentDevices, familyName);
+    const nextDevices = [...currentDevices, nextDevice];
+    const didSave = await persistDevicesImmediately(nextDevices);
+    if (!didSave) {
+      return;
     }
-  }, [loadDefinitionSnapshot, markDirty, navigate]);
+
+    setShowAddPicker(false);
+    if (nextDevice.deviceId) {
+      navigate(`/devices/${encodeURIComponent(nextDevice.deviceId)}`);
+    }
+  }, [loadDefinitionSnapshot, navigate, persistDevicesImmediately]);
 
   const openLibraryBleSelection = useCallback((definition: DeviceDefinitionSummary, familyName: string) => {
     const nextSelection = { definition, familyName } satisfies LibraryBleSelection;
@@ -1417,35 +1427,35 @@ export function DevicesPage({
       return;
     }
 
+    setUploadError(null);
+    const nextDevices = [...devicesRef.current];
     let firstAddedDeviceId = '';
-    setDevices((current) => {
-      const nextDevices = [...current];
-      for (const candidate of selectedDevices) {
-        const nextDevice = createBleDeviceFromCandidate(
-          libraryBleSelection.definition,
-          definitionSnapshot,
-          candidate,
-          nextDevices,
-          libraryBleSelection.familyName,
-        );
-        if (!firstAddedDeviceId) {
-          firstAddedDeviceId = nextDevice.deviceId;
-        }
-        nextDevices.push(nextDevice);
+    for (const candidate of selectedDevices) {
+      const nextDevice = createBleDeviceFromCandidate(
+        libraryBleSelection.definition,
+        definitionSnapshot,
+        candidate,
+        nextDevices,
+        libraryBleSelection.familyName,
+      );
+      if (!firstAddedDeviceId) {
+        firstAddedDeviceId = nextDevice.deviceId;
       }
+      nextDevices.push(nextDevice);
+    }
 
-      return nextDevices;
-    });
+    const didSave = await persistDevicesImmediately(nextDevices);
+    if (!didSave) {
+      return;
+    }
 
     setLibraryBleSelection(null);
     setSelectedLibraryBleAddresses([]);
     setShowAddPicker(false);
-    setUploadError(null);
-    markDirty();
     if (firstAddedDeviceId) {
       navigate(`/devices/${encodeURIComponent(firstAddedDeviceId)}`);
     }
-  }, [libraryBleSelection, loadDefinitionSnapshot, markDirty, navigate, selectedLibraryBleAddresses, visibleLibraryBleDevices]);
+  }, [libraryBleSelection, loadDefinitionSnapshot, navigate, persistDevicesImmediately, selectedLibraryBleAddresses, visibleLibraryBleDevices]);
 
   const addManualBleDevice = useCallback(async () => {
     if (!libraryBleSelection) {
@@ -1501,22 +1511,23 @@ export function DevicesPage({
           entityCount: definitionSnapshot.entities.length,
           dataSourceCount: definitionSnapshot.dataSources.length,
         };
-        let nextDeviceId = '';
-        setDevices((current) => {
-          const nextDevice = defaultDevice(current.length + 1, summary, definitionSnapshot, current, stripConnectionSuffix(summary.name));
-          nextDeviceId = nextDevice.deviceId;
-          return [...current, nextDevice];
-        });
+        const currentDevices = devicesRef.current;
+        const nextDevice = defaultDevice(currentDevices.length + 1, summary, definitionSnapshot, currentDevices, stripConnectionSuffix(summary.name));
+        const nextDevices = [...currentDevices, nextDevice];
+        const didSave = await persistDevicesImmediately(nextDevices);
+        if (!didSave) {
+          return;
+        }
+
         setShowAddPicker(false);
-        markDirty();
-        if (nextDeviceId) {
-          navigate(`/devices/${encodeURIComponent(nextDeviceId)}`);
+        if (nextDevice.deviceId) {
+          navigate(`/devices/${encodeURIComponent(nextDevice.deviceId)}`);
         }
       }
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : 'Upload failed.');
     }
-  }, [loadDefinitionSnapshot, markDirty, navigate, refreshDefinitions]);
+  }, [loadDefinitionSnapshot, navigate, persistDevicesImmediately, refreshDefinitions]);
 
   const removeDevice = useCallback((index: number) => {
     setDevices((current) => current
@@ -1592,21 +1603,14 @@ export function DevicesPage({
 
   return (
     <div className='mx-auto max-w-6xl space-y-6 pb-12'>
-      <div className='flex flex-col gap-2 border-b border-border pb-4 md:flex-row md:items-end md:justify-between'>
-        <div>
-          <h2 className='text-3xl font-bold tracking-tight text-foreground'>Devices</h2>
-          <p className='mt-2 text-sm text-muted-foreground'>
-            Add devices from the library or upload a definition JSON. Each device keeps its own definition snapshot, so transport, protocol, and polling overrides can be edited per device.
-          </p>
+      {showOverviewHeader ? (
+        <div className='flex flex-wrap gap-3'>
+          <Button type='button' variant='outline' size='lg' onClick={() => { setShowAddPicker(true); setUploadError(null); navigate('/devices/add'); }}>
+            <Plus className='h-4 w-4' />
+            Add device
+          </Button>
         </div>
-      </div>
-
-      <div className='flex flex-wrap gap-3'>
-        <Button type='button' variant='outline' size='lg' onClick={() => { setShowAddPicker(true); setUploadError(null); navigate('/devices/add'); }}>
-          <Plus className='h-4 w-4' />
-          Add device
-        </Button>
-      </div>
+      ) : null}
 
       {showAddPicker ? (
         <div className='rounded-2xl border border-border bg-card/70 p-5 shadow-sm'>
@@ -1774,7 +1778,7 @@ export function DevicesPage({
       {loadError ? <div className='rounded-xl border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive'>{loadError}</div> : null}
       {isLoading ? <div className='flex min-h-64 items-center justify-center rounded-2xl border border-border bg-card/60'><LoaderCircle className='h-6 w-6 animate-spin text-primary' /></div> : null}
 
-      {!isLoading ? (
+      {!isLoading && showConfiguredDevices ? (
         <div className='space-y-4'>
           {visibleDeviceEntries.map(({ device, index }) => {
             const definitionSummary = getDefinition(device, availableDefinitions);

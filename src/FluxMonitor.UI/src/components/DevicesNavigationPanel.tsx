@@ -70,6 +70,17 @@ export function DevicesNavigationPanel({ className }: { className?: string }) {
     void loadDevices();
   }, [loadDevices]);
 
+  useEffect(() => {
+    const handleDevicesChanged = () => {
+      void loadDevices();
+    };
+
+    window.addEventListener('devices:config-changed', handleDevicesChanged);
+    return () => {
+      window.removeEventListener('devices:config-changed', handleDevicesChanged);
+    };
+  }, [loadDevices]);
+
   const toggleDevice = useCallback(async (device: DeviceNavigationItem, enabled: boolean) => {
     setActions((current) => ({
       ...current,
