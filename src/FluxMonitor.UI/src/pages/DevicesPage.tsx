@@ -1,4 +1,5 @@
 import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ArrowDown, ArrowUp, Battery, Check, Droplets, LoaderCircle, Play, Plus, RotateCcw, Square, Thermometer, Trash2, Upload, X } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -871,15 +872,22 @@ function renderDefinitionEditorFields(
     });
 }
 
-export function DevicesPage() {
+export function DevicesPage({
+  initialShowAddPicker = false,
+  selectedDeviceId,
+}: {
+  initialShowAddPicker?: boolean;
+  selectedDeviceId?: string;
+}) {
   const { definitions: availableDefinitions, refresh: refreshDefinitions } = useDeviceDefinitions();
+  const navigate = useNavigate();
   const definitionFamilies = buildDefinitionFamilies(availableDefinitions);
   const [devices, setDevices] = useState<DeviceConfiguration[]>([]);
   const [rememberedDeviceIds, setRememberedDeviceIds] = useState<string[]>([]);
   const [ports, setPorts] = useState<string[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [showAddPicker, setShowAddPicker] = useState(false);
+  const [showAddPicker, setShowAddPicker] = useState(initialShowAddPicker);
   const [libraryBleSelection, setLibraryBleSelection] = useState<LibraryBleSelection | null>(null);
   const [selectedLibraryBleAddresses, setSelectedLibraryBleAddresses] = useState<string[]>([]);
   const [uploadError, setUploadError] = useState<string | null>(null);
@@ -910,8 +918,18 @@ export function DevicesPage() {
   const devicesRef = useRef<DeviceConfiguration[]>([]);
   const initialLoadDone = useRef(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const visibleDeviceEntries = devices.flatMap((device, index) => (
+    !selectedDeviceId || device.deviceId === selectedDeviceId
+      ? [{ device, index }]
+      : []
+  ));
+  const selectedDeviceMissing = selectedDeviceId != null && devices.length > 0 && visibleDeviceEntries.length === 0;
 
   devicesRef.current = devices;
+
+  useEffect(() => {
+    setShowAddPicker(initialShowAddPicker);
+  }, [initialShowAddPicker]);
 
   const setAutoSaveTarget = useCallback((target: SaveFieldTarget | null) => {
     autoSaveFieldRef.current = target;
@@ -1306,12 +1324,20 @@ export function DevicesPage() {
     const definition = explicitDefinition ?? definitionsRef.current.find((entry) => entry.id === definitionId);
     if (!definition || !definition.isTransportSupported) return;
     const definitionSnapshot = await loadDefinitionSnapshot(definitionId);
+    let nextDeviceId = '';
 
-    setDevices((current) => [...current, defaultDevice(current.length + 1, definition, definitionSnapshot, familyName)]);
+    setDevices((current) => {
+      const nextDevice = defaultDevice(current.length + 1, definition, definitionSnapshot, familyName);
+      nextDeviceId = nextDevice.deviceId;
+      return [...current, nextDevice];
+    });
     setShowAddPicker(false);
     setUploadError(null);
     markDirty();
-  }, [loadDefinitionSnapshot, markDirty]);
+    if (nextDeviceId) {
+      navigate(`/devices/${encodeURIComponent(nextDeviceId)}`);
+    }
+  }, [loadDefinitionSnapshot, markDirty, navigate]);
 
   const openLibraryBleSelection = useCallback((definition: DeviceDefinitionSummary, familyName: string) => {
     const nextSelection = { definition, familyName } satisfies LibraryBleSelection;
@@ -1334,16 +1360,21 @@ export function DevicesPage() {
       return;
     }
 
+    let firstAddedDeviceId = '';
     setDevices((current) => {
       const nextDevices = [...current];
       for (const candidate of selectedDevices) {
-        nextDevices.push(createBleDeviceFromCandidate(
+        const nextDevice = createBleDeviceFromCandidate(
           libraryBleSelection.definition,
           definitionSnapshot,
           candidate,
           nextDevices,
           libraryBleSelection.familyName,
-        ));
+        );
+        if (!firstAddedDeviceId) {
+          firstAddedDeviceId = nextDevice.deviceId;
+        }
+        nextDevices.push(nextDevice);
       }
 
       return nextDevices;
@@ -1354,7 +1385,10 @@ export function DevicesPage() {
     setShowAddPicker(false);
     setUploadError(null);
     markDirty();
-  }, [libraryBleSelection, loadDefinitionSnapshot, markDirty, selectedLibraryBleAddresses, visibleLibraryBleDevices]);
+    if (firstAddedDeviceId) {
+      navigate(`/devices/${encodeURIComponent(firstAddedDeviceId)}`);
+    }
+  }, [libraryBleSelection, loadDefinitionSnapshot, markDirty, navigate, selectedLibraryBleAddresses, visibleLibraryBleDevices]);
 
   const addManualBleDevice = useCallback(async () => {
     if (!libraryBleSelection) {
@@ -1410,14 +1444,22 @@ export function DevicesPage() {
           entityCount: definitionSnapshot.entities.length,
           dataSourceCount: definitionSnapshot.dataSources.length,
         };
-        setDevices((current) => [...current, defaultDevice(current.length + 1, summary, definitionSnapshot, stripConnectionSuffix(summary.name))]);
+        let nextDeviceId = '';
+        setDevices((current) => {
+          const nextDevice = defaultDevice(current.length + 1, summary, definitionSnapshot, stripConnectionSuffix(summary.name));
+          nextDeviceId = nextDevice.deviceId;
+          return [...current, nextDevice];
+        });
         setShowAddPicker(false);
         markDirty();
+        if (nextDeviceId) {
+          navigate(`/devices/${encodeURIComponent(nextDeviceId)}`);
+        }
       }
     } catch (error) {
       setUploadError(error instanceof Error ? error.message : 'Upload failed.');
     }
-  }, [loadDefinitionSnapshot, markDirty, refreshDefinitions]);
+  }, [loadDefinitionSnapshot, markDirty, navigate, refreshDefinitions]);
 
   const removeDevice = useCallback((index: number) => {
     setDevices((current) => current
@@ -1492,7 +1534,7 @@ export function DevicesPage() {
       </div>
 
       <div className='flex flex-wrap gap-3'>
-        <Button type='button' variant='outline' size='lg' onClick={() => setShowAddPicker(true)}>
+        <Button type='button' variant='outline' size='lg' onClick={() => { setShowAddPicker(true); setUploadError(null); navigate('/devices/add'); }}>
           <Plus className='h-4 w-4' />
           Add device
         </Button>
@@ -1502,7 +1544,7 @@ export function DevicesPage() {
         <div className='rounded-2xl border border-border bg-card/70 p-5 shadow-sm'>
           <div className='mb-4 flex items-center justify-between'>
             <h3 className='text-lg font-semibold text-foreground'>Add a new device</h3>
-            <Button type='button' variant='ghost' size='sm' onClick={() => { setShowAddPicker(false); setUploadError(null); }}>
+            <Button type='button' variant='ghost' size='sm' onClick={() => { setShowAddPicker(false); setUploadError(null); navigate('/devices'); }}>
               <X className='h-4 w-4' />
             </Button>
           </div>
@@ -1666,7 +1708,7 @@ export function DevicesPage() {
 
       {!isLoading ? (
         <div className='space-y-4'>
-          {devices.map((device, index) => {
+          {visibleDeviceEntries.map(({ device, index }) => {
             const definitionSummary = getDefinition(device, availableDefinitions);
             const definitionFamily = getFamilyForDefinition(device.definitionId, definitionFamilies);
             const connectionChoices = definitionFamily?.definitions ?? (definitionSummary ? [definitionSummary] : []);
@@ -2136,12 +2178,19 @@ export function DevicesPage() {
             );
           })}
 
+          {selectedDeviceMissing ? (
+            <div className='rounded-2xl border border-dashed border-border bg-card/40 px-6 py-12 text-center'>
+              <div className='text-lg font-semibold text-foreground'>Device not found</div>
+              <p className='mt-2 text-sm text-muted-foreground'>The selected device is not configured or no longer available.</p>
+            </div>
+          ) : null}
+
           {devices.length === 0 && !showAddPicker ? (
             <div className='rounded-2xl border border-dashed border-border bg-card/40 px-6 py-12 text-center'>
               <div className='text-lg font-semibold text-foreground'>No devices configured</div>
               <p className='mt-2 text-sm text-muted-foreground'>Add a device from the library or upload a definition JSON to get started.</p>
               <div className='mt-6'>
-                <Button type='button' onClick={() => setShowAddPicker(true)}>
+                <Button type='button' onClick={() => { setShowAddPicker(true); setUploadError(null); navigate('/devices/add'); }}>
                   <Plus className='h-4 w-4' />
                   Add first device
                 </Button>

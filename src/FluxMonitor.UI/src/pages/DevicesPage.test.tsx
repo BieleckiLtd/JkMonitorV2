@@ -1,6 +1,11 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { DevicesPage } from './DevicesPage';
+
+function renderPage(ui = <DevicesPage />) {
+  return render(<MemoryRouter>{ui}</MemoryRouter>);
+}
 
 describe('DevicesPage', () => {
   let holdFollowUpScan = false;
@@ -288,7 +293,7 @@ describe('DevicesPage', () => {
   });
 
   it('renders the BLE scan picker for supported BLE definitions and can fall back to manual add', async () => {
-    render(<DevicesPage />);
+    renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /add first device/i }));
     expect(await screen.findByText(/^JK Inverter BMS$/i)).toBeInTheDocument();
@@ -309,7 +314,7 @@ describe('DevicesPage', () => {
   it('shows quick BLE results before the follow-up scan completes', async () => {
     holdFollowUpScan = true;
 
-    render(<DevicesPage />);
+    renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /add first device/i }));
     fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using bluetooth/i }));
@@ -367,7 +372,7 @@ describe('DevicesPage', () => {
       },
     ];
 
-    render(<DevicesPage />);
+    renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /add device/i }));
     fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using bluetooth/i }));
@@ -380,7 +385,7 @@ describe('DevicesPage', () => {
   });
 
   it('lets a stopped device switch connection without changing its device id', async () => {
-    render(<DevicesPage />);
+    renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /add first device/i }));
     fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using usb \/ serial/i }));
@@ -400,7 +405,7 @@ describe('DevicesPage', () => {
   });
 
   it('shows a waiting message instead of a blank first-poll failure when start is still in progress', async () => {
-    render(<DevicesPage />);
+    renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /add first device/i }));
     fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using bluetooth/i }));
@@ -421,7 +426,7 @@ describe('DevicesPage', () => {
   });
 
   it('keeps focus while editing the device id', async () => {
-    render(<DevicesPage />);
+    renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /add first device/i }));
     fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using usb \/ serial/i }));
@@ -437,7 +442,7 @@ describe('DevicesPage', () => {
   });
 
   it('does not autosave device id changes until the field loses focus', async () => {
-    render(<DevicesPage />);
+    renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /add first device/i }));
     fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using usb \/ serial/i }));
@@ -498,7 +503,7 @@ describe('DevicesPage', () => {
     ];
     initialRememberedDeviceIds = ['device-1', 'legacy-a', 'legacy-b'];
 
-    render(<DevicesPage />);
+    renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /add device/i }));
     fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using usb \/ serial/i }));
@@ -560,7 +565,7 @@ describe('DevicesPage', () => {
       },
     ];
 
-    render(<DevicesPage />);
+    renderPage();
 
     fireEvent.click(await screen.findByText(/definition overrides/i));
 
@@ -641,7 +646,7 @@ describe('DevicesPage', () => {
       },
     ];
 
-    render(<DevicesPage />);
+    renderPage();
 
     fireEvent.click(await screen.findByRole('button', { name: /move battery 1 down/i }));
 
@@ -657,5 +662,67 @@ describe('DevicesPage', () => {
       expect(body.devices.map((device) => device.deviceId)).toEqual(['device-2', 'device-1']);
       expect(body.devices.map((device) => device.sortOrder)).toEqual([0, 1]);
     });
+  });
+
+  it('renders only the selected device card for a routed device page', async () => {
+    initialDevicesResponse = [
+      {
+        persistedId: 1,
+        deviceId: 'device-1',
+        displayName: 'Battery 1',
+        definitionId: 'jk-inverter-bms',
+        definitionVersion: '1.0.0',
+        transportPortName: 'COM3',
+        bleSettingsPin: null,
+        address: 1,
+        isMaster: false,
+        pollIntervalMilliseconds: 1000,
+        enabled: false,
+        cellVoltageSmoothingFactor: 0,
+        cellVoltageSmoothingBreakoutMillivolts: 0,
+        displayPrecision: {
+          voltage: 2,
+          cellVoltage: 3,
+          current: 1,
+          power: 0,
+          temperature: 1,
+          soc: 0,
+          deltaVoltage: 3,
+        },
+        hasDefinitionOverride: false,
+        definition: definitionDetailsById['jk-inverter-bms'],
+      },
+      {
+        persistedId: 2,
+        deviceId: 'device-2',
+        displayName: 'Battery 2',
+        definitionId: 'jk-inverter-bms',
+        definitionVersion: '1.0.0',
+        transportPortName: 'COM4',
+        bleSettingsPin: null,
+        address: 2,
+        isMaster: false,
+        pollIntervalMilliseconds: 1000,
+        enabled: false,
+        cellVoltageSmoothingFactor: 0,
+        cellVoltageSmoothingBreakoutMillivolts: 0,
+        displayPrecision: {
+          voltage: 2,
+          cellVoltage: 3,
+          current: 1,
+          power: 0,
+          temperature: 1,
+          soc: 0,
+          deltaVoltage: 3,
+        },
+        hasDefinitionOverride: false,
+        definition: definitionDetailsById['jk-inverter-bms'],
+      },
+    ];
+
+    renderPage(<DevicesPage selectedDeviceId='device-2' />);
+
+    expect(await screen.findByText('Battery 2')).toBeInTheDocument();
+    expect(screen.queryByText('Battery 1')).not.toBeInTheDocument();
   });
 });

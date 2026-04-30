@@ -1,5 +1,6 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { type ReactNode } from 'react';
+import { DevicesNavigationPanel } from '../components/DevicesNavigationPanel';
 import { PrimaryNavigationPanel, PrimaryNavigationEmptyState } from '../components/PrimaryNavigationPanel';
 import { SystemNavigationPanel } from '../components/SystemNavigationPanel';
 import { useSetAppBar } from '../components/AppBar';
@@ -21,7 +22,12 @@ export function PrimaryNavigationLayout() {
   const systemChildId = systemChildMatch?.[1] ?? null;
   const isSystemChild = systemChildId !== null;
   const isSystemRoute = isSystemRoot || isSystemChild;
-  const isPrimaryPage = !isRoot && !isSystemRoute;
+  const isDevicesRoot = pathname === '/devices';
+  const deviceChildMatch = pathname.match(/^\/devices\/([^/]+)/);
+  const deviceChildId = deviceChildMatch?.[1] ?? null;
+  const isDevicesChild = deviceChildId !== null;
+  const isDevicesRoute = isDevicesRoot || isDevicesChild;
+  const isPrimaryPage = !isRoot && !isSystemRoute && !isDevicesRoute;
 
   const shouldRedirect = isSystemRoot && menuSlots >= 2;
 
@@ -76,6 +82,36 @@ export function PrimaryNavigationLayout() {
     return <Outlet />;
   }
 
+  // ── Devices root (/devices) ────────────────────────────────────────
+  if (isDevicesRoot) {
+    return menuSlots === 0
+      ? <DevicesNavigationPanel />
+      : (
+          <MenuAndContent menu={<PrimaryNavigationPanel />}>
+            <DevicesNavigationPanel />
+          </MenuAndContent>
+        );
+  }
+
+  // ── Device pages (/devices/add, /devices/:deviceId) ────────────────
+  if (isDevicesChild) {
+    if (menuSlots >= 2) {
+      return (
+        <TwoMenusAndContent menu1={<PrimaryNavigationPanel />} menu2={<DevicesNavigationPanel />}>
+          <Outlet />
+        </TwoMenusAndContent>
+      );
+    }
+    if (menuSlots === 1) {
+      return (
+        <MenuAndContent menu={<DevicesNavigationPanel />}>
+          <Outlet />
+        </MenuAndContent>
+      );
+    }
+    return <Outlet />;
+  }
+
   // ── Primary pages (/monitor, /devices, /services) ──────────────────
   if (menuSlots >= 1) {
     return (
@@ -98,6 +134,11 @@ function computeAppBarState(
   systemChildId: string | null,
   isPrimaryPage: boolean,
 ) {
+  const isDevicesRoot = pathname === '/devices';
+  const deviceChildMatch = pathname.match(/^\/devices\/([^/]+)/);
+  const deviceChildId = deviceChildMatch?.[1] ?? null;
+  const isDevicesChild = deviceChildId !== null;
+
   if (isRoot) {
     return { title: 'FLUX_MONITOR', description: '' };
   }
@@ -117,6 +158,24 @@ function computeAppBarState(
       return { title: item.label, description: item.description, backTo };
     }
     return { title: 'System', description: '', backTo: '/system' };
+  }
+
+  if (isDevicesRoot) {
+    return {
+      title: 'Devices',
+      description: 'Select a device readout or add a new one',
+      backTo: menuSlots === 0 ? '/' : undefined,
+    };
+  }
+
+  if (isDevicesChild && deviceChildId) {
+    return {
+      title: deviceChildId === 'add' ? 'Add a new device' : 'Devices',
+      description: deviceChildId === 'add'
+        ? 'Add a device from the library or upload a definition'
+        : 'Live telemetry and quick readout controls',
+      backTo: menuSlots < 2 ? '/devices' : undefined,
+    };
   }
 
   if (isPrimaryPage) {

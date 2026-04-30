@@ -1,4 +1,4 @@
-import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter as Router, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { useEffect } from 'react';
 import { useAppStore } from './store/useAppStore';
 import { MainLayout } from './layouts/MainLayout';
@@ -48,7 +48,9 @@ function App() {
             />
             <Route path='/system/:sectionId' element={<SystemPage />} />
             <Route path='/monitor' element={<PageContent><MonitorPage /></PageContent>} />
-            <Route path='/devices' element={<PageContent><DevicesPage /></PageContent>} />
+            <Route path='/devices' element={null} />
+            <Route path='/devices/add' element={<PageContent><DevicesPage initialShowAddPicker /></PageContent>} />
+            <Route path='/devices/:deviceId' element={<PageContent><RoutedDevicePage /></PageContent>} />
             <Route path='/services' element={<PageContent><ServicesPage /></PageContent>} />
             <Route path='/notifications' element={<Navigate to='/system/notifications' replace />} />
             <Route path='/settings' element={<Navigate to='/system/theme' replace />} />
@@ -64,4 +66,10 @@ export default App;
 
 function PageContent({ children }: { children: React.ReactNode }) {
   return <div className='space-y-6 pb-8'>{children}</div>;
+}
+
+function RoutedDevicePage() {
+  const { deviceId } = useParams();
+
+  return <DevicesPage selectedDeviceId={deviceId ? decodeURIComponent(deviceId) : undefined} />;
 }

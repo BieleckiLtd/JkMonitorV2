@@ -48,7 +48,9 @@ function renderLayout(initialEntry = '/') {
         <Route element={<PrimaryNavigationLayout />}>
           <Route path='/' element={<div>Home workspace</div>} />
           <Route path='/monitor' element={<div>Monitor workspace</div>} />
-          <Route path='/devices' element={<div>Devices workspace</div>} />
+          <Route path='/devices' element={null} />
+          <Route path='/devices/add' element={<div>Add device workspace</div>} />
+          <Route path='/devices/:deviceId' element={<div>Device workspace</div>} />
         </Route>
       </Routes>
     </MemoryRouter>
@@ -61,6 +63,19 @@ describe('PrimaryNavigationLayout', () => {
   beforeEach(() => {
     matchMediaMock = createMatchMediaMock(true);
     window.matchMedia = vi.fn().mockImplementation(() => matchMediaMock);
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        devices: [
+          {
+            deviceId: 'device-1',
+            displayName: 'Battery 1',
+            enabled: true,
+            sortOrder: 0,
+          },
+        ],
+      }),
+    } as Response) as typeof fetch;
   });
 
   afterEach(() => {
@@ -84,12 +99,21 @@ describe('PrimaryNavigationLayout', () => {
     expect(screen.queryByText('Open a section')).not.toBeInTheDocument();
   });
 
+  it('shows the devices submenu beside a routed device page at tablet widths', async () => {
+    renderLayout('/devices/device-1');
+
+    expect(screen.getByRole('navigation', { name: /primary navigation/i })).toBeInTheDocument();
+    expect(await screen.findByRole('navigation', { name: /devices navigation/i })).toBeInTheDocument();
+    expect(screen.getByText('Device workspace')).toBeInTheDocument();
+    expect(screen.getByText('Battery 1')).toBeInTheDocument();
+  });
+
   it('falls back to rendering only the active route below the split breakpoint', () => {
     matchMediaMock.dispatchChange(false);
 
-    renderLayout('/devices');
+    renderLayout('/devices/device-1');
 
     expect(screen.queryByRole('navigation', { name: /primary navigation/i })).not.toBeInTheDocument();
-    expect(screen.getByText('Devices workspace')).toBeInTheDocument();
+    expect(screen.getByText('Device workspace')).toBeInTheDocument();
   });
 });
