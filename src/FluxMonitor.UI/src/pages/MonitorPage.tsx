@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Activity, AlertTriangle, Battery, BatteryCharging, Check, ChevronDown, ChevronUp, Edit2, Gauge, Leaf, LoaderCircle, Shield, Thermometer, X, Zap } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { HistoryCharts } from '../components/HistoryCharts';
@@ -780,6 +780,7 @@ function ParameterRow({
   const [editValue, setEditValue] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [writeResult, setWriteResult] = useState<{ success: boolean; message: string } | null>(null);
+  const skipNextBlurSaveRef = useRef(false);
   const isSwitchSetting = isSwitchSettingParam(param.key);
   const displayName = getParameterDisplayName(param);
   const statusChip = getSwitchStatusChip(param, telemetry, paramByKey);
@@ -810,6 +811,10 @@ function ParameterRow({
   const cancelEdit = useCallback(() => {
     setIsEditing(false);
     setWriteResult(null);
+  }, []);
+
+  const suppressNextBlurSave = useCallback(() => {
+    skipNextBlurSaveRef.current = true;
   }, []);
 
   const saveValue = useCallback(async () => {
@@ -856,6 +861,17 @@ function ParameterRow({
     }
   }, [deviceId, editValue, entity, param, temperatureUnit]);
 
+  const handleBlurSave = useCallback(() => {
+    if (skipNextBlurSaveRef.current) {
+      skipNextBlurSaveRef.current = false;
+      return;
+    }
+
+    if (!isSaving) {
+      void saveValue();
+    }
+  }, [isSaving, saveValue]);
+
   return (
     <div className='rounded-lg border border-border/50 bg-background/40 px-3 py-2'>
       <div className={cn(
@@ -885,6 +901,7 @@ function ParameterRow({
                   className='min-w-0 w-full rounded border border-border bg-background px-2 py-0.5 text-sm font-semibold text-foreground outline-none focus:border-primary sm:max-w-full sm:flex-1'
                   value={editValue}
                   onChange={e => setEditValue(e.target.value)}
+                  onBlur={handleBlurSave}
                   disabled={isSaving}
                   autoFocus
                 >
@@ -903,6 +920,7 @@ function ParameterRow({
                     className='w-full rounded border border-border bg-background px-2 py-0.5 text-sm font-semibold text-foreground outline-none focus:border-primary sm:w-24'
                     value={editValue}
                     onChange={e => setEditValue(e.target.value)}
+                    onBlur={handleBlurSave}
                     onKeyDown={e => { if (e.key === 'Enter') void saveValue(); if (e.key === 'Escape') cancelEdit(); }}
                     disabled={isSaving}
                     autoFocus
@@ -910,11 +928,11 @@ function ParameterRow({
                   {editValueUnit && <span className='text-[10px] text-muted-foreground/60'>{editValueUnit}</span>}
                 </>
               )}
-              <button onClick={() => void saveValue()} disabled={isSaving}
+              <button onPointerDown={suppressNextBlurSave} onClick={() => void saveValue()} disabled={isSaving}
                 className='rounded p-1 text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50'>
                 {isSaving ? <LoaderCircle className='h-3.5 w-3.5 animate-spin' /> : <Check className='h-3.5 w-3.5' />}
               </button>
-              <button onClick={cancelEdit} disabled={isSaving}
+              <button onPointerDown={suppressNextBlurSave} onClick={cancelEdit} disabled={isSaving}
                 className='rounded p-1 text-muted-foreground hover:bg-muted/50 disabled:opacity-50'>
                 <X className='h-3.5 w-3.5' />
               </button>
@@ -1044,6 +1062,7 @@ function CombinedClockParameterRow({
   const [editValue, setEditValue] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [writeResult, setWriteResult] = useState<ParameterWriteResult | null>(null);
+  const skipNextBlurSaveRef = useRef(false);
   const displayValue = formatCombinedClockDisplayValue(params);
 
   const startEdit = useCallback(() => {
@@ -1055,6 +1074,10 @@ function CombinedClockParameterRow({
   const cancelEdit = useCallback(() => {
     setIsEditing(false);
     setWriteResult(null);
+  }, []);
+
+  const suppressNextBlurSave = useCallback(() => {
+    skipNextBlurSaveRef.current = true;
   }, []);
 
   const saveValue = useCallback(async () => {
@@ -1105,6 +1128,17 @@ function CombinedClockParameterRow({
     }
   }, [deviceId, editValue, temperatureUnit]);
 
+  const handleBlurSave = useCallback(() => {
+    if (skipNextBlurSaveRef.current) {
+      skipNextBlurSaveRef.current = false;
+      return;
+    }
+
+    if (!isSaving) {
+      void saveValue();
+    }
+  }, [isSaving, saveValue]);
+
   return (
     <div className='rounded-lg border border-border/50 bg-background/40 px-3 py-2'>
       <div className='flex items-center justify-between gap-3'>
@@ -1121,6 +1155,7 @@ function CombinedClockParameterRow({
                 className='rounded border border-border bg-background px-2 py-0.5 text-sm font-semibold text-foreground outline-none focus:border-primary'
                 value={editValue}
                 onChange={(event) => setEditValue(event.target.value)}
+                onBlur={handleBlurSave}
                 onKeyDown={(event) => {
                   if (event.key === 'Enter') void saveValue();
                   if (event.key === 'Escape') cancelEdit();
@@ -1128,12 +1163,12 @@ function CombinedClockParameterRow({
                 disabled={isSaving}
                 autoFocus
               />
-              <button onClick={() => void saveValue()} disabled={isSaving}
+              <button onPointerDown={suppressNextBlurSave} onClick={() => void saveValue()} disabled={isSaving}
                 aria-label='Save date and time'
                 className='rounded p-1 text-emerald-400 hover:bg-emerald-500/20 disabled:opacity-50'>
                 {isSaving ? <LoaderCircle className='h-3.5 w-3.5 animate-spin' /> : <Check className='h-3.5 w-3.5' />}
               </button>
-              <button onClick={cancelEdit} disabled={isSaving}
+              <button onPointerDown={suppressNextBlurSave} onClick={cancelEdit} disabled={isSaving}
                 aria-label='Cancel date and time edit'
                 className='rounded p-1 text-muted-foreground hover:bg-muted/50 disabled:opacity-50'>
                 <X className='h-3.5 w-3.5' />
