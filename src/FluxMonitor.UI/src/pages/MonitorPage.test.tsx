@@ -790,7 +790,7 @@ describe('MonitorPage', () => {
                 type: 'parameter-table',
                 title: 'Configuration',
                 filter: {
-                  categories: ['Cell Protection', 'Current Protection', 'Thermal Protection', 'Balance Settings', 'SOC Settings', 'System', 'Charging', 'Discharging', 'Communication', 'Triggers', 'F2 Charger'],
+                  categories: ['Cell Protection', 'Current Protection', 'Thermal Protection', 'Balance Settings', 'SOC Settings', 'System', 'Charging', 'Discharging', 'Communication', 'Triggers', 'Device Info', 'F2 Charger'],
                 },
                 groupBy: 'category',
               },
@@ -855,9 +855,17 @@ describe('MonitorPage', () => {
               { key: 'battery_temp_2', displayName: 'Battery Temp 2', category: 'Thermal Protection', numericValue: 20.122, sortOrder: 6, unit: '°C' },
               { key: 'battery_temp_3', displayName: 'Battery Temp 3', category: 'Thermal Protection', numericValue: 19.866, sortOrder: 7, unit: '°C' },
               { key: 'charge_status', displayName: 'Charge Status', category: 'Charging', numericValue: 2, rawValue: 2, stringValue: 'Float', sortOrder: 8, unit: '' },
+              { key: 'discharge_status', displayName: 'Discharge Status', category: 'Discharging', numericValue: 1, rawValue: 1, stringValue: 'Enabled', sortOrder: 8, unit: '' },
+              { key: 'max_charge_current', displayName: 'Max Charge Current', category: 'Charging', numericValue: 80, rawValue: 80, sortOrder: 8, isWritable: true, unit: 'A' },
+              { key: 'max_discharge_current', displayName: 'Max Discharge Current', category: 'Discharging', numericValue: 120, rawValue: 120, sortOrder: 8, isWritable: true, unit: 'A' },
               { key: 'charge_status_time_elapsed', displayName: 'Charge Status Time', category: 'Charging', numericValue: 90, sortOrder: 9, unit: 's' },
               { key: 'cell_request_charge_voltage_time', displayName: 'RCV Time', category: 'Charging', numericValue: 0.1, rawValue: 1, sortOrder: 10, isWritable: true, unit: 'h' },
               { key: 'cell_request_float_voltage_time', displayName: 'RFV Time', category: 'Charging', numericValue: 0.2, rawValue: 2, sortOrder: 11, isWritable: true, unit: 'h' },
+              { key: 'cell_overvoltage_protection', displayName: 'Cell OVP', category: 'Cell Protection', numericValue: 3.65, sortOrder: 11, isWritable: true, unit: 'V' },
+              { key: 'charge_overcurrent_protection', displayName: 'Charge OCP', category: 'Current Protection', numericValue: 120, sortOrder: 11, isWritable: true, unit: 'A' },
+              { key: 'balance_trigger_voltage', displayName: 'Balance Trigger Voltage', category: 'Balance Settings', numericValue: 3.4, sortOrder: 11, isWritable: true, unit: 'V' },
+              { key: 'soc_100_voltage', displayName: 'SOC 100% Voltage', category: 'SOC Settings', numericValue: 56.8, sortOrder: 11, isWritable: true, unit: 'V' },
+              { key: 'soc_0_voltage', displayName: 'SOC 0% Voltage', category: 'SOC Settings', numericValue: 44.8, sortOrder: 11, isWritable: true, unit: 'V' },
               { key: 'heating_status', displayName: 'Heating Status', category: 'System', booleanValue: false, sortOrder: 10, unit: '' },
               { key: 'heating_current', displayName: 'Heat Current', category: 'System', numericValue: 0.511, sortOrder: 11, unit: 'A' },
               { key: 'emergency_time_countdown', displayName: 'Emergency Timer', category: 'System', numericValue: 45, sortOrder: 12, unit: 's' },
@@ -880,6 +888,7 @@ describe('MonitorPage', () => {
               { key: 'uart3_protocol', displayName: 'UART 3 Protocol', category: 'Communication', numericValue: 15, sortOrder: 29, isWritable: true, unit: '' },
               { key: 'charge_switch', displayName: 'Charge Switch', category: 'Charging', numericValue: 1, rawValue: 1, sortOrder: 29, isWritable: true, unit: '' },
               { key: 'voltage_calibration', displayName: 'Voltage Calibration', category: 'System', numericValue: 53.2, rawValue: 53200, sortOrder: 30, isWritable: true, unit: 'V' },
+              { key: 'serial_number', displayName: 'Serial Number', category: 'Device Info', stringValue: 'JK-001', sortOrder: 31, unit: '' },
             ],
           },
         },
@@ -898,16 +907,45 @@ describe('MonitorPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /house battery/i }));
 
     expect(await screen.findByTestId('history-charts')).toHaveTextContent('History for jk-1');
-    fireEvent.click(screen.getByRole('button', { name: 'Thermal Protection section' }));
+  const chargingSection = screen.getByRole('button', { name: 'Charging section' });
+  const dischargingSection = screen.getByRole('button', { name: 'Discharging section' });
+  const balanceSection = screen.getByRole('button', { name: 'Balance Settings section' });
+  const cellProtectionSection = screen.getByRole('button', { name: 'Cell Protection section' });
+  const currentProtectionSection = screen.getByRole('button', { name: 'Current Protection section' });
+  const thermalSection = screen.getByRole('button', { name: 'Thermal Protection section' });
+  const triggersSection = screen.getByRole('button', { name: 'Triggers section' });
+  const communicationSection = screen.getByRole('button', { name: 'Communication section' });
+  const systemSection = screen.getByRole('button', { name: 'System section' });
+  const deviceInfoSection = screen.getByRole('button', { name: 'Device Info section' });
+  expect(screen.queryByRole('button', { name: 'SOC Settings section' })).not.toBeInTheDocument();
+  expect(chargingSection.compareDocumentPosition(dischargingSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(dischargingSection.compareDocumentPosition(balanceSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(balanceSection.compareDocumentPosition(cellProtectionSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(cellProtectionSection.compareDocumentPosition(currentProtectionSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(currentProtectionSection.compareDocumentPosition(thermalSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(thermalSection.compareDocumentPosition(triggersSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(triggersSection.compareDocumentPosition(communicationSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(communicationSection.compareDocumentPosition(systemSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  expect(systemSection.compareDocumentPosition(deviceInfoSection) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+  fireEvent.click(thermalSection);
     expect(screen.getByText('Battery Temp 3')).toBeInTheDocument();
     expect(screen.getByText('MOS Temperature')).toBeInTheDocument();
     expect(screen.getByText('21.7')).toBeInTheDocument();
     expect(screen.getByText('19.9')).toBeInTheDocument();
     expect(screen.queryByText('21.733')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Charging section' }));
+    fireEvent.click(currentProtectionSection);
+    expect(screen.getByText('Max Charge Current')).toBeInTheDocument();
+    expect(screen.getByText('Max Discharge Current')).toBeInTheDocument();
+    expect(screen.getByText('Charge OCP')).toBeInTheDocument();
+    expect(screen.getByText('Max Charge Current').compareDocumentPosition(screen.getByText('Charge OCP')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText('Max Discharge Current').compareDocumentPosition(screen.getByText('Charge OCP')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+  fireEvent.click(chargingSection);
     expect(screen.getByText('Charge Status')).toBeInTheDocument();
     expect(screen.getByText('Charge Status Time')).toBeInTheDocument();
+    expect(screen.getAllByText('Max Charge Current').length).toBeGreaterThan(1);
     const chargingSwitchLabel = screen.getAllByText('Charging').find((element) => element.tagName === 'SPAN');
     expect(chargingSwitchLabel).toBeInTheDocument();
     expect(screen.getByText('Active')).toBeInTheDocument();
@@ -916,10 +954,17 @@ describe('MonitorPage', () => {
     expect(screen.getByText('0.1')).toBeInTheDocument();
     expect(screen.getByText('0.2')).toBeInTheDocument();
     expect(chargingSwitchLabel?.compareDocumentPosition(screen.getByText('Charge Status')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText('SOC 100% Voltage')).toBeInTheDocument();
+    expect(screen.getByText('SOC 0% Voltage')).toBeInTheDocument();
+    expect(screen.getByText('Charge Status').compareDocumentPosition(screen.getByText('SOC 100% Voltage')) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.getAllByText((_, element) => element?.textContent === '0.1 h').length).toBeGreaterThan(0);
     expect(screen.getAllByText((_, element) => element?.textContent === '0.2 h').length).toBeGreaterThan(0);
 
-    fireEvent.click(screen.getByRole('button', { name: 'System section' }));
+    fireEvent.click(dischargingSection);
+    expect(screen.getByText('Discharge Status')).toBeInTheDocument();
+    expect(screen.getAllByText('Max Discharge Current').length).toBeGreaterThan(1);
+
+    fireEvent.click(systemSection);
     expect(screen.getByText('Heating Status')).toBeInTheDocument();
     expect(screen.getByText('Heat Current')).toBeInTheDocument();
     expect(screen.getByText('Time Enter Sleep')).toBeInTheDocument();
@@ -928,19 +973,23 @@ describe('MonitorPage', () => {
     expect(screen.getByText('Voltage Calibration')).toBeInTheDocument();
     expect(screen.queryByText('LCD Buzzer Trigger')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Communication section' }));
+    fireEvent.click(communicationSection);
     expect(screen.getByText('UART 1 Protocol')).toBeInTheDocument();
     expect(screen.getByText('CAN Protocol')).toBeInTheDocument();
     expect(screen.getByText('UART 2 Protocol')).toBeInTheDocument();
     expect(screen.getByText('UART 3 Protocol')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('button', { name: 'Triggers section' }));
+    fireEvent.click(triggersSection);
     expect(screen.getByText('LCD Buzzer Trigger')).toBeInTheDocument();
     expect(screen.getByText('LCD Buzzer Trigger Value')).toBeInTheDocument();
     expect(screen.getByText('DRY 1 Trigger')).toBeInTheDocument();
     expect(screen.getByText('DRY 2 Release Value')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Edit LCD Buzzer Trigger' })).toBeEnabled();
     expect(screen.getByRole('button', { name: 'Edit DRY 2 Release Value' })).toBeEnabled();
+
+    fireEvent.click(deviceInfoSection);
+    expect(screen.getByText('Serial Number')).toBeInTheDocument();
+    expect(screen.getByText('JK-001')).toBeInTheDocument();
   });
 
   it('renders inverter cards as compact expandable summaries with synchronized power units and header badges', async () => {

@@ -95,6 +95,28 @@ type ResolvedStatusGlyph = {
   variant?: 'icon' | 'badge';
 };
 
+const parameterCategoryMergeMap: Record<string, string> = {
+  'SOC Settings': 'Charging',
+};
+
+const preferredParameterCategoryOrder = [
+  'Charging',
+  'Discharging',
+  'Balance Settings',
+  'Cell Protection',
+  'Current Protection',
+  'Thermal Protection',
+  'Triggers',
+  'Communication',
+  'System',
+  'Device Info',
+] as const;
+
+const repeatedCurrentProtectionParameterKeys = [
+  'max_charge_current',
+  'max_discharge_current',
+] as const;
+
 export function MonitorPage() {
   const [devices, setDevices] = useState<DeviceRuntimeState[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -298,7 +320,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
   // Group parameters by category
   const grouped = new Map<string, DeviceParameter[]>();
   for (const param of parameters) {
-    const cat = param.category;
+    const cat = normalizeParameterCategory(param.category);
     if (!grouped.has(cat)) grouped.set(cat, []);
     grouped.get(cat)!.push(param);
   }
@@ -950,9 +972,10 @@ function ParameterCategoryCard({
 }) {
   const [isExpanded, setIsExpanded] = useState(false);
   const combinedClockParams = getCombinedClockParams(params, definition);
+  const repeatedCurrentProtectionParams = getRepeatedCurrentProtectionParams(category, params, paramByKey);
   const visibleParams = combinedClockParams == null
-    ? params
-    : params.filter((param) => !inverterClockParameterKeySet.has(param.key));
+    ? [...repeatedCurrentProtectionParams, ...params]
+    : [...repeatedCurrentProtectionParams, ...params.filter((param) => !inverterClockParameterKeySet.has(param.key))];
   const orderedVisibleParams = [...visibleParams].sort((left, right) => getParameterCategoryPriority(left) - getParameterCategoryPriority(right));
   const displayCategory = formatCategoryTitle(category);
 
@@ -2019,10 +2042,12 @@ function filterParams(allParams: DeviceParameter[], section: UiSectionDefinition
 function groupByCategory(params: DeviceParameter[]): Map<string, DeviceParameter[]> {
   const map = new Map<string, DeviceParameter[]>();
   for (const p of params) {
-    if (!map.has(p.category)) map.set(p.category, []);
-    map.get(p.category)!.push(p);
+    const category = normalizeParameterCategory(p.category);
+    if (!map.has(category)) map.set(category, []);
+    map.get(category)!.push(p);
   }
-  return map;
+
+  return new Map(orderParameterCategories([...map.keys()]).map((category) => [category, map.get(category)!]));
 }
 
 /** Returns sorted category names. Uses definition entity order when available, otherwise legacy fallback. */
@@ -2032,16 +2057,18 @@ function getSortedCategories(grouped: Map<string, DeviceParameter[]>, definition
     const seen = new Set<string>();
     const ordered: string[] = [];
     for (const e of definition.entities) {
-      if (!seen.has(e.category) && grouped.has(e.category)) {
-        seen.add(e.category);
-        ordered.push(e.category);
+      const category = normalizeParameterCategory(e.category);
+      if (!seen.has(category) && grouped.has(category)) {
+        seen.add(category);
+        ordered.push(category);
       }
     }
     if (definition.computedEntities) {
       for (const e of definition.computedEntities) {
-        if (!seen.has(e.category) && grouped.has(e.category)) {
-          seen.add(e.category);
-          ordered.push(e.category);
+        const category = normalizeParameterCategory(e.category);
+        if (!seen.has(category) && grouped.has(category)) {
+          seen.add(category);
+          ordered.push(category);
         }
       }
     }
@@ -2049,11 +2076,38 @@ function getSortedCategories(grouped: Map<string, DeviceParameter[]>, definition
     for (const cat of grouped.keys()) {
       if (!seen.has(cat)) ordered.push(cat);
     }
-    return ordered;
+
+    return orderParameterCategories(ordered);
   }
 
   // Fallback: alphabetical order when no definition
-  return [...grouped.keys()].sort((a, b) => a.localeCompare(b));
+  return orderParameterCategories([...grouped.keys()].sort((a, b) => a.localeCompare(b)));
+}
+
+function normalizeParameterCategory(category: string) {
+  return parameterCategoryMergeMap[category] ?? category;
+}
+
+function orderParameterCategories(categories: readonly string[]) {
+  const normalizedCategories: string[] = [];
+  const seen = new Set<string>();
+
+  for (const category of categories) {
+    const normalizedCategory = normalizeParameterCategory(category);
+    if (seen.has(normalizedCategory)) {
+      continue;
+    }
+
+    seen.add(normalizedCategory);
+    normalizedCategories.push(normalizedCategory);
+  }
+
+  const preferredSet = new Set<string>(preferredParameterCategoryOrder);
+
+  return [
+    ...preferredParameterCategoryOrder.filter((category) => seen.has(category)),
+    ...normalizedCategories.filter((category) => !preferredSet.has(category)),
+  ];
 }
 
 function CategoryIcon({ category }: { category: string }) {
@@ -2093,6 +2147,23 @@ function formatCategoryTitle(category: string) {
     : category;
 }
 
+function getRepeatedCurrentProtectionParams(
+  category: string,
+  params: DeviceParameter[],
+  paramByKey: Map<string, DeviceParameter>,
+) {
+  if (category !== 'Current Protection') {
+    return [];
+  }
+
+  const existingKeys = new Set(params.map((param) => param.key));
+
+  return repeatedCurrentProtectionParameterKeys
+    .filter((key) => !existingKeys.has(key))
+    .map((key) => paramByKey.get(key))
+    .filter((param): param is DeviceParameter => param != null);
+}
+
 function getParameterDisplayName(param: DeviceParameter): string {
   switch (param.key) {
     case 'charge_switch':
@@ -2107,6 +2178,14 @@ function getParameterDisplayName(param: DeviceParameter): string {
 }
 
 function getParameterCategoryPriority(param: DeviceParameter): number {
+  if (param.key === 'max_charge_current') {
+    return -2;
+  }
+
+  if (param.key === 'max_discharge_current') {
+    return -1;
+  }
+
   return isSwitchSettingParam(param.key) ? 0 : 1;
 }
 
