@@ -16,6 +16,9 @@ internal static class BluetoothFailureHints
     private const string BluetoothNotReadyHint =
         "Bluetooth is not ready. Turn Bluetooth on in System settings, wait a moment, then try again.";
 
+    private const string BluetoothBusyHint =
+        "Bluetooth is busy finishing a previous scan or connection. Wait a few seconds, then try again.";
+
     internal static string Describe(Exception exception)
     {
         ArgumentNullException.ThrowIfNull(exception);
@@ -46,6 +49,11 @@ internal static class BluetoothFailureHints
             return BluetoothUnavailableHint;
         }
 
+        if (LooksLikeBluetoothBusy(trimmedMessage, errorName, normalizedMessage))
+        {
+            return BluetoothBusyHint;
+        }
+
         if (normalizedMessage.Contains("le-connection-abort-by-local", StringComparison.OrdinalIgnoreCase) ||
             normalizedMessage.Contains("software caused connection abort", StringComparison.OrdinalIgnoreCase))
         {
@@ -68,6 +76,15 @@ internal static class BluetoothFailureHints
                || normalizedMessage.Contains("power off", StringComparison.OrdinalIgnoreCase)
                || normalizedMessage.Contains("operation currently not available", StringComparison.OrdinalIgnoreCase)
                || normalizedMessage.Contains("resource temporarily unavailable", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool LooksLikeBluetoothBusy(string rawMessage, string? errorName, string normalizedMessage)
+    {
+        return string.Equals(errorName, "org.bluez.Error.InProgress", StringComparison.OrdinalIgnoreCase)
+               || rawMessage.Contains("org.bluez.Error.InProgress", StringComparison.OrdinalIgnoreCase)
+               || normalizedMessage.Contains("operation already in progress", StringComparison.OrdinalIgnoreCase)
+               || normalizedMessage.Contains("operation is already in progress", StringComparison.OrdinalIgnoreCase)
+               || normalizedMessage.Contains("already in progress", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool LooksLikeOpaqueBlueZFailure(string rawMessage, string? errorName, string normalizedMessage)

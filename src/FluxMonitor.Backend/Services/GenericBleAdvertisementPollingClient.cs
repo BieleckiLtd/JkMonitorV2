@@ -254,14 +254,11 @@ public sealed class GenericBleAdvertisementPollingClient(
             };
             adapter.DeviceFound += _deviceFoundHandler;
 
-            try
-            {
-                await adapter.StartDiscoveryAsync();
-            }
-            catch (Exception exception)
-            {
-                logger.LogDebug(exception, "BLE advertisement discovery was already active.");
-            }
+            _ = await BlueZOperationHelpers.TryStartDiscoveryAsync(
+                adapter,
+                logger,
+                "ble-advertisement-monitor",
+                cancellationToken);
 
             _adapter = adapter;
             _scannerRefreshCancellationSource = new CancellationTokenSource();
@@ -291,7 +288,13 @@ public sealed class GenericBleAdvertisementPollingClient(
                     }
 
                     if (!await adapter.GetAsync<bool>("Discovering"))
-                        await adapter.StartDiscoveryAsync();
+                    {
+                        _ = await BlueZOperationHelpers.TryStartDiscoveryAsync(
+                            adapter,
+                            logger,
+                            "ble-advertisement-monitor-refresh",
+                            cancellationToken);
+                    }
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {

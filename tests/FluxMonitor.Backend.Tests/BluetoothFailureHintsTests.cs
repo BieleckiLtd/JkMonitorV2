@@ -44,4 +44,14 @@ public sealed class BluetoothFailureHintsTests
             "Bluetooth operation failed. Check System > Bluetooth and the device connection, then try again.",
             message);
     }
+
+    [Fact]
+    public void Describe_UsesBusyHint_ForBlueZInProgressErrors()
+    {
+        var message = BluetoothFailureHints.Describe("org.bluez.Error.InProgress: Operation already in progress", "org.bluez.Error.InProgress");
+
+        Assert.Equal(
+            "Bluetooth is busy finishing a previous scan or connection. Wait a few seconds, then try again.",
+            message);
+    }
 }

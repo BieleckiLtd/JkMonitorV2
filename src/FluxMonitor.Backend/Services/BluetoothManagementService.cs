@@ -302,23 +302,25 @@ public sealed class BluetoothManagementService(ILogger<BluetoothManagementServic
         try
         {
             adapter.DeviceFound += OnDeviceFoundAsync;
+            var startedDiscovery = false;
             try
             {
                 logger.LogInformation("Starting Bluetooth discovery for {DurationSeconds} seconds.", scanDuration.TotalSeconds);
-                await adapter.StartDiscoveryAsync();
+                startedDiscovery = await BlueZOperationHelpers.TryStartDiscoveryAsync(
+                    adapter,
+                    logger,
+                    "bluetooth-management-scan",
+                    cancellationToken);
                 await Task.Delay(scanDuration, cancellationToken);
             }
             finally
             {
                 adapter.DeviceFound -= OnDeviceFoundAsync;
-                try
-                {
-                    await adapter.StopDiscoveryAsync();
-                }
-                catch
-                {
-                    // Best effort.
-                }
+                await BlueZOperationHelpers.StopDiscoveryIfStartedAsync(
+                    adapter,
+                    startedDiscovery,
+                    logger,
+                    "bluetooth-management-scan");
             }
         }
         catch (Exception exception) when (!cancellationToken.IsCancellationRequested)

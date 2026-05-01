@@ -357,9 +357,14 @@ public sealed class GenericBlePollingClient(
         }
 
         adapter.DeviceFound += OnDeviceFoundAsync;
+        var startedDiscovery = false;
         try
         {
-            await adapter.StartDiscoveryAsync();
+            startedDiscovery = await BlueZOperationHelpers.TryStartDiscoveryAsync(
+                adapter,
+                logger,
+                "generic-ble-discovery",
+                cancellationToken);
             if (matchingAdvertisementSeen is null)
             {
                 await Task.Delay(discoveryWindow, cancellationToken);
@@ -382,7 +387,11 @@ public sealed class GenericBlePollingClient(
         finally
         {
             adapter.DeviceFound -= OnDeviceFoundAsync;
-            try { await adapter.StopDiscoveryAsync(); } catch { /* best effort */ }
+            await BlueZOperationHelpers.StopDiscoveryIfStartedAsync(
+                adapter,
+                startedDiscovery,
+                logger,
+                "generic-ble-discovery");
         }
 
         var discovered = new List<BleDiscoveredDevice>(devices.Count);
@@ -476,7 +485,12 @@ public sealed class GenericBlePollingClient(
                 ?? throw new TimeoutException($"Unable to find BLE device '{target}'.");
 
             logger.LogInformation("Connecting to BLE device {Target} for device {DeviceId}.", target, device.DeviceId);
-            await bleDevice.ConnectAsync();
+            await BlueZOperationHelpers.EnsureConnectedAsync(
+                bleDevice,
+                timeout,
+                logger,
+                $"device={device.DeviceId};target={target}",
+                cancellationToken);
             await bleDevice.WaitForPropertyValueAsync("Connected", value: true, timeout);
             await bleDevice.WaitForPropertyValueAsync("ServicesResolved", value: true, timeout);
 
@@ -505,7 +519,11 @@ public sealed class GenericBlePollingClient(
             session.WriteCharacteristic = writeCharacteristic;
             session.DefinitionId = definition.Device.Id;
             session.NotifyWatcher = await notifyCharacteristic.WatchPropertiesAsync(changes => OnNotifyPropertiesChanged(session, definition, changes));
-            await notifyCharacteristic.StartNotifyAsync();
+            await BlueZOperationHelpers.StartNotifyAsync(
+                notifyCharacteristic,
+                logger,
+                $"device={device.DeviceId};target={target}",
+                cancellationToken);
             await Task.Delay(150, cancellationToken);
 
             logger.LogInformation(
@@ -1325,7 +1343,7 @@ public sealed class GenericBlePollingClient(
         return alternate;
     }
 
-    private static async Task<Device?> ResolveDeviceAsync(
+    private async Task<Device?> ResolveDeviceAsync(
         Adapter adapter,
         string identifier,
         TimeSpan timeout,
@@ -1345,9 +1363,14 @@ public sealed class GenericBlePollingClient(
         }
 
         adapter.DeviceFound += OnDeviceFoundAsync;
+        var startedDiscovery = false;
         try
         {
-            await adapter.StartDiscoveryAsync();
+            startedDiscovery = await BlueZOperationHelpers.TryStartDiscoveryAsync(
+                adapter,
+                logger,
+                $"resolve-device:{identifier}",
+                cancellationToken);
             using var delayCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
             var delayTask = Task.Delay(timeout, delayCts.Token);
             var completed = await Task.WhenAny(discoveryTcs.Task, delayTask);
@@ -1360,7 +1383,11 @@ public sealed class GenericBlePollingClient(
         finally
         {
             adapter.DeviceFound -= OnDeviceFoundAsync;
-            try { await adapter.StopDiscoveryAsync(); } catch { /* best effort */ }
+            await BlueZOperationHelpers.StopDiscoveryIfStartedAsync(
+                adapter,
+                startedDiscovery,
+                logger,
+                $"resolve-device:{identifier}");
         }
     }
 

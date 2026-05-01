@@ -949,6 +949,7 @@ export function DevicesPage({
   const definitionsRef = useRef<DeviceDefinitionSummary[]>([]);
   const autoSaveFieldRef = useRef<SaveFieldTarget | null>(null);
   const bleScanSequenceRef = useRef<Record<string, number>>({});
+  const activeBleScanKeysRef = useRef<Set<string>>(new Set());
   const activeLibraryBleScanKey = libraryBleSelection ? `library:${libraryBleSelection.definition.id}` : null;
 
   useEffect(() => {
@@ -1288,6 +1289,11 @@ export function DevicesPage({
   }, [autoSaveField, autoSaveStatus]);
 
   const scanBleDevices = useCallback(async (clientKey: string, definitionId: string) => {
+    if (activeBleScanKeysRef.current.has(clientKey)) {
+      return;
+    }
+
+    activeBleScanKeysRef.current.add(clientKey);
     const scanSequence = (bleScanSequenceRef.current[clientKey] ?? 0) + 1;
     bleScanSequenceRef.current[clientKey] = scanSequence;
 
@@ -1314,8 +1320,10 @@ export function DevicesPage({
     };
 
     try {
+      let followUpScheduled = false;
       const quickData = await fetchScanPhase('1000', true);
       if (!isLatestScan()) {
+        activeBleScanKeysRef.current.delete(clientKey);
         return;
       }
 
@@ -1325,14 +1333,17 @@ export function DevicesPage({
       setBleScanLoading((current) => ({ ...current, [clientKey]: false }));
 
       if (quickData.error && quickResults.length === 0) {
+        activeBleScanKeysRef.current.delete(clientKey);
         return;
       }
 
       setBleScanFollowUpLoading((current) => ({ ...current, [clientKey]: true }));
+      followUpScheduled = true;
 
       window.setTimeout(() => {
         if (!isLatestScan()) {
           setBleScanFollowUpLoading((current) => ({ ...current, [clientKey]: false }));
+          activeBleScanKeysRef.current.delete(clientKey);
           return;
         }
 
@@ -1367,14 +1378,21 @@ export function DevicesPage({
             if (isLatestScan()) {
               setBleScanFollowUpLoading((current) => ({ ...current, [clientKey]: false }));
             }
+            activeBleScanKeysRef.current.delete(clientKey);
           }
         })();
       }, 0);
+
+      if (!followUpScheduled) {
+        activeBleScanKeysRef.current.delete(clientKey);
+      }
     } catch (error) {
       if (!isLatestScan()) {
+        activeBleScanKeysRef.current.delete(clientKey);
         return;
       }
 
+      activeBleScanKeysRef.current.delete(clientKey);
       setBleScanResults((current) => ({ ...current, [clientKey]: [] }));
       setBleScanErrors((current) => ({
         ...current,
@@ -1693,7 +1711,7 @@ export function DevicesPage({
                       type='button'
                       variant='outline'
                       size='sm'
-                      disabled={bleScanLoading[activeLibraryBleScanKey]}
+                      disabled={bleScanLoading[activeLibraryBleScanKey] || bleScanFollowUpLoading[activeLibraryBleScanKey]}
                       onClick={() => void scanBleDevices(activeLibraryBleScanKey, libraryBleSelection.definition.id)}
                     >
                       {bleScanLoading[activeLibraryBleScanKey] ? <LoaderCircle className='h-4 w-4 animate-spin' /> : null}
@@ -2002,7 +2020,7 @@ export function DevicesPage({
                           type='button'
                           variant='outline'
                           className='shrink-0'
-                          disabled={device.enabled || bleIsScanning || !device.definitionId}
+                          disabled={device.enabled || bleIsScanning || bleIsScanningForMore || !device.definitionId}
                           onClick={() => void scanBleDevices(device.clientKey, device.definitionId)}
                         >
                           {bleIsScanning ? <LoaderCircle className='h-4 w-4 animate-spin' /> : null}
@@ -2020,7 +2038,7 @@ export function DevicesPage({
                                   key={candidate.address}
                                   candidate={candidate}
                                   selected={isSelected}
-                                  disabled={device.enabled || bleIsScanning}
+                                  disabled={device.enabled || bleIsScanning || bleIsScanningForMore}
                                   nowMs={scanNowMs}
                                   onClick={() => updateDevice(index, 'transportPortName', candidate.address)}
                                   actionLabel={isSelected ? 'Selected' : 'Use device'}
