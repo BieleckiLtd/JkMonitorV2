@@ -522,6 +522,73 @@ describe('MonitorPage', () => {
     expect(screen.queryByText(/Waiting for first reading/i)).not.toBeInTheDocument();
   }, 10000);
 
+  it('uses the compact card layout immediately when telemetry has compact pack metrics before the definition loads', async () => {
+    useDeviceDefinitionMock.mockReturnValue(null);
+
+    class FakeEventSource {
+      static instances: FakeEventSource[] = [];
+
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      close = vi.fn();
+
+      constructor(public readonly url: string) {
+        FakeEventSource.instances.push(this);
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }));
+      }
+    }
+
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    render(<MonitorPage />);
+
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(1);
+    });
+
+    FakeEventSource.instances[0]?.emit({
+      devices: [
+        {
+          deviceId: 'jk-pack',
+          displayName: 'Battery Rack',
+          definitionId: 'jk-inverter-bms-ble',
+          protocolHandler: 'ble-frame',
+          enabled: true,
+          isMaster: true,
+          pollIntervalMilliseconds: 1000,
+          lastOutcome: 'Succeeded',
+          latestTelemetry: {
+            collectedAt: '2026-04-12T12:00:00.000Z',
+            cells: [],
+            activeWarnings: [],
+            parameters: [
+              { key: 'total_voltage', displayName: 'Total Voltage', category: 'Pack Status', numericValue: 53.61, sortOrder: 0, unit: 'V', displayPrecision: 2 },
+              { key: 'current', displayName: 'Current', category: 'Pack Status', numericValue: 3.3, sortOrder: 1, unit: 'A', displayPrecision: 1 },
+              { key: 'power', displayName: 'Power', category: 'Pack Status', numericValue: 179, sortOrder: 2, unit: 'W', displayPrecision: 0 },
+              { key: 'state_of_charge', displayName: 'State of Charge', category: 'Pack Status', numericValue: 99, sortOrder: 3, unit: '%', displayPrecision: 0 },
+              { key: 'charging_enabled', displayName: 'Charging', category: 'Status', booleanValue: true, sortOrder: 4 },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(await screen.findByText('Battery Rack')).toBeInTheDocument();
+    expect(screen.getByTitle('Charging')).toBeInTheDocument();
+    expect(screen.queryByText('Last update')).not.toBeInTheDocument();
+    expect(screen.queryByText('SUCCEEDED')).not.toBeInTheDocument();
+    expect(screen.getByText('53.61')).toHaveClass('text-sky-400');
+    expect(screen.getByText('3.3')).toHaveClass('text-emerald-400');
+    expect(screen.getByText('179')).toHaveClass('text-emerald-400');
+  }, 10000);
+
   it('keeps the last in-memory telemetry values when a later snapshot has no telemetry payload', async () => {
     class FakeEventSource {
       static instances: FakeEventSource[] = [];

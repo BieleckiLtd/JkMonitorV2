@@ -47,6 +47,25 @@ const packCompactHeroMetrics: UiMetricDefinition[] = [
   { entity: 'state_of_charge', icon: 'battery', color: 'green' },
 ];
 
+const packCompactStatusGlyphs: UiStatusGlyphDefinition[] = [
+  {
+    type: 'last-seen',
+    icon: 'pulse',
+    levels: [
+      { maxAgeSeconds: 5, color: 'green', label: 'less than 5 seconds ago' },
+      { maxAgeSeconds: 300, color: 'orange', label: 'less than 5 minutes ago' },
+      { color: 'red', label: 'more than 5 minutes ago' },
+    ],
+  },
+  {
+    type: 'state',
+    states: [
+      { entity: 'charging_enabled', equals: true, icon: 'battery-charging', color: 'green', title: 'Charging' },
+      { entity: 'discharging_enabled', equals: true, icon: 'battery-discharging', color: 'orange', title: 'Discharging' },
+    ],
+  },
+];
+
 function hasCompactInverterPowerMetrics(paramByKey: Map<string, DeviceParameter>) {
   return inverterCompactHeroMetrics.every(metric => paramByKey.has(metric.entity));
 }
@@ -121,6 +140,10 @@ function getRelativeAdvertisementAgeSeconds(collectedAt: string | null | undefin
 
 function shouldUseCompactMonitorCard(definition: DeviceDefinition | null) {
   return definition?.ui?.pages?.monitor?.card != null;
+}
+
+function shouldUseCompactMonitorCardFallback(paramByKey: Map<string, DeviceParameter>) {
+  return hasCompactInverterPowerMetrics(paramByKey) || hasCompactPackMetrics(paramByKey);
 }
 
 type SwitchStatusChip = {
@@ -396,14 +419,18 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
   const isFailing = device.lastOutcome === 'Failed';
   const dp = device.displayPrecision ?? defaultPrecision;
   const [selectedCellIndices, setSelectedCellIndices] = useState<number[]>([]);
-  const usesCompactMonitorCard = shouldUseCompactMonitorCard(definition);
-  const deviceCategory = definition?.device.category?.toLowerCase();
-  const isEnvironment = deviceCategory === 'environment';
-  const isInverter = deviceCategory === 'inverter';
-  const [isExpanded, setIsExpanded] = useState(false);
 
   // Build a fast lookup by entity key for definition-driven rendering
   const paramByKey = new Map(parameters.map(p => [p.key, p]));
+
+  const usesCompactMonitorCard = shouldUseCompactMonitorCard(definition) || shouldUseCompactMonitorCardFallback(paramByKey);
+  const deviceCategory = definition?.device.category?.toLowerCase();
+  const isEnvironment = deviceCategory === 'environment';
+  const hasInverterPowerMetrics = hasCompactInverterPowerMetrics(paramByKey);
+  const hasPackPowerMetrics = hasCompactPackMetrics(paramByKey);
+  const isInverter = deviceCategory === 'inverter' || (definition == null && hasInverterPowerMetrics);
+  const isPack = deviceCategory === 'energy-storage' || (definition == null && hasPackPowerMetrics);
+  const [isExpanded, setIsExpanded] = useState(false);
 
   // Resolve monitor page UI sections from definition (if available)
   const monitorSections = definition?.ui?.pages?.monitor?.sections;
@@ -430,6 +457,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
     const compactWarnings = compactTelemetry.activeWarnings ?? [];
     const compactParamByKey = new Map(compactParameters.map(p => [p.key, p]));
     const heroSection = monitorSections?.find(s => s.type === 'hero-metrics');
+    const compactCardIconName = definition?.device.icon ?? (isPack ? 'battery' : undefined);
     const heroMetrics = hasCompactInverterPowerMetrics(compactParamByKey) || hasMetricDefinitions(inverterCompactHeroMetrics, definition)
       ? inverterCompactHeroMetrics
       : heroSection?.metrics ?? (hasCompactPackMetrics(compactParamByKey) || hasMetricDefinitions(packCompactHeroMetrics, definition) ? packCompactHeroMetrics : []);
@@ -439,7 +467,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
     const capacityAh = compactParamByKey.get('nominal_battery_capacity')?.numericValue;
     const advertisementAgeSeconds = getRelativeAdvertisementAgeSeconds(telemetry?.collectedAt, nowMs);
     const compactSections = monitorSections?.filter(section => section.type !== 'hero-metrics' && section.type !== 'parameter-table') ?? [];
-    const statusGlyphDefinitions = definition?.ui?.pages?.monitor?.card?.statusGlyphs;
+    const statusGlyphDefinitions = definition?.ui?.pages?.monitor?.card?.statusGlyphs ?? (isPack ? packCompactStatusGlyphs : undefined);
     const headerStatusGlyphs = isInverter
       ? resolveInverterStatusGlyphs(statusGlyphDefinitions, compactTelemetry, compactParamByKey, nowMs, isPassiveAdvertisement)
       : statusGlyphDefinitions != null
@@ -462,7 +490,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                 isFailing ? 'border-rose-500/30 bg-rose-500/10 text-rose-400' :
                 'border-border bg-muted/50 text-muted-foreground'
               )}>
-                <DeviceIcon name={definition?.device.icon} className='h-4 w-4' />
+                <DeviceIcon name={compactCardIconName} className='h-4 w-4' />
               </div>
               <div className='min-w-0'>
                 <h3 className='text-base font-semibold text-foreground truncate'>{device.displayName}</h3>
@@ -540,7 +568,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                   const value = param?.numericValue;
                   const sourceUnit = getMetricSourceUnit(param, entity);
                   const unit = getTemperatureDisplayUnit(sourceUnit, temperatureUnit) ?? '';
-                  const prec = entity?.display?.precision ?? 2;
+                  const prec = entity?.display?.precision ?? param?.displayPrecision ?? 2;
                   const displayValue = isCelsiusUnit(sourceUnit)
                     ? convertTemperatureValue(value != null ? Number(value) : null, temperatureUnit)
                     : value != null ? Number(value) : null;
