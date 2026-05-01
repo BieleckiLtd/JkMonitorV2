@@ -84,6 +84,34 @@ internal static class BlueZOperationHelpers
         }
     }
 
+    internal static async Task StopDiscoveryIfActiveAsync(
+        Adapter adapter,
+        ILogger logger,
+        string context)
+    {
+        if (!await IsDiscoveringAsync(adapter))
+            return;
+
+        try
+        {
+            await adapter.StopDiscoveryAsync();
+        }
+        catch (Exception exception) when (IsOperationInProgress(exception))
+        {
+            logger.LogDebug(
+                exception,
+                "Bluetooth discovery stop is already in progress. Context={Context}.",
+                context);
+        }
+        catch (Exception exception)
+        {
+            logger.LogDebug(
+                exception,
+                "Bluetooth discovery stop failed. Context={Context}.",
+                context);
+        }
+    }
+
     internal static async Task EnsureConnectedAsync(
         Device device,
         TimeSpan timeout,

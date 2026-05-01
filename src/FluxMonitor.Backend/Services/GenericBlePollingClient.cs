@@ -482,13 +482,13 @@ public sealed class GenericBlePollingClient(
 
         try
         {
-            using var adapterOperation = await BlueZOperationHelpers.AcquireAdapterOperationLockAsync(cancellationToken);
             var bleDevice = await ResolveDeviceAsync(adapter, target, timeout, cancellationToken)
                 ?? throw new TimeoutException($"Unable to find BLE device '{target}'.");
 
-            await BlueZOperationHelpers.StopDiscoveryIfStartedAsync(
+            using var adapterOperation = await BlueZOperationHelpers.AcquireAdapterOperationLockAsync(cancellationToken);
+
+            await BlueZOperationHelpers.StopDiscoveryIfActiveAsync(
                 adapter,
-                startedHere: true,
                 logger,
                 $"connect-device:{target}");
 
