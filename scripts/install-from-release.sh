@@ -35,11 +35,13 @@ NONINTERACTIVE_INSTALL_RUNTIME="${FLUXMONITOR_INSTALL_RUNTIME:-}"
 NONINTERACTIVE_INSTALL_SERVICE="${FLUXMONITOR_INSTALL_SERVICE:-}"
 NONINTERACTIVE_REUSE_EXISTING_CONFIGURATION="${FLUXMONITOR_REUSE_EXISTING_CONFIGURATION:-}"
 NONINTERACTIVE_REFRESH_CLOUDFLARED="${FLUXMONITOR_REFRESH_CLOUDFLARED:-}"
+NONINTERACTIVE_REFRESH_SYSTEM_PACKAGES="${FLUXMONITOR_REFRESH_SYSTEM_PACKAGES:-}"
 EXPECTED_RELEASE_SHA256="${FLUXMONITOR_EXPECTED_RELEASE_SHA256:-}"
 CONFIGURE_SCRIPT_PATH="$DESTINATION/configure.sh"
 TIMESCALE_REPOSITORY_SETUP_URL='https://packagecloud.io/install/repositories/timescale/timescaledb/script.deb.sh'
 CLOUDFLARED_PACKAGE_CHANGED='false'
 CLOUDFLARED_START_SCRIPT_CHANGED='false'
+APT_INDEX_REFRESHED='false'
 
 if [ -t 1 ]; then
   COLOR_RESET='\033[0m'
@@ -798,6 +800,34 @@ dpkg_package_is_installed() {
     | awk -v package_name="$package_name" '$1 == "ii" && $2 == package_name { found = 1 } END { exit(found ? 0 : 1) }'
 }
 
+all_dpkg_packages_are_installed() {
+  local package_name
+
+  if ! command -v dpkg >/dev/null 2>&1; then
+    return 1
+  fi
+
+  for package_name in "$@"; do
+    if ! dpkg_package_is_installed "$package_name"; then
+      return 1
+    fi
+  done
+}
+
+refresh_apt_index_once() {
+  if ! command -v apt-get >/dev/null 2>&1; then
+    return 1
+  fi
+
+  if [ "$APT_INDEX_REFRESHED" = 'true' ]; then
+    muted 'Package index was already refreshed during this installer run.'
+    return 0
+  fi
+
+  run_elevated apt-get update
+  APT_INDEX_REFRESHED='true'
+}
+
 find_installed_timescaledb_apache_package() {
   local postgres_major="$1"
   local package_name
@@ -1092,7 +1122,7 @@ bootstrap_local_postgres_connection_string() {
     fi
 
     info 'Installing the local PostgreSQL server package.' >&2
-    run_elevated apt-get update >&2
+    refresh_apt_index_once >&2
     run_elevated apt-get install -y postgresql >&2
   fi
 
@@ -1196,9 +1226,15 @@ install_or_update_speedtest_cli() {
 
   section 'Installing internet speed test tool'
 
+  if command -v speedtest-cli >/dev/null 2>&1 && ! is_truthy "$NONINTERACTIVE_REFRESH_SYSTEM_PACKAGES"; then
+    info 'speedtest-cli is already available. Skipping package refresh.'
+    muted 'Set FLUXMONITOR_REFRESH_SYSTEM_PACKAGES=yes to refresh optional system packages during this update.'
+    return 0
+  fi
+
   if command -v apt-get >/dev/null 2>&1; then
     info 'Installing or updating speedtest-cli from the system package repository.'
-    if run_elevated apt-get update >&2 && run_elevated apt-get install -y speedtest-cli >&2; then
+    if refresh_apt_index_once >&2 && run_elevated apt-get install -y speedtest-cli >&2; then
       return 0
     fi
 
@@ -1232,10 +1268,16 @@ install_or_update_networkmanager_tools() {
     return 0
   fi
 
-  info 'Installing or updating NetworkManager from the system package repository.'
-  if ! run_elevated apt-get update >&2 || ! run_elevated apt-get install -y network-manager >&2; then
-    warn 'NetworkManager could not be installed. Wi-Fi controls and fallback local access may remain unavailable.'
-    return 0
+  if command -v nmcli >/dev/null 2>&1 \
+    && dpkg_package_is_installed network-manager \
+    && ! is_truthy "$NONINTERACTIVE_REFRESH_SYSTEM_PACKAGES"; then
+    info 'NetworkManager tools are already installed. Skipping package refresh.'
+  else
+    info 'Installing or updating NetworkManager from the system package repository.'
+    if ! refresh_apt_index_once >&2 || ! run_elevated apt-get install -y network-manager >&2; then
+      warn 'NetworkManager could not be installed. Wi-Fi controls and fallback local access may remain unavailable.'
+      return 0
+    fi
   fi
 
   if command -v systemctl >/dev/null 2>&1; then
@@ -1289,17 +1331,22 @@ install_or_update_bluetooth_support() {
 
   if command -v apt-get >/dev/null 2>&1; then
     packages=(bluez rfkill)
-    info 'Installing or updating Bluetooth support packages.'
-    if ! run_elevated apt-get update >&2; then
-      warn 'The package index could not be refreshed before installing Bluetooth support packages.'
-    fi
 
     if apt-cache show pi-bluetooth >/dev/null 2>&1; then
       packages+=(pi-bluetooth)
     fi
 
-    if ! run_elevated apt-get install -y "${packages[@]}" >&2; then
-      warn 'Bluetooth support packages could not be installed automatically. BLE scans may remain unavailable.'
+    if all_dpkg_packages_are_installed "${packages[@]}" && ! is_truthy "$NONINTERACTIVE_REFRESH_SYSTEM_PACKAGES"; then
+      info 'Bluetooth support packages are already installed. Skipping package refresh.'
+    else
+      info 'Installing or updating Bluetooth support packages.'
+      if ! refresh_apt_index_once >&2; then
+        warn 'The package index could not be refreshed before installing Bluetooth support packages.'
+      fi
+
+      if ! run_elevated apt-get install -y "${packages[@]}" >&2; then
+        warn 'Bluetooth support packages could not be installed automatically. BLE scans may remain unavailable.'
+      fi
     fi
   else
     warn 'apt-get is not available on this host. Skipping automatic Bluetooth package installation.'
@@ -1638,6 +1685,7 @@ configure_persistent_wifi_powersave_off() {
 install_or_update_mdns_support() {
   local host_name
   local hostname_url
+  local packages
 
   host_name="$(get_host_name)"
   hostname_url="$(get_hostname_access_url)"
@@ -1652,9 +1700,15 @@ install_or_update_mdns_support() {
     return 0
   fi
 
-  info "Installing or updating mDNS support for $hostname_url."
-  run_elevated apt-get update >&2
-  run_elevated apt-get install -y avahi-daemon avahi-utils libnss-mdns >&2
+  packages=(avahi-daemon avahi-utils libnss-mdns)
+
+  if all_dpkg_packages_are_installed "${packages[@]}" && ! is_truthy "$NONINTERACTIVE_REFRESH_SYSTEM_PACKAGES"; then
+    info "mDNS support packages are already installed for $hostname_url. Skipping package refresh."
+  else
+    info "Installing or updating mDNS support for $hostname_url."
+    refresh_apt_index_once >&2
+    run_elevated apt-get install -y "${packages[@]}" >&2
+  fi
 
   if command -v systemctl >/dev/null 2>&1; then
     run_elevated systemctl enable "$MDNS_SERVICE_NAME" >/dev/null 2>&1 || true

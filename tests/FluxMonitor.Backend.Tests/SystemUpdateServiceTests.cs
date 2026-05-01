@@ -236,6 +236,125 @@ public class SystemUpdateServiceTests
     }
 
     [Fact]
+    public async Task CheckForUpdateAsync_ReusesCachedSuccessfulResultForRepeatedChecks()
+    {
+        using var releaseInfoScope = TemporaryReleaseInfoScope.Create(
+            "FLUXMONITOR_RELEASE_SHA256=1111111111111111111111111111111111111111111111111111111111111111");
+
+        var releaseRequestCount = 0;
+        var checksumRequestCount = 0;
+        var service = CreateService(
+            new StubHttpClientFactory(new StubHttpMessageHandler(request =>
+            {
+                if (request.RequestUri?.AbsoluteUri == "https://api.github.com/repos/BieleckiLtd/JkMonitorV2/releases/tags/dev-latest")
+                {
+                    releaseRequestCount++;
+                    return CreateJsonResponse("""
+                        {
+                          "tag_name": "dev-latest",
+                          "published_at": "2026-04-05T12:00:00Z",
+                          "assets": [
+                            {
+                              "name": "fluxmonitor-backend-linux-arm64.tar.gz.sha256",
+                              "browser_download_url": "https://example.test/dev.sha256"
+                            }
+                          ]
+                        }
+                        """);
+                }
+
+                if (request.RequestUri?.AbsoluteUri == "https://example.test/dev.sha256")
+                {
+                    checksumRequestCount++;
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("1111111111111111111111111111111111111111111111111111111111111111  fluxmonitor-backend-linux-arm64.tar.gz")
+                    };
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            })));
+
+        var firstResult = await service.CheckForUpdateAsync(CancellationToken.None);
+        var secondResult = await service.CheckForUpdateAsync(CancellationToken.None);
+
+        Assert.False(firstResult.UpdateAvailable);
+        Assert.False(secondResult.UpdateAvailable);
+        Assert.Equal(firstResult.RemoteChecksum, secondResult.RemoteChecksum);
+        Assert.Equal(1, releaseRequestCount);
+        Assert.Equal(1, checksumRequestCount);
+    }
+
+    [Fact]
+    public async Task SavePreferredChannelAsync_ClearsCachedUpdateCheck()
+    {
+        using var releaseInfoScope = TemporaryReleaseInfoScope.Create(
+            "FLUXMONITOR_RELEASE_SHA256=1111111111111111111111111111111111111111111111111111111111111111");
+
+        var service = CreateService(
+            new StubHttpClientFactory(new StubHttpMessageHandler(request =>
+            {
+                if (request.RequestUri?.AbsoluteUri == "https://api.github.com/repos/BieleckiLtd/JkMonitorV2/releases/tags/dev-latest")
+                {
+                    return CreateJsonResponse("""
+                        {
+                          "tag_name": "dev-latest",
+                          "published_at": "2026-04-05T12:00:00Z",
+                          "assets": [
+                            {
+                              "name": "fluxmonitor-backend-linux-arm64.tar.gz.sha256",
+                              "browser_download_url": "https://example.test/dev.sha256"
+                            }
+                          ]
+                        }
+                        """);
+                }
+
+                if (request.RequestUri?.AbsoluteUri == "https://api.github.com/repos/BieleckiLtd/JkMonitorV2/releases/latest")
+                {
+                    return CreateJsonResponse("""
+                        {
+                          "tag_name": "v1.2.3",
+                          "published_at": "2026-04-06T12:00:00Z",
+                          "assets": [
+                            {
+                              "name": "fluxmonitor-backend-linux-arm64.tar.gz.sha256",
+                              "browser_download_url": "https://example.test/main.sha256"
+                            }
+                          ]
+                        }
+                        """);
+                }
+
+                if (request.RequestUri?.AbsoluteUri == "https://example.test/dev.sha256")
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("1111111111111111111111111111111111111111111111111111111111111111  fluxmonitor-backend-linux-arm64.tar.gz")
+                    };
+                }
+
+                if (request.RequestUri?.AbsoluteUri == "https://example.test/main.sha256")
+                {
+                    return new HttpResponseMessage(HttpStatusCode.OK)
+                    {
+                        Content = new StringContent("2222222222222222222222222222222222222222222222222222222222222222  fluxmonitor-backend-linux-arm64.tar.gz")
+                    };
+                }
+
+                return new HttpResponseMessage(HttpStatusCode.NotFound);
+            })));
+
+        var devResult = await service.CheckForUpdateAsync(CancellationToken.None);
+        await service.SavePreferredChannelAsync("main", CancellationToken.None);
+        var mainResult = await service.CheckForUpdateAsync(CancellationToken.None);
+
+        Assert.Equal("dev", devResult.TargetChannel);
+        Assert.Equal("main", mainResult.TargetChannel);
+        Assert.Equal("v1.2.3", mainResult.TargetReleaseTag);
+    }
+
+    [Fact]
     public void TryGetStageDefinition_TracksSafeCancellationWindow()
     {
         Assert.True(SystemUpdateService.TryGetStageDefinition("Downloading release artifact", out var downloadingStage));

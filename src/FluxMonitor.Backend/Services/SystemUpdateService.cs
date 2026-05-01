@@ -18,6 +18,7 @@ public sealed class SystemUpdateService(
     private const string ChecksumAssetName = AssetName + ".sha256";
     private const string ReleaseApiBaseUrl = $"https://api.github.com/repos/{Repository}/releases";
     private const int InstallerOutputTailCapacity = 120;
+    private static readonly TimeSpan UpdateCheckCacheDuration = TimeSpan.FromSeconds(60);
 
     private static readonly UpdateStageDefinition StartingStage = new(
         InstallerSection: null,
@@ -191,8 +192,51 @@ public sealed class SystemUpdateService(
     private CancellationTokenSource? _updateCancellationSource;
     private bool _cancelRequested;
     private readonly Lock _stateGate = new();
+    private readonly Lock _updateCheckGate = new();
+    private UpdateCheckCacheEntry? _cachedUpdateCheck;
+    private Task<UpdateCheckResult>? _runningUpdateCheck;
 
     public async Task<UpdateCheckResult> CheckForUpdateAsync(CancellationToken cancellationToken)
+    {
+        var cached = TryGetCachedUpdateCheck();
+        if (cached is not null)
+        {
+            return cached;
+        }
+
+        Task<UpdateCheckResult> checkTask;
+        lock (_updateCheckGate)
+        {
+            _runningUpdateCheck ??= RunUpdateCheckAsync(CancellationToken.None);
+            checkTask = _runningUpdateCheck;
+        }
+
+        try
+        {
+            var result = await checkTask.WaitAsync(cancellationToken);
+            if (string.IsNullOrWhiteSpace(result.CheckError))
+            {
+                StoreCachedUpdateCheck(result);
+            }
+
+            return CloneUpdateCheckResult(result);
+        }
+        finally
+        {
+            if (checkTask.IsCompleted)
+            {
+                lock (_updateCheckGate)
+                {
+                    if (ReferenceEquals(_runningUpdateCheck, checkTask))
+                    {
+                        _runningUpdateCheck = null;
+                    }
+                }
+            }
+        }
+    }
+
+    private async Task<UpdateCheckResult> RunUpdateCheckAsync(CancellationToken cancellationToken)
     {
         var result = await CreateBaseCheckResultAsync(cancellationToken);
 
@@ -280,6 +324,7 @@ public sealed class SystemUpdateService(
     {
         var normalizedChannel = SoftwareUpdateChannels.NormalizeSelection(channel);
         await softwareUpdateStore.SavePreferredChannelAsync(normalizedChannel, cancellationToken);
+        ClearCachedUpdateCheck();
 
         return new UpdateChannelPreferenceResult
         {
@@ -1003,6 +1048,68 @@ public sealed class SystemUpdateService(
         return client;
     }
 
+    private UpdateCheckResult? TryGetCachedUpdateCheck()
+    {
+        lock (_updateCheckGate)
+        {
+            if (_cachedUpdateCheck is null || _cachedUpdateCheck.ExpiresAt <= DateTimeOffset.UtcNow)
+            {
+                return null;
+            }
+
+            return CloneUpdateCheckResult(_cachedUpdateCheck.Result);
+        }
+    }
+
+    private void StoreCachedUpdateCheck(UpdateCheckResult result)
+    {
+        lock (_updateCheckGate)
+        {
+            _cachedUpdateCheck = new UpdateCheckCacheEntry(
+                CloneUpdateCheckResult(result),
+                DateTimeOffset.UtcNow.Add(UpdateCheckCacheDuration));
+        }
+    }
+
+    private void ClearCachedUpdateCheck()
+    {
+        lock (_updateCheckGate)
+        {
+            _cachedUpdateCheck = null;
+        }
+    }
+
+    private static UpdateCheckResult CloneUpdateCheckResult(UpdateCheckResult result)
+    {
+        return new UpdateCheckResult
+        {
+            CurrentReleaseTag = result.CurrentReleaseTag,
+            CurrentSourceRevision = result.CurrentSourceRevision,
+            CurrentBuiltAt = result.CurrentBuiltAt,
+            CurrentWorkflowRunNumber = result.CurrentWorkflowRunNumber,
+            CurrentWorkflowRunAttempt = result.CurrentWorkflowRunAttempt,
+            CurrentReleasePublishedAt = result.CurrentReleasePublishedAt,
+            CurrentChannel = result.CurrentChannel,
+            PreferredChannel = result.PreferredChannel,
+            TargetChannel = result.TargetChannel,
+            TargetReleaseTag = result.TargetReleaseTag,
+            CheckedAt = result.CheckedAt,
+            CanUpdate = result.CanUpdate,
+            Reason = result.Reason,
+            UpdateAvailable = result.UpdateAvailable,
+            RemoteReleasePublishedAt = result.RemoteReleasePublishedAt,
+            RemoteChecksum = result.RemoteChecksum,
+            LocalChecksum = result.LocalChecksum,
+            CheckError = result.CheckError,
+            Commits = result.Commits?.Select(commit => new CommitInfo
+            {
+                Sha = commit.Sha,
+                Message = commit.Message,
+                Date = commit.Date
+            }).ToList()
+        };
+    }
+
     private async Task<UpdateCheckResult> CreateBaseCheckResultAsync(CancellationToken cancellationToken)
     {
         var build = buildMetadataProvider.GetBuildInfo();
@@ -1152,6 +1259,8 @@ public sealed class SystemUpdateService(
 }
 
 internal sealed record ResolvedReleaseInfo(string Channel, GitHubRelease? Release);
+
+internal sealed record UpdateCheckCacheEntry(UpdateCheckResult Result, DateTimeOffset ExpiresAt);
 
 internal sealed class UpdateTargetResolution
 {
