@@ -434,6 +434,171 @@ describe('MonitorPage', () => {
     expect(screen.queryByText(/Waiting for first reading/i)).not.toBeInTheDocument();
   }, 10000);
 
+  it('renders compact cards with N/D placeholders before the first telemetry values arrive', async () => {
+    useDeviceDefinitionMock.mockReturnValue({
+      version: '1',
+      device: {
+        id: 'jk-inverter-bms-ble',
+        name: 'JK Inverter BMS (BLE)',
+        manufacturer: 'JK',
+        model: 'JK-PB2A16S20P',
+        category: 'energy-storage',
+        icon: 'battery',
+      },
+      connection: {
+        transport: { type: 'ble', defaults: {} },
+        protocol: { type: 'ble-frame', settings: {} },
+      },
+      dataSources: [],
+      pollGroups: {},
+      entities: [
+        { id: 'total_voltage', type: 'number', name: 'Total Voltage', category: 'Pack Status', source: { bank: 'live', byteOffset: 0, unit: 'V' }, display: { precision: 2 } },
+        { id: 'current', type: 'number', name: 'Current', category: 'Pack Status', source: { bank: 'live', byteOffset: 2, unit: 'A' }, display: { precision: 1 } },
+        { id: 'power', type: 'number', name: 'Power', category: 'Pack Status', source: { bank: 'live', byteOffset: 4, unit: 'W' }, display: { precision: 0 } },
+        { id: 'state_of_charge', type: 'number', name: 'State of Charge', category: 'Pack Status', source: { bank: 'live', byteOffset: 6, unit: '%' }, display: { precision: 0 } },
+      ],
+      computedEntities: [],
+      ui: {
+        pages: {
+          monitor: {
+            card: {
+              primaryMetric: 'state_of_charge',
+              secondaryMetrics: ['total_voltage', 'current', 'power'],
+              statusEntities: [],
+            },
+          },
+        },
+      },
+    } satisfies DeviceDefinition);
+
+    class FakeEventSource {
+      static instances: FakeEventSource[] = [];
+
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      close = vi.fn();
+
+      constructor(public readonly url: string) {
+        FakeEventSource.instances.push(this);
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }));
+      }
+    }
+
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    render(<MonitorPage />);
+
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(1);
+    });
+
+    FakeEventSource.instances[0]?.emit({
+      devices: [
+        {
+          deviceId: 'jk-1',
+          displayName: 'Battery Rack',
+          definitionId: 'jk-inverter-bms-ble',
+          protocolHandler: 'ble-frame',
+          enabled: true,
+          isMaster: true,
+          pollIntervalMilliseconds: 1000,
+          lastOutcome: 'Loading',
+          latestTelemetry: null,
+        },
+      ],
+    });
+
+    expect(await screen.findByText('Battery Rack')).toBeInTheDocument();
+    expect(screen.getByText('Total Voltage')).toBeInTheDocument();
+    expect(screen.getByText('Current')).toBeInTheDocument();
+    expect(screen.getAllByText('N/D').length).toBeGreaterThanOrEqual(4);
+    expect(screen.queryByText(/Waiting for first reading/i)).not.toBeInTheDocument();
+  }, 10000);
+
+  it('keeps the last in-memory telemetry values when a later snapshot has no telemetry payload', async () => {
+    class FakeEventSource {
+      static instances: FakeEventSource[] = [];
+
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      close = vi.fn();
+
+      constructor(public readonly url: string) {
+        FakeEventSource.instances.push(this);
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }));
+      }
+    }
+
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    render(<MonitorPage />);
+
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(1);
+    });
+
+    FakeEventSource.instances[0]?.emit({
+      devices: [
+        {
+          deviceId: 'pack-1',
+          displayName: 'Battery Pack',
+          definitionId: 'generic-pack',
+          protocolHandler: 'modbus-rtu',
+          enabled: true,
+          isMaster: true,
+          pollIntervalMilliseconds: 1000,
+          lastOutcome: 'Succeeded',
+          latestTelemetry: {
+            collectedAt: '2026-04-12T12:00:00.000Z',
+            cells: [],
+            activeWarnings: [],
+            parameters: [
+              { key: 'total_voltage', displayName: 'Total Voltage', category: 'Pack Status', numericValue: 52.4, sortOrder: 0, unit: 'V' },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(await screen.findByText('Battery Pack')).toBeInTheDocument();
+    expect(screen.getByText('52.400')).toBeInTheDocument();
+
+    FakeEventSource.instances[0]?.emit({
+      devices: [
+        {
+          deviceId: 'pack-1',
+          displayName: 'Battery Pack',
+          definitionId: 'generic-pack',
+          protocolHandler: 'modbus-rtu',
+          enabled: true,
+          isMaster: true,
+          pollIntervalMilliseconds: 1000,
+          lastOutcome: 'Failed',
+          latestTelemetry: null,
+        },
+      ],
+    });
+
+    await waitFor(() => {
+      expect(screen.getByText('52.400')).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Waiting for first reading/i)).not.toBeInTheDocument();
+  }, 10000);
+
   it('renders JK BMS cards collapsed by default and expands them on demand', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-04-12T12:00:02.000Z').getTime());
 

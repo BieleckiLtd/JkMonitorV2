@@ -55,6 +55,10 @@ function hasCompactPackMetrics(paramByKey: Map<string, DeviceParameter>) {
   return packCompactHeroMetrics.every(metric => paramByKey.has(metric.entity));
 }
 
+function hasMetricDefinitions(metrics: readonly UiMetricDefinition[], definition: DeviceDefinition | null | undefined) {
+  return metrics.every(metric => findMetricEntity(definition, metric.entity) != null);
+}
+
 const reconnectDelayMs = 2000;
 const fallbackRefreshIntervalMs = 2000;
 const nd = 'N/D';
@@ -74,6 +78,33 @@ type DeviceSummaryResponse = {
     enabled: boolean;
   }>;
 };
+
+function getSnapshotDevices(snapshot: DeviceRuntimeState[] | DeviceRuntimeStateStreamEnvelope) {
+  return Array.isArray(snapshot) ? snapshot : snapshot.devices;
+}
+
+function mergeRuntimeDeviceSnapshots(
+  currentDevices: DeviceRuntimeState[],
+  nextDevices: DeviceRuntimeState[],
+) {
+  if (currentDevices.length === 0) {
+    return nextDevices;
+  }
+
+  const currentById = new Map(currentDevices.map((device) => [device.deviceId, device]));
+
+  return nextDevices.map((device) => {
+    const current = currentById.get(device.deviceId);
+    if (!current?.latestTelemetry || device.latestTelemetry != null) {
+      return device;
+    }
+
+    return {
+      ...device,
+      latestTelemetry: current.latestTelemetry,
+    };
+  });
+}
 
 function getRelativeAdvertisementAgeSeconds(collectedAt: string | null | undefined, nowMs: number) {
   if (!collectedAt) {
@@ -150,7 +181,8 @@ export function MonitorPage() {
     const applySnapshot = (snapshot: DeviceRuntimeState[] | DeviceRuntimeStateStreamEnvelope) => {
       if (!isMounted) return;
       clearSummaryTimer();
-      setDevices(Array.isArray(snapshot) ? snapshot : snapshot.devices);
+      const nextDevices = getSnapshotDevices(snapshot);
+      setDevices((currentDevices) => mergeRuntimeDeviceSnapshots(currentDevices, nextDevices));
       setLoadError(null);
       setIsLoading(false);
     };
@@ -391,16 +423,16 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
   const paramTableSections = monitorSections?.filter(s => s.type === 'parameter-table');
 
   // Compact monitor cards are definition-driven.
-  if (usesCompactMonitorCard && (telemetry || isPassiveAdvertisement)) {
+  if (usesCompactMonitorCard) {
     const compactTelemetry = telemetry ?? emptyTelemetrySnapshot;
     const compactParameters = compactTelemetry.parameters ?? [];
     const compactCells = compactTelemetry.cells ?? [];
     const compactWarnings = compactTelemetry.activeWarnings ?? [];
     const compactParamByKey = new Map(compactParameters.map(p => [p.key, p]));
     const heroSection = monitorSections?.find(s => s.type === 'hero-metrics');
-    const heroMetrics = hasCompactInverterPowerMetrics(compactParamByKey)
+    const heroMetrics = hasCompactInverterPowerMetrics(compactParamByKey) || hasMetricDefinitions(inverterCompactHeroMetrics, definition)
       ? inverterCompactHeroMetrics
-      : heroSection?.metrics ?? (hasCompactPackMetrics(compactParamByKey) ? packCompactHeroMetrics : []);
+      : heroSection?.metrics ?? (hasCompactPackMetrics(compactParamByKey) || hasMetricDefinitions(packCompactHeroMetrics, definition) ? packCompactHeroMetrics : []);
     const batteryParam = compactParamByKey.get('battery_pct');
     const batteryValue = batteryParam?.numericValue;
     const signalValue = compactParamByKey.get('signal_strength_pct')?.numericValue;
@@ -483,7 +515,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                 <>
                   <div className='hidden text-right sm:block'>
                     <div className='text-[10px] font-medium uppercase tracking-[0.18em] text-muted-foreground/60'>Last update</div>
-                    <div className='text-xs font-medium text-muted-foreground'>{new Date(compactTelemetry.collectedAt).toLocaleTimeString()}</div>
+                    <div className='text-xs font-medium text-muted-foreground'>{formatTimestampTime(compactTelemetry.collectedAt)}</div>
                   </div>
                   <span className={cn('rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em]', getOutcomeClass(device.lastOutcome))}>
                     {device.lastOutcome}
@@ -703,13 +735,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
         </div>
       )}
 
-      {!telemetry && !device.lastError && !isPassiveAdvertisement && (
-        <div className='flex items-center justify-center rounded-2xl border border-dashed border-border bg-card/40 py-8 text-sm text-muted-foreground'>
-          <LoaderCircle className='mr-2 h-4 w-4 animate-spin' /> Waiting for first reading...
-        </div>
-      )}
-
-      {telemetry ? renderSummaryMetricTiles(paramByKey, definition, temperatureUnit) : null}
+      {renderSummaryMetricTiles(paramByKey, definition, temperatureUnit)}
 
       {telemetry && isExpanded && (
         <div className='space-y-3 sm:space-y-4'>
@@ -856,7 +882,7 @@ function renderSummaryMetricTiles(
   definition: DeviceDefinition | null | undefined,
   temperatureUnit: TemperatureUnit,
 ) {
-  if (hasCompactInverterPowerMetrics(paramByKey)) {
+  if (hasCompactInverterPowerMetrics(paramByKey) || (paramByKey.size === 0 && hasMetricDefinitions(inverterCompactHeroMetrics, definition))) {
     return (
       <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
         {inverterCompactHeroMetrics.map((metric) => {
@@ -883,7 +909,7 @@ function renderSummaryMetricTiles(
     );
   }
 
-  if (hasCompactPackMetrics(paramByKey)) {
+  if (hasCompactPackMetrics(paramByKey) || (paramByKey.size === 0 && hasMetricDefinitions(packCompactHeroMetrics, definition))) {
     return (
       <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
         {packCompactHeroMetrics.map((metric) => {
@@ -917,9 +943,35 @@ function renderSummaryMetricTiles(
     .map((key) => paramByKey.get(key))
     .filter((param): param is DeviceParameter => param != null);
   const metrics = preferred.slice(0, 4);
+  const placeholderMetrics = paramByKey.size === 0
+    ? definition?.ui?.pages?.monitor?.sections
+      ?.find((section) => section.type === 'hero-metrics')
+      ?.metrics
+      ?.slice(0, 4) ?? []
+    : [];
 
   if (metrics.length === 0) {
-    return null;
+    if (placeholderMetrics.length === 0) {
+      return null;
+    }
+
+    return (
+      <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
+        {placeholderMetrics.map((metric) => {
+          const entity = findMetricEntity(definition, metric.entity);
+          const sourceUnit = getMetricSourceUnit(undefined, entity);
+
+          return (
+            <HeroInlineMetric
+              key={metric.entity}
+              label={metric.label ?? entity?.name ?? metric.entity}
+              value={nd}
+              unit={getTemperatureDisplayUnit(sourceUnit, temperatureUnit) ?? sourceUnit ?? ''}
+            />
+          );
+        })}
+      </div>
+    );
   }
 
   return (
@@ -2887,6 +2939,15 @@ function trimTrailingZeroes(value: string) {
 function fmt(value: number | null | undefined, decimals = 2): string {
   if (value == null || !Number.isFinite(value)) return nd;
   return value.toFixed(decimals);
+}
+
+function formatTimestampTime(timestamp: string | null | undefined) {
+  if (!timestamp) {
+    return nd;
+  }
+
+  const parsed = Date.parse(timestamp);
+  return Number.isNaN(parsed) ? nd : new Date(parsed).toLocaleTimeString();
 }
 
 function getOutcomeClass(outcome: string): string {
