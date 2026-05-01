@@ -24,8 +24,9 @@ public sealed class GenericSerialPollingClient(
     private SerialPort? _serialPort;
     private bool _disposed;
 
-    // Slow poll group caching: bank ID → (lastRead, rawData)
+    // Slow poll group caching: device/bank -> (lastRead, rawData)
     private readonly Dictionary<string, (DateTimeOffset LastRead, byte[] Data)> _bankCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, DateTimeOffset> _coldSlowBankDueAt = new(StringComparer.OrdinalIgnoreCase);
 
     public Task<DevicePollResult> PollAsync(DeviceConfiguration device, CancellationToken cancellationToken)
     {
@@ -65,17 +66,25 @@ public sealed class GenericSerialPollingClient(
             var bankData = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
             var now = DateTimeOffset.UtcNow;
             var protocolType = definition.Connection.Protocol.Type ?? "modbus-rtu";
+            var fastestPollIntervalMs = GetFastestPollIntervalMilliseconds(definition);
 
             foreach (var bank in definition.DataSources)
             {
                 var pollGroup = definition.PollGroups.GetValueOrDefault(bank.PollGroup);
                 var intervalMs = pollGroup?.IntervalMs ?? 1000;
+                var cacheKey = GetBankCacheKey(device, bank.Id);
 
                 // Check if this bank is cached and still fresh
-                if (_bankCache.TryGetValue(bank.Id, out var cached) &&
-                    now - cached.LastRead < TimeSpan.FromMilliseconds(intervalMs))
+                if (_bankCache.TryGetValue(cacheKey, out var cached) &&
+                    IsCachedBankFresh(cached.LastRead, now, intervalMs))
                 {
                     bankData[bank.Id] = cached.Data;
+                    continue;
+                }
+
+                if (!_bankCache.ContainsKey(cacheKey) &&
+                    ShouldDeferColdSlowBank(cacheKey, intervalMs, fastestPollIntervalMs, now))
+                {
                     continue;
                 }
 
@@ -100,6 +109,7 @@ public sealed class GenericSerialPollingClient(
                 catch (Exception ex) when (bank.Optional)
                 {
                     logger.LogWarning(ex, "Optional bank '{BankId}' read failed, skipping.", bank.Id);
+                    ScheduleColdSlowBankRetry(cacheKey, intervalMs, fastestPollIntervalMs, now);
                     continue;
                 }
 
@@ -108,7 +118,8 @@ public sealed class GenericSerialPollingClient(
                     dataArray = ResponseLayoutNormalizer.Normalize(dataArray, bank.ResponseLayout);
 
                 bankData[bank.Id] = dataArray;
-                _bankCache[bank.Id] = (now, dataArray);
+                _bankCache[cacheKey] = (now, dataArray);
+                _coldSlowBankDueAt.Remove(cacheKey);
             }
 
             // Parse all entities from raw bank data
@@ -235,7 +246,9 @@ public sealed class GenericSerialPollingClient(
 
             foreach (var bankId in affectedBankIds)
             {
-                _bankCache.Remove(bankId);
+                var cacheKey = GetBankCacheKey(device, bankId);
+                _bankCache.Remove(cacheKey);
+                _coldSlowBankDueAt.Remove(cacheKey);
             }
 
             return plans.Select(plan => resultsByEntityId[plan.Entity.Id]).ToArray();
@@ -450,6 +463,47 @@ public sealed class GenericSerialPollingClient(
             rawRegisters,
             string.Empty,
             new Dictionary<string, decimal?>(entityValues, StringComparer.OrdinalIgnoreCase));
+    }
+
+    private static string GetBankCacheKey(DeviceConfiguration device, string bankId)
+        => $"{device.DeviceId}::{bankId}";
+
+    private static bool IsCachedBankFresh(DateTimeOffset lastRead, DateTimeOffset now, int intervalMs)
+        => intervalMs <= 0 || now - lastRead < TimeSpan.FromMilliseconds(intervalMs);
+
+    private static int GetFastestPollIntervalMilliseconds(DeviceDefinition definition)
+        => definition.DataSources
+            .Select(bank => definition.PollGroups.GetValueOrDefault(bank.PollGroup)?.IntervalMs ?? 1000)
+            .Where(intervalMs => intervalMs > 0)
+            .DefaultIfEmpty(1000)
+            .Min();
+
+    private bool ShouldDeferColdSlowBank(
+        string cacheKey,
+        int intervalMs,
+        int fastestPollIntervalMs,
+        DateTimeOffset now)
+    {
+        if (intervalMs <= fastestPollIntervalMs)
+            return false;
+
+        if (!_coldSlowBankDueAt.TryGetValue(cacheKey, out var dueAt))
+        {
+            _coldSlowBankDueAt[cacheKey] = now.AddMilliseconds(intervalMs);
+            return true;
+        }
+
+        return now < dueAt;
+    }
+
+    private void ScheduleColdSlowBankRetry(
+        string cacheKey,
+        int intervalMs,
+        int fastestPollIntervalMs,
+        DateTimeOffset now)
+    {
+        if (intervalMs > fastestPollIntervalMs)
+            _coldSlowBankDueAt[cacheKey] = now.AddMilliseconds(intervalMs);
     }
 
     #region Entity Parsing
@@ -720,10 +774,7 @@ public sealed class GenericSerialPollingClient(
             infoPayload = System.Text.Encoding.ASCII.GetBytes(bank.RequestInfo);
 
         var request = AsciiHexFramedProtocol.BuildCommand(slaveAddress, bank.Command, framing, infoPayload);
-        var stream = serialPort.BaseStream;
-        await stream.WriteAsync(request, ct);
-        await stream.FlushAsync(ct);
-        var response = await AsciiHexFramedProtocol.ReadFrameAsync(stream, framing, readTimeout, ct);
+        var response = await SendAndReceiveAsciiHexAsync(serialPort, request, framing, readTimeout, ct);
         return AsciiHexFramedProtocol.ValidateAndExtractPayload(response, framing);
     }
 
@@ -947,11 +998,127 @@ public sealed class GenericSerialPollingClient(
 
     #region Serial Port Management
 
-    private static async Task<byte[]> SendAndReceiveModbusAsync(SerialPort serialPort, byte[] request, int expectedLen, int readTimeout, CancellationToken cancellationToken)
+    private static Task<byte[]> SendAndReceiveModbusAsync(
+        SerialPort serialPort,
+        byte[] request,
+        int expectedLen,
+        int readTimeout,
+        CancellationToken cancellationToken)
+        => Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            serialPort.Write(request, 0, request.Length);
+            return ReadModbusResponse(serialPort, expectedLen, readTimeout, cancellationToken);
+        }, cancellationToken);
+
+    private static Task<byte[]> SendAndReceiveAsciiHexAsync(
+        SerialPort serialPort,
+        byte[] request,
+        AsciiHexFrameSettings framing,
+        int readTimeout,
+        CancellationToken cancellationToken)
+        => Task.Run(() =>
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            serialPort.Write(request, 0, request.Length);
+            return ReadAsciiHexFrame(serialPort, framing, readTimeout, cancellationToken);
+        }, cancellationToken);
+
+    private static byte[] ReadModbusResponse(
+        SerialPort serialPort,
+        int expectedLen,
+        int readTimeout,
+        CancellationToken cancellationToken)
     {
-        await serialPort.BaseStream.WriteAsync(request, cancellationToken);
-        await serialPort.BaseStream.FlushAsync(cancellationToken);
-        return await ModbusRtu.ReadResponseAsync(serialPort.BaseStream, expectedLen, readTimeout, cancellationToken);
+        var buffer = new byte[expectedLen];
+        var totalRead = 0;
+        var previousTimeout = serialPort.ReadTimeout;
+        var deadline = DateTimeOffset.UtcNow.AddMilliseconds(readTimeout);
+
+        try
+        {
+            while (totalRead < expectedLen)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                serialPort.ReadTimeout = GetRemainingTimeoutMilliseconds(deadline);
+
+                try
+                {
+                    var bytesRead = serialPort.Read(buffer, totalRead, expectedLen - totalRead);
+                    if (bytesRead == 0)
+                        continue;
+
+                    totalRead += bytesRead;
+
+                    if (totalRead >= 5 && (buffer[1] & 0x80) != 0)
+                        return buffer[..5];
+                }
+                catch (TimeoutException)
+                {
+                    throw new TimeoutException($"Timed out after {readTimeout}ms waiting for Modbus RTU response (received {totalRead} of {expectedLen} bytes).");
+                }
+            }
+
+            return buffer;
+        }
+        finally
+        {
+            serialPort.ReadTimeout = previousTimeout;
+        }
+    }
+
+    private static byte[] ReadAsciiHexFrame(
+        SerialPort serialPort,
+        AsciiHexFrameSettings framing,
+        int readTimeout,
+        CancellationToken cancellationToken)
+    {
+        var buffer = new byte[4096];
+        var totalRead = 0;
+        var previousTimeout = serialPort.ReadTimeout;
+        var deadline = DateTimeOffset.UtcNow.AddMilliseconds(readTimeout);
+
+        try
+        {
+            while (totalRead < buffer.Length)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                serialPort.ReadTimeout = GetRemainingTimeoutMilliseconds(deadline);
+
+                try
+                {
+                    var bytesRead = serialPort.Read(buffer, totalRead, buffer.Length - totalRead);
+                    if (bytesRead == 0)
+                        continue;
+
+                    totalRead += bytesRead;
+                    if (buffer[totalRead - 1] == framing.EndByte)
+                        break;
+                }
+                catch (TimeoutException)
+                {
+                    throw new TimeoutException($"ASCII-hex framed serial read timeout ({readTimeout}ms). Read {totalRead} bytes.");
+                }
+            }
+
+            if (totalRead == 0)
+                throw new InvalidDataException("ASCII-hex framed serial: no data received.");
+
+            return buffer[..totalRead];
+        }
+        finally
+        {
+            serialPort.ReadTimeout = previousTimeout;
+        }
+    }
+
+    private static int GetRemainingTimeoutMilliseconds(DateTimeOffset deadline)
+    {
+        var remaining = deadline - DateTimeOffset.UtcNow;
+        if (remaining <= TimeSpan.Zero)
+            throw new TimeoutException("Serial read timeout elapsed.");
+
+        return Math.Max(1, (int)Math.Ceiling(remaining.TotalMilliseconds));
     }
 
     private SerialPort EnsurePort(DeviceConfiguration device, DeviceDefinition definition)

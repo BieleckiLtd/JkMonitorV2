@@ -1941,6 +1941,7 @@ describe('MonitorPage', () => {
     });
 
     expect(await screen.findByText('Scaled Battery')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /scaled battery/i }));
     fireEvent.click(screen.getByRole('button', { name: 'Configuration section' }));
     fireEvent.click(screen.getByTitle('Edit parameter'));
 

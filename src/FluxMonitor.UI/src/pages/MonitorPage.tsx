@@ -65,6 +65,16 @@ const emptyTelemetrySnapshot: DeviceTelemetrySnapshot = {
   parameters: [],
 };
 
+type DeviceSummaryResponse = {
+  devices: Array<{
+    deviceId: string;
+    displayName: string;
+    sortOrder?: number;
+    definitionId?: string;
+    enabled: boolean;
+  }>;
+};
+
 function getRelativeAdvertisementAgeSeconds(collectedAt: string | null | undefined, nowMs: number) {
   if (!collectedAt) {
     return null;
@@ -129,12 +139,54 @@ export function MonitorPage() {
     let eventSource: EventSource | null = null;
     let reconnectTimerId: number | null = null;
     let fallbackIntervalId: number | null = null;
+    let summaryTimerId: number | null = null;
 
-    const applySnapshot = (snapshot: DeviceRuntimeState[]) => {
+    const clearSummaryTimer = () => {
+      if (summaryTimerId == null) return;
+      window.clearTimeout(summaryTimerId);
+      summaryTimerId = null;
+    };
+
+    const applySnapshot = (snapshot: DeviceRuntimeState[] | DeviceRuntimeStateStreamEnvelope) => {
       if (!isMounted) return;
-      setDevices(snapshot);
+      clearSummaryTimer();
+      setDevices(Array.isArray(snapshot) ? snapshot : snapshot.devices);
       setLoadError(null);
       setIsLoading(false);
+    };
+
+    const loadSummaries = async () => {
+      try {
+        const response = await fetch('/api/devices/summary', { cache: 'no-store' });
+        if (!response.ok) return;
+        const data = (await response.json()) as DeviceSummaryResponse;
+        if (!isMounted) return;
+        setDevices((current) => {
+          if (current.length > 0) return current;
+
+          return (data.devices ?? []).map((device) => ({
+            deviceId: device.deviceId,
+            displayName: device.displayName,
+            sortOrder: device.sortOrder ?? 0,
+            definitionId: device.definitionId ?? '',
+            protocolHandler: null,
+            address: 0,
+            enabled: device.enabled,
+            isMaster: false,
+            pollIntervalMilliseconds: 0,
+            lastPollStartedAt: null,
+            lastPollCompletedAt: null,
+            lastOutcome: device.enabled ? 'Loading' : 'Disabled',
+            lastError: null,
+            lastPersistedAt: null,
+            displayPrecision: defaultPrecision,
+            temperatureUnit: 'c',
+            latestTelemetry: null,
+          }));
+        });
+      } catch {
+        // The full telemetry load below will surface any user-visible error.
+      }
     };
 
     const load = async () => {
@@ -144,7 +196,7 @@ export function MonitorPage() {
       try {
         const response = await fetch('/api/devices/current', { cache: 'no-store' });
         if (!response.ok) throw new Error('Unable to load device telemetry.');
-        const data = (await response.json()) as DeviceRuntimeState[];
+        const data = (await response.json()) as DeviceRuntimeState[] | DeviceRuntimeStateStreamEnvelope;
         applySnapshot(data);
       } catch (error) {
         if (!isMounted) return;
@@ -225,12 +277,17 @@ export function MonitorPage() {
     };
 
     void load();
+    summaryTimerId = window.setTimeout(() => {
+      summaryTimerId = null;
+      void loadSummaries();
+    }, 150);
     connectStream();
 
     return () => {
       isMounted = false;
       closeEventSource();
       clearReconnectTimer();
+      clearSummaryTimer();
 
       if (fallbackIntervalId != null) {
         window.clearInterval(fallbackIntervalId);
@@ -273,8 +330,10 @@ export function MonitorPage() {
       )}
 
       {isLoading && devices.length === 0 && (
-        <div className='flex min-h-64 items-center justify-center rounded-2xl border border-border bg-card/60'>
-          <LoaderCircle className='h-6 w-6 animate-spin text-primary' />
+        <div className='space-y-3 sm:space-y-4'>
+          <MonitorSkeletonCard />
+          <MonitorSkeletonCard />
+          <MonitorSkeletonCard />
         </div>
       )}
 
@@ -589,8 +648,13 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
   return (
     <div className='space-y-3 sm:space-y-4'>
       {/* Device Header */}
-      <div className='flex flex-col gap-2 rounded-2xl border border-border bg-card/70 p-4 shadow-sm sm:gap-3 sm:p-5 sm:flex-row sm:items-center sm:justify-between'>
-        <div className='flex items-center gap-3'>
+      <button
+        type='button'
+        onClick={() => setIsExpanded(prev => !prev)}
+        className='flex w-full flex-col gap-2 rounded-2xl border border-border bg-card/70 p-4 text-left shadow-sm transition-colors hover:bg-card/90 sm:gap-3 sm:p-5 sm:flex-row sm:items-center sm:justify-between'
+        aria-expanded={isExpanded}
+      >
+        <div className='flex min-w-0 items-center gap-3'>
           <div className={cn(
             'flex h-11 w-11 items-center justify-center rounded-xl border',
             isHealthy ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' :
@@ -611,12 +675,17 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
             </div>
           </div>
         </div>
-        {telemetry && (
-          <div className='text-xs text-muted-foreground'>
-            Last update: {new Date(telemetry.collectedAt).toLocaleTimeString()}
+        <div className='flex items-center gap-3 text-xs text-muted-foreground'>
+          {telemetry ? (
+            <div>
+              Last update: {new Date(telemetry.collectedAt).toLocaleTimeString()}
+            </div>
+          ) : null}
+          <div className='text-muted-foreground/70'>
+            {isExpanded ? <ChevronUp className='h-4 w-4' /> : <ChevronDown className='h-4 w-4' />}
           </div>
-        )}
-      </div>
+        </div>
+      </button>
 
       {device.lastError && (
         <div className='rounded-xl border border-rose-500/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-300'>
@@ -640,8 +709,10 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
         </div>
       )}
 
-      {telemetry && (
-        <>
+      {telemetry ? renderSummaryMetricTiles(paramByKey, definition, temperatureUnit) : null}
+
+      {telemetry && isExpanded && (
+        <div className='space-y-3 sm:space-y-4'>
           {/* Hero metrics — driven by definition */}
           {monitorSections ? (
             renderDefinitionSections(monitorSections, paramByKey, telemetry, dp, cells, selectedCellIndices, setSelectedCellIndices, device.deviceId, definition, temperatureUnit)
@@ -679,8 +750,28 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
               ))}
             </div>
           )}
-        </>
+        </div>
       )}
+    </div>
+  );
+}
+
+function MonitorSkeletonCard() {
+  return (
+    <div className='rounded-2xl border border-border bg-card/60 p-4 shadow-sm sm:p-5'>
+      <div className='flex items-center gap-3'>
+        <div className='h-11 w-11 animate-pulse rounded-xl bg-muted/70' />
+        <div className='min-w-0 flex-1 space-y-2'>
+          <div className='h-4 w-40 animate-pulse rounded bg-muted/70' />
+          <div className='h-3 w-56 max-w-full animate-pulse rounded bg-muted/50' />
+        </div>
+      </div>
+      <div className='mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4'>
+        <div className='h-16 animate-pulse rounded-xl border border-border/70 bg-background/40' />
+        <div className='h-16 animate-pulse rounded-xl border border-border/70 bg-background/40' />
+        <div className='h-16 animate-pulse rounded-xl border border-border/70 bg-background/40' />
+        <div className='h-16 animate-pulse rounded-xl border border-border/70 bg-background/40' />
+      </div>
     </div>
   );
 }
@@ -745,6 +836,108 @@ function renderInlineEntityStats(
   return (
     <div className='grid grid-cols-2 gap-2 sm:grid-cols-3 xl:grid-cols-4'>
       {items}
+    </div>
+  );
+}
+
+const preferredSummaryMetricKeys = [
+  'total_voltage',
+  'current',
+  'power',
+  'state_of_charge',
+  'battery_pct',
+  'temperature',
+  'humidity',
+  'signal_strength_pct',
+];
+
+function renderSummaryMetricTiles(
+  paramByKey: Map<string, DeviceParameter>,
+  definition: DeviceDefinition | null | undefined,
+  temperatureUnit: TemperatureUnit,
+) {
+  if (hasCompactInverterPowerMetrics(paramByKey)) {
+    return (
+      <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
+        {inverterCompactHeroMetrics.map((metric) => {
+          const param = paramByKey.get(metric.entity);
+          const entity = findMetricEntity(definition, metric.entity);
+          const metricDisplay = formatMetricDisplayValue(
+            param?.numericValue != null ? Number(param.numericValue) : null,
+            getMetricSourceUnit(param, entity) ?? '',
+            entity?.display?.precision ?? 2,
+            metric,
+            { forcePowerShortKilowatts: true },
+          );
+
+          return (
+            <HeroInlineMetric
+              key={metric.entity}
+              label={metric.label ?? param?.displayName ?? entity?.name ?? metric.entity}
+              value={metricDisplay.valueText}
+              unit={metricDisplay.unitText}
+            />
+          );
+        })}
+      </div>
+    );
+  }
+
+  if (hasCompactPackMetrics(paramByKey)) {
+    return (
+      <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
+        {packCompactHeroMetrics.map((metric) => {
+          const param = paramByKey.get(metric.entity);
+          const entity = findMetricEntity(definition, metric.entity);
+          const sourceUnit = getMetricSourceUnit(param, entity);
+          const displayValue = isCelsiusUnit(sourceUnit)
+            ? convertTemperatureValue(param?.numericValue != null ? Number(param.numericValue) : null, temperatureUnit)
+            : param?.numericValue != null ? Number(param.numericValue) : null;
+          const metricDisplay = formatMetricDisplayValue(
+            displayValue,
+            getTemperatureDisplayUnit(sourceUnit, temperatureUnit) ?? sourceUnit ?? '',
+            entity?.display?.precision ?? 2,
+            metric,
+          );
+
+          return (
+            <HeroInlineMetric
+              key={metric.entity}
+              label={metric.label ?? param?.displayName ?? entity?.name ?? metric.entity}
+              value={metricDisplay.valueText}
+              unit={metricDisplay.unitText}
+            />
+          );
+        })}
+      </div>
+    );
+  }
+
+  const preferred = preferredSummaryMetricKeys
+    .map((key) => paramByKey.get(key))
+    .filter((param): param is DeviceParameter => param != null);
+  const metrics = preferred.slice(0, 4);
+
+  if (metrics.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className='grid grid-cols-2 gap-3 sm:grid-cols-4'>
+      {metrics.map((param) => {
+        const entity = definition?.entities.find((candidate) => candidate.id === param.key);
+        const value = formatParamValue(param, temperatureUnit, 'yes-no', entity?.display?.precision ?? param.displayPrecision);
+        const unit = getTemperatureDisplayUnit(param.unit, temperatureUnit) ?? param.unit ?? '';
+
+        return (
+          <HeroInlineMetric
+            key={param.key}
+            label={param.displayName ?? entity?.name ?? param.key}
+            value={value}
+            unit={unit}
+          />
+        );
+      })}
     </div>
   );
 }

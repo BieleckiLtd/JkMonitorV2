@@ -67,6 +67,22 @@ public sealed class DevicesController(
         return Ok(BuildDeviceConfigurationResponse(deviceConfigStore.GetDevices()));
     }
 
+    [HttpGet("summary")]
+    public IActionResult GetSummary()
+    {
+        var devices = deviceConfigStore.GetDevices()
+            .Select(device => new DeviceSummaryApiModel
+            {
+                DeviceId = device.DeviceId,
+                DisplayName = device.DisplayName,
+                SortOrder = device.SortOrder,
+                Enabled = device.Enabled
+            })
+            .ToArray();
+
+        return Ok(new DeviceSummariesResponse { Devices = devices });
+    }
+
     [HttpPut("config")]
     public async Task<ActionResult> SaveConfig(
         [FromBody] SaveDeviceConfigurationsRequest request,

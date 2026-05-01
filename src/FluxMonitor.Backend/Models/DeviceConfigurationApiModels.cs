@@ -53,3 +53,19 @@ public sealed record class DeviceConfigurationsResponse
 
     public IReadOnlyList<string> RememberedDeviceIds { get; init; } = [];
 }
+
+public sealed record class DeviceSummaryApiModel
+{
+    public required string DeviceId { get; init; }
+
+    public required string DisplayName { get; init; }
+
+    public int SortOrder { get; init; }
+
+    public bool Enabled { get; init; }
+}
+
+public sealed record class DeviceSummariesResponse
+{
+    public required IReadOnlyList<DeviceSummaryApiModel> Devices { get; init; }
+}

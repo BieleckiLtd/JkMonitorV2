@@ -51,7 +51,7 @@ export function DevicesNavigationPanel({ className }: { className?: string }) {
 
   const loadDevices = useCallback(async () => {
     try {
-      const response = await fetch('/api/devices/config');
+      const response = await fetch('/api/devices/summary', { cache: 'no-store' });
       if (!response.ok) {
         throw new Error('Unable to load configured devices.');
       }
