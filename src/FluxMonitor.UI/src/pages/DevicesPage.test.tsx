@@ -483,6 +483,43 @@ describe('DevicesPage', () => {
     }, { timeout: 1500 });
   });
 
+  it('does not autosave text input changes until the field loses focus', async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /add first device/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add jk inverter bms using usb \/ serial/i }));
+
+    await waitFor(() => {
+      expect(vi.mocked(globalThis.fetch).mock.calls.find(([input, init]) =>
+        String(input) === '/api/devices/config' && init?.method === 'PUT')).toBeDefined();
+    });
+
+    const getConfigSaveCount = () => vi.mocked(globalThis.fetch).mock.calls.filter(([input, init]) =>
+      String(input) === '/api/devices/config' && init?.method === 'PUT').length;
+    const initialConfigSaveCount = getConfigSaveCount();
+    const displayNameInput = screen.getByRole('textbox', { name: /display name/i });
+
+    displayNameInput.focus();
+
+    fireEvent.change(displayNameInput, { target: { value: 'Garage battery' } });
+    await new Promise((resolve) => window.setTimeout(resolve, 700));
+
+    expect(screen.getByDisplayValue('Garage battery')).toHaveFocus();
+    expect(getConfigSaveCount()).toBe(initialConfigSaveCount);
+
+    fireEvent.change(screen.getByDisplayValue('Garage battery'), { target: { value: 'Garage battery bank' } });
+    await new Promise((resolve) => window.setTimeout(resolve, 700));
+
+    expect(screen.getByDisplayValue('Garage battery bank')).toHaveFocus();
+    expect(getConfigSaveCount()).toBe(initialConfigSaveCount);
+
+    fireEvent.blur(screen.getByDisplayValue('Garage battery bank'));
+
+    await waitFor(() => {
+      expect(getConfigSaveCount()).toBeGreaterThan(initialConfigSaveCount);
+    }, { timeout: 1500 });
+  });
+
   it('blocks duplicate device ids from being saved', async () => {
     initialDevicesResponse = [
       {

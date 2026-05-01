@@ -1,4 +1,4 @@
-import { type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowDown, ArrowUp, Battery, Check, Droplets, LoaderCircle, Play, Plus, RotateCcw, Square, Thermometer, Trash2, Upload, X } from 'lucide-react';
 import { Button } from '../components/ui/button';
@@ -832,6 +832,7 @@ function DefinitionEditorTextInput({
         disabled={disabled}
         onChange={(event) => setDraftValue(event.target.value)}
         onBlur={commitValue}
+        onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
       />
       {helperText ? <p className='text-[11px] text-muted-foreground'>{helperText}</p> : null}
     </label>
@@ -941,6 +942,7 @@ export function DevicesPage({
   const [autoSaveField, setAutoSaveField] = useState<SaveFieldTarget | null>(null);
   const [saveDirty, setSaveDirty] = useState(0);
   const [editingDeviceIdClientKey, setEditingDeviceIdClientKey] = useState<string | null>(null);
+  const [activeDeferredSaveField, setActiveDeferredSaveField] = useState<SaveFieldTarget | null>(null);
   const [bleScanResults, setBleScanResults] = useState<Record<string, BleScanDevice[]>>({});
   const [bleScanLoading, setBleScanLoading] = useState<Record<string, boolean>>({});
   const [bleScanFollowUpLoading, setBleScanFollowUpLoading] = useState<Record<string, boolean>>({});
@@ -992,6 +994,31 @@ export function DevicesPage({
     const deviceClientKey = devicesRef.current[index]?.clientKey;
     return deviceClientKey ? { deviceClientKey, fieldKey } : null;
   }, []);
+
+  const deferInputSaveUntilFinished = useCallback((index: number, fieldKey: string) => {
+    const getTarget = () => getSaveFieldTarget(index, fieldKey);
+
+    return {
+      onFocus: () => {
+        setActiveDeferredSaveField(getTarget());
+      },
+      onBlur: () => {
+        const target = getTarget();
+        setActiveDeferredSaveField((current) => (
+          target
+            && current?.deviceClientKey === target.deviceClientKey
+            && current.fieldKey === target.fieldKey
+            ? null
+            : current
+        ));
+      },
+      onKeyDown: (event: KeyboardEvent<HTMLInputElement>) => {
+        if (event.key === 'Enter') {
+          event.currentTarget.blur();
+        }
+      },
+    };
+  }, [getSaveFieldTarget]);
 
   const libraryAssignedBleTargets = libraryBleSelection
     ? getAssignedBleTargets(devices, libraryBleSelection.definition.id)
@@ -1113,14 +1140,14 @@ export function DevicesPage({
   }, [setAutoSaveTarget]);
 
   useEffect(() => {
-    if (!initialLoadDone.current || saveDirty === 0 || editingDeviceIdClientKey) return;
+    if (!initialLoadDone.current || saveDirty === 0 || editingDeviceIdClientKey || activeDeferredSaveField) return;
 
     const timer = window.setTimeout(() => {
       void saveDevicesNow();
     }, 600);
 
     return () => window.clearTimeout(timer);
-  }, [editingDeviceIdClientKey, saveDirty, saveDevicesNow]);
+  }, [activeDeferredSaveField, editingDeviceIdClientKey, saveDirty, saveDevicesNow]);
 
   const markDirty = useCallback((target?: SaveFieldTarget | null) => {
     if (target) {
@@ -1938,6 +1965,7 @@ export function DevicesPage({
                       aria-invalid={duplicateDeviceIdClientKeys.has(device.clientKey)}
                       onFocus={() => setEditingDeviceIdClientKey(device.clientKey)}
                       onBlur={() => setEditingDeviceIdClientKey((current) => current === device.clientKey ? null : current)}
+                      onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur(); }}
                       onChange={(event) => updateDevice(index, 'deviceId', event.target.value)}
                     />
                     {rememberedIdsForDevice.length > 0 ? (
@@ -1958,7 +1986,11 @@ export function DevicesPage({
                       <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Display name</span>
                       {renderFieldSaveState(device.clientKey, 'displayName')}
                     </div>
-                    <Input value={device.displayName} onChange={(event) => updateDevice(index, 'displayName', event.target.value)} />
+                    <Input
+                      value={device.displayName}
+                      {...deferInputSaveUntilFinished(index, 'displayName')}
+                      onChange={(event) => updateDevice(index, 'displayName', event.target.value)}
+                    />
                   </label>
 
                   <label className='space-y-2 text-sm text-foreground'>
@@ -2016,6 +2048,7 @@ export function DevicesPage({
                           value={device.transportPortName ?? ''}
                           disabled={device.enabled}
                           placeholder='AA:BB:CC:DD:EE:FF or device alias'
+                          {...deferInputSaveUntilFinished(index, 'transportPortName')}
                           onChange={(event) => updateDevice(index, 'transportPortName', event.target.value)}
                         />
                         <Button
@@ -2070,6 +2103,7 @@ export function DevicesPage({
                         max={255}
                         value={device.address}
                         disabled={device.enabled}
+                        {...deferInputSaveUntilFinished(index, 'address')}
                         onChange={(event) => updateDevice(index, 'address', Number(event.target.value))}
                       />
                     </label>
@@ -2102,6 +2136,7 @@ export function DevicesPage({
                         type='password'
                         value={device.bleSettingsPin ?? ''}
                         disabled={device.enabled}
+                        {...deferInputSaveUntilFinished(index, 'bleSettingsPin')}
                         onChange={(event) => updateDevice(index, 'bleSettingsPin', event.target.value)}
                       />
                     </label>
@@ -2126,6 +2161,7 @@ export function DevicesPage({
                           step='0.01'
                           value={device.cellVoltageSmoothingFactor}
                           disabled={device.enabled}
+                          {...deferInputSaveUntilFinished(index, 'cellVoltageSmoothingFactor')}
                           onChange={(event) => updateDevice(index, 'cellVoltageSmoothingFactor', Number(event.target.value))}
                         />
                       </label>
@@ -2140,6 +2176,7 @@ export function DevicesPage({
                           step='1'
                           value={device.cellVoltageSmoothingBreakoutMillivolts}
                           disabled={device.enabled}
+                          {...deferInputSaveUntilFinished(index, 'cellVoltageSmoothingBreakoutMillivolts')}
                           onChange={(event) => updateDevice(index, 'cellVoltageSmoothingBreakoutMillivolts', Number(event.target.value))}
                         />
                       </label>
@@ -2148,35 +2185,35 @@ export function DevicesPage({
                           <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Voltage precision</span>
                           {renderFieldSaveState(device.clientKey, 'displayPrecision.voltage')}
                         </div>
-                        <Input type='number' min={0} step='1' value={device.displayPrecision.voltage} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'voltage', Number(event.target.value))} />
+                        <Input type='number' min={0} step='1' value={device.displayPrecision.voltage} disabled={device.enabled} {...deferInputSaveUntilFinished(index, 'displayPrecision.voltage')} onChange={(event) => updateDisplayPrecision(index, 'voltage', Number(event.target.value))} />
                       </label>
                       <label className='space-y-2 text-sm text-foreground'>
                         <div className='flex items-center justify-between gap-2'>
                           <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Cell precision</span>
                           {renderFieldSaveState(device.clientKey, 'displayPrecision.cellVoltage')}
                         </div>
-                        <Input type='number' min={0} step='1' value={device.displayPrecision.cellVoltage} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'cellVoltage', Number(event.target.value))} />
+                        <Input type='number' min={0} step='1' value={device.displayPrecision.cellVoltage} disabled={device.enabled} {...deferInputSaveUntilFinished(index, 'displayPrecision.cellVoltage')} onChange={(event) => updateDisplayPrecision(index, 'cellVoltage', Number(event.target.value))} />
                       </label>
                       <label className='space-y-2 text-sm text-foreground'>
                         <div className='flex items-center justify-between gap-2'>
                           <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Current precision</span>
                           {renderFieldSaveState(device.clientKey, 'displayPrecision.current')}
                         </div>
-                        <Input type='number' min={0} step='1' value={device.displayPrecision.current} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'current', Number(event.target.value))} />
+                        <Input type='number' min={0} step='1' value={device.displayPrecision.current} disabled={device.enabled} {...deferInputSaveUntilFinished(index, 'displayPrecision.current')} onChange={(event) => updateDisplayPrecision(index, 'current', Number(event.target.value))} />
                       </label>
                       <label className='space-y-2 text-sm text-foreground'>
                         <div className='flex items-center justify-between gap-2'>
                           <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Power precision</span>
                           {renderFieldSaveState(device.clientKey, 'displayPrecision.power')}
                         </div>
-                        <Input type='number' min={0} step='1' value={device.displayPrecision.power} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'power', Number(event.target.value))} />
+                        <Input type='number' min={0} step='1' value={device.displayPrecision.power} disabled={device.enabled} {...deferInputSaveUntilFinished(index, 'displayPrecision.power')} onChange={(event) => updateDisplayPrecision(index, 'power', Number(event.target.value))} />
                       </label>
                       <label className='space-y-2 text-sm text-foreground'>
                         <div className='flex items-center justify-between gap-2'>
                           <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Temperature precision</span>
                           {renderFieldSaveState(device.clientKey, 'displayPrecision.temperature')}
                         </div>
-                        <Input type='number' min={0} step='1' value={device.displayPrecision.temperature} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'temperature', Number(event.target.value))} />
+                        <Input type='number' min={0} step='1' value={device.displayPrecision.temperature} disabled={device.enabled} {...deferInputSaveUntilFinished(index, 'displayPrecision.temperature')} onChange={(event) => updateDisplayPrecision(index, 'temperature', Number(event.target.value))} />
                       </label>
                       <label className='space-y-2 text-sm text-foreground'>
                         <div className='flex items-center justify-between gap-2'>
@@ -2213,14 +2250,14 @@ export function DevicesPage({
                           <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>SOC precision</span>
                           {renderFieldSaveState(device.clientKey, 'displayPrecision.soc')}
                         </div>
-                        <Input type='number' min={0} step='1' value={device.displayPrecision.soc} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'soc', Number(event.target.value))} />
+                        <Input type='number' min={0} step='1' value={device.displayPrecision.soc} disabled={device.enabled} {...deferInputSaveUntilFinished(index, 'displayPrecision.soc')} onChange={(event) => updateDisplayPrecision(index, 'soc', Number(event.target.value))} />
                       </label>
                       <label className='space-y-2 text-sm text-foreground'>
                         <div className='flex items-center justify-between gap-2'>
                           <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Delta V precision</span>
                           {renderFieldSaveState(device.clientKey, 'displayPrecision.deltaVoltage')}
                         </div>
-                        <Input type='number' min={0} step='1' value={device.displayPrecision.deltaVoltage} disabled={device.enabled} onChange={(event) => updateDisplayPrecision(index, 'deltaVoltage', Number(event.target.value))} />
+                        <Input type='number' min={0} step='1' value={device.displayPrecision.deltaVoltage} disabled={device.enabled} {...deferInputSaveUntilFinished(index, 'displayPrecision.deltaVoltage')} onChange={(event) => updateDisplayPrecision(index, 'deltaVoltage', Number(event.target.value))} />
                       </label>
                     </div>
                   </div>
