@@ -47,6 +47,18 @@ internal static class BlueZOperationHelpers
         }
         catch (Exception exception) when (IsOperationInProgress(exception))
         {
+            if (!await IsDiscoveringAsync(adapter))
+            {
+                logger.LogWarning(
+                    exception,
+                    "Bluetooth discovery reported an operation in progress while the adapter is not discovering. Retrying after a discovery reset. Context={Context}.",
+                    context);
+
+                await ResetDiscoveryBeforeRetryAsync(adapter, logger, context, cancellationToken);
+                await adapter.StartDiscoveryAsync();
+                return true;
+            }
+
             logger.LogDebug(
                 exception,
                 "Bluetooth discovery is already active. Context={Context}.",
@@ -170,6 +182,27 @@ internal static class BlueZOperationHelpers
         {
             return false;
         }
+    }
+
+    private static async Task ResetDiscoveryBeforeRetryAsync(
+        Adapter adapter,
+        ILogger logger,
+        string context,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await adapter.StopDiscoveryAsync();
+        }
+        catch (Exception stopException)
+        {
+            logger.LogDebug(
+                stopException,
+                "Bluetooth discovery reset stop failed before retry. Context={Context}.",
+                context);
+        }
+
+        await Task.Delay(TimeSpan.FromMilliseconds(250), cancellationToken);
     }
 
     private static async Task<bool> IsConnectedAsync(Device device)
