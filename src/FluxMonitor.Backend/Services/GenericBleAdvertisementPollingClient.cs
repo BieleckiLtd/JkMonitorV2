@@ -222,24 +222,20 @@ public sealed class GenericBleAdvertisementPollingClient(
 
     private async Task EnsureScannerRunningAsync(CancellationToken cancellationToken)
     {
-        if (_adapter is not null)
-            return;
-
         await _scannerLock.WaitAsync(cancellationToken);
         try
         {
             if (_adapter is not null)
+            {
+                await EnsureDiscoveryActiveAsync(_adapter, "ble-advertisement-monitor", cancellationToken);
+                EnsureRefreshLoopRunning(_adapter);
                 return;
+            }
 
             var adapter = (await BlueZManager.GetAdaptersAsync()).FirstOrDefault()
                 ?? throw new InvalidOperationException("No Bluetooth adapter was found.");
 
-            if (!await adapter.GetAsync<bool>("Powered"))
-            {
-                var powerResult = await bluetoothManagementService.SetPowerAsync(enabled: true, cancellationToken);
-                if (!powerResult.Success)
-                    throw new InvalidOperationException(powerResult.Message);
-            }
+            await EnsureDiscoveryActiveAsync(adapter, "ble-advertisement-monitor", cancellationToken);
 
             foreach (var device in await adapter.GetDevicesAsync())
             {
@@ -254,20 +250,52 @@ public sealed class GenericBleAdvertisementPollingClient(
             };
             adapter.DeviceFound += _deviceFoundHandler;
 
-            _ = await BlueZOperationHelpers.TryStartDiscoveryAsync(
-                adapter,
-                logger,
-                "ble-advertisement-monitor",
-                cancellationToken);
-
             _adapter = adapter;
-            _scannerRefreshCancellationSource = new CancellationTokenSource();
-            _scannerRefreshTask = RunSnapshotRefreshLoopAsync(adapter, _scannerRefreshCancellationSource.Token);
+            EnsureRefreshLoopRunning(adapter);
         }
         finally
         {
             _scannerLock.Release();
         }
+    }
+
+    private async Task EnsureDiscoveryActiveAsync(
+        Adapter adapter,
+        string context,
+        CancellationToken cancellationToken)
+    {
+        if (!await adapter.GetAsync<bool>("Powered"))
+        {
+            var powerResult = await bluetoothManagementService.SetPowerAsync(enabled: true, cancellationToken);
+            if (!powerResult.Success)
+                throw new InvalidOperationException(powerResult.Message);
+        }
+
+        if (await adapter.GetAsync<bool>("Discovering"))
+            return;
+
+        _ = await BlueZOperationHelpers.TryStartDiscoveryAsync(
+            adapter,
+            logger,
+            context,
+            cancellationToken);
+    }
+
+    private void EnsureRefreshLoopRunning(Adapter adapter)
+    {
+        if (_scannerRefreshTask is { IsCompleted: false })
+            return;
+
+        if (_scannerRefreshTask is { IsFaulted: true } faultedTask)
+        {
+            logger.LogWarning(
+                faultedTask.Exception,
+                "Restarting BLE advertisement scanner refresh loop after it stopped unexpectedly.");
+        }
+
+        _scannerRefreshCancellationSource?.Dispose();
+        _scannerRefreshCancellationSource = new CancellationTokenSource();
+        _scannerRefreshTask = RunSnapshotRefreshLoopAsync(adapter, _scannerRefreshCancellationSource.Token);
     }
 
     private async Task RunSnapshotRefreshLoopAsync(Adapter adapter, CancellationToken cancellationToken)
@@ -280,21 +308,10 @@ public sealed class GenericBleAdvertisementPollingClient(
             {
                 try
                 {
-                    if (!await adapter.GetAsync<bool>("Powered"))
-                    {
-                        var powerResult = await bluetoothManagementService.SetPowerAsync(enabled: true, cancellationToken);
-                        if (!powerResult.Success)
-                            throw new InvalidOperationException(powerResult.Message);
-                    }
-
-                    if (!await adapter.GetAsync<bool>("Discovering"))
-                    {
-                        _ = await BlueZOperationHelpers.TryStartDiscoveryAsync(
-                            adapter,
-                            logger,
-                            "ble-advertisement-monitor-refresh",
-                            cancellationToken);
-                    }
+                    await EnsureDiscoveryActiveAsync(
+                        adapter,
+                        "ble-advertisement-monitor-refresh",
+                        cancellationToken);
                 }
                 catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
                 {

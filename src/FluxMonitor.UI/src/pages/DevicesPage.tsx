@@ -1764,7 +1764,9 @@ export function DevicesPage({
                     })}
                   </div>
                 ) : null}
-                {(bleScanResults[activeLibraryBleScanKey] ?? []).length > 0 && visibleLibraryBleDevices.length === 0 ? (
+                {(bleScanResults[activeLibraryBleScanKey] ?? []).length > 0
+                  && visibleLibraryBleDevices.length === 0
+                  && !bleScanFollowUpLoading[activeLibraryBleScanKey] ? (
                   <div className='mt-4 rounded-lg border border-border/70 bg-background/50 px-3 py-3 text-sm text-muted-foreground'>
                     All nearby compatible devices are already added.
                   </div>
