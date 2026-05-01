@@ -7,6 +7,14 @@ namespace FluxMonitor.Backend.Services;
 
 internal static class BlueZOperationHelpers
 {
+    private static readonly SemaphoreSlim AdapterOperationLock = new(1, 1);
+
+    internal static async Task<IDisposable> AcquireAdapterOperationLockAsync(CancellationToken cancellationToken = default)
+    {
+        await AdapterOperationLock.WaitAsync(cancellationToken);
+        return new AdapterOperationLockReleaser();
+    }
+
     internal static bool IsOperationInProgress(Exception exception)
     {
         if (exception is DBusException dbusException)
@@ -153,4 +161,18 @@ internal static class BlueZOperationHelpers
            (message.Contains("operation already in progress", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("operation is already in progress", StringComparison.OrdinalIgnoreCase) ||
             message.Contains("already in progress", StringComparison.OrdinalIgnoreCase));
+
+    private sealed class AdapterOperationLockReleaser : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed)
+                return;
+
+            _disposed = true;
+            AdapterOperationLock.Release();
+        }
+    }
 }

@@ -274,6 +274,10 @@ public sealed class GenericBleAdvertisementPollingClient(
         if (await adapter.GetAsync<bool>("Discovering"))
             return;
 
+        using var adapterOperation = await BlueZOperationHelpers.AcquireAdapterOperationLockAsync(cancellationToken);
+        if (await adapter.GetAsync<bool>("Discovering"))
+            return;
+
         _ = await BlueZOperationHelpers.TryStartDiscoveryAsync(
             adapter,
             logger,
