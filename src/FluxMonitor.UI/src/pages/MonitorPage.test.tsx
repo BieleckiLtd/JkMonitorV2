@@ -113,13 +113,13 @@ describe('MonitorPage', () => {
 
     expect(FakeEventSource.instances).toHaveLength(1);
 
-    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
 
     FakeEventSource.instances[0]?.onerror?.();
 
     expect(FakeEventSource.instances[0]?.close).toHaveBeenCalledTimes(1);
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
     });
 
     await new Promise((resolve) => window.setTimeout(resolve, 2100));
@@ -434,7 +434,7 @@ describe('MonitorPage', () => {
     expect(screen.queryByText(/Waiting for first reading/i)).not.toBeInTheDocument();
   }, 10000);
 
-  it('renders compact cards with N/D placeholders before the first telemetry values arrive', async () => {
+  it('renders compact cards with metric skeletons before the first telemetry values arrive', async () => {
     useDeviceDefinitionMock.mockReturnValue({
       version: '1',
       device: {
@@ -518,8 +518,55 @@ describe('MonitorPage', () => {
     expect(await screen.findByText('Battery Rack')).toBeInTheDocument();
     expect(screen.getByText('Total Voltage')).toBeInTheDocument();
     expect(screen.getByText('Current')).toBeInTheDocument();
-    expect(screen.getAllByText('N/D').length).toBeGreaterThanOrEqual(4);
+    expect(screen.getByLabelText('Total Voltage loading')).toBeInTheDocument();
+    expect(screen.getByLabelText('Current loading')).toBeInTheDocument();
+    expect(screen.getByLabelText('Power loading')).toBeInTheDocument();
+    expect(screen.getByLabelText('State of Charge loading')).toBeInTheDocument();
     expect(screen.queryByText(/Waiting for first reading/i)).not.toBeInTheDocument();
+  }, 10000);
+
+  it('renders summary devices in the final compact layout while live telemetry is still loading', async () => {
+    useDeviceDefinitionMock.mockReturnValue(null);
+
+    class FakeEventSource {
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      close = vi.fn();
+
+      constructor(public readonly url: string) {}
+    }
+
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+    globalThis.fetch = vi.fn((input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/devices/summary') {
+        return Promise.resolve(new Response(JSON.stringify({
+          devices: [
+            {
+              deviceId: 'jk-inverter-bms-504185749008132-00',
+              displayName: '504185749008132-00',
+              definitionId: 'jk-inverter-bms-ble',
+              enabled: true,
+              sortOrder: 0,
+            },
+          ],
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }));
+      }
+
+      return new Promise<Response>(() => {});
+    }) as typeof fetch;
+
+    render(<MonitorPage />);
+
+    expect(await screen.findByText('504185749008132-00')).toBeInTheDocument();
+    expect(screen.getByText('Total Voltage')).toBeInTheDocument();
+    expect(screen.getByLabelText('Total Voltage loading')).toBeInTheDocument();
+    expect(screen.getByLabelText('Current loading')).toBeInTheDocument();
+    expect(screen.queryByText('Loading')).not.toBeInTheDocument();
+    expect(screen.queryByText(/0ms/)).not.toBeInTheDocument();
   }, 10000);
 
   it('uses the compact card layout immediately when telemetry has compact pack metrics before the definition loads', async () => {
@@ -1764,6 +1811,10 @@ describe('MonitorPage', () => {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ devices: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         success: true,
         results: [
@@ -1834,11 +1885,11 @@ describe('MonitorPage', () => {
     fireEvent.click(screen.getByLabelText('Save date and time'));
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
     });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+      3,
       '/api/devices/inv-clock/parameters/batch',
       expect.objectContaining({
         method: 'POST',
@@ -2124,6 +2175,10 @@ describe('MonitorPage', () => {
         status: 200,
         headers: { 'Content-Type': 'application/json' },
       }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ devices: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }))
       .mockResolvedValueOnce(new Response(JSON.stringify({
         success: true,
         writtenValue: 3460,
@@ -2184,11 +2239,11 @@ describe('MonitorPage', () => {
     fireEvent.keyDown(input, { key: 'Enter' });
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(fetchMock).toHaveBeenCalledTimes(3);
     });
 
     expect(fetchMock).toHaveBeenNthCalledWith(
-      2,
+      3,
       '/api/devices/scaled-1/parameters/cell_charge_request',
       expect.objectContaining({
         method: 'POST',

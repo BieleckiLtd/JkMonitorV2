@@ -41,11 +41,25 @@ const inverterCompactHeroMetrics: UiMetricDefinition[] = [
 ];
 
 const packCompactHeroMetrics: UiMetricDefinition[] = [
-  { entity: 'total_voltage', icon: 'zap', color: 'emerald' },
-  { entity: 'current', icon: 'activity', color: 'blue' },
-  { entity: 'power', icon: 'gauge', color: 'amber', format: 'power-short' },
-  { entity: 'state_of_charge', icon: 'battery', color: 'green' },
+  { entity: 'total_voltage', icon: 'zap', color: 'emerald', label: 'Total Voltage' },
+  { entity: 'current', icon: 'activity', color: 'blue', label: 'Current' },
+  { entity: 'power', icon: 'gauge', color: 'amber', label: 'Power', format: 'power-short' },
+  { entity: 'state_of_charge', icon: 'battery', color: 'green', label: 'State of Charge' },
 ];
+
+const environmentCompactHeroMetrics: UiMetricDefinition[] = [
+  { entity: 'temperature_c', icon: 'thermometer', color: 'amber', label: 'Temperature' },
+  { entity: 'humidity_pct', icon: 'activity', color: 'blue', label: 'Humidity' },
+];
+
+const compactPackDefinitionIds = new Set([
+  'jk-inverter-bms',
+  'jk-inverter-bms-ble',
+  'jk-bd4a8s4p-ble',
+  'pylon-lv-rs485',
+]);
+const compactInverterDefinitionIds = new Set(['anenji-inverter-rs232']);
+const compactEnvironmentDefinitionIds = new Set(['govee-thermo-hygrometer-ble']);
 
 const packCompactStatusGlyphs: UiStatusGlyphDefinition[] = [
   {
@@ -99,7 +113,7 @@ type DeviceSummaryResponse = {
 };
 
 function getSnapshotDevices(snapshot: DeviceRuntimeState[] | DeviceRuntimeStateStreamEnvelope) {
-  return Array.isArray(snapshot) ? snapshot : snapshot.devices;
+  return Array.isArray(snapshot) ? snapshot : Array.isArray(snapshot.devices) ? snapshot.devices : [];
 }
 
 function mergeRuntimeDeviceSnapshots(
@@ -144,6 +158,16 @@ function shouldUseCompactMonitorCard(definition: DeviceDefinition | null) {
 
 function shouldUseCompactMonitorCardFallback(paramByKey: Map<string, DeviceParameter>) {
   return hasCompactInverterPowerMetrics(paramByKey) || hasCompactPackMetrics(paramByKey);
+}
+
+function shouldUseKnownCompactDefinitionFallback(definitionId: string | null | undefined) {
+  if (!definitionId) {
+    return false;
+  }
+
+  return compactPackDefinitionIds.has(definitionId)
+    || compactInverterDefinitionIds.has(definitionId)
+    || compactEnvironmentDefinitionIds.has(definitionId);
 }
 
 type SwitchStatusChip = {
@@ -193,17 +217,9 @@ export function MonitorPage() {
     let eventSource: EventSource | null = null;
     let reconnectTimerId: number | null = null;
     let fallbackIntervalId: number | null = null;
-    let summaryTimerId: number | null = null;
-
-    const clearSummaryTimer = () => {
-      if (summaryTimerId == null) return;
-      window.clearTimeout(summaryTimerId);
-      summaryTimerId = null;
-    };
 
     const applySnapshot = (snapshot: DeviceRuntimeState[] | DeviceRuntimeStateStreamEnvelope) => {
       if (!isMounted) return;
-      clearSummaryTimer();
       const nextDevices = getSnapshotDevices(snapshot);
       setDevices((currentDevices) => mergeRuntimeDeviceSnapshots(currentDevices, nextDevices));
       setLoadError(null);
@@ -215,6 +231,7 @@ export function MonitorPage() {
         const response = await fetch('/api/devices/summary', { cache: 'no-store' });
         if (!response.ok) return;
         const data = (await response.json()) as DeviceSummaryResponse;
+        if (!Array.isArray(data.devices)) return;
         if (!isMounted) return;
         setDevices((current) => {
           if (current.length > 0) return current;
@@ -332,17 +349,13 @@ export function MonitorPage() {
     };
 
     void load();
-    summaryTimerId = window.setTimeout(() => {
-      summaryTimerId = null;
-      void loadSummaries();
-    }, 150);
+    void loadSummaries();
     connectStream();
 
     return () => {
       isMounted = false;
       closeEventSource();
       clearReconnectTimer();
-      clearSummaryTimer();
 
       if (fallbackIntervalId != null) {
         window.clearInterval(fallbackIntervalId);
@@ -384,14 +397,6 @@ export function MonitorPage() {
         </div>
       )}
 
-      {isLoading && devices.length === 0 && (
-        <div className='space-y-3 sm:space-y-4'>
-          <MonitorSkeletonCard />
-          <MonitorSkeletonCard />
-          <MonitorSkeletonCard />
-        </div>
-      )}
-
       {devices.length === 0 && !isLoading && !loadError && (
         <div className='rounded-2xl border border-dashed border-border bg-card/40 px-6 py-12 text-center'>
           <div className='text-lg font-semibold text-foreground'>No devices configured</div>
@@ -413,8 +418,12 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
   const parameters = telemetry?.parameters ?? [];
   const cells = telemetry?.cells ?? [];
   const warnings = telemetry?.activeWarnings ?? [];
+  const isKnownEnvironmentDefinition = compactEnvironmentDefinitionIds.has(device.definitionId);
+  const isKnownInverterDefinition = compactInverterDefinitionIds.has(device.definitionId);
+  const isKnownPackDefinition = compactPackDefinitionIds.has(device.definitionId);
   const isPassiveAdvertisement = definition?.connection.protocol.type === 'ble-advertisement'
-    || device.protocolHandler === 'ble-advertisement';
+    || device.protocolHandler === 'ble-advertisement'
+    || (definition == null && isKnownEnvironmentDefinition);
   const isHealthy = device.lastOutcome === 'Succeeded';
   const isFailing = device.lastOutcome === 'Failed';
   const dp = device.displayPrecision ?? defaultPrecision;
@@ -423,13 +432,15 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
   // Build a fast lookup by entity key for definition-driven rendering
   const paramByKey = new Map(parameters.map(p => [p.key, p]));
 
-  const usesCompactMonitorCard = shouldUseCompactMonitorCard(definition) || shouldUseCompactMonitorCardFallback(paramByKey);
+  const usesCompactMonitorCard = shouldUseCompactMonitorCard(definition)
+    || shouldUseCompactMonitorCardFallback(paramByKey)
+    || shouldUseKnownCompactDefinitionFallback(device.definitionId);
   const deviceCategory = definition?.device.category?.toLowerCase();
-  const isEnvironment = deviceCategory === 'environment';
+  const isEnvironment = deviceCategory === 'environment' || (definition == null && isKnownEnvironmentDefinition);
   const hasInverterPowerMetrics = hasCompactInverterPowerMetrics(paramByKey);
   const hasPackPowerMetrics = hasCompactPackMetrics(paramByKey);
-  const isInverter = deviceCategory === 'inverter' || (definition == null && hasInverterPowerMetrics);
-  const isPack = deviceCategory === 'energy-storage' || (definition == null && hasPackPowerMetrics);
+  const isInverter = deviceCategory === 'inverter' || (definition == null && (hasInverterPowerMetrics || isKnownInverterDefinition));
+  const isPack = deviceCategory === 'energy-storage' || (definition == null && (hasPackPowerMetrics || isKnownPackDefinition));
   const [isExpanded, setIsExpanded] = useState(false);
 
   // Resolve monitor page UI sections from definition (if available)
@@ -457,10 +468,15 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
     const compactWarnings = compactTelemetry.activeWarnings ?? [];
     const compactParamByKey = new Map(compactParameters.map(p => [p.key, p]));
     const heroSection = monitorSections?.find(s => s.type === 'hero-metrics');
-    const compactCardIconName = definition?.device.icon ?? (isPack ? 'battery' : undefined);
-    const heroMetrics = hasCompactInverterPowerMetrics(compactParamByKey) || hasMetricDefinitions(inverterCompactHeroMetrics, definition)
+    const compactCardIconName = definition?.device.icon ?? (isEnvironment ? 'thermometer' : isInverter ? 'zap' : isPack ? 'battery' : undefined);
+    const heroMetrics = hasCompactInverterPowerMetrics(compactParamByKey) || isInverter || hasMetricDefinitions(inverterCompactHeroMetrics, definition)
       ? inverterCompactHeroMetrics
-      : heroSection?.metrics ?? (hasCompactPackMetrics(compactParamByKey) || hasMetricDefinitions(packCompactHeroMetrics, definition) ? packCompactHeroMetrics : []);
+      : heroSection?.metrics
+        ?? (hasCompactPackMetrics(compactParamByKey) || isPack || hasMetricDefinitions(packCompactHeroMetrics, definition)
+          ? packCompactHeroMetrics
+          : isEnvironment
+            ? environmentCompactHeroMetrics
+            : []);
     const batteryParam = compactParamByKey.get('battery_pct');
     const batteryValue = batteryParam?.numericValue;
     const signalValue = compactParamByKey.get('signal_strength_pct')?.numericValue;
@@ -566,7 +582,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                   const param = compactParamByKey.get(m.entity);
                   const entity = findMetricEntity(definition, m.entity);
                   const value = param?.numericValue;
-                  const sourceUnit = getMetricSourceUnit(param, entity);
+                  const sourceUnit = getMetricSourceUnit(param, entity) || getFallbackMetricUnit(m.entity);
                   const unit = getTemperatureDisplayUnit(sourceUnit, temperatureUnit) ?? '';
                   const prec = entity?.display?.precision ?? param?.displayPrecision ?? 2;
                   const displayValue = isCelsiusUnit(sourceUnit)
@@ -594,9 +610,16 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
                         {m.label ?? param?.displayName ?? entity?.name ?? m.entity}
                       </div>
                       <div className='mt-1 flex items-baseline gap-1'>
-                        <span className={cn('text-xl font-bold tracking-tight tabular-nums sm:text-2xl', accentClass)}>
-                          {metricDisplay.valueText}
-                        </span>
+                        {param == null ? (
+                          <span
+                            aria-label={`${m.label ?? entity?.name ?? m.entity} loading`}
+                            className={cn('mt-1 h-7 w-20 animate-pulse rounded bg-current opacity-20 sm:h-8', accentClass)}
+                          />
+                        ) : (
+                          <span className={cn('text-xl font-bold tracking-tight tabular-nums sm:text-2xl', accentClass)}>
+                            {metricDisplay.valueText}
+                          </span>
+                        )}
                         <span className='text-xs font-medium text-muted-foreground/70'>{metricDisplay.unitText}</span>
                       </div>
                     </div>
@@ -806,26 +829,6 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
           )}
         </div>
       )}
-    </div>
-  );
-}
-
-function MonitorSkeletonCard() {
-  return (
-    <div className='rounded-2xl border border-border bg-card/60 p-4 shadow-sm sm:p-5'>
-      <div className='flex items-center gap-3'>
-        <div className='h-11 w-11 animate-pulse rounded-xl bg-muted/70' />
-        <div className='min-w-0 flex-1 space-y-2'>
-          <div className='h-4 w-40 animate-pulse rounded bg-muted/70' />
-          <div className='h-3 w-56 max-w-full animate-pulse rounded bg-muted/50' />
-        </div>
-      </div>
-      <div className='mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4'>
-        <div className='h-16 animate-pulse rounded-xl border border-border/70 bg-background/40' />
-        <div className='h-16 animate-pulse rounded-xl border border-border/70 bg-background/40' />
-        <div className='h-16 animate-pulse rounded-xl border border-border/70 bg-background/40' />
-        <div className='h-16 animate-pulse rounded-xl border border-border/70 bg-background/40' />
-      </div>
     </div>
   );
 }
@@ -2182,6 +2185,34 @@ function getMetricSourceUnit(
     ?? '';
 }
 
+function getFallbackMetricUnit(entityId: string) {
+  switch (entityId) {
+    case 'total_voltage':
+    case 'battery_voltage':
+    case 'grid_voltage':
+    case 'output_voltage':
+      return 'V';
+    case 'current':
+    case 'battery_current':
+    case 'output_current':
+      return 'A';
+    case 'power':
+    case 'grid_power':
+    case 'battery_power':
+    case 'pv_power':
+    case 'output_active_power':
+      return 'W';
+    case 'state_of_charge':
+    case 'battery_pct':
+    case 'humidity_pct':
+      return '%';
+    case 'temperature_c':
+      return 'C';
+    default:
+      return '';
+  }
+}
+
 function shouldUseSharedPowerKilowatts(
   metrics: UiMetricDefinition[],
   paramByKey: Map<string, DeviceParameter>,
@@ -2306,11 +2337,16 @@ function formatDeviceConnectionDescriptor(
   isPassiveAdvertisement: boolean,
 ) {
   const handler = device.protocolHandler ?? device.definitionId;
+  const parts = [device.deviceId, handler].filter((part) => part != null && part !== '');
   if (isPassiveAdvertisement) {
-    return `${device.deviceId} • ${handler} • passive listener`;
+    return [...parts, 'passive listener'].join(' • ');
   }
 
-  return `${device.deviceId} • ${handler} • ${device.pollIntervalMilliseconds}ms`;
+  if (device.pollIntervalMilliseconds > 0) {
+    parts.push(`${device.pollIntervalMilliseconds}ms`);
+  }
+
+  return parts.join(' • ');
 }
 
 /** Maps color name strings from the device definition to Tailwind text-color classes. */
