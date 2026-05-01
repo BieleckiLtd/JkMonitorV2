@@ -282,22 +282,22 @@ function Invoke-RemoteDeploy {
     $failures = New-Object System.Collections.Generic.List[string]
 
     foreach ($attempt in $attempts) {
-        $host = [string]$attempt.Host
+        $targetHost = [string]$attempt.Host
         $extraArgs = [string[]]$attempt.ExtraArgs
 
         if ($extraArgs.Count -gt 0 -and -not (Test-CommandExists 'cloudflared')) {
-            $failures.Add("Remote fallback '$host' requires cloudflared on PATH.")
+            $failures.Add("Remote fallback '$targetHost' requires cloudflared on PATH.")
             continue
         }
 
-        Write-Step "Deploying to $host"
-        $ScriptContent | & ssh @commonArgs @extraArgs $host 'bash -s'
+        Write-Step "Deploying to $targetHost"
+        $ScriptContent | & ssh @commonArgs @extraArgs $targetHost 'bash -s'
         if ($LASTEXITCODE -eq 0) {
             return
         }
 
-        $failures.Add("SSH deploy via '$host' failed with exit code $LASTEXITCODE.")
-        if ($host -eq $PrimaryHost -and $attempts.Count -gt 1) {
+        $failures.Add("SSH deploy via '$targetHost' failed with exit code $LASTEXITCODE.")
+        if ($targetHost -eq $PrimaryHost -and $attempts.Count -gt 1) {
             Write-Info 'Primary SSH target failed. Trying Cloudflare Access fallback.'
         }
     }
