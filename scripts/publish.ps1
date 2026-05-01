@@ -257,6 +257,8 @@ function Invoke-RemoteDeploy {
         [string]$ScriptContent
     )
 
+    $normalizedScriptContent = $ScriptContent -replace "`r`n", "`n"
+
     $commonArgs = @(
         '-o', 'BatchMode=yes',
         '-o', 'ConnectTimeout=15',
@@ -291,7 +293,7 @@ function Invoke-RemoteDeploy {
         }
 
         Write-Step "Deploying to $targetHost"
-        $ScriptContent | & ssh @commonArgs @extraArgs $targetHost 'bash -s'
+        $normalizedScriptContent | & ssh @commonArgs @extraArgs $targetHost 'bash -s'
         if ($LASTEXITCODE -eq 0) {
             return
         }
