@@ -18,6 +18,7 @@ public sealed class GenericSerialPollingClient(
     DefinitionDrivenTelemetryBuilder telemetryBuilder,
     ExpressionEvaluator expressionEvaluator,
     DeviceDefinitionLoader definitionLoader,
+    DeviceDetailInterestStore detailInterestStore,
     ILogger<GenericSerialPollingClient> logger) : IDevicePollingClient, IDisposable
 {
     private readonly SemaphoreSlim _busLock = new(1, 1);
@@ -67,12 +68,18 @@ public sealed class GenericSerialPollingClient(
             var now = DateTimeOffset.UtcNow;
             var protocolType = definition.Connection.Protocol.Type ?? "modbus-rtu";
             var fastestPollIntervalMs = GetFastestPollIntervalMilliseconds(definition);
+            var includeDetailBanks = detailInterestStore.HasDetailInterest(device.DeviceId);
 
             foreach (var bank in definition.DataSources)
             {
                 var pollGroup = definition.PollGroups.GetValueOrDefault(bank.PollGroup);
                 var intervalMs = pollGroup?.IntervalMs ?? 1000;
                 var cacheKey = GetBankCacheKey(device, bank.Id);
+
+                if (!includeDetailBanks && IsDetailBank(intervalMs, fastestPollIntervalMs))
+                {
+                    continue;
+                }
 
                 // Check if this bank is cached and still fresh
                 if (_bankCache.TryGetValue(cacheKey, out var cached) &&
@@ -477,6 +484,9 @@ public sealed class GenericSerialPollingClient(
             .Where(intervalMs => intervalMs > 0)
             .DefaultIfEmpty(1000)
             .Min();
+
+    private static bool IsDetailBank(int intervalMs, int fastestPollIntervalMs)
+        => intervalMs <= 0 || intervalMs > fastestPollIntervalMs;
 
     private bool ShouldDeferColdSlowBank(
         string cacheKey,

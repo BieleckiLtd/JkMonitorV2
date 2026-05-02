@@ -65,7 +65,7 @@ describe('MonitorPage', () => {
       expect(FakeEventSource.instances).toHaveLength(1);
     });
 
-    expect(FakeEventSource.instances[0]?.url).toBe('/api/devices/current/stream');
+    expect(FakeEventSource.instances[0]?.url).toBe('/api/devices/current/stream?summary=true');
 
     FakeEventSource.instances[0]?.emit({
       devices: [
@@ -84,6 +84,69 @@ describe('MonitorPage', () => {
 
     expect(await screen.findByText('Battery 1')).toBeInTheDocument();
     expect(screen.getByText(/device-1/i)).toBeInTheDocument();
+  });
+
+  it('reconnects the telemetry stream with detail interest when a device expands', async () => {
+    class FakeEventSource {
+      static instances: FakeEventSource[] = [];
+
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      close = vi.fn();
+
+      constructor(public readonly url: string) {
+        FakeEventSource.instances.push(this);
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }));
+      }
+    }
+
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    render(<MonitorPage />);
+
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(1);
+    });
+
+    FakeEventSource.instances[0]?.emit({
+      devices: [
+        {
+          deviceId: 'device-1',
+          displayName: 'Battery 1',
+          definitionId: 'jk-inverter-bms',
+          enabled: true,
+          isMaster: true,
+          pollIntervalMilliseconds: 1000,
+          lastOutcome: 'Succeeded',
+          latestTelemetry: {
+            collectedAt: '2026-04-12T12:00:00.000Z',
+            cells: [],
+            activeWarnings: [],
+            parameters: [
+              { key: 'total_voltage', displayName: 'Total Voltage', category: 'Pack Status', numericValue: 52.1, sortOrder: 0, unit: 'V' },
+              { key: 'current', displayName: 'Current', category: 'Pack Status', numericValue: 8.2, sortOrder: 1, unit: 'A' },
+              { key: 'power', displayName: 'Power', category: 'Pack Status', numericValue: 427, sortOrder: 2, unit: 'W' },
+              { key: 'state_of_charge', displayName: 'State of Charge', category: 'Pack Status', numericValue: 78, sortOrder: 3, unit: '%' },
+            ],
+          },
+        },
+      ],
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: /battery 1/i }));
+
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(2);
+    });
+    expect(FakeEventSource.instances[0]?.close).toHaveBeenCalledTimes(1);
+    expect(FakeEventSource.instances[1]?.url).toBe('/api/devices/current/stream?summary=true&detailDeviceId=device-1');
   });
 
   it('reconnects the SSE stream after an error and refreshes the latest snapshot', async () => {
@@ -124,7 +187,7 @@ describe('MonitorPage', () => {
 
     await new Promise((resolve) => window.setTimeout(resolve, 2100));
     expect(FakeEventSource.instances).toHaveLength(2);
-    expect(FakeEventSource.instances[1]?.url).toBe('/api/devices/current/stream');
+    expect(FakeEventSource.instances[1]?.url).toBe('/api/devices/current/stream?summary=true');
   }, 10000);
 
   it('renders devices in the order provided by the runtime snapshot', async () => {

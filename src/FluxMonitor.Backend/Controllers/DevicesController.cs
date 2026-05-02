@@ -22,6 +22,7 @@ public sealed class DevicesController(
     GenericBleAdvertisementPollingClient genericBleAdvertisementPollingClient,
     PollingClientDispatcher pollingClientDispatcher,
     DeviceDefinitionLoader definitionLoader,
+    DeviceDetailInterestStore detailInterestStore,
     ITelemetryRepository telemetryRepository,
     IOptionsMonitor<MonitorConfiguration> configuration,
     PollTrigger pollTrigger,
@@ -32,25 +33,47 @@ public sealed class DevicesController(
     private RetentionConfiguration GetCurrentRetention() => configuration.CurrentValue.Storage.Retention;
 
     [HttpGet("current")]
-    public IActionResult GetCurrent()
+    public IActionResult GetCurrent(
+        [FromQuery] string[] detailDeviceId,
+        [FromQuery] bool summary = false)
     {
-        return Ok(stateStore.GetCurrentDevices());
+        var devices = stateStore.GetCurrentDevices();
+        return Ok(summary || detailDeviceId.Length > 0
+            ? ProjectDeviceStates(devices, detailDeviceId)
+            : devices);
     }
 
     [HttpGet("current/stream")]
-    public async Task GetCurrentStream(CancellationToken cancellationToken)
+    public async Task GetCurrentStream(
+        [FromQuery] string[] detailDeviceId,
+        [FromQuery] bool summary = false,
+        CancellationToken cancellationToken = default)
     {
         Response.Headers.Append("Cache-Control", "no-cache");
         Response.Headers.Append("X-Accel-Buffering", "no");
         Response.ContentType = "text/event-stream";
 
-        await using var subscription = deviceStateBroadcaster.Subscribe(stateStore.GetCurrentDevices());
+        var currentDevices = stateStore.GetCurrentDevices();
+        var requestedDetailDeviceIds = NormalizeDetailDeviceIds(detailDeviceId);
+        var detailDeviceIds = summary
+            ? requestedDetailDeviceIds
+            : currentDevices.Select(device => device.DeviceId).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        using var detailLease = detailInterestStore.Acquire(detailDeviceIds);
+        if (detailDeviceIds.Count > 0)
+        {
+            pollTrigger.Signal();
+        }
+
+        await using var subscription = deviceStateBroadcaster.Subscribe(currentDevices);
 
         try
         {
             await foreach (var devices in subscription.Reader.ReadAllAsync(cancellationToken))
             {
-                var payload = SerializeCurrentDevicesStream(devices);
+                var projectedDevices = summary
+                    ? ProjectDeviceStates(devices, detailDeviceIds)
+                    : devices;
+                var payload = SerializeCurrentDevicesStream(projectedDevices);
                 await Response.WriteAsync($"data: {payload}\n\n", cancellationToken);
                 await Response.Body.FlushAsync(cancellationToken);
             }
@@ -76,6 +99,7 @@ public sealed class DevicesController(
                 DeviceId = device.DeviceId,
                 DisplayName = device.DisplayName,
                 SortOrder = device.SortOrder,
+                DefinitionId = device.DefinitionId,
                 Enabled = device.Enabled
             })
             .ToArray();
@@ -890,6 +914,110 @@ public sealed class DevicesController(
             return parameter.RawValue.Value;
         return null;
     }
+
+    private IReadOnlyList<DeviceRuntimeState> ProjectDeviceStates(
+        IReadOnlyList<DeviceRuntimeState> devices,
+        IEnumerable<string> detailDeviceIds)
+    {
+        var detailSet = NormalizeDetailDeviceIds(detailDeviceIds);
+        if (detailSet.Count == 0)
+        {
+            return devices.Select(ProjectCollapsedDeviceState).ToArray();
+        }
+
+        return devices
+            .Select(device => detailSet.Contains(device.DeviceId)
+                ? device
+                : ProjectCollapsedDeviceState(device))
+            .ToArray();
+    }
+
+    private DeviceRuntimeState ProjectCollapsedDeviceState(DeviceRuntimeState device)
+    {
+        if (device.LatestTelemetry is null)
+            return device;
+
+        if (!definitionLoader.TryGet(device.DefinitionId, out var definition) || definition is null)
+            return device with { LatestTelemetry = ProjectCollapsedTelemetryWithoutDefinition(device.LatestTelemetry) };
+
+        return device with { LatestTelemetry = ProjectCollapsedTelemetry(device.LatestTelemetry, definition) };
+    }
+
+    private static DeviceTelemetrySnapshot ProjectCollapsedTelemetry(
+        DeviceTelemetrySnapshot telemetry,
+        DeviceDefinition definition)
+    {
+        var summaryEntityIds = GetSummaryEntityIds(definition);
+        var parameters = telemetry.Parameters
+            .Where(parameter => summaryEntityIds.Contains(parameter.Key) && !parameter.IsWritable)
+            .ToArray();
+        var numericValues = telemetry.NumericValues
+            .Where(value => summaryEntityIds.Contains(value.Key))
+            .ToDictionary(value => value.Key, value => value.Value, StringComparer.OrdinalIgnoreCase);
+
+        return telemetry with
+        {
+            Cells = [],
+            Parameters = parameters,
+            NumericValues = numericValues
+        };
+    }
+
+    private static DeviceTelemetrySnapshot ProjectCollapsedTelemetryWithoutDefinition(DeviceTelemetrySnapshot telemetry)
+    {
+        var parameters = telemetry.Parameters
+            .Where(parameter => !parameter.IsWritable)
+            .ToArray();
+        var parameterIds = parameters
+            .Select(parameter => parameter.Key)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var numericValues = telemetry.NumericValues
+            .Where(value => parameterIds.Contains(value.Key))
+            .ToDictionary(value => value.Key, value => value.Value, StringComparer.OrdinalIgnoreCase);
+
+        return telemetry with
+        {
+            Cells = [],
+            Parameters = parameters,
+            NumericValues = numericValues
+        };
+    }
+
+    private static HashSet<string> GetSummaryEntityIds(DeviceDefinition definition)
+    {
+        var fastestIntervalMs = definition.DataSources
+            .Select(bank => definition.PollGroups.GetValueOrDefault(bank.PollGroup)?.IntervalMs ?? 1000)
+            .Where(intervalMs => intervalMs > 0)
+            .DefaultIfEmpty(1000)
+            .Min();
+        var summaryBankIds = definition.DataSources
+            .Where(bank =>
+            {
+                var intervalMs = definition.PollGroups.GetValueOrDefault(bank.PollGroup)?.IntervalMs ?? 1000;
+                return intervalMs > 0 && intervalMs <= fastestIntervalMs;
+            })
+            .Select(bank => bank.Id)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var ids = definition.Entities
+            .Where(entity => summaryBankIds.Contains(entity.Source.Bank))
+            .Select(entity => entity.Id)
+            .Concat(definition.ComputedEntities.Select(entity => entity.Id))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (!string.IsNullOrWhiteSpace(definition.Alarms?.Source))
+        {
+            ids.Add(definition.Alarms.Source);
+        }
+
+        return ids;
+    }
+
+    private static HashSet<string> NormalizeDetailDeviceIds(IEnumerable<string> detailDeviceIds)
+        => detailDeviceIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     private DeviceConfigurationsResponse BuildDeviceConfigurationResponse(IReadOnlyList<DeviceConfiguration> devices)
     {

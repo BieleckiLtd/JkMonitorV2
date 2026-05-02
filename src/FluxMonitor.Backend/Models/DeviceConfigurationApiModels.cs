@@ -62,6 +62,8 @@ public sealed record class DeviceSummaryApiModel
 
     public int SortOrder { get; init; }
 
+    public required string DefinitionId { get; init; }
+
     public bool Enabled { get; init; }
 }
 

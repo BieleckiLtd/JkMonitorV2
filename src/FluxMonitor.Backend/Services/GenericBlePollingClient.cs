@@ -20,6 +20,7 @@ public sealed class GenericBlePollingClient(
     DefinitionDrivenTelemetryBuilder telemetryBuilder,
     DeviceDefinitionLoader definitionLoader,
     BluetoothManagementService bluetoothManagementService,
+    DeviceDetailInterestStore detailInterestStore,
     ILogger<GenericBlePollingClient> logger) : IDevicePollingClient, IDisposable
 {
     private readonly ConcurrentDictionary<string, BleSession> _sessions = new(StringComparer.OrdinalIgnoreCase);
@@ -137,10 +138,17 @@ public sealed class GenericBlePollingClient(
 
             var bankData = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
             var interBankDelay = definition.Connection.Protocol.Settings?.InterBankDelayMs ?? 0;
+            var fastestPollIntervalMs = GetFastestPollIntervalMilliseconds(definition);
+            var includeDetailBanks = detailInterestStore.HasDetailInterest(device.DeviceId);
             var isFirstBank = true;
             foreach (var bank in definition.DataSources)
             {
                 var intervalMs = GetBankIntervalMilliseconds(definition, bank);
+
+                if (!includeDetailBanks && IsDetailBank(intervalMs, fastestPollIntervalMs))
+                {
+                    continue;
+                }
 
                 if (TryGetFreshCachedPayload(session, bank.Id, intervalMs, out var cachedPayload))
                 {
@@ -1079,6 +1087,16 @@ public sealed class GenericBlePollingClient(
 
     private static int GetBankIntervalMilliseconds(DeviceDefinition definition, DataSourceDefinition bank)
         => definition.PollGroups.GetValueOrDefault(bank.PollGroup)?.IntervalMs ?? 1000;
+
+    private static int GetFastestPollIntervalMilliseconds(DeviceDefinition definition)
+        => definition.DataSources
+            .Select(bank => GetBankIntervalMilliseconds(definition, bank))
+            .Where(intervalMs => intervalMs > 0)
+            .DefaultIfEmpty(1000)
+            .Min();
+
+    private static bool IsDetailBank(int intervalMs, int fastestPollIntervalMs)
+        => intervalMs <= 0 || intervalMs > fastestPollIntervalMs;
 
     internal static TimeSpan GetNotifyStreamWaitTimeout(TimeSpan connectionTimeout, int intervalMs)
     {

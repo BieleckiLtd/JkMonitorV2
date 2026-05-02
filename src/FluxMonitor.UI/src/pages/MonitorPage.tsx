@@ -210,6 +210,27 @@ export function MonitorPage() {
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [nowMs, setNowMs] = useState(() => Date.now());
+  const [expandedDeviceIds, setExpandedDeviceIds] = useState<Set<string>>(() => new Set());
+  const detailQueryString = [
+    'summary=true',
+    ...[...expandedDeviceIds]
+    .sort((left, right) => left.localeCompare(right))
+    .map((deviceId) => `detailDeviceId=${encodeURIComponent(deviceId)}`),
+  ]
+    .join('&');
+
+  const handleDeviceExpandedChange = useCallback((deviceId: string, isExpanded: boolean) => {
+    setExpandedDeviceIds((current) => {
+      const next = new Set(current);
+      if (isExpanded) {
+        next.add(deviceId);
+      } else {
+        next.delete(deviceId);
+      }
+
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     let isMounted = true;
@@ -266,7 +287,8 @@ export function MonitorPage() {
       requestInFlight = true;
 
       try {
-        const response = await fetch('/api/devices/current', { cache: 'no-store' });
+        const currentUrl = `/api/devices/current?${detailQueryString}`;
+        const response = await fetch(currentUrl, { cache: 'no-store' });
         if (!response.ok) throw new Error('Unable to load device telemetry.');
         const data = (await response.json()) as DeviceRuntimeState[] | DeviceRuntimeStateStreamEnvelope;
         applySnapshot(data);
@@ -304,7 +326,8 @@ export function MonitorPage() {
       clearReconnectTimer();
       closeEventSource();
 
-      const stream = new EventSource('/api/devices/current/stream');
+      const streamUrl = `/api/devices/current/stream?${detailQueryString}`;
+      const stream = new EventSource(streamUrl);
       eventSource = stream;
 
       stream.onmessage = (event) => {
@@ -348,8 +371,12 @@ export function MonitorPage() {
       };
     };
 
-    void load();
-    void loadSummaries();
+    if (expandedDeviceIds.size === 0 || typeof EventSource === 'undefined') {
+      void load();
+    }
+    if (expandedDeviceIds.size === 0) {
+      void loadSummaries();
+    }
     connectStream();
 
     return () => {
@@ -361,7 +388,7 @@ export function MonitorPage() {
         window.clearInterval(fallbackIntervalId);
       }
     };
-  }, []);
+  }, [detailQueryString]);
 
   useEffect(() => {
     const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
@@ -405,13 +432,26 @@ export function MonitorPage() {
       )}
 
       {devices.map((device) => (
-        <DevicePanel key={device.deviceId} device={device} nowMs={nowMs} />
+        <DevicePanel
+          key={device.deviceId}
+          device={device}
+          nowMs={nowMs}
+          onExpandedChange={handleDeviceExpandedChange}
+        />
       ))}
     </div>
   );
 }
 
-function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: number }) {
+function DevicePanel({
+  device,
+  nowMs,
+  onExpandedChange,
+}: {
+  device: DeviceRuntimeState;
+  nowMs: number;
+  onExpandedChange: (deviceId: string, isExpanded: boolean) => void;
+}) {
   const definition = useDeviceDefinition(device.definitionId, device.deviceId);
   const temperatureUnit: TemperatureUnit = device.temperatureUnit === 'f' ? 'f' : 'c';
   const telemetry = device.latestTelemetry;
@@ -442,6 +482,18 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
   const isInverter = deviceCategory === 'inverter' || (definition == null && (hasInverterPowerMetrics || isKnownInverterDefinition));
   const isPack = deviceCategory === 'energy-storage' || (definition == null && (hasPackPowerMetrics || isKnownPackDefinition));
   const [isExpanded, setIsExpanded] = useState(false);
+
+  useEffect(() => {
+    return () => onExpandedChange(device.deviceId, false);
+  }, [device.deviceId, onExpandedChange]);
+
+  const toggleExpanded = useCallback(() => {
+    setIsExpanded((expanded) => {
+      const next = !expanded;
+      onExpandedChange(device.deviceId, next);
+      return next;
+    });
+  }, [device.deviceId, onExpandedChange]);
 
   // Resolve monitor page UI sections from definition (if available)
   const monitorSections = definition?.ui?.pages?.monitor?.sections;
@@ -496,7 +548,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
           {/* Compact header */}
           <button
             type='button'
-            onClick={() => setIsExpanded(prev => !prev)}
+            onClick={toggleExpanded}
             className='flex w-full items-center justify-between gap-3 px-4 py-3 sm:px-5 sm:py-4 text-left transition-colors hover:bg-muted/30'
           >
             <div className='flex items-center gap-3 min-w-0'>
@@ -733,7 +785,7 @@ function DevicePanel({ device, nowMs }: { device: DeviceRuntimeState; nowMs: num
       {/* Device Header */}
       <button
         type='button'
-        onClick={() => setIsExpanded(prev => !prev)}
+        onClick={toggleExpanded}
         className='flex w-full flex-col gap-2 rounded-2xl border border-border bg-card/70 p-4 text-left shadow-sm transition-colors hover:bg-card/90 sm:gap-3 sm:p-5 sm:flex-row sm:items-center sm:justify-between'
         aria-expanded={isExpanded}
       >
