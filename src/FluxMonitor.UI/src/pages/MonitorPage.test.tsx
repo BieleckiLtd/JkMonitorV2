@@ -681,8 +681,8 @@ describe('MonitorPage', () => {
             parameters: [
               { key: 'total_voltage', displayName: 'Total Voltage', category: 'Pack Status', numericValue: 53.61, sortOrder: 0, unit: 'V', displayPrecision: 2 },
               { key: 'current', displayName: 'Current', category: 'Pack Status', numericValue: 3.3, sortOrder: 1, unit: 'A', displayPrecision: 1 },
-              { key: 'power', displayName: 'Power', category: 'Pack Status', numericValue: 179, sortOrder: 2, unit: 'W', displayPrecision: 0 },
-              { key: 'state_of_charge', displayName: 'State of Charge', category: 'Pack Status', numericValue: 99, sortOrder: 3, unit: '%', displayPrecision: 0 },
+              { key: 'power', displayName: 'Power', category: 'Pack Status', numericValue: 1442, sortOrder: 2, unit: 'W' },
+              { key: 'state_of_charge', displayName: 'State of Charge', category: 'Pack Status', numericValue: 99, sortOrder: 3, unit: '%' },
               { key: 'charging_enabled', displayName: 'Charging', category: 'Status', booleanValue: true, sortOrder: 4 },
             ],
           },
@@ -696,7 +696,10 @@ describe('MonitorPage', () => {
     expect(screen.queryByText('SUCCEEDED')).not.toBeInTheDocument();
     expect(screen.getByText('53.61')).toHaveClass('text-sky-400');
     expect(screen.getByText('3.3')).toHaveClass('text-emerald-400');
-    expect(screen.getByText('179')).toHaveClass('text-emerald-400');
+    expect(screen.getByText('1.4')).toHaveClass('text-emerald-400');
+    expect(screen.getByText('kW')).toBeInTheDocument();
+    expect(screen.getByText('99')).toBeInTheDocument();
+    expect(screen.queryByText('99.00')).not.toBeInTheDocument();
   }, 10000);
 
   it('keeps the last in-memory telemetry values when a later snapshot has no telemetry payload', async () => {
@@ -1120,7 +1123,7 @@ describe('MonitorPage', () => {
                 metrics: [
                   { entity: 'total_voltage', color: 'emerald' },
                   { entity: 'current', color: 'blue' },
-                  { entity: 'power', color: 'amber' },
+                  { entity: 'power', color: 'amber', format: 'power-short' },
                   { entity: 'state_of_charge', color: 'green' },
                 ],
               },
@@ -1188,7 +1191,7 @@ describe('MonitorPage', () => {
             parameters: [
               { key: 'total_voltage', displayName: 'Total Voltage', category: 'Pack Status', numericValue: 53.21, sortOrder: 0, unit: 'V' },
               { key: 'current', displayName: 'Current', category: 'Pack Status', numericValue: -12.3, sortOrder: 1, unit: 'A' },
-              { key: 'power', displayName: 'Power', category: 'Pack Status', numericValue: 654, sortOrder: 2, unit: 'W' },
+              { key: 'power', displayName: 'Power', category: 'Pack Status', numericValue: 1442, sortOrder: 2, unit: 'W' },
               { key: 'state_of_charge', displayName: 'State of Charge', category: 'Pack Status', numericValue: 78, sortOrder: 3, unit: '%' },
               { key: 'charging_enabled', displayName: 'Charging', category: 'Status', booleanValue: true, sortOrder: 3, unit: '' },
               { key: 'discharging_enabled', displayName: 'Discharging', category: 'Status', booleanValue: true, sortOrder: 3, unit: '' },
@@ -1242,6 +1245,10 @@ describe('MonitorPage', () => {
     expect(screen.getByTitle('Charging')).toBeInTheDocument();
     expect(screen.queryByText('Succeeded')).not.toBeInTheDocument();
     expect(screen.getByText('53.21')).toBeInTheDocument();
+    expect(screen.getByText('1.4')).toBeInTheDocument();
+    expect(screen.getByText('78')).toBeInTheDocument();
+    expect(screen.queryByText('1442')).not.toBeInTheDocument();
+    expect(screen.queryByText('78.00')).not.toBeInTheDocument();
     expect(screen.queryByTestId('history-charts')).not.toBeInTheDocument();
     expect(screen.queryByText('Charging')).not.toBeInTheDocument();
     expect(screen.queryByText('Charge Status')).not.toBeInTheDocument();

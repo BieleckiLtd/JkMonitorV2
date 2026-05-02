@@ -653,7 +653,7 @@ function DevicePanel({
                   const value = param?.numericValue;
                   const sourceUnit = getMetricSourceUnit(param, entity) || getFallbackMetricUnit(m.entity);
                   const unit = getTemperatureDisplayUnit(sourceUnit, temperatureUnit) ?? '';
-                  const prec = entity?.display?.precision ?? param?.displayPrecision ?? 2;
+                  const prec = getMetricDisplayPrecision(m, param, entity);
                   const displayValue = isCelsiusUnit(sourceUnit)
                     ? convertTemperatureValue(value != null ? Number(value) : null, temperatureUnit)
                     : value != null ? Number(value) : null;
@@ -991,7 +991,7 @@ function renderSummaryMetricTiles(
           const metricDisplay = formatMetricDisplayValue(
             param?.numericValue != null ? Number(param.numericValue) : null,
             getMetricSourceUnit(param, entity) ?? '',
-            entity?.display?.precision ?? 2,
+            getMetricDisplayPrecision(metric, param, entity),
             metric,
             { forcePowerShortKilowatts: true },
           );
@@ -1022,7 +1022,7 @@ function renderSummaryMetricTiles(
           const metricDisplay = formatMetricDisplayValue(
             displayValue,
             getTemperatureDisplayUnit(sourceUnit, temperatureUnit) ?? sourceUnit ?? '',
-            entity?.display?.precision ?? 2,
+            getMetricDisplayPrecision(metric, param, entity),
             metric,
           );
 
@@ -1571,7 +1571,7 @@ function renderDefinitionSections(
                 const value = param?.numericValue;
                 const sourceUnit = getMetricSourceUnit(param, entity);
                 const unit = getTemperatureDisplayUnit(sourceUnit, temperatureUnit) ?? '';
-                const prec = entity?.display?.precision ?? 2;
+                const prec = getMetricDisplayPrecision(m, param, entity);
                 const displayValue = isCelsiusUnit(sourceUnit)
                   ? convertTemperatureValue(value != null ? Number(value) : null, temperatureUnit)
                   : value != null ? Number(value) : null;
@@ -2280,6 +2280,37 @@ function getFallbackMetricUnit(entityId: string) {
     default:
       return '';
   }
+}
+
+function getFallbackMetricPrecision(entityId: string) {
+  switch (entityId) {
+    case 'current':
+    case 'battery_current':
+    case 'output_current':
+    case 'temperature_c':
+      return 1;
+    case 'power':
+    case 'grid_power':
+    case 'battery_power':
+    case 'pv_power':
+    case 'output_active_power':
+    case 'state_of_charge':
+    case 'battery_pct':
+    case 'humidity_pct':
+      return 0;
+    default:
+      return 2;
+  }
+}
+
+function getMetricDisplayPrecision(
+  metric: UiMetricDefinition,
+  param: DeviceParameter | undefined,
+  entity: EntityDefinition | ComputedEntityDefinition | undefined,
+) {
+  return entity?.display?.precision
+    ?? param?.displayPrecision
+    ?? getFallbackMetricPrecision(metric.entity);
 }
 
 function shouldUseSharedPowerKilowatts(

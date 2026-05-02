@@ -1842,7 +1842,7 @@
             "metrics": [
               { "entity": "total_voltage",    "icon": "zap",      "color": "emerald" },
               { "entity": "current",          "icon": "activity",  "color": "blue" },
-              { "entity": "power",            "icon": "gauge",     "color": "amber" },
+              { "entity": "power",            "icon": "gauge",     "color": "amber", "format": "power-short" },
               { "entity": "state_of_charge",  "icon": "battery",   "color": "green" }
             ]
           },
