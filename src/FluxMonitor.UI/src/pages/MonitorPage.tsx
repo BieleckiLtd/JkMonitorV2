@@ -95,6 +95,7 @@ function hasMetricDefinitions(metrics: readonly UiMetricDefinition[], definition
 const reconnectDelayMs = 2000;
 const fallbackRefreshIntervalMs = 2000;
 const nd = 'N/D';
+const millivoltFormatters = new Set(['millivolts', 'millivolt', 'mv']);
 const emptyTelemetrySnapshot: DeviceTelemetrySnapshot = {
   collectedAt: '',
   cells: [],
@@ -174,6 +175,22 @@ type SwitchStatusChip = {
   label: string;
   className: string;
 };
+
+function isMillivoltFormatter(formatter: string | null | undefined) {
+  return formatter != null && millivoltFormatters.has(formatter.toLowerCase());
+}
+
+function getFormattedDisplayUnit(
+  unit: string | null | undefined,
+  formatter: string | null | undefined,
+  temperatureUnit: TemperatureUnit,
+) {
+  if (isMillivoltFormatter(formatter)) {
+    return 'mV';
+  }
+
+  return getTemperatureDisplayUnit(unit, temperatureUnit) ?? unit ?? '';
+}
 
 type ResolvedStatusGlyph = {
   key: string;
@@ -925,7 +942,7 @@ function renderInlineEntityStats(
 
       const entity = definition?.entities.find((candidate) => candidate.id === entityId);
       const value = formatParamValue(param, temperatureUnit, 'yes-no', entity?.display?.precision ?? param.displayPrecision);
-      const unit = getTemperatureDisplayUnit(param.unit, temperatureUnit) ?? param.unit ?? '';
+      const unit = getFormattedDisplayUnit(param.unit, param.displayFormatter, temperatureUnit);
 
       return (
         <HeroInlineMetric
@@ -1062,7 +1079,7 @@ function renderSummaryMetricTiles(
       {metrics.map((param) => {
         const entity = definition?.entities.find((candidate) => candidate.id === param.key);
         const value = formatParamValue(param, temperatureUnit, 'yes-no', entity?.display?.precision ?? param.displayPrecision);
-        const unit = getTemperatureDisplayUnit(param.unit, temperatureUnit) ?? param.unit ?? '';
+        const unit = getFormattedDisplayUnit(param.unit, param.displayFormatter, temperatureUnit);
 
         return (
           <HeroInlineMetric
@@ -1121,7 +1138,7 @@ function ParameterRow({
     isSwitchSetting ? 'enabled-disabled' : 'yes-no',
     entity?.display?.precision ?? param.displayPrecision,
   );
-  const displayUnit = getTemperatureDisplayUnit(param.unit, temperatureUnit) ?? param.unit;
+  const displayUnit = getFormattedDisplayUnit(param.unit, param.displayFormatter, temperatureUnit);
   const editModeLabel = entity ? 'value:' : 'raw:';
   const editValueUnit = entity
     ? getTemperatureDisplayUnit(entity.source.unit ?? param.unit, temperatureUnit) ?? param.unit
@@ -1206,7 +1223,7 @@ function ParameterRow({
         'gap-3',
         isEditing
           ? 'flex flex-col items-stretch sm:flex-row sm:items-center sm:justify-between'
-            : 'flex items-start justify-between'
+            : 'flex min-w-0 items-start justify-between'
       )}>
         <span className='flex min-w-0 flex-wrap items-center gap-1.5 text-xs text-muted-foreground'>
           <span>{displayName}</span>
@@ -1267,7 +1284,7 @@ function ParameterRow({
             </div>
           ) : (
             <>
-              <span className='min-w-0 break-words text-right text-sm font-semibold text-foreground whitespace-normal'>
+              <span className='min-w-0 flex-1 break-words text-right text-sm font-semibold text-foreground whitespace-normal [overflow-wrap:anywhere]'>
                 {value}
                 {displayUnit && <span className='ml-1 text-xs font-normal text-muted-foreground'> {displayUnit}</span>}
               </span>
@@ -1350,7 +1367,7 @@ function ParameterCategoryCard({
         </button>
       </CardHeader>
       {isExpanded && (
-        <CardContent className='px-0 pt-0'>
+        <CardContent className='px-0 pt-2'>
           <div className='grid gap-2'>
             {combinedClockParams != null && (
               <CombinedClockParameterRow
@@ -2862,6 +2879,10 @@ function formatParamValue(
       : sourceValue;
     if (displayValue == null || !Number.isFinite(displayValue)) {
       return nd;
+    }
+
+    if (isMillivoltFormatter(param.displayFormatter)) {
+      return Math.round(displayValue * 1000).toString();
     }
 
     const precision = displayPrecision ?? param.displayPrecision;

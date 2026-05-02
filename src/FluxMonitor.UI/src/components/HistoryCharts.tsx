@@ -127,11 +127,37 @@ const keyUnitSuffix: Record<string, string> = {
   batteryTemperatureCelsius: '°C',
 };
 
+const legacyMillivoltKeys = new Set(['deltaCellVoltageVolts']);
+const millivoltFormatters = new Set(['millivolts', 'millivolt', 'mv']);
+
+function formatWithUnit(valueText: string, unit: string) {
+  return unit ? `${valueText} ${unit}` : valueText;
+}
+
+function isMillivoltFormatter(formatter: string | null | undefined) {
+  return formatter != null && millivoltFormatters.has(formatter.toLowerCase());
+}
+
+function formatChartValue(
+  value: number,
+  key: string,
+  getDecimalsForKey: (key: string) => number,
+  getUnitForKey: (key: string) => string,
+  getFormatterForKey: (key: string) => string | null | undefined,
+) {
+  if (isMillivoltFormatter(getFormatterForKey(key)) || legacyMillivoltKeys.has(key)) {
+    return formatWithUnit(Math.round(value * 1000).toString(), 'mV');
+  }
+
+  return formatWithUnit(value.toFixed(getDecimalsForKey(key)), getUnitForKey(key));
+}
+
 function formatActiveValues(
   point: Record<string, unknown> | null,
   lines: LineSpec[],
   getDecimalsForKey: (key: string) => number,
   getUnitForKey: (key: string) => string,
+  getFormatterForKey: (key: string) => string | null | undefined,
 ): string | null {
   if (!point) return null;
   const parts: string[] = [];
@@ -140,9 +166,7 @@ function formatActiveValues(
     if (raw == null) continue;
     const num = typeof raw === 'number' ? raw : Number(raw);
     if (Number.isNaN(num)) continue;
-    const decimals = getDecimalsForKey(l.key);
-    const unit = getUnitForKey(l.key);
-    parts.push(`${num.toFixed(decimals)}${unit}`);
+    parts.push(formatChartValue(num, l.key, getDecimalsForKey, getUnitForKey, getFormatterForKey));
   }
   return parts.length > 0 ? parts.join(' · ') : null;
 }
@@ -443,6 +467,10 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
     return getTemperatureDisplayUnit(sourceUnit, temperatureUnit) ?? '';
   }, [definition, temperatureUnit]);
 
+  const getFormatterForKey = useCallback((key: string) => {
+    return getDefinitionEntity(definition, key)?.display?.formatter;
+  }, [definition]);
+
   const displayData = useMemo(
     () => data.map((point) => applyTemperatureUnitToPoint(point, definition, temperatureUnit) as ChartDataPoint),
     [data, definition, temperatureUnit],
@@ -566,7 +594,6 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
               <MultiCellChartSection
                 selectedCells={selectedCells}
                 data={multiCellData}
-                precision={precision}
                 onDismiss={onClearCellSelection}
                 hoveredTime={sharedHoveredTime}
                 selectedTime={sharedSelectedTime}
@@ -578,11 +605,12 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
                 lines={[{ key: 'totalVoltageVolts', color: '#38bdf8', name: 'Pack Voltage' }]}
                 getDecimalsForKey={getDecimalsForKey}
                 getUnitForKey={getUnitForKey}
+                getFormatterForKey={getFormatterForKey}
                 hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
                 onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
                 todayXTicks={todayXTicks} />
             ) : null}
-            {definitionCharts ? renderDefinitionCharts(definitionCharts, chartData, resolvedResolution, displayMode, sharedHoveredTime, sharedSelectedTime, setSharedHoveredTime, setSharedSelectedTime, todayXTicks, batteryStatusSubtitle, getDecimalsForKey, getUnitForKey) : (
+            {definitionCharts ? renderDefinitionCharts(definitionCharts, chartData, resolvedResolution, displayMode, sharedHoveredTime, sharedSelectedTime, setSharedHoveredTime, setSharedSelectedTime, todayXTicks, batteryStatusSubtitle, getDecimalsForKey, getUnitForKey, getFormatterForKey) : (
               <>
                 <EnergyChartSection data={chartData} resolution={resolvedResolution} displayMode={displayMode}
                   hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
@@ -592,6 +620,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
                   line={{ key: 'stateOfChargePercent', color: '#34d399', name: 'SOC' }}
                   getDecimalsForKey={getDecimalsForKey}
                   getUnitForKey={getUnitForKey}
+                  getFormatterForKey={getFormatterForKey}
                   hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
                   onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
                   todayXTicks={todayXTicks}
@@ -604,6 +633,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
               ]}
               getDecimalsForKey={getDecimalsForKey}
               getUnitForKey={getUnitForKey}
+              getFormatterForKey={getFormatterForKey}
               hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
               onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
               todayXTicks={todayXTicks} />
@@ -614,6 +644,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
               ]}
               getDecimalsForKey={getDecimalsForKey}
               getUnitForKey={getUnitForKey}
+              getFormatterForKey={getFormatterForKey}
               hoveredTime={sharedHoveredTime} selectedTime={sharedSelectedTime}
               onHover={setSharedHoveredTime} onSelect={setSharedSelectedTime}
               todayXTicks={todayXTicks} />
@@ -652,6 +683,7 @@ function renderDefinitionCharts(
   batteryStatusSubtitle?: React.ReactNode,
   getDecimalsForKey?: (key: string) => number,
   getUnitForKey?: (key: string) => string,
+  getFormatterForKey?: (key: string) => string | null | undefined,
 ): React.ReactNode {
   return charts.filter(c => c.type !== 'multi-cell-chart').map((chart, i) => {
     if (chart.type === 'area-chart' && chart.showEnergyTotals) {
@@ -689,6 +721,7 @@ function renderDefinitionCharts(
           line={lines[0]}
           getDecimalsForKey={getDecimalsForKey ?? (() => 2)}
           getUnitForKey={getUnitForKey ?? (() => '')}
+          getFormatterForKey={getFormatterForKey ?? (() => undefined)}
           hoveredTime={hoveredTime}
           selectedTime={selectedTime}
           onHover={onHover}
@@ -707,6 +740,7 @@ function renderDefinitionCharts(
           lines={lines}
           getDecimalsForKey={getDecimalsForKey ?? (() => 2)}
           getUnitForKey={getUnitForKey ?? (() => '')}
+          getFormatterForKey={getFormatterForKey ?? (() => undefined)}
         domain={chart.yAxis?.domain}
         hoveredTime={hoveredTime}
         selectedTime={selectedTime}
@@ -726,14 +760,16 @@ const tooltipContentStyle = { backgroundColor: 'var(--card)', border: '1px solid
 const tooltipLabelStyle = { color: 'var(--muted-foreground)' };
 const legendStyle = { fontSize: 11, paddingTop: 4, color: 'var(--muted-foreground)' };
 const chartMargin = { top: 4, right: 8, bottom: 0, left: 8 };
-const singleAxisWidth = 48;
-const dualAxisWidth = 44;
+const singleAxisWidth = 64;
+const dualAxisWidth = 60;
+const cellVoltageDecimals = 3;
 
-function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitForKey, hoveredTime, selectedTime, onHover, onSelect, todayXTicks, subtitle }: {
+function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitForKey, getFormatterForKey, hoveredTime, selectedTime, onHover, onSelect, todayXTicks, subtitle }: {
   title: string; data: ChartDataPoint[]; lines: LineSpec[];
   domain?: [number, number];
   getDecimalsForKey: (key: string) => number;
   getUnitForKey: (key: string) => string;
+  getFormatterForKey: (key: string) => string | null | undefined;
   hoveredTime: string | null; selectedTime: string | null;
   onHover: (time: string | null) => void; onSelect: (time: string | null) => void;
   todayXTicks?: string[];
@@ -741,7 +777,15 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
 }) {
   const activePoint = getActivePoint(data, hoveredTime, selectedTime);
   const hasSecondaryAxis = lines.some((line) => line.secondaryAxis);
-  const activeValueText = lines.length === 1 ? formatActiveValues(activePoint, lines, getDecimalsForKey, getUnitForKey) : null;
+  const activeValueText = lines.length === 1 ? formatActiveValues(activePoint, lines, getDecimalsForKey, getUnitForKey, getFormatterForKey) : null;
+  const primaryAxisLine = lines.find((line) => !line.secondaryAxis) ?? lines[0];
+  const secondaryAxisLine = lines.find((line) => line.secondaryAxis);
+  const primaryTickFormatter = useCallback((value: number) => (
+    primaryAxisLine ? formatChartValue(value, primaryAxisLine.key, getDecimalsForKey, getUnitForKey, getFormatterForKey) : String(value)
+  ), [getDecimalsForKey, getFormatterForKey, getUnitForKey, primaryAxisLine]);
+  const secondaryTickFormatter = useCallback((value: number) => (
+    secondaryAxisLine ? formatChartValue(value, secondaryAxisLine.key, getDecimalsForKey, getUnitForKey, getFormatterForKey) : String(value)
+  ), [getDecimalsForKey, getFormatterForKey, getUnitForKey, secondaryAxisLine]);
   const renderTooltipContent = useCallback((tooltipState: {
     active?: boolean;
     label?: string | number;
@@ -767,9 +811,11 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
         return { name: line.name, value: String(raw), color: line.color };
       }
 
-      const decimals = getDecimalsForKey(line.key);
-      const suffix = getUnitForKey(line.key);
-      return { name: line.name, value: `${num.toFixed(decimals)}${suffix}`, color: line.color };
+      return {
+        name: line.name,
+        value: formatChartValue(num, line.key, getDecimalsForKey, getUnitForKey, getFormatterForKey),
+        color: line.color,
+      };
     });
 
     return (
@@ -785,7 +831,7 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
         </div>
       </div>
     );
-  }, [activePoint, getDecimalsForKey, getUnitForKey, lines]);
+  }, [activePoint, getDecimalsForKey, getFormatterForKey, getUnitForKey, lines]);
 
   const handleChartMove = useCallback((state: unknown) => {
     const idx = extractActiveIndex(state);
@@ -844,11 +890,11 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
           <XAxis dataKey='time' tick={xTickStyle} tickLine={false} axisLine={false} {...(todayXTicks ? { ticks: todayXTicks } : {})} />
           {hasSecondaryAxis ? (
             <>
-              <YAxis yAxisId='primary' orientation='left' width={dualAxisWidth} tick={yTickStyle} tickLine={false} axisLine={false} domain={domain ?? ['auto', 'auto']} />
-              <YAxis yAxisId='secondary' orientation='right' width={dualAxisWidth} tick={yTickStyle} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
+              <YAxis yAxisId='primary' orientation='left' width={dualAxisWidth} tick={yTickStyle} tickLine={false} axisLine={false} domain={domain ?? ['auto', 'auto']} tickFormatter={primaryTickFormatter} />
+              <YAxis yAxisId='secondary' orientation='right' width={dualAxisWidth} tick={yTickStyle} tickLine={false} axisLine={false} domain={['auto', 'auto']} tickFormatter={secondaryTickFormatter} />
             </>
           ) : (
-            <YAxis yAxisId='primary' orientation='right' width={singleAxisWidth} tick={yTickStyle} tickLine={false} axisLine={false} domain={domain ?? ['auto', 'auto']} />
+            <YAxis yAxisId='primary' orientation='right' width={singleAxisWidth} tick={yTickStyle} tickLine={false} axisLine={false} domain={domain ?? ['auto', 'auto']} tickFormatter={primaryTickFormatter} />
           )}
           <Tooltip
             content={renderTooltipContent}
@@ -875,12 +921,13 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
   );
 }
 
-function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUnitForKey, hoveredTime, selectedTime, onHover, onSelect, todayXTicks, subtitle }: {
+function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUnitForKey, getFormatterForKey, hoveredTime, selectedTime, onHover, onSelect, todayXTicks, subtitle }: {
   title: string;
   data: ChartDataPoint[];
   line: LineSpec;
   getDecimalsForKey: (key: string) => number;
   getUnitForKey: (key: string) => string;
+  getFormatterForKey: (key: string) => string | null | undefined;
   hoveredTime: string | null;
   selectedTime: string | null;
   onHover: (time: string | null) => void;
@@ -890,7 +937,7 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
 }) {
   const gradientId = useId().replace(/:/g, '');
   const activePoint = getActivePoint(data, hoveredTime, selectedTime);
-  const activeValueText = formatActiveValues(activePoint, [line], getDecimalsForKey, getUnitForKey);
+  const activeValueText = formatActiveValues(activePoint, [line], getDecimalsForKey, getUnitForKey, getFormatterForKey);
   const renderTooltipContent = useCallback((tooltipState: {
     active?: boolean;
     label?: string | number;
@@ -909,7 +956,7 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
     const num = raw == null ? Number.NaN : typeof raw === 'number' ? raw : Number(raw);
     const value = Number.isNaN(num)
       ? 'N/D'
-      : `${num.toFixed(getDecimalsForKey(line.key))}${getUnitForKey(line.key)}`;
+      : formatChartValue(num, line.key, getDecimalsForKey, getUnitForKey, getFormatterForKey);
 
     return (
       <div style={tooltipContentStyle}>
@@ -922,7 +969,7 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
         </div>
       </div>
     );
-  }, [activePoint, getDecimalsForKey, getUnitForKey, line]);
+  }, [activePoint, getDecimalsForKey, getFormatterForKey, getUnitForKey, line]);
 
   const handleChartMove = useCallback((state: unknown) => {
     const idx = extractActiveIndex(state);
@@ -1163,8 +1210,8 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
   );
 }
 
-function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hoveredTime, selectedTime, onHover, onSelect }: {
-  selectedCells: number[]; data: Record<string, unknown>[]; precision: DisplayPrecision; onDismiss?: () => void;
+function MultiCellChartSection({ selectedCells, data, onDismiss, hoveredTime, selectedTime, onHover, onSelect }: {
+  selectedCells: number[]; data: Record<string, unknown>[]; onDismiss?: () => void;
   hoveredTime: string | null; selectedTime: string | null;
   onHover: (time: string | null) => void; onSelect: (time: string | null) => void;
 }) {
@@ -1178,8 +1225,8 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hove
   const tooltipFormatter: any = useCallback((value: unknown, name: string) => {
     const num = typeof value === 'number' ? value : Number(value);
     if (Number.isNaN(num)) return [String(value), name];
-    return [`${num.toFixed(precision.cellVoltage)}V`, name];
-  }, [precision.cellVoltage]);
+    return [formatWithUnit(num.toFixed(cellVoltageDecimals), 'V'), name];
+  }, []);
 
   const activePoint = getActivePoint(data, hoveredTime, selectedTime);
   const activeCellText = useMemo(() => {
@@ -1190,10 +1237,12 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hove
       if (raw == null) continue;
       const num = typeof raw === 'number' ? raw : Number(raw);
       if (Number.isNaN(num)) continue;
-      parts.push(`${num.toFixed(precision.cellVoltage)}V`);
+      parts.push(formatWithUnit(num.toFixed(cellVoltageDecimals), 'V'));
     }
     return parts.length > 0 ? parts.join(' · ') : null;
-  }, [activePoint, cellLines, precision.cellVoltage]);
+  }, [activePoint, cellLines]);
+
+  const yTickFormatter = useCallback((value: number) => formatWithUnit(value.toFixed(cellVoltageDecimals), 'V'), []);
 
   const handleChartMove = useCallback((state: unknown) => {
     const idx = extractActiveIndex(state);
@@ -1253,7 +1302,7 @@ function MultiCellChartSection({ selectedCells, data, precision, onDismiss, hove
         >
           <CartesianGrid strokeDasharray='3 3' stroke='var(--border)' opacity={0.4} />
           <XAxis dataKey='time' tick={xTickStyle} tickLine={false} axisLine={false} />
-          <YAxis orientation='right' width={singleAxisWidth} tick={yTickStyle} tickLine={false} axisLine={false} domain={['auto', 'auto']} />
+          <YAxis orientation='right' width={singleAxisWidth} tick={yTickStyle} tickLine={false} axisLine={false} domain={['auto', 'auto']} tickFormatter={yTickFormatter} />
           <Tooltip
             contentStyle={tooltipContentStyle}
             labelStyle={tooltipLabelStyle}

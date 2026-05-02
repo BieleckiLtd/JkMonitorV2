@@ -12,6 +12,14 @@ type CellVoltageChartProps = {
   onCellClick?: (index: number) => void;
 };
 
+function formatCellVoltage(value: number) {
+  return `${value.toFixed(3)} V`;
+}
+
+function formatCellSpread(value: number) {
+  return `${Math.round(value * 1000)} mV`;
+}
+
 export function CellVoltageChart({
   cells,
   minV,
@@ -48,10 +56,10 @@ export function CellVoltageChart({
             </div>
           </div>
           <div className='flex flex-wrap gap-x-4 gap-y-1 text-xs font-normal text-muted-foreground'>
-            {minV != null && <span>Min: <span className='font-semibold text-foreground'>{minV.toFixed(3)}V</span></span>}
-            {avgV != null && <span>Avg: <span className='font-semibold text-foreground'>{avgV.toFixed(3)}V</span></span>}
-            {maxV != null && <span>Max: <span className='font-semibold text-foreground'>{maxV.toFixed(3)}V</span></span>}
-            {minV != null && maxV != null && <span>Delta: <span className='font-semibold text-foreground'>{(maxV - minV).toFixed(3)}V</span></span>}
+            {minV != null && <span>Min: <span className='font-semibold text-foreground'>{formatCellVoltage(minV)}</span></span>}
+            {avgV != null && <span>Avg: <span className='font-semibold text-foreground'>{formatCellVoltage(avgV)}</span></span>}
+            {maxV != null && <span>Max: <span className='font-semibold text-foreground'>{formatCellVoltage(maxV)}</span></span>}
+            {minV != null && maxV != null && <span>Delta: <span className='font-semibold text-foreground'>{formatCellSpread(maxV - minV)}</span></span>}
           </div>
         </CardTitle>
       </CardHeader>
@@ -83,7 +91,7 @@ export function CellVoltageChart({
                   />
                   <div className='mt-0.5 text-[7px] leading-none text-muted-foreground sm:text-[9px]'>{cell.index}</div>
                   <div className='whitespace-nowrap text-[6px] font-semibold leading-none text-muted-foreground/80 tabular-nums sm:text-[8px]'>
-                    {cell.voltageVolts.toFixed(3)}
+                    {formatCellVoltage(cell.voltageVolts)}
                   </div>
                 </div>
               );

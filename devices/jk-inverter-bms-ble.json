@@ -1724,7 +1724,7 @@
       "category": "Cells",
       "expression": "max(cell_voltages) - min(cell_voltages)",
       "unit": "V",
-      "display": { "precision": 3 },
+      "display": { "precision": 3, "formatter": "millivolts" },
       "role": "delta-cell-voltage",
       "fallbackFor": "delta_cell_voltage_hw"
     },

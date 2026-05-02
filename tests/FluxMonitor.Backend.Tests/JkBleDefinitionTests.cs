@@ -241,6 +241,8 @@ public sealed class JkBleDefinitionTests
         Assert.DoesNotContain(historyCharts!, chart => chart.Title == "Temperatures");
         var spreadChart = Assert.Single(historyCharts!, chart => chart.Title == "Cell Voltage Spread");
         Assert.Equal(["min_cell_voltage", "max_cell_voltage", "delta_cell_voltage"], spreadChart.Traces!.Select(trace => trace.Entity).ToArray());
+        var deltaCellVoltage = Assert.Single(definition.ComputedEntities, entity => entity.Id == "delta_cell_voltage");
+        Assert.Equal("millivolts", deltaCellVoltage.Display?.Formatter);
 
         var configurationSection = Assert.Single(sections!, section => section.Title == "Configuration");
         Assert.Equal("category", configurationSection.GroupBy);
