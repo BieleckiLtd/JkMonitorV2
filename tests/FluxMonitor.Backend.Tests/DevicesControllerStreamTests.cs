@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluxMonitor.Backend.Controllers;
+using FluxMonitor.Contracts.Configuration;
 using FluxMonitor.Contracts.Status;
 using Xunit;
 
@@ -7,6 +8,60 @@ namespace FluxMonitor.Backend.Tests;
 
 public sealed class DevicesControllerStreamTests
 {
+    [Fact]
+    public void FilterEnabledDeviceStates_RemovesDisabledDevices()
+    {
+        var devices = DevicesController.FilterEnabledDeviceStates([
+            new DeviceRuntimeState
+            {
+                DeviceId = "enabled-device",
+                DisplayName = "Enabled Device",
+                DefinitionId = "jk-inverter-bms",
+                Enabled = true,
+                IsMaster = false,
+                PollIntervalMilliseconds = 1000
+            },
+            new DeviceRuntimeState
+            {
+                DeviceId = "disabled-device",
+                DisplayName = "Disabled Device",
+                DefinitionId = "jk-inverter-bms",
+                Enabled = false,
+                IsMaster = false,
+                PollIntervalMilliseconds = 1000
+            }
+        ]);
+
+        Assert.Collection(
+            devices,
+            device => Assert.Equal("enabled-device", device.DeviceId));
+    }
+
+    [Fact]
+    public void FilterEnabledDeviceConfigurations_RemovesDisabledDevices()
+    {
+        var devices = DevicesController.FilterEnabledDeviceConfigurations([
+            new DeviceConfiguration
+            {
+                DeviceId = "enabled-device",
+                DisplayName = "Enabled Device",
+                DefinitionId = "jk-inverter-bms",
+                Enabled = true
+            },
+            new DeviceConfiguration
+            {
+                DeviceId = "disabled-device",
+                DisplayName = "Disabled Device",
+                DefinitionId = "jk-inverter-bms",
+                Enabled = false
+            }
+        ]);
+
+        Assert.Collection(
+            devices,
+            device => Assert.Equal("enabled-device", device.DeviceId));
+    }
+
     [Fact]
     public void SerializeCurrentDevicesStream_UsesWebJsonNaming()
     {

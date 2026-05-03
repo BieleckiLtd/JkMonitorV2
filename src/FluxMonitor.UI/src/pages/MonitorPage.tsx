@@ -114,7 +114,8 @@ type DeviceSummaryResponse = {
 };
 
 function getSnapshotDevices(snapshot: DeviceRuntimeState[] | DeviceRuntimeStateStreamEnvelope) {
-  return Array.isArray(snapshot) ? snapshot : Array.isArray(snapshot.devices) ? snapshot.devices : [];
+  const devices = Array.isArray(snapshot) ? snapshot : Array.isArray(snapshot.devices) ? snapshot.devices : [];
+  return devices.filter((device) => device.enabled);
 }
 
 function mergeRuntimeDeviceSnapshots(
@@ -266,7 +267,7 @@ export function MonitorPage() {
 
     const loadSummaries = async () => {
       try {
-        const response = await fetch('/api/devices/summary', { cache: 'no-store' });
+        const response = await fetch('/api/devices/summary?enabledOnly=true', { cache: 'no-store' });
         if (!response.ok) return;
         const data = (await response.json()) as DeviceSummaryResponse;
         if (!Array.isArray(data.devices)) return;
@@ -274,25 +275,27 @@ export function MonitorPage() {
         setDevices((current) => {
           if (current.length > 0) return current;
 
-          return (data.devices ?? []).map((device) => ({
-            deviceId: device.deviceId,
-            displayName: device.displayName,
-            sortOrder: device.sortOrder ?? 0,
-            definitionId: device.definitionId ?? '',
-            protocolHandler: null,
-            address: 0,
-            enabled: device.enabled,
-            isMaster: false,
-            pollIntervalMilliseconds: 0,
-            lastPollStartedAt: null,
-            lastPollCompletedAt: null,
-            lastOutcome: device.enabled ? 'Loading' : 'Disabled',
-            lastError: null,
-            lastPersistedAt: null,
-            displayPrecision: defaultPrecision,
-            temperatureUnit: 'c',
-            latestTelemetry: null,
-          }));
+          return (data.devices ?? [])
+            .filter((device) => device.enabled)
+            .map((device) => ({
+              deviceId: device.deviceId,
+              displayName: device.displayName,
+              sortOrder: device.sortOrder ?? 0,
+              definitionId: device.definitionId ?? '',
+              protocolHandler: null,
+              address: 0,
+              enabled: device.enabled,
+              isMaster: false,
+              pollIntervalMilliseconds: 0,
+              lastPollStartedAt: null,
+              lastPollCompletedAt: null,
+              lastOutcome: 'Loading',
+              lastError: null,
+              lastPersistedAt: null,
+              displayPrecision: defaultPrecision,
+              temperatureUnit: 'c',
+              latestTelemetry: null,
+            }));
         });
       } catch {
         // The full telemetry load below will surface any user-visible error.
@@ -304,7 +307,7 @@ export function MonitorPage() {
       requestInFlight = true;
 
       try {
-        const currentUrl = `/api/devices/current?${detailQueryString}`;
+        const currentUrl = `/api/devices/current?${detailQueryString}&enabledOnly=true`;
         const response = await fetch(currentUrl, { cache: 'no-store' });
         if (!response.ok) throw new Error('Unable to load device telemetry.');
         const data = (await response.json()) as DeviceRuntimeState[] | DeviceRuntimeStateStreamEnvelope;
@@ -343,7 +346,7 @@ export function MonitorPage() {
       clearReconnectTimer();
       closeEventSource();
 
-      const streamUrl = `/api/devices/current/stream?${detailQueryString}`;
+      const streamUrl = `/api/devices/current/stream?${detailQueryString}&enabledOnly=true`;
       const stream = new EventSource(streamUrl);
       eventSource = stream;
 

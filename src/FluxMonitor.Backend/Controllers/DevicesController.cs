@@ -35,9 +35,15 @@ public sealed class DevicesController(
     [HttpGet("current")]
     public IActionResult GetCurrent(
         [FromQuery] string[] detailDeviceId,
-        [FromQuery] bool summary = false)
+        [FromQuery] bool summary = false,
+        [FromQuery] bool enabledOnly = false)
     {
         var devices = stateStore.GetCurrentDevices();
+        if (enabledOnly)
+        {
+            devices = FilterEnabledDeviceStates(devices);
+        }
+
         return Ok(summary || detailDeviceId.Length > 0
             ? ProjectDeviceStates(devices, detailDeviceId)
             : devices);
@@ -47,6 +53,7 @@ public sealed class DevicesController(
     public async Task GetCurrentStream(
         [FromQuery] string[] detailDeviceId,
         [FromQuery] bool summary = false,
+        [FromQuery] bool enabledOnly = false,
         CancellationToken cancellationToken = default)
     {
         Response.Headers.Append("Cache-Control", "no-cache");
@@ -54,6 +61,11 @@ public sealed class DevicesController(
         Response.ContentType = "text/event-stream";
 
         var currentDevices = stateStore.GetCurrentDevices();
+        if (enabledOnly)
+        {
+            currentDevices = FilterEnabledDeviceStates(currentDevices);
+        }
+
         var requestedDetailDeviceIds = NormalizeDetailDeviceIds(detailDeviceId);
         var detailDeviceIds = summary
             ? requestedDetailDeviceIds
@@ -70,9 +82,12 @@ public sealed class DevicesController(
         {
             await foreach (var devices in subscription.Reader.ReadAllAsync(cancellationToken))
             {
-                var projectedDevices = summary
-                    ? ProjectDeviceStates(devices, detailDeviceIds)
+                var visibleDevices = enabledOnly
+                    ? FilterEnabledDeviceStates(devices)
                     : devices;
+                var projectedDevices = summary
+                    ? ProjectDeviceStates(visibleDevices, detailDeviceIds)
+                    : visibleDevices;
                 var payload = SerializeCurrentDevicesStream(projectedDevices);
                 await Response.WriteAsync($"data: {payload}\n\n", cancellationToken);
                 await Response.Body.FlushAsync(cancellationToken);
@@ -91,9 +106,15 @@ public sealed class DevicesController(
     }
 
     [HttpGet("summary")]
-    public IActionResult GetSummary()
+    public IActionResult GetSummary([FromQuery] bool enabledOnly = false)
     {
-        var devices = deviceConfigStore.GetDevices()
+        var configuredDevices = deviceConfigStore.GetDevices();
+        if (enabledOnly)
+        {
+            configuredDevices = FilterEnabledDeviceConfigurations(configuredDevices);
+        }
+
+        var devices = configuredDevices
             .Select(device => new DeviceSummaryApiModel
             {
                 DeviceId = device.DeviceId,
@@ -1046,6 +1067,16 @@ public sealed class DevicesController(
             Devices = devices
         }, DeviceStateStreamJsonOptions);
     }
+
+    internal static IReadOnlyList<DeviceRuntimeState> FilterEnabledDeviceStates(IEnumerable<DeviceRuntimeState> devices)
+        => devices
+            .Where(device => device.Enabled)
+            .ToArray();
+
+    internal static IReadOnlyList<DeviceConfiguration> FilterEnabledDeviceConfigurations(IEnumerable<DeviceConfiguration> devices)
+        => devices
+            .Where(device => device.Enabled)
+            .ToArray();
 
 }
 

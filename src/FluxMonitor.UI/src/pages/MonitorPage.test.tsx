@@ -65,7 +65,7 @@ describe('MonitorPage', () => {
       expect(FakeEventSource.instances).toHaveLength(1);
     });
 
-    expect(FakeEventSource.instances[0]?.url).toBe('/api/devices/current/stream?summary=true');
+    expect(FakeEventSource.instances[0]?.url).toBe('/api/devices/current/stream?summary=true&enabledOnly=true');
 
     FakeEventSource.instances[0]?.emit({
       devices: [
@@ -84,6 +84,86 @@ describe('MonitorPage', () => {
 
     expect(await screen.findByText('Battery 1')).toBeInTheDocument();
     expect(screen.getByText(/device-1/i)).toBeInTheDocument();
+  });
+
+  it('does not render disabled devices from summaries or live snapshots', async () => {
+    class FakeEventSource {
+      static instances: FakeEventSource[] = [];
+
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      close = vi.fn();
+
+      constructor(public readonly url: string) {
+        FakeEventSource.instances.push(this);
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }));
+      }
+    }
+
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+    globalThis.fetch = vi.fn((input: RequestInfo | URL) => {
+      const url = input.toString();
+      if (url === '/api/devices/summary?enabledOnly=true') {
+        return Promise.resolve(new Response(JSON.stringify({
+          devices: [
+            {
+              deviceId: 'disabled-summary',
+              displayName: 'Disabled Summary Device',
+              definitionId: 'jk-inverter-bms',
+              enabled: false,
+              sortOrder: 0,
+            },
+          ],
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }));
+      }
+
+      return Promise.resolve(new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }));
+    }) as typeof fetch;
+
+    render(<MonitorPage />);
+
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(1);
+    });
+
+    expect(screen.queryByText('Disabled Summary Device')).not.toBeInTheDocument();
+
+    FakeEventSource.instances[0]?.emit({
+      devices: [
+        {
+          deviceId: 'disabled-live',
+          displayName: 'Disabled Live Device',
+          definitionId: 'jk-inverter-bms',
+          enabled: false,
+          isMaster: false,
+          pollIntervalMilliseconds: 500,
+          lastOutcome: 'Disabled',
+          latestTelemetry: null,
+        },
+        {
+          deviceId: 'enabled-live',
+          displayName: 'Enabled Live Device',
+          definitionId: 'jk-inverter-bms',
+          enabled: true,
+          isMaster: false,
+          pollIntervalMilliseconds: 500,
+          lastOutcome: 'Succeeded',
+          latestTelemetry: null,
+        },
+      ],
+    });
+
+    expect(await screen.findByText('Enabled Live Device')).toBeInTheDocument();
+    expect(screen.queryByText('Disabled Live Device')).not.toBeInTheDocument();
   });
 
   it('reconnects the telemetry stream with detail interest when a device expands', async () => {
@@ -146,7 +226,7 @@ describe('MonitorPage', () => {
       expect(FakeEventSource.instances).toHaveLength(2);
     });
     expect(FakeEventSource.instances[0]?.close).toHaveBeenCalledTimes(1);
-    expect(FakeEventSource.instances[1]?.url).toBe('/api/devices/current/stream?summary=true&detailDeviceId=device-1');
+    expect(FakeEventSource.instances[1]?.url).toBe('/api/devices/current/stream?summary=true&detailDeviceId=device-1&enabledOnly=true');
   });
 
   it('reconnects the SSE stream after an error and refreshes the latest snapshot', async () => {
@@ -187,7 +267,7 @@ describe('MonitorPage', () => {
 
     await new Promise((resolve) => window.setTimeout(resolve, 2100));
     expect(FakeEventSource.instances).toHaveLength(2);
-    expect(FakeEventSource.instances[1]?.url).toBe('/api/devices/current/stream?summary=true');
+    expect(FakeEventSource.instances[1]?.url).toBe('/api/devices/current/stream?summary=true&enabledOnly=true');
   }, 10000);
 
   it('renders devices in the order provided by the runtime snapshot', async () => {
@@ -602,7 +682,7 @@ describe('MonitorPage', () => {
     globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
     globalThis.fetch = vi.fn((input: RequestInfo | URL) => {
       const url = input.toString();
-      if (url === '/api/devices/summary') {
+      if (url === '/api/devices/summary?enabledOnly=true') {
         return Promise.resolve(new Response(JSON.stringify({
           devices: [
             {
