@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Text.RegularExpressions;
 using FluxMonitor.Backend.Controllers;
 using FluxMonitor.Backend.Models;
 using FluxMonitor.Contracts.Configuration;
@@ -19,9 +20,14 @@ public sealed class AutomationEvaluator(
 {
     private const int MaxLogEntries = 100;
 
+    private static readonly Regex AndRegex = new(@"\bAND\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex OrRegex = new(@"\bOR\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex NotRegex = new(@"\bNOT\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+    private static readonly Regex EqualityRegex = new(@"(?<![<>=!])=(?!=)", RegexOptions.Compiled);
+    private static readonly Regex LeadingIfRegex = new(@"^\s*IF\s*:?\s*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
+
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastTriggered = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, bool> _previousExpressionState = new(StringComparer.OrdinalIgnoreCase);
-    private readonly ConcurrentDictionary<string, string> _lastScheduleBucket = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentQueue<AutomationLogEntry> _log = new();
 
     public IReadOnlyList<AutomationLogEntry> GetRecentLog()
@@ -37,15 +43,23 @@ public sealed class AutomationEvaluator(
             return;
 
         var now = DateTimeOffset.UtcNow;
-        var rules = configStore.GetRules()
-            .Where(rule => rule.Enabled && IsRuleRelevantToPoll(rule, observedDeviceId))
-            .ToArray();
+        var rules = configStore.GetRules().Where(rule => rule.Enabled).ToArray();
 
         foreach (var rule in rules)
         {
             try
             {
-                if (!ShouldTrigger(rule, observedDeviceId, observedDeviceName, snapshot, now))
+                if (_lastTriggered.TryGetValue(rule.Id, out var lastTriggered)
+                    && now - lastTriggered < TimeSpan.FromMinutes(rule.CooldownMinutes))
+                {
+                    continue;
+                }
+
+                var matched = EvaluateCondition(rule.Expression);
+                var wasMatched = _previousExpressionState.GetValueOrDefault(rule.Id, false);
+                _previousExpressionState[rule.Id] = matched;
+
+                if (!matched || wasMatched)
                     continue;
 
                 await ExecuteRuleAsync(rule, now, cancellationToken);
@@ -57,147 +71,161 @@ public sealed class AutomationEvaluator(
         }
     }
 
-    private static bool IsRuleRelevantToPoll(AutomationRuleConfig rule, string observedDeviceId)
-        => string.IsNullOrWhiteSpace(rule.SourceDeviceId)
-            || string.Equals(rule.SourceDeviceId, observedDeviceId, StringComparison.OrdinalIgnoreCase)
-            || !string.Equals(rule.TriggerType, "expression", StringComparison.OrdinalIgnoreCase);
-
-    private bool ShouldTrigger(
-        AutomationRuleConfig rule,
-        string observedDeviceId,
-        string observedDeviceName,
-        DeviceTelemetrySnapshot snapshot,
-        DateTimeOffset now)
+    public async Task<TestAutomationRuleResponse> TestAsync(AutomationRuleConfig rule, CancellationToken cancellationToken)
     {
-        if (_lastTriggered.TryGetValue(rule.Id, out var lastTriggered)
-            && now - lastTriggered < TimeSpan.FromMinutes(rule.CooldownMinutes))
+        var validationErrors = AutomationRuleValidator.Validate([rule]);
+        if (validationErrors.Count > 0)
         {
-            return false;
+            return new TestAutomationRuleResponse
+            {
+                ConditionMatched = false,
+                Message = validationErrors[0]
+            };
         }
 
-        return rule.TriggerType.ToLowerInvariant() switch
+        var matched = EvaluateCondition(rule.Expression);
+        if (!matched)
         {
-            "expression" => ShouldTriggerExpression(rule, observedDeviceId, observedDeviceName, snapshot),
-            "date-time" => ShouldTriggerDateTime(rule, now),
-            "time-of-day" => ShouldTriggerDaily(rule, now),
-            "weekly" => ShouldTriggerWeekly(rule, now),
-            "hourly" => ShouldTriggerHourly(rule, now),
-            _ => false
+            return new TestAutomationRuleResponse
+            {
+                ConditionMatched = false,
+                Message = "Condition evaluated to false. No actions were written."
+            };
+        }
+
+        var actionResults = await ExecuteActionsAsync(rule, cancellationToken);
+        return new TestAutomationRuleResponse
+        {
+            ConditionMatched = true,
+            Message = actionResults.All(result => result.Success)
+                ? "Condition matched and all actions were written."
+                : "Condition matched, but one or more actions failed.",
+            ActionResults = actionResults
         };
     }
 
-    private bool ShouldTriggerExpression(
-        AutomationRuleConfig rule,
-        string observedDeviceId,
-        string observedDeviceName,
-        DeviceTelemetrySnapshot snapshot)
+    private bool EvaluateCondition(string expressionText)
     {
-        if (!string.IsNullOrWhiteSpace(rule.SourceDeviceId)
-            && !string.Equals(rule.SourceDeviceId, observedDeviceId, StringComparison.OrdinalIgnoreCase))
-        {
+        if (string.IsNullOrWhiteSpace(expressionText))
             return false;
-        }
 
-        bool triggered;
         try
         {
+            var context = BuildExpressionContext(expressionText);
             var expression = new Expression(
-                rule.Expression,
+                context.Expression,
                 ExpressionOptions.AllowNullParameter | ExpressionOptions.IgnoreCaseAtBuiltInFunctions);
 
-            expression.Parameters["device"] = observedDeviceName;
-            expression.Parameters["deviceId"] = observedDeviceId;
-            expression.Parameters["hour"] = DateTimeOffset.Now.Hour;
-            expression.Parameters["minute"] = DateTimeOffset.Now.Minute;
-            expression.Parameters["dayOfWeek"] = (int)DateTimeOffset.Now.DayOfWeek;
-            PopulateSnapshotParameters(expression, snapshot);
+            foreach (var (key, value) in context.Parameters)
+            {
+                expression.Parameters[key] = value;
+            }
 
             var result = expression.Evaluate();
-            triggered = result is true or 1 or 1.0;
+            return result is true or 1 or 1.0;
         }
         catch (Exception exception)
         {
-            logger.LogWarning(exception, "NCalc expression error in automation rule '{RuleId}': {Expression}", rule.Id, rule.Expression);
+            logger.LogWarning(exception, "NCalc expression error in automation expression: {Expression}", expressionText);
             return false;
         }
-
-        var wasTriggered = _previousExpressionState.GetValueOrDefault(rule.Id, false);
-        _previousExpressionState[rule.Id] = triggered;
-
-        return triggered && !wasTriggered;
     }
 
-    private bool ShouldTriggerDateTime(AutomationRuleConfig rule, DateTimeOffset now)
+    private AutomationExpressionContext BuildExpressionContext(string rawExpression)
     {
-        if (rule.RunAt is null || now < rule.RunAt.Value)
-            return false;
+        var expression = NormalizeExpressionText(rawExpression);
+        var parameters = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
 
-        return MarkScheduleBucket(rule.Id, "once");
-    }
+        var now = DateTimeOffset.Now;
+        AddToken("time.hour", now.Hour);
+        AddToken("time.minute", now.Minute);
+        AddToken("time.day", now.Day);
+        AddToken("time.month", now.Month);
+        AddToken("time.day_of_week", GetIsoDayOfWeek(now.DayOfWeek));
+        AddToken("time.dayOfWeek", GetIsoDayOfWeek(now.DayOfWeek));
+        AddToken("time.unix_seconds", now.ToUnixTimeSeconds());
 
-    private bool ShouldTriggerDaily(AutomationRuleConfig rule, DateTimeOffset now)
-    {
-        var localNow = now.ToLocalTime();
-        if (!AutomationRuleValidator.TryParseTimeOfDay(rule.TimeOfDay, out var time)
-            || localNow.Hour != time.Hour
-            || localNow.Minute != time.Minute)
+        foreach (var device in stateStore.GetCurrentDevices())
         {
-            return false;
+            if (device.LatestTelemetry is null)
+                continue;
+
+            foreach (var parameter in EnumerateDeviceValues(device.LatestTelemetry))
+            {
+                AddToken($"{device.DeviceId}.{parameter.Key}", parameter.Value);
+            }
         }
 
-        return MarkScheduleBucket(rule.Id, localNow.ToString("yyyy-MM-dd:HH:mm"));
-    }
+        return new AutomationExpressionContext(expression, parameters);
 
-    private bool ShouldTriggerWeekly(AutomationRuleConfig rule, DateTimeOffset now)
-    {
-        var localNow = now.ToLocalTime();
-        if (!rule.DaysOfWeek.Contains((int)localNow.DayOfWeek)
-            || !AutomationRuleValidator.TryParseTimeOfDay(rule.TimeOfDay, out var time)
-            || localNow.Hour != time.Hour
-            || localNow.Minute != time.Minute)
+        void AddToken(string token, object value)
         {
-            return false;
+            var safeName = ToSafeParameterName(token);
+            expression = ReplaceToken(expression, token, safeName);
+            parameters[safeName] = value;
         }
-
-        return MarkScheduleBucket(rule.Id, localNow.ToString("yyyy-MM-dd:HH:mm"));
     }
 
-    private bool ShouldTriggerHourly(AutomationRuleConfig rule, DateTimeOffset now)
+    private static string NormalizeExpressionText(string expression)
     {
-        var localNow = now.ToLocalTime();
-        if (rule.MinuteOfHour != localNow.Minute)
-            return false;
+        var normalized = expression.Trim();
+        normalized = LeadingIfRegex.Replace(normalized, string.Empty);
+        var thenIndex = normalized.IndexOf("THEN:", StringComparison.OrdinalIgnoreCase);
+        if (thenIndex >= 0)
+            normalized = normalized[..thenIndex].Trim();
 
-        return MarkScheduleBucket(rule.Id, localNow.ToString("yyyy-MM-dd:HH"));
+        normalized = AndRegex.Replace(normalized, "&&");
+        normalized = OrRegex.Replace(normalized, "||");
+        normalized = NotRegex.Replace(normalized, "!");
+        normalized = EqualityRegex.Replace(normalized, "==");
+        return normalized;
     }
 
-    private bool MarkScheduleBucket(string ruleId, string bucket)
+    private static string ReplaceToken(string expression, string token, string safeName)
+        => Regex.Replace(
+            expression,
+            $@"(?<![A-Za-z0-9_]){Regex.Escape(token)}(?![A-Za-z0-9_])",
+            safeName,
+            RegexOptions.IgnoreCase);
+
+    private static string ToSafeParameterName(string token)
+        => "p_" + Regex.Replace(token, @"[^A-Za-z0-9_]", "_");
+
+    private static int GetIsoDayOfWeek(DayOfWeek dayOfWeek)
+        => dayOfWeek is DayOfWeek.Sunday ? 7 : (int)dayOfWeek;
+
+    private static IEnumerable<KeyValuePair<string, object>> EnumerateDeviceValues(DeviceTelemetrySnapshot snapshot)
     {
-        if (_lastScheduleBucket.TryGetValue(ruleId, out var previous)
-            && string.Equals(previous, bucket, StringComparison.Ordinal))
+        foreach (var value in snapshot.NumericValues)
         {
-            return false;
+            if (value.Value.HasValue)
+                yield return new KeyValuePair<string, object>(value.Key, (double)value.Value.Value);
         }
 
-        _lastScheduleBucket[ruleId] = bucket;
-        return true;
+        foreach (var parameter in snapshot.Parameters)
+        {
+            if (parameter.NumericValue.HasValue)
+                yield return new KeyValuePair<string, object>(parameter.Key, (double)parameter.NumericValue.Value);
+            else if (parameter.BooleanValue.HasValue)
+                yield return new KeyValuePair<string, object>(parameter.Key, parameter.BooleanValue.Value ? 1 : 0);
+            else if (parameter.RawValue.HasValue)
+                yield return new KeyValuePair<string, object>(parameter.Key, parameter.RawValue.Value);
+        }
     }
 
     private async Task ExecuteRuleAsync(AutomationRuleConfig rule, DateTimeOffset now, CancellationToken cancellationToken)
     {
         _lastTriggered[rule.Id] = now;
-
-        var result = await WriteParameterAsync(rule, cancellationToken);
-        var message = result.Success
-            ? $"Wrote {rule.RawValue} to {rule.TargetParameterKey} on {rule.TargetDeviceId}."
-            : result.Error ?? "Automation write failed.";
+        var actionResults = await ExecuteActionsAsync(rule, cancellationToken);
+        var success = actionResults.Count > 0 && actionResults.All(result => result.Success);
+        var message = success
+            ? $"Wrote {actionResults.Count} automation action(s)."
+            : "One or more automation actions failed.";
 
         logger.LogInformation(
-            "Automation rule '{RuleId}' triggered. TargetDevice={TargetDeviceId}, TargetParameter={TargetParameterKey}, Success={Success}, Message={Message}",
+            "Automation rule '{RuleId}' triggered. Success={Success}, Message={Message}",
             rule.Id,
-            rule.TargetDeviceId,
-            rule.TargetParameterKey,
-            result.Success,
+            success,
             message);
 
         AppendLogEntry(new AutomationLogEntry
@@ -205,39 +233,62 @@ public sealed class AutomationEvaluator(
             RuleId = rule.Id,
             RuleName = rule.Name,
             FiredAt = DateTimeOffset.UtcNow,
-            TriggerType = rule.TriggerType,
-            SourceDeviceId = rule.SourceDeviceId,
-            TargetDeviceId = rule.TargetDeviceId,
-            TargetParameterKey = rule.TargetParameterKey,
-            RawValue = rule.RawValue,
-            Success = result.Success,
-            Message = message
+            ConditionMatched = true,
+            Success = success,
+            Message = message,
+            ActionResults = actionResults,
+            TargetDeviceId = actionResults.FirstOrDefault()?.TargetDeviceId ?? string.Empty,
+            TargetParameterKey = actionResults.FirstOrDefault()?.TargetParameterKey ?? string.Empty,
+            RawValue = actionResults.FirstOrDefault()?.RawValue ?? 0
         });
     }
 
-    private async Task<WriteRegisterResult> WriteParameterAsync(AutomationRuleConfig rule, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<AutomationActionLogEntry>> ExecuteActionsAsync(
+        AutomationRuleConfig rule,
+        CancellationToken cancellationToken)
+    {
+        var results = new List<AutomationActionLogEntry>();
+        foreach (var action in AutomationRuleValidator.NormalizeActions(rule))
+        {
+            var result = await WriteParameterAsync(action, cancellationToken);
+            results.Add(new AutomationActionLogEntry
+            {
+                TargetDeviceId = action.TargetDeviceId,
+                TargetParameterKey = action.TargetParameterKey,
+                RawValue = action.RawValue,
+                Success = result.Success,
+                Message = result.Success
+                    ? $"Wrote {action.RawValue} to {action.TargetParameterKey} on {action.TargetDeviceId}."
+                    : result.Error ?? "Automation write failed."
+            });
+        }
+
+        return results;
+    }
+
+    private async Task<WriteRegisterResult> WriteParameterAsync(AutomationActionConfig action, CancellationToken cancellationToken)
     {
         var device = deviceConfigStore.GetDevices().FirstOrDefault(d =>
-            string.Equals(d.DeviceId, rule.TargetDeviceId, StringComparison.OrdinalIgnoreCase));
+            string.Equals(d.DeviceId, action.TargetDeviceId, StringComparison.OrdinalIgnoreCase));
 
         if (device is null)
-            return new WriteRegisterResult(false, rule.RawValue, null, $"Device '{rule.TargetDeviceId}' not found.");
+            return new WriteRegisterResult(false, action.RawValue, null, $"Device '{action.TargetDeviceId}' not found.");
 
         if (!device.TryResolveDefinition(definitionLoader, out var definition) || definition is null)
-            return new WriteRegisterResult(false, rule.RawValue, null, $"Device definition '{device.DefinitionId}' not found.");
+            return new WriteRegisterResult(false, action.RawValue, null, $"Device definition '{device.DefinitionId}' not found.");
 
         var blockedWriteReason = DevicesController.GetProtectedWriteBlockReason(
             definition,
-            rule.TargetParameterKey,
-            stateStore.GetDeviceState(rule.TargetDeviceId)?.LatestTelemetry);
+            action.TargetParameterKey,
+            stateStore.GetDeviceState(action.TargetDeviceId)?.LatestTelemetry);
         if (blockedWriteReason is not null)
-            return new WriteRegisterResult(false, rule.RawValue, null, blockedWriteReason);
+            return new WriteRegisterResult(false, action.RawValue, null, blockedWriteReason);
 
         try
         {
             var result = string.Equals(definition.Connection.Transport.Type, "ble", StringComparison.OrdinalIgnoreCase)
-                ? await genericBlePollingClient.WriteEntityAsync(device, definition, rule.TargetParameterKey, rule.RawValue, cancellationToken)
-                : await genericSerialPollingClient.WriteEntityAsync(device, definition, rule.TargetParameterKey, rule.RawValue, cancellationToken);
+                ? await genericBlePollingClient.WriteEntityAsync(device, definition, action.TargetParameterKey, action.RawValue, cancellationToken)
+                : await genericSerialPollingClient.WriteEntityAsync(device, definition, action.TargetParameterKey, action.RawValue, cancellationToken);
 
             pollTrigger.Signal();
             return result;
@@ -249,7 +300,7 @@ public sealed class AutomationEvaluator(
             or InvalidDataException
             or PlatformNotSupportedException)
         {
-            return new WriteRegisterResult(false, rule.RawValue, null, exception.Message);
+            return new WriteRegisterResult(false, action.RawValue, null, exception.Message);
         }
     }
 
@@ -262,22 +313,5 @@ public sealed class AutomationEvaluator(
         }
     }
 
-    private static void PopulateSnapshotParameters(Expression expression, DeviceTelemetrySnapshot snapshot)
-    {
-        foreach (var value in snapshot.NumericValues)
-        {
-            if (value.Value.HasValue)
-                expression.Parameters[value.Key] = (double)value.Value.Value;
-        }
-
-        foreach (var parameter in snapshot.Parameters)
-        {
-            if (parameter.NumericValue.HasValue && !expression.Parameters.ContainsKey(parameter.Key))
-                expression.Parameters[parameter.Key] = (double)parameter.NumericValue.Value;
-            else if (parameter.BooleanValue.HasValue && !expression.Parameters.ContainsKey(parameter.Key))
-                expression.Parameters[parameter.Key] = parameter.BooleanValue.Value ? 1 : 0;
-            else if (parameter.RawValue.HasValue && !expression.Parameters.ContainsKey(parameter.Key))
-                expression.Parameters[parameter.Key] = parameter.RawValue.Value;
-        }
-    }
+    private sealed record AutomationExpressionContext(string Expression, IReadOnlyDictionary<string, object> Parameters);
 }

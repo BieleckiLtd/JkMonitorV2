@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Dapper;
 using FluxMonitor.Backend.Models;
 using FluxMonitor.Contracts.Configuration;
@@ -11,6 +12,7 @@ public sealed class AutomationConfigStore(
     ILogger<AutomationConfigStore> logger)
     : PostgresStore(configuration.Value.Storage.ConnectionString)
 {
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private readonly SemaphoreSlim _initializationLock = new(1, 1);
     private readonly object _cacheLock = new();
     private AutomationConfig _config = new();
@@ -129,6 +131,7 @@ CREATE TABLE IF NOT EXISTS automation_rules (
     target_device_id text NOT NULL,
     target_parameter_key text NOT NULL,
     raw_value bigint NOT NULL DEFAULT 0,
+    actions jsonb NOT NULL DEFAULT '[]'::jsonb,
     cooldown_minutes integer NOT NULL DEFAULT 15,
     sort_order integer NOT NULL DEFAULT 0,
     updated_at timestamptz NOT NULL DEFAULT NOW()
@@ -136,14 +139,17 @@ CREATE TABLE IF NOT EXISTS automation_rules (
 
 CREATE INDEX IF NOT EXISTS ix_automation_rules_source_device_id
     ON automation_rules (source_device_id);
+DO $$ BEGIN
+  ALTER TABLE automation_rules ADD COLUMN IF NOT EXISTS actions jsonb NOT NULL DEFAULT '[]'::jsonb;
+END $$;
 ");
     }
 
     private static async Task<List<AutomationRuleConfig>> LoadRulesAsync(NpgsqlConnection connection)
     {
         var rows = await connection.QueryAsync<AutomationRuleRow>(@"
-SELECT id, name, enabled, source_device_id, expression, trigger_type, run_at, time_of_day,
-       days_of_week, minute_of_hour, target_device_id, target_parameter_key, raw_value, cooldown_minutes
+SELECT id, name, enabled, source_device_id, expression, trigger_type,
+       target_device_id, target_parameter_key, raw_value, actions::text AS actions, cooldown_minutes
 FROM automation_rules
 ORDER BY sort_order, id;
 ");
@@ -156,10 +162,7 @@ ORDER BY sort_order, id;
             SourceDeviceId = row.source_device_id,
             Expression = row.expression,
             TriggerType = row.trigger_type,
-            RunAt = row.run_at,
-            TimeOfDay = row.time_of_day,
-            DaysOfWeek = row.days_of_week ?? [],
-            MinuteOfHour = row.minute_of_hour,
+            Actions = LoadActions(row.actions, row.target_device_id, row.target_parameter_key, row.raw_value),
             TargetDeviceId = row.target_device_id,
             TargetParameterKey = row.target_parameter_key,
             RawValue = Convert.ToUInt32(row.raw_value),
@@ -188,12 +191,12 @@ ORDER BY sort_order, id;
             var rule = rules[index];
             await connection.ExecuteAsync(@"
 INSERT INTO automation_rules (
-    id, name, enabled, source_device_id, expression, trigger_type, run_at, time_of_day,
-    days_of_week, minute_of_hour, target_device_id, target_parameter_key, raw_value,
+    id, name, enabled, source_device_id, expression, trigger_type,
+    target_device_id, target_parameter_key, raw_value, actions,
     cooldown_minutes, sort_order, updated_at)
 VALUES (
-    @Id, @Name, @Enabled, @SourceDeviceId, @Expression, @TriggerType, @RunAt, @TimeOfDay,
-    @DaysOfWeek, @MinuteOfHour, @TargetDeviceId, @TargetParameterKey, @RawValue,
+    @Id, @Name, @Enabled, @SourceDeviceId, @Expression, @TriggerType,
+    @TargetDeviceId, @TargetParameterKey, @RawValue, CAST(@Actions AS jsonb),
     @CooldownMinutes, @SortOrder, NOW())
 ON CONFLICT (id)
 DO UPDATE SET
@@ -202,13 +205,10 @@ DO UPDATE SET
     source_device_id = EXCLUDED.source_device_id,
     expression = EXCLUDED.expression,
     trigger_type = EXCLUDED.trigger_type,
-    run_at = EXCLUDED.run_at,
-    time_of_day = EXCLUDED.time_of_day,
-    days_of_week = EXCLUDED.days_of_week,
-    minute_of_hour = EXCLUDED.minute_of_hour,
     target_device_id = EXCLUDED.target_device_id,
     target_parameter_key = EXCLUDED.target_parameter_key,
     raw_value = EXCLUDED.raw_value,
+    actions = EXCLUDED.actions,
     cooldown_minutes = EXCLUDED.cooldown_minutes,
     sort_order = EXCLUDED.sort_order,
     updated_at = NOW();
@@ -220,13 +220,10 @@ DO UPDATE SET
                 rule.SourceDeviceId,
                 rule.Expression,
                 rule.TriggerType,
-                rule.RunAt,
-                rule.TimeOfDay,
-                DaysOfWeek = rule.DaysOfWeek.ToArray(),
-                rule.MinuteOfHour,
                 rule.TargetDeviceId,
                 rule.TargetParameterKey,
                 RawValue = (long)rule.RawValue,
+                Actions = JsonSerializer.Serialize(AutomationRuleValidator.NormalizeActions(rule), JsonOptions),
                 rule.CooldownMinutes,
                 SortOrder = index
             }, transaction);
@@ -242,15 +239,47 @@ DO UPDATE SET
             SourceDeviceId = rule.SourceDeviceId,
             Expression = rule.Expression,
             TriggerType = rule.TriggerType,
-            RunAt = rule.RunAt,
-            TimeOfDay = rule.TimeOfDay,
-            DaysOfWeek = [.. rule.DaysOfWeek],
-            MinuteOfHour = rule.MinuteOfHour,
+            Actions = [.. AutomationRuleValidator.NormalizeActions(rule).Select(CloneAction)],
             TargetDeviceId = rule.TargetDeviceId,
             TargetParameterKey = rule.TargetParameterKey,
             RawValue = rule.RawValue,
             CooldownMinutes = rule.CooldownMinutes
         };
+
+    private static AutomationActionConfig CloneAction(AutomationActionConfig action)
+        => new()
+        {
+            TargetDeviceId = action.TargetDeviceId,
+            TargetParameterKey = action.TargetParameterKey,
+            RawValue = action.RawValue
+        };
+
+    private static IReadOnlyList<AutomationActionConfig> LoadActions(
+        string? json,
+        string targetDeviceId,
+        string targetParameterKey,
+        long rawValue)
+    {
+        var actions = string.IsNullOrWhiteSpace(json)
+            ? []
+            : JsonSerializer.Deserialize<List<AutomationActionConfig>>(json, JsonOptions) ?? [];
+
+        if (actions.Count > 0)
+            return actions;
+
+        if (string.IsNullOrWhiteSpace(targetDeviceId) && string.IsNullOrWhiteSpace(targetParameterKey))
+            return [];
+
+        return
+        [
+            new AutomationActionConfig
+            {
+                TargetDeviceId = targetDeviceId,
+                TargetParameterKey = targetParameterKey,
+                RawValue = Convert.ToUInt32(rawValue)
+            }
+        ];
+    }
 
     private sealed class AutomationRuleRow
     {
@@ -260,13 +289,10 @@ DO UPDATE SET
         public string source_device_id { get; init; } = string.Empty;
         public string expression { get; init; } = string.Empty;
         public string trigger_type { get; init; } = "expression";
-        public DateTimeOffset? run_at { get; init; }
-        public string? time_of_day { get; init; }
-        public int[]? days_of_week { get; init; }
-        public int? minute_of_hour { get; init; }
         public string target_device_id { get; init; } = string.Empty;
         public string target_parameter_key { get; init; } = string.Empty;
         public long raw_value { get; init; }
+        public string actions { get; init; } = "[]";
         public int cooldown_minutes { get; init; }
     }
 }

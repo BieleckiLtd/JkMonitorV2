@@ -13,27 +13,30 @@ public sealed class AutomationRuleConfig
 
     public bool Enabled { get; init; } = true;
 
-    public string SourceDeviceId { get; init; } = string.Empty;
-
     public string Expression { get; init; } = string.Empty;
+
+    public IReadOnlyList<AutomationActionConfig> Actions { get; init; } = [];
+
+    public int CooldownMinutes { get; init; } = 15;
+
+    public string SourceDeviceId { get; init; } = string.Empty;
 
     public string TriggerType { get; init; } = "expression";
 
-    public DateTimeOffset? RunAt { get; init; }
+    public string TargetDeviceId { get; init; } = string.Empty;
 
-    public string? TimeOfDay { get; init; }
+    public string TargetParameterKey { get; init; } = string.Empty;
 
-    public IReadOnlyList<int> DaysOfWeek { get; init; } = [];
+    public uint RawValue { get; init; }
+}
 
-    public int? MinuteOfHour { get; init; }
-
+public sealed class AutomationActionConfig
+{
     public required string TargetDeviceId { get; init; }
 
     public required string TargetParameterKey { get; init; }
 
     public uint RawValue { get; init; }
-
-    public int CooldownMinutes { get; init; } = 15;
 }
 
 public sealed class SaveAutomationRulesRequest
@@ -54,10 +57,27 @@ public sealed class AutomationLogEntry
 
     public required DateTimeOffset FiredAt { get; init; }
 
-    public required string TriggerType { get; init; }
+    public required bool ConditionMatched { get; init; }
 
-    public required string SourceDeviceId { get; init; }
+    public string TriggerType { get; init; } = "expression";
 
+    public string SourceDeviceId { get; init; } = string.Empty;
+
+    public string TargetDeviceId { get; init; } = string.Empty;
+
+    public string TargetParameterKey { get; init; } = string.Empty;
+
+    public uint RawValue { get; init; }
+
+    public required bool Success { get; init; }
+
+    public required string Message { get; init; }
+
+    public IReadOnlyList<AutomationActionLogEntry> ActionResults { get; init; } = [];
+}
+
+public sealed class AutomationActionLogEntry
+{
     public required string TargetDeviceId { get; init; }
 
     public required string TargetParameterKey { get; init; }
@@ -67,6 +87,20 @@ public sealed class AutomationLogEntry
     public required bool Success { get; init; }
 
     public required string Message { get; init; }
+}
+
+public sealed class TestAutomationRuleRequest
+{
+    public required AutomationRuleConfig Rule { get; init; }
+}
+
+public sealed class TestAutomationRuleResponse
+{
+    public required bool ConditionMatched { get; init; }
+
+    public required string Message { get; init; }
+
+    public IReadOnlyList<AutomationActionLogEntry> ActionResults { get; init; } = [];
 }
 
 public sealed record AutomationDeviceOption(
@@ -81,6 +115,9 @@ public sealed record AutomationParameterOption(
     string Category,
     string Unit,
     bool IsWritable,
+    decimal? NumericValue,
+    string? StringValue,
+    bool? BooleanValue,
     long? RawValue,
     IReadOnlyList<AutomationSelectOption> Options);
 

@@ -4,6 +4,7 @@ import type {
   AutomationDeviceOption,
   AutomationLogEntry,
   AutomationRuleConfig,
+  TestAutomationRuleResponse,
 } from '../types/automation';
 
 async function readErrorMessage(response: Response, fallbackMessage: string) {
@@ -57,7 +58,17 @@ export function useAutomationConfig() {
     return data;
   }, []);
 
-  return { config, isLoading, error, reload: load, saveRules };
+  const testRule = useCallback(async (rule: AutomationRuleConfig): Promise<TestAutomationRuleResponse> => {
+    const response = await fetch('/api/automations/rules/test', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rule }),
+    });
+    if (!response.ok) throw new Error(await readErrorMessage(response, 'Failed to test automation.'));
+    return (await response.json()) as TestAutomationRuleResponse;
+  }, []);
+
+  return { config, isLoading, error, reload: load, saveRules, testRule };
 }
 
 export function useAutomationLog() {
@@ -76,6 +87,11 @@ export function useAutomationLog() {
 
   useEffect(() => {
     void load();
+    const interval = window.setInterval(() => {
+      void load();
+    }, 5000);
+
+    return () => window.clearInterval(interval);
   }, [load]);
 
   return { log, reload: load };
@@ -97,6 +113,11 @@ export function useAutomationMetadata() {
 
   useEffect(() => {
     void load();
+    const interval = window.setInterval(() => {
+      void load();
+    }, 5000);
+
+    return () => window.clearInterval(interval);
   }, [load]);
 
   return { devices, reload: load };

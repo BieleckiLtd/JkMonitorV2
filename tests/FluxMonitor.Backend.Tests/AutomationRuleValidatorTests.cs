@@ -15,11 +15,16 @@ public sealed class AutomationRuleValidatorTests
             {
                 Id = "automation-1",
                 Name = "Charge when low",
-                SourceDeviceId = "battery-1",
-                TriggerType = "expression",
                 Expression = "",
-                TargetDeviceId = "inverter-1",
-                TargetParameterKey = "charging_enabled"
+                Actions =
+                [
+                    new AutomationActionConfig
+                    {
+                        TargetDeviceId = "inverter-1",
+                        TargetParameterKey = "charging_enabled",
+                        RawValue = 1
+                    }
+                ]
             }
         ]);
 
@@ -27,7 +32,7 @@ public sealed class AutomationRuleValidatorTests
     }
 
     [Fact]
-    public void Validate_ReturnsNoErrors_ForWeeklyRule()
+    public void Validate_ReturnsNoErrors_ForExpressionRuleWithActions()
     {
         var errors = AutomationRuleValidator.Validate(
         [
@@ -35,12 +40,16 @@ public sealed class AutomationRuleValidatorTests
             {
                 Id = "automation-1",
                 Name = "Enable output",
-                TriggerType = "weekly",
-                TimeOfDay = "07:30",
-                DaysOfWeek = [1, 2, 3, 4, 5],
-                TargetDeviceId = "inverter-1",
-                TargetParameterKey = "output_enabled",
-                RawValue = 1
+                Expression = "battery-1.state_of_charge < 20 && time.day_of_week <= 5",
+                Actions =
+                [
+                    new AutomationActionConfig
+                    {
+                        TargetDeviceId = "inverter-1",
+                        TargetParameterKey = "output_enabled",
+                        RawValue = 1
+                    }
+                ]
             }
         ]);
 

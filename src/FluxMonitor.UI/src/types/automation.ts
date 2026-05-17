@@ -1,5 +1,3 @@
-export type AutomationTriggerType = 'expression' | 'date-time' | 'time-of-day' | 'weekly' | 'hourly';
-
 export type AutomationSelectOption = {
   value: number;
   label: string;
@@ -11,6 +9,9 @@ export type AutomationParameterOption = {
   category: string;
   unit: string;
   isWritable: boolean;
+  numericValue?: number | null;
+  stringValue?: string | null;
+  booleanValue?: boolean | null;
   rawValue?: number | null;
   options: AutomationSelectOption[];
 };
@@ -26,32 +27,38 @@ export type AutomationRuleConfig = {
   id: string;
   name: string;
   enabled: boolean;
-  sourceDeviceId: string;
   expression: string;
-  triggerType: AutomationTriggerType;
-  runAt?: string | null;
-  timeOfDay?: string | null;
-  daysOfWeek: number[];
-  minuteOfHour?: number | null;
+  actions: AutomationActionConfig[];
+  cooldownMinutes: number;
+};
+
+export type AutomationActionConfig = {
   targetDeviceId: string;
   targetParameterKey: string;
   rawValue: number;
-  cooldownMinutes: number;
 };
 
 export type AutomationConfigResponse = {
   rules: AutomationRuleConfig[];
 };
 
+export type AutomationActionLogEntry = AutomationActionConfig & {
+  success: boolean;
+  message: string;
+};
+
 export type AutomationLogEntry = {
   ruleId: string;
   ruleName: string;
   firedAt: string;
-  triggerType: AutomationTriggerType;
-  sourceDeviceId: string;
-  targetDeviceId: string;
-  targetParameterKey: string;
-  rawValue: number;
+  conditionMatched: boolean;
   success: boolean;
   message: string;
+  actionResults: AutomationActionLogEntry[];
+};
+
+export type TestAutomationRuleResponse = {
+  conditionMatched: boolean;
+  message: string;
+  actionResults: AutomationActionLogEntry[];
 };

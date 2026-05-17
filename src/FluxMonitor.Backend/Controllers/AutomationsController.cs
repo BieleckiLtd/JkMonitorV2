@@ -56,6 +56,14 @@ public sealed class AutomationsController(
     public ActionResult<IReadOnlyList<AutomationLogEntry>> GetLog()
         => Ok(evaluator.GetRecentLog());
 
+    [HttpPost("rules/test")]
+    public async Task<ActionResult<TestAutomationRuleResponse>> TestRule(
+        [FromBody] TestAutomationRuleRequest request,
+        CancellationToken cancellationToken)
+    {
+        return Ok(await evaluator.TestAsync(request.Rule, cancellationToken));
+    }
+
     [HttpGet("devices")]
     public IActionResult GetAvailableDevices()
     {
@@ -103,6 +111,9 @@ public sealed class AutomationsController(
                     entity.Source.Unit ?? string.Empty,
                     entity.Writable,
                     null,
+                    null,
+                    null,
+                    null,
                     entity.Options?.Select(option => new AutomationSelectOption(option.Value, option.Label)).ToArray() ?? []);
             }
 
@@ -118,6 +129,9 @@ public sealed class AutomationsController(
                     computed.Unit ?? string.Empty,
                     false,
                     null,
+                    null,
+                    null,
+                    null,
                     []));
             }
         }
@@ -132,6 +146,9 @@ public sealed class AutomationsController(
                     parameter.Category,
                     parameter.Unit ?? string.Empty,
                     parameter.IsWritable,
+                    parameter.NumericValue,
+                    parameter.StringValue,
+                    parameter.BooleanValue,
                     parameter.RawValue,
                     parameter.Options?.Select(option => new AutomationSelectOption(option.Value, option.Label)).ToArray() ?? []);
             }

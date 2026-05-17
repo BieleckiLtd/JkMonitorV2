@@ -4,15 +4,6 @@ namespace FluxMonitor.Backend.Services;
 
 public static class AutomationRuleValidator
 {
-    private static readonly HashSet<string> SupportedTriggerTypes = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "expression",
-        "date-time",
-        "time-of-day",
-        "weekly",
-        "hourly"
-    };
-
     public static IReadOnlyList<string> Validate(IReadOnlyList<AutomationRuleConfig> rules)
     {
         ArgumentNullException.ThrowIfNull(rules);
@@ -33,39 +24,23 @@ public static class AutomationRuleValidator
             if (string.IsNullOrWhiteSpace(rule.Name))
                 errors.Add($"{label}: name is required.");
 
-            if (!SupportedTriggerTypes.Contains(rule.TriggerType))
-                errors.Add($"{label}: trigger type is not supported.");
-
-            if (string.Equals(rule.TriggerType, "expression", StringComparison.OrdinalIgnoreCase)
-                && string.IsNullOrWhiteSpace(rule.Expression))
+            if (string.IsNullOrWhiteSpace(rule.Expression))
                 errors.Add($"{label}: expression is required.");
 
-            if (string.Equals(rule.TriggerType, "date-time", StringComparison.OrdinalIgnoreCase)
-                && rule.RunAt is null)
-                errors.Add($"{label}: date/time is required.");
+            var actions = NormalizeActions(rule);
+            if (actions.Count == 0)
+                errors.Add($"{label}: add at least one action.");
 
-            if ((string.Equals(rule.TriggerType, "time-of-day", StringComparison.OrdinalIgnoreCase)
-                    || string.Equals(rule.TriggerType, "weekly", StringComparison.OrdinalIgnoreCase))
-                && !TryParseTimeOfDay(rule.TimeOfDay, out _))
-                errors.Add($"{label}: time of day must use HH:mm format.");
+            for (var actionIndex = 0; actionIndex < actions.Count; actionIndex++)
+            {
+                var action = actions[actionIndex];
+                var actionLabel = $"{label} action {actionIndex + 1}";
+                if (string.IsNullOrWhiteSpace(action.TargetDeviceId))
+                    errors.Add($"{actionLabel}: target device is required.");
 
-            if (string.Equals(rule.TriggerType, "weekly", StringComparison.OrdinalIgnoreCase)
-                && rule.DaysOfWeek.Count == 0)
-                errors.Add($"{label}: select at least one day.");
-
-            if (string.Equals(rule.TriggerType, "weekly", StringComparison.OrdinalIgnoreCase)
-                && rule.DaysOfWeek.Any(day => day < 0 || day > 6))
-                errors.Add($"{label}: days must be between 0 and 6.");
-
-            if (string.Equals(rule.TriggerType, "hourly", StringComparison.OrdinalIgnoreCase)
-                && (rule.MinuteOfHour is null or < 0 or > 59))
-                errors.Add($"{label}: minute of hour must be between 0 and 59.");
-
-            if (string.IsNullOrWhiteSpace(rule.TargetDeviceId))
-                errors.Add($"{label}: target device is required.");
-
-            if (string.IsNullOrWhiteSpace(rule.TargetParameterKey))
-                errors.Add($"{label}: target parameter is required.");
+                if (string.IsNullOrWhiteSpace(action.TargetParameterKey))
+                    errors.Add($"{actionLabel}: target parameter is required.");
+            }
 
             if (rule.CooldownMinutes < 0)
                 errors.Add($"{label}: cooldown cannot be negative.");
@@ -76,6 +51,28 @@ public static class AutomationRuleValidator
 
     internal static bool TryParseTimeOfDay(string? value, out TimeOnly time)
         => TimeOnly.TryParseExact(value, "HH:mm", out time);
+
+    internal static IReadOnlyList<AutomationActionConfig> NormalizeActions(AutomationRuleConfig rule)
+    {
+        if (rule.Actions.Count > 0)
+            return rule.Actions;
+
+        if (!string.IsNullOrWhiteSpace(rule.TargetDeviceId)
+            || !string.IsNullOrWhiteSpace(rule.TargetParameterKey))
+        {
+            return
+            [
+                new AutomationActionConfig
+                {
+                    TargetDeviceId = rule.TargetDeviceId,
+                    TargetParameterKey = rule.TargetParameterKey,
+                    RawValue = rule.RawValue
+                }
+            ];
+        }
+
+        return [];
+    }
 
     private static string GetRuleLabel(AutomationRuleConfig rule, int index)
         => string.IsNullOrWhiteSpace(rule.Name) ? $"Rule {index + 1}" : $"Rule \"{rule.Name}\"";
