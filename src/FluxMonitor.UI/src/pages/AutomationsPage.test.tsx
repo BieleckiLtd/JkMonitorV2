@@ -68,6 +68,7 @@ describe('AutomationsPage', () => {
     expect(screen.getByLabelText('Automation 1 action 1 value')).toHaveValue('1');
     expect(screen.getByText('current: On')).toBeInTheDocument();
 
+    fireEvent.click(screen.getByRole('button', { name: /battery-a/i }));
     fireEvent.click(screen.getByRole('button', { name: /state_of_charge/i }));
     expect(screen.getByPlaceholderText(/state_of_charge/i)).toHaveValue('battery-a.state_of_charge');
   });
@@ -76,16 +77,33 @@ describe('AutomationsPage', () => {
     render(<AutomationsPage hideHeader />);
 
     fireEvent.click(screen.getByRole('button', { name: /add automation/i }));
-    fireEvent.click(screen.getByRole('button', { name: /save automations/i }));
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
 
     expect(screen.getByText('Automation "New automation": enter an expression.')).toBeInTheDocument();
     expect(saveRulesMock).not.toHaveBeenCalled();
+  });
+
+  it('renders one shared expandable value picker for all automations', () => {
+    render(<AutomationsPage hideHeader />);
+
+    fireEvent.click(screen.getByRole('button', { name: /add automation/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add automation/i }));
+
+    expect(screen.getAllByText('Available values')).toHaveLength(1);
+    const timeSection = screen.getByText('time').closest('button');
+    const batterySection = screen.getByText('battery-a').closest('button');
+    expect(timeSection).toHaveAttribute('aria-expanded', 'true');
+    expect(batterySection).toHaveAttribute('aria-expanded', 'false');
+
+    fireEvent.click(batterySection!);
+    expect(batterySection).toHaveAttribute('aria-expanded', 'true');
   });
 
   it('keeps an unsaved rule draft across remounts', async () => {
     const firstRender = render(<AutomationsPage hideHeader />);
 
     fireEvent.click(screen.getByRole('button', { name: /add automation/i }));
+    fireEvent.click(screen.getByRole('button', { name: /battery-a/i }));
     fireEvent.click(screen.getByRole('button', { name: /state_of_charge/i }));
     expect(screen.getByPlaceholderText(/state_of_charge/i)).toHaveValue('battery-a.state_of_charge');
 

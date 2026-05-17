@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Bot, CheckCircle2, Hash, LoaderCircle, Play, Plus, RefreshCcw, Save, Trash2, XCircle } from 'lucide-react';
+import { Bot, CheckCircle2, ChevronDown, ChevronRight, Hash, LoaderCircle, Play, Plus, RefreshCcw, Save, Search, Trash2, XCircle } from 'lucide-react';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -7,6 +7,7 @@ import { Switch } from '../components/ui/switch';
 import { cn } from '../lib/utils';
 import { useAutomationConfig, useAutomationLog, useAutomationMetadata } from '../hooks/useAutomations';
 import type { AutomationActionConfig, AutomationDeviceOption, AutomationParameterOption, AutomationRuleConfig, TestAutomationRuleResponse } from '../types/automation';
+import type { ReactNode } from 'react';
 
 const timeTokens = [
   { token: 'time.hour', label: 'Hour', value: () => new Date().getHours() },
@@ -58,24 +59,21 @@ function defaultRule(devices: AutomationDeviceOption[]): AutomationRuleConfig {
   };
 }
 
-function getValidationMessage(rules: AutomationRuleConfig[], devices: AutomationDeviceOption[]) {
-  for (let index = 0; index < rules.length; index += 1) {
-    const rule = rules[index];
-    const label = rule.name.trim() ? `Automation "${rule.name.trim()}"` : `Automation ${index + 1}`;
-    if (!rule.name.trim()) return `${label}: enter a name.`;
-    if (!rule.expression.trim()) return `${label}: enter an expression.`;
-    if (rule.actions.length === 0) return `${label}: add at least one action.`;
+function getValidationMessage(rule: AutomationRuleConfig, devices: AutomationDeviceOption[], index: number) {
+  const label = rule.name.trim() ? `Automation "${rule.name.trim()}"` : `Automation ${index + 1}`;
+  if (!rule.name.trim()) return `${label}: enter a name.`;
+  if (!rule.expression.trim()) return `${label}: enter an expression.`;
+  if (rule.actions.length === 0) return `${label}: add at least one action.`;
 
-    for (let actionIndex = 0; actionIndex < rule.actions.length; actionIndex += 1) {
-      const action = rule.actions[actionIndex];
-      const targetDevice = getDevice(devices, action.targetDeviceId);
-      if (!targetDevice) return `${label} action ${actionIndex + 1}: select a target device.`;
-      if (!action.targetParameterKey.trim()) return `${label} action ${actionIndex + 1}: select a writable parameter.`;
-      if (!targetDevice.writableParameters.some((parameter) => parameter.id === action.targetParameterKey)) {
-        return `${label} action ${actionIndex + 1}: select a writable parameter exposed by the target device.`;
-      }
-      if (!Number.isFinite(action.rawValue) || action.rawValue < 0) return `${label} action ${actionIndex + 1}: raw value must be zero or greater.`;
+  for (let actionIndex = 0; actionIndex < rule.actions.length; actionIndex += 1) {
+    const action = rule.actions[actionIndex];
+    const targetDevice = getDevice(devices, action.targetDeviceId);
+    if (!targetDevice) return `${label} action ${actionIndex + 1}: select a target device.`;
+    if (!action.targetParameterKey.trim()) return `${label} action ${actionIndex + 1}: select a writable parameter.`;
+    if (!targetDevice.writableParameters.some((parameter) => parameter.id === action.targetParameterKey)) {
+      return `${label} action ${actionIndex + 1}: select a writable parameter exposed by the target device.`;
     }
+    if (!Number.isFinite(action.rawValue) || action.rawValue < 0) return `${label} action ${actionIndex + 1}: raw value must be zero or greater.`;
   }
 
   return null;
@@ -99,8 +97,9 @@ type Tab = 'rules' | 'history';
 type AutomationDraftState = {
   rules: AutomationRuleConfig[];
   tab: Tab;
-  saveMsg: string | null;
+  ruleMessages: Record<string, string>;
   testResults: Record<string, TestAutomationRuleResponse | string>;
+  activeRuleId: string | null;
 };
 
 function readDraftState(): AutomationDraftState | null {
@@ -114,8 +113,9 @@ function readDraftState(): AutomationDraftState | null {
     return {
       rules: parsed.rules.map((rule) => ({ ...rule, actions: rule.actions ?? [] })),
       tab: parsed.tab === 'history' ? 'history' : 'rules',
-      saveMsg: parsed.saveMsg ?? null,
+      ruleMessages: parsed.ruleMessages ?? {},
       testResults: parsed.testResults ?? {},
+      activeRuleId: parsed.activeRuleId ?? null,
     };
   } catch {
     return null;
@@ -160,27 +160,36 @@ export function AutomationsPage({ hideHeader = false }: { hideHeader?: boolean }
   const initialDraft = useMemo(readDraftState, []);
   const [tab, setTab] = useState<Tab>(initialDraft?.tab ?? 'rules');
   const [rules, setRules] = useState<AutomationRuleConfig[]>(initialDraft?.rules ?? []);
+  const [savedRules, setSavedRules] = useState<AutomationRuleConfig[]>([]);
   const [initialized, setInitialized] = useState(Boolean(initialDraft));
-  const [isSaving, setIsSaving] = useState(false);
-  const [saveMsg, setSaveMsg] = useState<string | null>(initialDraft?.saveMsg ?? null);
+  const [savingRuleId, setSavingRuleId] = useState<string | null>(null);
+  const [ruleMessages, setRuleMessages] = useState<Record<string, string>>(initialDraft?.ruleMessages ?? {});
   const [testResults, setTestResults] = useState<Record<string, TestAutomationRuleResponse | string>>(initialDraft?.testResults ?? {});
   const [testingRuleId, setTestingRuleId] = useState<string | null>(null);
+  const [activeRuleId, setActiveRuleId] = useState<string | null>(initialDraft?.activeRuleId ?? null);
 
   useEffect(() => {
     if (config && !initialized) {
-      setRules(config.rules.map((rule) => ({ ...rule, actions: rule.actions ?? [] })));
+      const normalizedRules = config.rules.map((rule) => ({ ...rule, actions: rule.actions ?? [] }));
+      setSavedRules(normalizedRules);
+      setRules(normalizedRules);
+      setActiveRuleId((current) => current ?? normalizedRules[0]?.id ?? null);
       setInitialized(true);
     }
   }, [config, initialized]);
 
   useEffect(() => {
     if (!initialized) return;
-    writeDraftState({ rules, tab, saveMsg, testResults });
-  }, [initialized, rules, saveMsg, tab, testResults]);
+    writeDraftState({ rules, tab, ruleMessages, testResults, activeRuleId });
+  }, [activeRuleId, initialized, ruleMessages, rules, tab, testResults]);
 
   const updateRule = <K extends keyof AutomationRuleConfig>(index: number, key: K, value: AutomationRuleConfig[K]) => {
     setRules((current) => current.map((rule, ruleIndex) => (ruleIndex === index ? { ...rule, [key]: value } : rule)));
-    setSaveMsg(null);
+    setRuleMessages((current) => {
+      const next = { ...current };
+      delete next[rules[index]?.id ?? ''];
+      return next;
+    });
   };
 
   const updateAction = <K extends keyof AutomationActionConfig>(ruleIndex: number, actionIndex: number, key: K, value: AutomationActionConfig[K]) => {
@@ -191,36 +200,78 @@ export function AutomationsPage({ hideHeader = false }: { hideHeader?: boolean }
         actions: rule.actions.map((action, candidateIndex) => candidateIndex === actionIndex ? { ...action, [key]: value } : action),
       };
     }));
-    setSaveMsg(null);
+    setRuleMessages((current) => {
+      const next = { ...current };
+      delete next[rules[ruleIndex]?.id ?? ''];
+      return next;
+    });
   };
 
   const addRule = () => {
-    setRules((current) => [...current, defaultRule(devices)]);
-    setSaveMsg(null);
+    const nextRule = defaultRule(devices);
+    setRules((current) => [...current, nextRule]);
+    setActiveRuleId(nextRule.id);
   };
 
-  const removeRule = (index: number) => {
+  const removeRule = async (index: number) => {
+    const rule = rules[index];
+    if (!rule) return;
+
     setRules((current) => current.filter((_, ruleIndex) => ruleIndex !== index));
-    setSaveMsg(null);
+    setRuleMessages((current) => {
+      const next = { ...current };
+      delete next[rule.id];
+      return next;
+    });
+    setActiveRuleId((current) => current === rule.id ? rules.find((_, ruleIndex) => ruleIndex !== index)?.id ?? null : current);
+
+    if (!savedRules.some((savedRule) => savedRule.id === rule.id)) return;
+
+    setSavingRuleId(rule.id);
+    try {
+      const data = await saveRules(savedRules.filter((savedRule) => savedRule.id !== rule.id));
+      setSavedRules(data.rules.map((savedRule) => ({ ...savedRule, actions: savedRule.actions ?? [] })));
+    } catch (err) {
+      setRules((current) => {
+        const next = [...current];
+        next.splice(index, 0, rule);
+        return next;
+      });
+      setRuleMessages((current) => ({ ...current, [rule.id]: err instanceof Error ? err.message : 'Failed to delete automation.' }));
+    } finally {
+      setSavingRuleId(null);
+    }
   };
 
-  const handleSaveRules = async () => {
-    const validationMessage = getValidationMessage(rules, devices);
+  const handleSaveRule = async (index: number) => {
+    const rule = rules[index];
+    if (!rule) return;
+
+    const validationMessage = getValidationMessage(rule, devices, index);
     if (validationMessage) {
-      setSaveMsg(validationMessage);
+      setRuleMessages((current) => ({ ...current, [rule.id]: validationMessage }));
       return;
     }
 
-    setIsSaving(true);
-    setSaveMsg(null);
+    const nextSavedRules = savedRules.some((savedRule) => savedRule.id === rule.id)
+      ? savedRules.map((savedRule) => savedRule.id === rule.id ? rule : savedRule)
+      : [...savedRules, rule];
+
+    setSavingRuleId(rule.id);
+    setRuleMessages((current) => {
+      const next = { ...current };
+      delete next[rule.id];
+      return next;
+    });
     try {
-      await saveRules(rules);
+      const data = await saveRules(nextSavedRules);
+      setSavedRules(data.rules.map((savedRule) => ({ ...savedRule, actions: savedRule.actions ?? [] })));
       clearDraftState();
-      setSaveMsg('Automations saved and active.');
+      setRuleMessages((current) => ({ ...current, [rule.id]: 'Automation saved and active.' }));
     } catch (err) {
-      setSaveMsg(err instanceof Error ? err.message : 'Failed to save automations.');
+      setRuleMessages((current) => ({ ...current, [rule.id]: err instanceof Error ? err.message : 'Failed to save automation.' }));
     } finally {
-      setIsSaving(false);
+      setSavingRuleId(null);
     }
   };
 
@@ -236,6 +287,14 @@ export function AutomationsPage({ hideHeader = false }: { hideHeader?: boolean }
     } finally {
       setTestingRuleId(null);
     }
+  };
+
+  const insertTokenIntoActiveRule = (token: string) => {
+    const activeIndex = rules.findIndex((rule) => rule.id === activeRuleId);
+    if (activeIndex < 0) return;
+    const activeRule = rules[activeIndex];
+    const prefix = activeRule.expression.trim() ? `${activeRule.expression.trim()} ` : '';
+    updateRule(activeIndex, 'expression', `${prefix}${token}`);
   };
 
   if (isLoading) {
@@ -269,21 +328,19 @@ export function AutomationsPage({ hideHeader = false }: { hideHeader?: boolean }
         </Button>
       </div>
 
-      {saveMsg ? (
-        <div className='rounded-xl border border-border bg-muted/60 px-4 py-3 text-sm text-foreground'>{saveMsg}</div>
-      ) : null}
-
       {tab === 'rules' ? (
         <div className='space-y-4'>
           <div className='grid gap-2 sm:flex sm:flex-wrap sm:gap-3'>
             <Button variant='outline' className='w-full sm:w-auto' onClick={addRule}>
               <Plus className='h-4 w-4' /> Add automation
             </Button>
-            <Button className='w-full sm:w-auto' onClick={handleSaveRules} disabled={isSaving}>
-              {isSaving ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Save className='h-4 w-4' />}
-              Save automations
-            </Button>
           </div>
+
+          <TokenPanel
+            devices={devices}
+            activeRule={rules.find((rule) => rule.id === activeRuleId)}
+            onInsert={insertTokenIntoActiveRule}
+          />
 
           {rules.length === 0 ? (
             <div className='rounded-2xl border border-dashed border-border bg-card/40 px-6 py-12 text-center'>
@@ -300,11 +357,15 @@ export function AutomationsPage({ hideHeader = false }: { hideHeader?: boolean }
               rule={rule}
               index={index}
               testResult={testResults[rule.id]}
+              message={ruleMessages[rule.id]}
               isTesting={testingRuleId === rule.id}
+              isSaving={savingRuleId === rule.id}
               onUpdate={updateRule}
               onUpdateAction={updateAction}
               onRemove={removeRule}
               onTest={handleTestRule}
+              onSave={handleSaveRule}
+              onActivate={setActiveRuleId}
             />
           ))}
         </div>
@@ -350,27 +411,30 @@ function AutomationRuleEditor({
   rule,
   index,
   testResult,
+  message,
   isTesting,
+  isSaving,
   onUpdate,
   onUpdateAction,
   onRemove,
   onTest,
+  onSave,
+  onActivate,
 }: {
   devices: AutomationDeviceOption[];
   rule: AutomationRuleConfig;
   index: number;
   testResult?: TestAutomationRuleResponse | string;
+  message?: string;
   isTesting: boolean;
+  isSaving: boolean;
   onUpdate: <K extends keyof AutomationRuleConfig>(index: number, key: K, value: AutomationRuleConfig[K]) => void;
   onUpdateAction: <K extends keyof AutomationActionConfig>(ruleIndex: number, actionIndex: number, key: K, value: AutomationActionConfig[K]) => void;
-  onRemove: (index: number) => void;
+  onRemove: (index: number) => void | Promise<void>;
   onTest: (rule: AutomationRuleConfig) => void;
+  onSave: (index: number) => void | Promise<void>;
+  onActivate: (ruleId: string) => void;
 }) {
-  const insertToken = (token: string) => {
-    const prefix = rule.expression.trim() ? `${rule.expression.trim()} ` : '';
-    onUpdate(index, 'expression', `${prefix}${token}`);
-  };
-
   const addAction = () => {
     onUpdate(index, 'actions', [...rule.actions, defaultAction(devices)]);
   };
@@ -392,7 +456,11 @@ function AutomationRuleEditor({
             {isTesting ? <LoaderCircle className='h-3.5 w-3.5 animate-spin' /> : <Play className='h-3.5 w-3.5' />}
             Test now
           </Button>
-          <Button variant='destructive' size='sm' onClick={() => onRemove(index)}>
+          <Button className='w-full sm:w-auto' size='sm' onClick={() => void onSave(index)} disabled={isSaving}>
+            {isSaving ? <LoaderCircle className='h-3.5 w-3.5 animate-spin' /> : <Save className='h-3.5 w-3.5' />}
+            Save
+          </Button>
+          <Button variant='destructive' size='sm' onClick={() => void onRemove(index)} disabled={isSaving}>
             <Trash2 className='h-3 w-3' />
           </Button>
         </div>
@@ -417,6 +485,7 @@ function AutomationRuleEditor({
               className='h-10 font-mono text-sm'
               value={rule.expression}
               onChange={(event) => onUpdate(index, 'expression', event.target.value)}
+              onFocus={() => onActivate(rule.id)}
               placeholder='device-1.state_of_charge == 22 && time.day_of_week == 7'
             />
           </label>
@@ -442,53 +511,169 @@ function AutomationRuleEditor({
           </div>
 
           {testResult ? <TestResultPanel result={testResult} /> : null}
-        </div>
-
-        <div className='min-w-0 space-y-3'>
-          <TokenPanel devices={devices} onInsert={insertToken} />
+          {message ? <div className='rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground'>{message}</div> : null}
         </div>
       </div>
     </section>
   );
 }
 
-function TokenPanel({ devices, onInsert }: { devices: AutomationDeviceOption[]; onInsert: (token: string) => void }) {
+function TokenPanel({
+  devices,
+  activeRule,
+  onInsert,
+}: {
+  devices: AutomationDeviceOption[];
+  activeRule: AutomationRuleConfig | undefined;
+  onInsert: (token: string) => void;
+}) {
+  const [query, setQuery] = useState('');
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(() => new Set(['time']));
+  const normalizedQuery = query.trim().toLowerCase();
+  const visibleDevices = devices.map((device) => ({
+    device,
+    parameters: normalizedQuery
+      ? device.parameters.filter((parameter) => [
+        device.id,
+        device.name,
+        parameter.id,
+        parameter.name,
+        parameter.category,
+        formatValue(parameter),
+      ].some((value) => value.toLowerCase().includes(normalizedQuery)))
+      : device.parameters,
+  })).filter((item) => item.parameters.length > 0);
+  const visibleTimeTokens = normalizedQuery
+    ? timeTokens.filter((item) => [item.token, item.label, String(item.value())].some((value) => value.toLowerCase().includes(normalizedQuery)))
+    : timeTokens;
+
+  const toggleSection = (sectionId: string) => {
+    setExpandedSections((current) => {
+      const next = new Set(current);
+      if (next.has(sectionId)) next.delete(sectionId);
+      else next.add(sectionId);
+      return next;
+    });
+  };
+
   return (
     <div className='rounded-xl border border-border bg-background/55 p-3'>
-      <div className='mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground sm:tracking-widest'>Available values</div>
-      <div className='space-y-3'>
-        <div className='space-y-2'>
-          <div className='font-mono text-[11px] uppercase tracking-wide text-muted-foreground sm:tracking-widest'>time</div>
-          <div className='space-y-1.5'>
-            {timeTokens.map((item) => (
-              <button key={item.token} type='button' onClick={() => onInsert(item.token)} className='flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-card/80 px-2.5 py-1.5 text-left text-xs hover:bg-muted'>
-                <span className='min-w-0 truncate font-mono text-foreground'>{item.token}</span>
-                <span className='text-muted-foreground'>{item.value()}</span>
-              </button>
-            ))}
+      <div className='mb-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(12rem,18rem)] lg:items-center'>
+        <div>
+          <div className='text-xs font-medium uppercase tracking-wide text-muted-foreground sm:tracking-widest'>Available values</div>
+          <div className='mt-1 truncate text-xs text-muted-foreground'>
+            Insert into: <span className='text-foreground'>{activeRule?.name || 'select an automation expression'}</span>
           </div>
         </div>
-
-        <div className='max-h-[30rem] space-y-3 overflow-auto pr-1'>
-          {devices.map((device) => (
-            <div key={device.id} className='space-y-2'>
-              <div className='truncate font-mono text-[11px] uppercase tracking-wide text-muted-foreground sm:tracking-widest'>{device.id}</div>
-              <div className='space-y-1.5'>
-                {device.parameters.map((parameter) => {
-                  const token = `${device.id}.${parameter.id}`;
-                  return (
-                    <button key={token} type='button' onClick={() => onInsert(token)} className='grid w-full grid-cols-[minmax(0,1fr)_auto] gap-2 rounded-lg border border-border bg-card/80 px-2.5 py-1.5 text-left text-xs hover:bg-muted'>
-                      <span className='truncate font-mono text-foreground'>{parameter.id}</span>
-                      <span className='max-w-28 truncate text-muted-foreground'>{formatValue(parameter)}</span>
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
+        <label className='relative block'>
+          <Search className='pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground' />
+          <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder='Find value...' className='pl-8' />
+        </label>
+      </div>
+      <div className='space-y-3'>
+        <ExpandableValueSection
+          id='time'
+          title='time'
+          count={visibleTimeTokens.length}
+          expanded={expandedSections.has('time')}
+          onToggle={toggleSection}
+        >
+          {visibleTimeTokens.map((item) => (
+            <ValueTokenButton
+              key={item.token}
+              token={item.token}
+              value={String(item.value())}
+              disabled={!activeRule}
+              onInsert={onInsert}
+            />
           ))}
-        </div>
+        </ExpandableValueSection>
+
+        {visibleDevices.map(({ device, parameters }) => (
+          <ExpandableValueSection
+            key={device.id}
+            id={device.id}
+            title={device.id}
+            subtitle={device.name}
+            count={parameters.length}
+            expanded={expandedSections.has(device.id) || Boolean(normalizedQuery)}
+            onToggle={toggleSection}
+          >
+            {parameters.map((parameter) => {
+              const token = `${device.id}.${parameter.id}`;
+              return (
+                <ValueTokenButton
+                  key={token}
+                  token={token}
+                  label={parameter.id}
+                  value={formatValue(parameter)}
+                  disabled={!activeRule}
+                  onInsert={onInsert}
+                />
+              );
+            })}
+          </ExpandableValueSection>
+        ))}
       </div>
     </div>
+  );
+}
+
+function ExpandableValueSection({
+  id,
+  title,
+  subtitle,
+  count,
+  expanded,
+  onToggle,
+  children,
+}: {
+  id: string;
+  title: string;
+  subtitle?: string;
+  count: number;
+  expanded: boolean;
+  onToggle: (id: string) => void;
+  children: ReactNode;
+}) {
+  return (
+    <div className='rounded-xl border border-border bg-card/60'>
+      <button type='button' className='flex w-full items-center gap-3 px-3 py-2 text-left' onClick={() => onToggle(id)} aria-expanded={expanded}>
+        {expanded ? <ChevronDown className='h-4 w-4 shrink-0 text-muted-foreground' /> : <ChevronRight className='h-4 w-4 shrink-0 text-muted-foreground' />}
+        <div className='min-w-0 flex-1'>
+          <div className='truncate font-mono text-xs text-foreground'>{title}</div>
+          {subtitle ? <div className='truncate text-xs text-muted-foreground'>{subtitle}</div> : null}
+        </div>
+        <Badge variant='outline'>{count}</Badge>
+      </button>
+      {expanded ? <div className='max-h-80 space-y-1.5 overflow-auto border-t border-border p-2'>{children}</div> : null}
+    </div>
+  );
+}
+
+function ValueTokenButton({
+  token,
+  label,
+  value,
+  disabled,
+  onInsert,
+}: {
+  token: string;
+  label?: string;
+  value: string;
+  disabled: boolean;
+  onInsert: (token: string) => void;
+}) {
+  return (
+    <button
+      type='button'
+      disabled={disabled}
+      onClick={() => onInsert(token)}
+      className='grid w-full grid-cols-[minmax(0,1fr)_auto] gap-2 rounded-lg border border-border bg-background/80 px-2.5 py-1.5 text-left text-xs hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50'
+    >
+      <span className='truncate font-mono text-foreground'>{label ?? token}</span>
+      <span className='max-w-32 truncate text-muted-foreground'>{value}</span>
+    </button>
   );
 }
 
