@@ -459,6 +459,11 @@ function getDefinitionPollInterval(definition: DeviceDefinition | null | undefin
   return intervals.length > 0 ? Math.min(...intervals) : fallback;
 }
 
+function isNotifyStreamDefinition(definition: DeviceDefinition | null | undefined) {
+  return definition?.connection.transport.type.toLowerCase() === 'ble'
+    && definition.dataSources.some((source) => source.readMode?.toLowerCase() === 'notify-stream');
+}
+
 function setNestedValue(source: unknown, path: string[], nextValue: unknown): unknown {
   if (path.length === 0) {
     return nextValue;
@@ -1650,7 +1655,7 @@ export function DevicesPage({
     <div className='mx-auto max-w-6xl space-y-6 pb-12'>
       {showOverviewHeader ? (
         <div className='flex flex-wrap gap-3'>
-          <Button type='button' variant='outline' size='lg' onClick={() => { setShowAddPicker(true); setUploadError(null); navigate('/devices/add'); }}>
+          <Button type='button' variant='outline' onClick={() => { setShowAddPicker(true); setUploadError(null); navigate('/devices/add'); }}>
             <Plus className='h-4 w-4' />
             Add device
           </Button>
@@ -1834,6 +1839,8 @@ export function DevicesPage({
             const transportType = getTransportType(device, availableDefinitions);
             const protocolType = device.definition?.connection.protocol.type ?? definitionSummary?.protocolType ?? null;
             const isPassiveBroadcast = protocolType === 'ble-advertisement';
+            const isNotifyStreamDevice = isNotifyStreamDefinition(device.definition);
+            const showPollingFields = !isPassiveBroadcast && !isNotifyStreamDevice;
             const isTransportSupported = definitionSummary?.isTransportSupported ?? true;
             const requiresTransport = requiresTransportIdentifier(device, availableDefinitions);
             const hasTransportTarget = !requiresTransport || Boolean(device.transportPortName?.trim());
@@ -1857,7 +1864,7 @@ export function DevicesPage({
                 path: ['connection', 'transport', 'defaults'],
                 value: filterTransportDefaults(device.definition?.connection.transport.defaults as Record<string, unknown> | undefined, transportType),
               },
-              {
+              ...(isNotifyStreamDevice ? [] : [{
                 key: 'protocol-settings',
                 title: 'Protocol settings',
                 description: 'Retries, timeouts, framing, and protocol-specific options.',
@@ -1870,7 +1877,7 @@ export function DevicesPage({
                 description: 'Polling cadence per group. The fastest interval becomes the device poll rate.',
                 path: ['pollGroups'],
                 value: device.definition?.pollGroups,
-              },
+              }]),
             ].filter((section): section is { key: string; title: string; description: string; path: string[]; value: Record<string, unknown> } => isObjectRecord(section.value));
 
             return (
@@ -1887,7 +1894,7 @@ export function DevicesPage({
                       {manufacturerAndModel || device.deviceId}
                     </div>
                     <div className='text-xs text-muted-foreground/70'>
-                      Connection: {getConnectionLabel(transportType)}{isPassiveBroadcast ? ' · Passive broadcast' : ` · Effective poll: ${effectivePollInterval} ms`}
+                      Connection: {getConnectionLabel(transportType)}{isPassiveBroadcast ? ' · Passive broadcast' : isNotifyStreamDevice ? ' · Notification stream' : ` · Effective poll: ${effectivePollInterval} ms`}
                     </div>
                   </div>
 
@@ -1999,7 +2006,7 @@ export function DevicesPage({
                       {renderFieldSaveState(device.clientKey, 'definitionId')}
                     </div>
                     <select
-                      className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+                      className='flex h-7 w-full rounded-lg border border-input bg-background px-2 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
                       value={device.definitionId}
                       disabled={device.enabled || connectionChoices.length <= 1}
                       onChange={(event) => { void updateDeviceConnection(index, event.target.value); }}
@@ -2010,7 +2017,7 @@ export function DevicesPage({
                     </select>
                   </label>
 
-                  {!isPassiveBroadcast ? (
+                  {showPollingFields ? (
                     <label className='space-y-2 text-sm text-foreground'>
                       <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Effective poll interval</span>
                       <Input value={`${effectivePollInterval} ms`} disabled />
@@ -2024,7 +2031,7 @@ export function DevicesPage({
                         {renderFieldSaveState(device.clientKey, 'transportPortName')}
                       </div>
                       <select
-                        className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+                        className='flex h-7 w-full rounded-lg border border-input bg-background px-2 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
                         value={device.transportPortName ?? ''}
                         disabled={device.enabled}
                         onChange={(event) => updateDevice(index, 'transportPortName', event.target.value || null)}
@@ -2109,13 +2116,13 @@ export function DevicesPage({
                     </label>
                   ) : null}
 
-                  {definitionFamily?.category === 'energy-storage' ? (
+                  {definitionFamily?.category === 'energy-storage' && !isNotifyStreamDevice ? (
                     <label className='space-y-2 text-sm text-foreground'>
                       <div className='flex items-center justify-between gap-2'>
                         <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Is master</span>
                         {renderFieldSaveState(device.clientKey, 'isMaster')}
                       </div>
-                      <div className='flex h-10 items-center rounded-md border border-input bg-background px-3'>
+                      <div className='flex h-7 items-center rounded-lg border border-input bg-background px-2'>
                         <input
                           type='checkbox'
                           checked={device.isMaster}

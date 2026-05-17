@@ -62,7 +62,7 @@
     {
       "id": "live",
       "name": "Live Data",
-      "command": 151,
+      "command": 150,
       "responseFrameType": 2,
       "headerSize": 6,
       "readMode": "notify-stream",

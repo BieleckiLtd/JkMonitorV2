@@ -80,16 +80,16 @@ public sealed class GenericBlePollingClient(
             return $"BLE responseFooterSize {settings.ResponseFooterSize} must be within responseFrameSize {settings.ResponseFrameSize}.";
         }
 
-        if (definition.DataSources.Any(IsRequestResponseBank))
+        if (DefinitionRequiresWriteCharacteristic(definition))
         {
             if (string.IsNullOrWhiteSpace(transportDefaults.WriteCharacteristicUuid))
-                return "BLE writeCharacteristicUuid is required for request-response banks.";
+                return "BLE writeCharacteristicUuid is required for request-response banks or notify-stream command fallback.";
 
             if (settings.RequestFrameSize < 2)
-                return "BLE requestFrameSize must be at least 2 bytes for request-response banks.";
+                return "BLE requestFrameSize must be at least 2 bytes for BLE command writes.";
 
             if (settings.RequestPreamble.Count == 0)
-                return "BLE requestPreamble is required for request-response banks.";
+                return "BLE requestPreamble is required for BLE command writes.";
 
             if (settings.CommandOffset < 0 || settings.CommandOffset >= settings.RequestFrameSize)
             {
@@ -144,13 +144,17 @@ public sealed class GenericBlePollingClient(
             foreach (var bank in definition.DataSources)
             {
                 var intervalMs = GetBankIntervalMilliseconds(definition, bank);
+                var cacheIntervalMs = GetEffectiveBankCacheIntervalMilliseconds(
+                    intervalMs,
+                    device.PollIntervalMilliseconds,
+                    IsNotifyStreamBank(bank));
 
                 if (!includeDetailBanks && IsDetailBank(intervalMs, fastestPollIntervalMs))
                 {
                     continue;
                 }
 
-                if (TryGetFreshCachedPayload(session, bank.Id, intervalMs, out var cachedPayload))
+                if (TryGetFreshCachedPayload(session, bank.Id, cacheIntervalMs, out var cachedPayload))
                 {
                     bankData[bank.Id] = cachedPayload;
                     isFirstBank = false;
@@ -163,7 +167,12 @@ public sealed class GenericBlePollingClient(
 
                 try
                 {
-                    var payload = await ReadBankPayloadAsync(session, definition, bank, cancellationToken);
+                    var payload = await ReadBankPayloadAsync(
+                        session,
+                        definition,
+                        bank,
+                        device.PollIntervalMilliseconds,
+                        cancellationToken);
                     bankData[bank.Id] = payload;
                 }
                 catch (TimeoutException ex) when (IsOptionalBank(bank))
@@ -182,6 +191,15 @@ public sealed class GenericBlePollingClient(
                 bankData,
                 DateTimeOffset.UtcNow,
                 GetLastFrameHex(session));
+        }
+        catch (BleNotifyStreamStalledException ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(
+                ex,
+                "BLE notify stream stalled for device {DeviceId}. Resetting session.",
+                device.DeviceId);
+            await ResetSessionAsync(session);
+            throw;
         }
         catch (Exception) when (!cancellationToken.IsCancellationRequested)
         {
@@ -264,7 +282,12 @@ public sealed class GenericBlePollingClient(
             RemoveCachedPayload(session, bank.Id);
             await Task.Delay(150, cancellationToken);
 
-            var payload = await ReadBankPayloadAsync(session, definition, bank, cancellationToken);
+            var payload = await ReadBankPayloadAsync(
+                session,
+                definition,
+                bank,
+                device.PollIntervalMilliseconds,
+                cancellationToken);
 
             if (!TryReadRawValue(entity, payload, definition.Connection.Protocol.Settings?.ByteOrder, out var readBackValue))
             {
@@ -564,10 +587,11 @@ public sealed class GenericBlePollingClient(
         BleSession session,
         DeviceDefinition definition,
         DataSourceDefinition bank,
+        int devicePollIntervalMs,
         CancellationToken cancellationToken)
     {
         return IsNotifyStreamBank(bank)
-            ? await WaitForNotifyStreamPayloadAsync(session, definition, bank, cancellationToken)
+            ? await WaitForNotifyStreamPayloadAsync(session, definition, bank, devicePollIntervalMs, cancellationToken)
             : await RequestFrameAsync(session, definition, bank, cancellationToken);
     }
 
@@ -593,12 +617,6 @@ public sealed class GenericBlePollingClient(
 
             try
             {
-                var commandFrame = BuildBleRequestCommand(bank.Command, settings);
-                var options = new Dictionary<string, object>
-                {
-                    ["type"] = await SelectWriteTypeAsync(session.WriteCharacteristic)
-                };
-
                 logger.LogDebug(
                     "Sending BLE command 0x{Command:X2} expecting frame type 0x{FrameType:X2} for device {DeviceId}. Attempt {Attempt}/{Attempts}.",
                     bank.Command,
@@ -607,7 +625,7 @@ public sealed class GenericBlePollingClient(
                     attempt,
                     attempts);
 
-                await session.WriteCharacteristic.WriteValueAsync(commandFrame, options);
+                await SendRequestCommandAsync(session, definition, bank, cancellationToken);
                 return await WaitForPendingReadAsync(session, bank, pendingRead, timeout, cancellationToken);
             }
             catch (Exception ex) when (!cancellationToken.IsCancellationRequested && attempt < attempts)
@@ -633,14 +651,38 @@ public sealed class GenericBlePollingClient(
             $"Timed out waiting for BLE frame type 0x{bank.ResponseFrameType:X2} from device '{session.DeviceId}'.");
     }
 
-    private async Task<byte[]> WaitForNotifyStreamPayloadAsync(
+    private async Task SendRequestCommandAsync(
         BleSession session,
         DeviceDefinition definition,
         DataSourceDefinition bank,
         CancellationToken cancellationToken)
     {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        if (session.WriteCharacteristic is null)
+            throw new InvalidOperationException($"Device '{session.DeviceId}' is not connected to a writable BLE characteristic.");
+
+        var commandFrame = BuildBleRequestCommand(bank.Command, GetRequiredProtocolSettings(definition));
+        var options = new Dictionary<string, object>
+        {
+            ["type"] = await SelectWriteTypeAsync(session.WriteCharacteristic)
+        };
+
+        await session.WriteCharacteristic.WriteValueAsync(commandFrame, options);
+    }
+
+    private async Task<byte[]> WaitForNotifyStreamPayloadAsync(
+        BleSession session,
+        DeviceDefinition definition,
+        DataSourceDefinition bank,
+        int devicePollIntervalMs,
+        CancellationToken cancellationToken)
+    {
         var transportDefaults = definition.Connection.Transport.Defaults ?? new TransportDefaults();
-        var intervalMs = GetBankIntervalMilliseconds(definition, bank);
+        var intervalMs = GetEffectiveBankCacheIntervalMilliseconds(
+            GetBankIntervalMilliseconds(definition, bank),
+            devicePollIntervalMs,
+            isNotifyStreamBank: true);
         var timeout = GetNotifyStreamWaitTimeout(
             TimeSpan.FromMilliseconds(Math.Max(transportDefaults.ConnectionTimeoutMs, 1000)),
             intervalMs);
@@ -651,6 +693,27 @@ public sealed class GenericBlePollingClient(
             if (TryGetFreshCachedPayload(session, bank.Id, intervalMs, out var cachedPayload))
                 return cachedPayload;
 
+            var supportsRequest = SupportsNotifyStreamRequestFallback(bank);
+            var hasWriteCharacteristic = session.WriteCharacteristic is not null;
+            var startRequestIssued = IsNotifyStreamStartRequestIssued(session, bank.Id);
+            var consecutiveTimeouts = GetNotifyStreamConsecutiveTimeouts(session, bank.Id);
+            if (ShouldSendNotifyStreamRequest(
+                    supportsRequest,
+                    hasWriteCharacteristic,
+                    startRequestIssued,
+                    consecutiveTimeouts))
+            {
+                logger.LogDebug(
+                    "Sending BLE notify-stream request command 0x{Command:X2} for device {DeviceId}. BankId={BankId}, ConsecutiveTimeouts={ConsecutiveTimeouts}.",
+                    bank.Command,
+                    session.DeviceId,
+                    bank.Id,
+                    consecutiveTimeouts);
+
+                await SendRequestCommandAsync(session, definition, bank, cancellationToken);
+                MarkNotifyStreamStartRequestIssued(session, bank.Id);
+            }
+
             logger.LogDebug(
                 "Waiting for BLE notify-stream frame type 0x{FrameType:X2} for device {DeviceId}. BankId={BankId}.",
                 bank.ResponseFrameType,
@@ -659,24 +722,22 @@ public sealed class GenericBlePollingClient(
 
             try
             {
-                return await WaitForPendingReadAsync(session, bank, pendingRead, timeout, cancellationToken);
+                var payload = await WaitForPendingReadAsync(session, bank, pendingRead, timeout, cancellationToken);
+                ResetNotifyStreamConsecutiveTimeouts(session, bank.Id);
+                return payload;
             }
-            catch (TimeoutException) when (session.WriteCharacteristic is not null)
+            catch (TimeoutException ex) when (!cancellationToken.IsCancellationRequested)
             {
-                if (!SupportsNotifyStreamRequestFallback(bank) ||
-                    !TryMarkNotifyStreamFallbackIssued(session, bank.Id))
+                var timeoutCount = RecordNotifyStreamTimeout(session, bank.Id);
+                if (ShouldResetNotifyStreamAfterTimeouts(timeoutCount))
                 {
-                    throw;
+                    throw new BleNotifyStreamStalledException(
+                        $"BLE notify stream for bank '{bank.Id}' on device '{session.DeviceId}' timed out {timeoutCount} consecutive times.",
+                        ex);
                 }
 
-                logger.LogDebug(
-                    "BLE notify-stream frame type 0x{FrameType:X2} did not arrive in time for device {DeviceId}. Issuing one-time request-response fallback for bank {BankId}.",
-                    bank.ResponseFrameType,
-                    session.DeviceId,
-                    bank.Id);
+                throw;
             }
-
-            return await RequestFrameAsync(session, definition, bank, cancellationToken);
         }
         finally
         {
@@ -740,6 +801,8 @@ public sealed class GenericBlePollingClient(
                 {
                     var cacheEntry = new BankCacheEntry(timestamp, ExtractPayload(candidate, bank, settings.ResponseFooterSize));
                     session.BankCache[bank.Id] = cacheEntry;
+                    if (IsNotifyStreamBank(bank))
+                        session.NotifyStreamConsecutiveTimeouts.Remove(bank.Id);
 
                     if (session.PendingReads.Remove(bank.Id, out var pendingRead))
                         completedReads.Add((pendingRead, cacheEntry));
@@ -1035,8 +1098,10 @@ public sealed class GenericBlePollingClient(
         return null;
     }
 
-    private static bool DefinitionRequiresWriteCharacteristic(DeviceDefinition definition)
-        => definition.DataSources.Any(IsRequestResponseBank);
+    internal static bool DefinitionRequiresWriteCharacteristic(DeviceDefinition definition)
+        => definition.DataSources.Any(bank =>
+            IsRequestResponseBank(bank) ||
+            (IsNotifyStreamBank(bank) && SupportsNotifyStreamRequestFallback(bank)));
 
     private static bool IsRequestResponseBank(DataSourceDefinition bank)
         => string.Equals(NormalizeReadMode(bank.ReadMode), "request-response", StringComparison.Ordinal);
@@ -1088,6 +1153,17 @@ public sealed class GenericBlePollingClient(
     private static int GetBankIntervalMilliseconds(DeviceDefinition definition, DataSourceDefinition bank)
         => definition.PollGroups.GetValueOrDefault(bank.PollGroup)?.IntervalMs ?? 1000;
 
+    internal static int GetEffectiveBankCacheIntervalMilliseconds(
+        int bankIntervalMs,
+        int devicePollIntervalMs,
+        bool isNotifyStreamBank)
+    {
+        if (!isNotifyStreamBank || bankIntervalMs <= 0)
+            return bankIntervalMs;
+
+        return Math.Max(bankIntervalMs, Math.Max(devicePollIntervalMs, 1));
+    }
+
     private static int GetFastestPollIntervalMilliseconds(DeviceDefinition definition)
         => definition.DataSources
             .Select(bank => GetBankIntervalMilliseconds(definition, bank))
@@ -1109,6 +1185,20 @@ public sealed class GenericBlePollingClient(
             ? boundedIntervalTimeout
             : connectionTimeout;
     }
+
+    internal static bool ShouldSendNotifyStreamRequest(
+        bool supportsRequest,
+        bool hasWriteCharacteristic,
+        bool startRequestIssued,
+        int consecutiveTimeouts)
+    {
+        return supportsRequest &&
+               hasWriteCharacteristic &&
+               (!startRequestIssued || consecutiveTimeouts > 0);
+    }
+
+    internal static bool ShouldResetNotifyStreamAfterTimeouts(int consecutiveTimeouts)
+        => consecutiveTimeouts >= BleSession.MaxConsecutiveNotifyStreamTimeouts;
 
     private static bool TryGetFreshCachedPayload(
         BleSession session,
@@ -1132,11 +1222,45 @@ public sealed class GenericBlePollingClient(
         return false;
     }
 
-    private static bool TryMarkNotifyStreamFallbackIssued(BleSession session, string bankId)
+    private static bool IsNotifyStreamStartRequestIssued(BleSession session, string bankId)
     {
         lock (session.SyncRoot)
         {
-            return session.NotifyStreamFallbackIssued.Add(bankId);
+            return session.NotifyStreamStartRequestsIssued.Contains(bankId);
+        }
+    }
+
+    private static void MarkNotifyStreamStartRequestIssued(BleSession session, string bankId)
+    {
+        lock (session.SyncRoot)
+        {
+            session.NotifyStreamStartRequestsIssued.Add(bankId);
+        }
+    }
+
+    private static int GetNotifyStreamConsecutiveTimeouts(BleSession session, string bankId)
+    {
+        lock (session.SyncRoot)
+        {
+            return session.NotifyStreamConsecutiveTimeouts.GetValueOrDefault(bankId);
+        }
+    }
+
+    private static int RecordNotifyStreamTimeout(BleSession session, string bankId)
+    {
+        lock (session.SyncRoot)
+        {
+            var timeoutCount = session.NotifyStreamConsecutiveTimeouts.GetValueOrDefault(bankId) + 1;
+            session.NotifyStreamConsecutiveTimeouts[bankId] = timeoutCount;
+            return timeoutCount;
+        }
+    }
+
+    private static void ResetNotifyStreamConsecutiveTimeouts(BleSession session, string bankId)
+    {
+        lock (session.SyncRoot)
+        {
+            session.NotifyStreamConsecutiveTimeouts.Remove(bankId);
         }
     }
 
@@ -1546,7 +1670,12 @@ public sealed class GenericBlePollingClient(
             {
                 try
                 {
-                    _ = await ReadBankPayloadAsync(session, definition, bank, probeCts.Token);
+                    _ = await ReadBankPayloadAsync(
+                        session,
+                        definition,
+                        bank,
+                        GetFastestPollIntervalMilliseconds(definition),
+                        probeCts.Token);
                     var details = $"{bank.Name} ({NormalizeReadMode(bank.ReadMode)}) responded successfully.";
                     return new(true, "Verified BLE device", details);
                 }
@@ -1787,7 +1916,8 @@ public sealed class GenericBlePollingClient(
             session.PendingReads.Clear();
             session.FrameBuffer.Clear();
             session.BankCache.Clear();
-            session.NotifyStreamFallbackIssued.Clear();
+            session.NotifyStreamStartRequestsIssued.Clear();
+            session.NotifyStreamConsecutiveTimeouts.Clear();
             session.LastFrameHex = string.Empty;
         }
 
@@ -1846,6 +1976,8 @@ public sealed class GenericBlePollingClient(
 
     private sealed class BleSession(string deviceId)
     {
+        public const int MaxConsecutiveNotifyStreamTimeouts = 3;
+
         public string DeviceId { get; } = deviceId;
         public SemaphoreSlim Lock { get; } = new(1, 1);
         public object SyncRoot { get; } = new();
@@ -1856,10 +1988,14 @@ public sealed class GenericBlePollingClient(
         public IDisposable? NotifyWatcher { get; set; }
         public List<byte> FrameBuffer { get; } = [];
         public Dictionary<string, BankCacheEntry> BankCache { get; } = new(StringComparer.OrdinalIgnoreCase);
-        public HashSet<string> NotifyStreamFallbackIssued { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public HashSet<string> NotifyStreamStartRequestsIssued { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public Dictionary<string, int> NotifyStreamConsecutiveTimeouts { get; } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, TaskCompletionSource<BankCacheEntry>> PendingReads { get; } = new(StringComparer.OrdinalIgnoreCase);
         public string LastFrameHex { get; set; } = string.Empty;
     }
+
+    private sealed class BleNotifyStreamStalledException(string message, Exception innerException)
+        : TimeoutException(message, innerException);
 }
 
 public sealed record BleDiscoveredDevice(

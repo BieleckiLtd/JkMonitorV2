@@ -45,7 +45,13 @@ describe('DevicesPage', () => {
           },
         },
       },
-      dataSources: [],
+      dataSources: [
+        {
+          id: 'live',
+          name: 'Live Data',
+          pollGroup: 'fast',
+        },
+      ],
       pollGroups: {
         fast: {
           intervalMs: 1000,
@@ -86,7 +92,14 @@ describe('DevicesPage', () => {
           },
         },
       },
-      dataSources: [],
+      dataSources: [
+        {
+          id: 'live',
+          name: 'Live Data',
+          pollGroup: 'fast',
+          readMode: 'notify-stream',
+        },
+      ],
       pollGroups: {
         fast: {
           intervalMs: 1000,
@@ -138,6 +151,7 @@ describe('DevicesPage', () => {
               name: 'JK Inverter BMS',
               manufacturer: 'JK',
               model: 'JK-PB2A16S20P',
+              category: 'energy-storage',
               transportType: 'serial',
               isTransportSupported: true,
             },
@@ -146,6 +160,7 @@ describe('DevicesPage', () => {
               name: 'JK Inverter BMS (BLE)',
               manufacturer: 'JK',
               model: 'JK-PB2A16S20P',
+              category: 'energy-storage',
               transportType: 'ble',
               isTransportSupported: true,
             },
@@ -402,6 +417,49 @@ describe('DevicesPage', () => {
     expect(screen.getByDisplayValue('device-1')).toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: /display name/i })).toHaveValue('JK Inverter BMS');
     expect(screen.queryByRole('combobox', { name: /serial port/i })).not.toBeInTheDocument();
+  });
+
+  it('hides polling and master controls for BLE notification-stream devices', async () => {
+    initialDevicesResponse = [
+      {
+        deviceId: 'device-1',
+        displayName: 'JK Inverter BMS',
+        definitionId: 'jk-inverter-bms-ble',
+        definitionVersion: '1.0.0',
+        transportPortName: 'AA:BB:CC:DD:EE:FF',
+        bleSettingsPin: null,
+        address: 1,
+        isMaster: false,
+        pollIntervalMilliseconds: 1000,
+        enabled: false,
+        cellVoltageSmoothingFactor: 0,
+        cellVoltageSmoothingBreakoutMillivolts: 0,
+        displayPrecision: {
+          voltage: 2,
+          cellVoltage: 3,
+          current: 1,
+          power: 0,
+          temperature: 1,
+          soc: 0,
+          deltaVoltage: 3,
+        },
+        hasDefinitionOverride: false,
+        definition: definitionDetailsById['jk-inverter-bms-ble'],
+      },
+    ];
+
+    renderPage();
+
+    expect(await screen.findByText(/connection: bluetooth .* notification stream/i)).toBeInTheDocument();
+    expect(screen.queryByText(/effective poll/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/effective poll interval/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/is master/i)).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByText(/definition overrides/i));
+
+    expect(screen.queryByText(/protocol settings/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/poll groups/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/transport defaults/i)).toBeInTheDocument();
   });
 
   it('shows a waiting message instead of a blank first-poll failure when start is still in progress', async () => {

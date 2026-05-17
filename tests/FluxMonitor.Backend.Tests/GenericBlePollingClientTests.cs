@@ -69,6 +69,96 @@ public sealed class GenericBlePollingClientTests
         Assert.True(GenericBlePollingClient.SupportsNotifyStreamRequestFallback(bankWithCommand));
     }
 
+    [Theory]
+    [InlineData(1000, 5000, true, 5000)]
+    [InlineData(5000, 1000, true, 5000)]
+    [InlineData(0, 5000, true, 0)]
+    [InlineData(1000, 5000, false, 1000)]
+    public void GetEffectiveBankCacheIntervalMilliseconds_UsesDeviceCadenceForNotifyStreams(
+        int bankIntervalMs,
+        int devicePollIntervalMs,
+        bool isNotifyStream,
+        int expectedIntervalMs)
+    {
+        var intervalMs = GenericBlePollingClient.GetEffectiveBankCacheIntervalMilliseconds(
+            bankIntervalMs,
+            devicePollIntervalMs,
+            isNotifyStream);
+
+        Assert.Equal(expectedIntervalMs, intervalMs);
+    }
+
+    [Theory]
+    [InlineData(true, true, false, 0, true)]
+    [InlineData(true, true, true, 0, false)]
+    [InlineData(true, true, true, 1, true)]
+    [InlineData(false, true, false, 0, false)]
+    [InlineData(true, false, false, 0, false)]
+    public void ShouldSendNotifyStreamRequest_PrimesOnceAndRefreshesAfterTimeout(
+        bool supportsRequest,
+        bool hasWriteCharacteristic,
+        bool startRequestIssued,
+        int consecutiveTimeouts,
+        bool expected)
+    {
+        var shouldSend = GenericBlePollingClient.ShouldSendNotifyStreamRequest(
+            supportsRequest,
+            hasWriteCharacteristic,
+            startRequestIssued,
+            consecutiveTimeouts);
+
+        Assert.Equal(expected, shouldSend);
+    }
+
+    [Theory]
+    [InlineData(0, false)]
+    [InlineData(2, false)]
+    [InlineData(3, true)]
+    public void ShouldResetNotifyStreamAfterTimeouts_ResetsAfterThreeConsecutiveMisses(
+        int consecutiveTimeouts,
+        bool expected)
+    {
+        var shouldReset = GenericBlePollingClient.ShouldResetNotifyStreamAfterTimeouts(consecutiveTimeouts);
+
+        Assert.Equal(expected, shouldReset);
+    }
+
+    [Fact]
+    public void DefinitionRequiresWriteCharacteristic_IncludesNotifyStreamCommandFallback()
+    {
+        var notifyOnlyDefinition = CreateDefinition(CreateBank(0x96));
+
+        Assert.True(GenericBlePollingClient.DefinitionRequiresWriteCharacteristic(notifyOnlyDefinition));
+    }
+
+    [Fact]
+    public void DefinitionRequiresWriteCharacteristic_IncludesRequestResponseBanks()
+    {
+        var requestResponseDefinition = CreateDefinition(CreateBank(0x96, "request-response"));
+
+        Assert.True(GenericBlePollingClient.DefinitionRequiresWriteCharacteristic(requestResponseDefinition));
+    }
+
+    [Fact]
+    public void DefinitionRequiresWriteCharacteristic_IgnoresPassiveNotifyStreamWithoutCommand()
+    {
+        var passiveNotifyDefinition = CreateDefinition(CreateBank(0x00));
+
+        Assert.False(GenericBlePollingClient.DefinitionRequiresWriteCharacteristic(passiveNotifyDefinition));
+    }
+
+    [Fact]
+    public void GetUnsupportedDefinitionMessage_RequiresWriteCharacteristicForNotifyStreamCommandFallback()
+    {
+        var notifyFallbackDefinition = CreateDefinition(CreateBank(0x96));
+
+        var message = GenericBlePollingClient.GetUnsupportedDefinitionMessage(notifyFallbackDefinition);
+
+        Assert.Equal(
+            "BLE writeCharacteristicUuid is required for request-response banks or notify-stream command fallback.",
+            message);
+    }
+
     [Fact]
     public void ApplyAdvertisedServiceVerification_MarksMatchingCandidatesWithoutConnecting()
     {
@@ -121,13 +211,53 @@ public sealed class GenericBlePollingClientTests
         Assert.Null(verified.VerificationDetails);
     }
 
-    private static DataSourceDefinition CreateBank(byte command)
+    private static DeviceDefinition CreateDefinition(params DataSourceDefinition[] banks)
+        => new()
+        {
+            Version = "1",
+            Device = new DeviceMetadata
+            {
+                Id = "test-ble",
+                Name = "Test BLE"
+            },
+            Connection = new ConnectionDefinition
+            {
+                Transport = new TransportDefinition
+                {
+                    Type = "ble",
+                    Defaults = new TransportDefaults
+                    {
+                        ServiceUuid = "0000ffe0-0000-1000-8000-00805f9b34fb",
+                        NotifyCharacteristicUuid = "0000ffe1-0000-1000-8000-00805f9b34fb"
+                    }
+                },
+                Protocol = new ProtocolDefinition
+                {
+                    Type = "ble-frame",
+                    Settings = new ProtocolSettings
+                    {
+                        ResponseFrameSize = 8,
+                        ChecksumType = "sum8",
+                        ResponsePreamble = [0x55],
+                        RequestPreamble = [0xAA]
+                    }
+                }
+            },
+            DataSources = banks,
+            PollGroups = new Dictionary<string, PollGroupDefinition>
+            {
+                ["fast"] = new() { IntervalMs = 1000 }
+            },
+            Entities = []
+        };
+
+    private static DataSourceDefinition CreateBank(byte command, string readMode = "notify-stream")
         => new()
         {
             Id = "live",
             Name = "Live Data",
             PollGroup = "fast",
-            ReadMode = "notify-stream",
+            ReadMode = readMode,
             Command = command,
             ResponseFrameType = 0x02
         };

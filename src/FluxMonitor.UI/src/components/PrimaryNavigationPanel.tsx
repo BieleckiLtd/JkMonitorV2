@@ -91,18 +91,18 @@ function PrimaryNavigationLink({
           }, { direction: 'forward' });
         }}
         className={cn(
-          'flex w-full items-center justify-between px-4 py-3.5 text-left transition-all duration-100',
+          'flex w-full items-center justify-between px-3 py-2.5 text-left transition-all duration-100',
           isActive ? 'bg-primary/10 text-primary' : 'hover:bg-accent/25',
         )}
       >
-        <div className='flex items-center gap-3.5'>
+            <div className='flex items-center gap-2.5'>
           <div
             className={cn(
-              'flex h-10 w-10 shrink-0 items-center justify-center transition-colors',
+              'flex h-8 w-8 shrink-0 items-center justify-center transition-colors',
               isActive ? 'bg-primary/14 text-primary' : 'bg-white/5 text-muted-foreground',
             )}
           >
-            <Icon className={cn('h-5 w-5', isActive ? 'opacity-100' : 'opacity-60')} />
+            <Icon className={cn('h-4 w-4', isActive ? 'opacity-100' : 'opacity-60')} />
           </div>
           <div>
             <div className={cn('font-mono text-sm', isActive ? 'text-primary' : 'text-foreground')}>

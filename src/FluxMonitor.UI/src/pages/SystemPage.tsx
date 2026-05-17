@@ -2191,7 +2191,7 @@ export function SystemPage() {
                   setWifiPasswordDirty(false);
                   setWifiFeedback(null);
                 }}
-                className='inline-flex items-center justify-center rounded-xl border border-border bg-background/70 px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
+                className='inline-flex h-7 items-center justify-center rounded-lg border border-border bg-background/70 px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
               >
                 Cancel
               </button>
@@ -2199,7 +2199,7 @@ export function SystemPage() {
                 type='button'
                 disabled={wifiConnectLoading || !wifiTargetSsid.trim()}
                 onClick={() => void connectWifi()}
-                className='inline-flex items-center justify-center gap-2 rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
+                className='inline-flex h-7 items-center justify-center gap-1.5 rounded-lg bg-primary px-2.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 disabled:opacity-50'
               >
                 {wifiConnectLoading ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Wifi className='h-4 w-4' />}
                 Connect
@@ -2226,14 +2226,14 @@ export function SystemPage() {
               <button
                 type='button'
                 onClick={() => setPendingConnectivityAction(null)}
-                className='inline-flex items-center justify-center rounded-xl border border-border bg-background/70 px-4 py-2 text-sm font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
+                className='inline-flex h-7 items-center justify-center rounded-lg border border-border bg-background/70 px-2.5 text-xs font-medium text-foreground transition-colors hover:bg-accent hover:text-accent-foreground'
               >
                 Cancel
               </button>
               <button
                 type='button'
                 onClick={() => void confirmPendingConnectivityAction()}
-                className='inline-flex items-center justify-center rounded-xl bg-primary px-4 py-2 text-sm font-medium text-primary-foreground transition-colors hover:bg-primary/90'
+                className='inline-flex h-7 items-center justify-center rounded-lg bg-primary px-2.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90'
               >
                 {pendingConnectivityConfirmLabel}
               </button>

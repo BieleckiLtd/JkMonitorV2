@@ -153,7 +153,7 @@ export function DevicesNavigationPanel({ className }: { className?: string }) {
               <div
                 data-active={isActive ? 'true' : undefined}
                 className={cn(
-                  'flex items-center gap-3 px-4 py-2.5 transition-all duration-100',
+                  'flex items-center gap-2.5 px-3 py-2 transition-all duration-100',
                   isActive ? 'bg-primary/10 text-primary' : 'hover:bg-accent/25',
                 )}
               >
@@ -168,15 +168,15 @@ export function DevicesNavigationPanel({ className }: { className?: string }) {
                       navigate(getDevicePath(device.deviceId));
                     }, { direction: 'forward' });
                   }}
-                  className='flex min-w-0 flex-1 items-center gap-3 text-left'
+                  className='flex min-w-0 flex-1 items-center gap-2.5 text-left'
                 >
                   <div
                     className={cn(
-                      'flex h-10 w-10 shrink-0 items-center justify-center',
+                      'flex h-8 w-8 shrink-0 items-center justify-center',
                       isActive ? 'bg-primary/14 text-primary' : 'bg-white/5 text-muted-foreground',
                     )}
                   >
-                    <Cable className={cn('h-5 w-5', isActive ? 'opacity-100' : 'opacity-60')} />
+                    <Cable className={cn('h-4 w-4', isActive ? 'opacity-100' : 'opacity-60')} />
                   </div>
                   <div className='min-w-0'>
                     <div className={cn('truncate font-mono text-sm', isActive ? 'text-primary' : 'text-foreground')}>
@@ -188,7 +188,7 @@ export function DevicesNavigationPanel({ className }: { className?: string }) {
                   </div>
                 </button>
 
-                <div className='flex shrink-0 items-center gap-2'>
+                <div className='flex shrink-0 items-center gap-1.5'>
                   {action?.loading ? <LoaderCircle className='h-3.5 w-3.5 animate-spin text-muted-foreground' /> : null}
                   <Switch
                     size='sm'
@@ -228,18 +228,18 @@ export function DevicesNavigationPanel({ className }: { className?: string }) {
             }, { direction: 'forward' });
           }}
           className={cn(
-            'flex w-full items-center justify-between px-4 py-3.5 text-left transition-all duration-100',
+            'flex w-full items-center justify-between px-3 py-2.5 text-left transition-all duration-100',
             activePath === '/devices/add' ? 'bg-primary/10 text-primary' : 'hover:bg-accent/25',
           )}
         >
-          <div className='flex items-center gap-3.5'>
+          <div className='flex items-center gap-2.5'>
             <div
               className={cn(
-                'flex h-10 w-10 shrink-0 items-center justify-center',
+                'flex h-8 w-8 shrink-0 items-center justify-center',
                 activePath === '/devices/add' ? 'bg-primary/14 text-primary' : 'bg-white/5 text-muted-foreground',
               )}
             >
-              <Plus className={cn('h-5 w-5', activePath === '/devices/add' ? 'opacity-100' : 'opacity-60')} />
+              <Plus className={cn('h-4 w-4', activePath === '/devices/add' ? 'opacity-100' : 'opacity-60')} />
             </div>
             <div>
               <div className={cn('font-mono text-sm', activePath === '/devices/add' ? 'text-primary' : 'text-foreground')}>

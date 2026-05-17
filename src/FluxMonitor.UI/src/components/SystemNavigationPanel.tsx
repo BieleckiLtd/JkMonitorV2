@@ -39,18 +39,18 @@ export function SystemNavigationPanel({ className }: { className?: string }) {
                   }, { direction: 'forward' });
                 }}
                 className={cn(
-                  'flex w-full items-center justify-between px-4 py-3.5 text-left transition-all duration-100',
+                  'flex w-full items-center justify-between px-3 py-2.5 text-left transition-all duration-100',
                   active ? 'bg-primary/5' : 'hover:bg-white/5',
                 )}
               >
-                <div className='flex items-center gap-3.5'>
+                <div className='flex items-center gap-2.5'>
                   <div
                     className={cn(
-                      'flex h-10 w-10 shrink-0 items-center justify-center',
+                      'flex h-8 w-8 shrink-0 items-center justify-center',
                       active ? 'bg-primary/10' : 'bg-white/5',
                     )}
                   >
-                    <Icon className={cn('h-5 w-5', active ? 'text-primary opacity-80' : 'opacity-50')} />
+                    <Icon className={cn('h-4 w-4', active ? 'text-primary opacity-80' : 'opacity-50')} />
                   </div>
                   <div>
                     <div className={cn('font-mono text-sm', active ? 'text-primary' : 'text-foreground')}>
@@ -61,7 +61,7 @@ export function SystemNavigationPanel({ className }: { className?: string }) {
                     </div>
                   </div>
                 </div>
-                <ChevronRight className={cn('h-5 w-5 shrink-0', active ? 'text-primary opacity-80' : 'opacity-50')} />
+                <ChevronRight className={cn('h-4 w-4 shrink-0', active ? 'text-primary opacity-80' : 'opacity-50')} />
               </button>
               {index < systemMenuItems.length - 1 ? (
                 <div aria-hidden='true' className='px-4'>

@@ -586,7 +586,7 @@ function BrowserCard({
               value={query}
               onChange={(event) => onQueryChange(event.target.value)}
               placeholder='Quick filter'
-              className='h-10 rounded-lg bg-background/75 pl-9'
+              className='h-7 rounded-lg bg-background/75 pl-8'
             />
           </div>
 
@@ -762,7 +762,7 @@ function PageTabButton({
       type='button'
       onClick={onClick}
       className={cn(
-        'flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors',
+        'flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-xs font-medium transition-colors',
         active ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
       )}
     >

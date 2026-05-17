@@ -489,7 +489,7 @@ export function NotificationsPage({ hideHeader = false }: { hideHeader?: boolean
                   <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Device</span>
                   <select
                     aria-label={`Rule ${index + 1} device`}
-                    className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+                    className='flex h-7 w-full rounded-lg border border-input bg-background px-2 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
                     value={rule.deviceId}
                     onChange={(e) => {
                       const deviceId = e.target.value;
@@ -511,7 +511,7 @@ export function NotificationsPage({ hideHeader = false }: { hideHeader?: boolean
                   <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Entity</span>
                   <select
                     aria-label={`Rule ${index + 1} entity`}
-                    className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+                    className='flex h-7 w-full rounded-lg border border-input bg-background px-2 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
                     value={rule.entityId}
                     onChange={(e) => updateRule(index, 'entityId', e.target.value)}
                   >
@@ -550,7 +550,7 @@ export function NotificationsPage({ hideHeader = false }: { hideHeader?: boolean
                   <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Severity</span>
                   <select
                     aria-label={`Rule ${index + 1} severity`}
-                    className='flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+                    className='flex h-7 w-full rounded-lg border border-input bg-background px-2 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
                     value={rule.severity}
                     onChange={(e) => updateRule(index, 'severity', e.target.value as NotificationRuleConfig['severity'])}
                   >
