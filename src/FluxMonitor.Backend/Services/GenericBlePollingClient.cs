@@ -83,7 +83,7 @@ public sealed class GenericBlePollingClient(
         if (DefinitionRequiresWriteCharacteristic(definition))
         {
             if (string.IsNullOrWhiteSpace(transportDefaults.WriteCharacteristicUuid))
-                return "BLE writeCharacteristicUuid is required for request-response banks or notify-stream command fallback.";
+                return "BLE writeCharacteristicUuid is required for request-response banks, notify-stream command fallback, or startup commands.";
 
             if (settings.RequestFrameSize < 2)
                 return "BLE requestFrameSize must be at least 2 bytes for BLE command writes.";
@@ -149,15 +149,15 @@ public sealed class GenericBlePollingClient(
                     device.PollIntervalMilliseconds,
                     IsNotifyStreamBank(bank));
 
-                if (!includeDetailBanks && IsDetailBank(intervalMs, fastestPollIntervalMs))
-                {
-                    continue;
-                }
-
                 if (TryGetFreshCachedPayload(session, bank.Id, cacheIntervalMs, out var cachedPayload))
                 {
                     bankData[bank.Id] = cachedPayload;
                     isFirstBank = false;
+                    continue;
+                }
+
+                if (!includeDetailBanks && IsDetailBank(intervalMs, fastestPollIntervalMs))
+                {
                     continue;
                 }
 
@@ -198,6 +198,7 @@ public sealed class GenericBlePollingClient(
                 ex,
                 "BLE notify stream stalled for device {DeviceId}. Resetting session.",
                 device.DeviceId);
+            ScheduleReconnectAttempt(session, definition);
             await ResetSessionAsync(session);
             throw;
         }
@@ -208,6 +209,7 @@ public sealed class GenericBlePollingClient(
                 logger.LogInformation(
                     "BLE connection lost for device {DeviceId}. Resetting session.",
                     device.DeviceId);
+                ScheduleReconnectAttempt(session, definition);
                 await ResetSessionAsync(session);
             }
             else
@@ -485,6 +487,7 @@ public sealed class GenericBlePollingClient(
         await ResetSessionAsync(session);
 
         var transportDefaults = definition.Connection.Transport.Defaults ?? new TransportDefaults();
+        await WaitForReconnectWindowAsync(session, transportDefaults.ReconnectDelayMs, cancellationToken);
         var timeout = TimeSpan.FromMilliseconds(Math.Max(transportDefaults.ConnectionTimeoutMs, 1000));
         var serviceUuid = BlueZManager.NormalizeUUID(
             transportDefaults.ServiceUuid
@@ -564,21 +567,25 @@ public sealed class GenericBlePollingClient(
                 $"device={device.DeviceId};target={target}",
                 cancellationToken);
             await Task.Delay(150, cancellationToken);
+            await SendStartupCommandsAsync(session, definition, cancellationToken);
 
             logger.LogInformation(
                 "BLE connection established for device {DeviceId}. Target={Target}, ServiceUuid={ServiceUuid}.",
                 device.DeviceId,
                 target,
                 serviceUuid);
+            MarkConnectionSucceeded(session);
         }
         catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
+            ScheduleReconnectAttempt(session, definition);
             logger.LogWarning(
                 ex,
                 "BLE connection/setup failed for device {DeviceId}. Target={Target}, DefinitionId={DefinitionId}.",
                 device.DeviceId,
                 target,
                 definition.Device.Id);
+            await ResetSessionAsync(session);
             throw;
         }
     }
@@ -625,7 +632,7 @@ public sealed class GenericBlePollingClient(
                     attempt,
                     attempts);
 
-                await SendRequestCommandAsync(session, definition, bank, cancellationToken);
+                await SendRequestCommandAsync(session, definition, bank.Command, cancellationToken);
                 return await WaitForPendingReadAsync(session, bank, pendingRead, timeout, cancellationToken);
             }
             catch (Exception ex) when (!cancellationToken.IsCancellationRequested && attempt < attempts)
@@ -654,7 +661,7 @@ public sealed class GenericBlePollingClient(
     private async Task SendRequestCommandAsync(
         BleSession session,
         DeviceDefinition definition,
-        DataSourceDefinition bank,
+        byte command,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
@@ -662,13 +669,42 @@ public sealed class GenericBlePollingClient(
         if (session.WriteCharacteristic is null)
             throw new InvalidOperationException($"Device '{session.DeviceId}' is not connected to a writable BLE characteristic.");
 
-        var commandFrame = BuildBleRequestCommand(bank.Command, GetRequiredProtocolSettings(definition));
+        var commandFrame = BuildBleRequestCommand(command, GetRequiredProtocolSettings(definition));
         var options = new Dictionary<string, object>
         {
             ["type"] = await SelectWriteTypeAsync(session.WriteCharacteristic)
         };
 
         await session.WriteCharacteristic.WriteValueAsync(commandFrame, options);
+    }
+
+    private async Task SendStartupCommandsAsync(
+        BleSession session,
+        DeviceDefinition definition,
+        CancellationToken cancellationToken)
+    {
+        var settings = GetRequiredProtocolSettings(definition);
+        if (settings.StartupCommands.Count == 0)
+            return;
+
+        var delayMs = Math.Max(settings.StartupCommandDelayMs, 0);
+        for (var i = 0; i < settings.StartupCommands.Count; i++)
+        {
+            var command = settings.StartupCommands[i];
+            logger.LogDebug(
+                "Sending BLE startup command 0x{Command:X2} for device {DeviceId}. CommandIndex={CommandIndex}/{CommandCount}.",
+                command,
+                session.DeviceId,
+                i + 1,
+                settings.StartupCommands.Count);
+
+            await SendRequestCommandAsync(session, definition, command, cancellationToken);
+            if (delayMs > 0 && i < settings.StartupCommands.Count - 1)
+                await Task.Delay(delayMs, cancellationToken);
+        }
+
+        if (delayMs > 0)
+            await Task.Delay(delayMs, cancellationToken);
     }
 
     private async Task<byte[]> WaitForNotifyStreamPayloadAsync(
@@ -710,7 +746,7 @@ public sealed class GenericBlePollingClient(
                     bank.Id,
                     consecutiveTimeouts);
 
-                await SendRequestCommandAsync(session, definition, bank, cancellationToken);
+                await SendRequestCommandAsync(session, definition, bank.Command, cancellationToken);
                 MarkNotifyStreamStartRequestIssued(session, bank.Id);
             }
 
@@ -1101,7 +1137,11 @@ public sealed class GenericBlePollingClient(
     internal static bool DefinitionRequiresWriteCharacteristic(DeviceDefinition definition)
         => definition.DataSources.Any(bank =>
             IsRequestResponseBank(bank) ||
-            (IsNotifyStreamBank(bank) && SupportsNotifyStreamRequestFallback(bank)));
+            (IsNotifyStreamBank(bank) && SupportsNotifyStreamRequestFallback(bank))) ||
+           ProtocolHasStartupCommands(definition);
+
+    private static bool ProtocolHasStartupCommands(DeviceDefinition definition)
+        => definition.Connection.Protocol.Settings?.StartupCommands.Count > 0;
 
     private static bool IsRequestResponseBank(DataSourceDefinition bank)
         => string.Equals(NormalizeReadMode(bank.ReadMode), "request-response", StringComparison.Ordinal);
@@ -1907,6 +1947,85 @@ public sealed class GenericBlePollingClient(
         }
     }
 
+    private async Task WaitForReconnectWindowAsync(
+        BleSession session,
+        int reconnectDelayMs,
+        CancellationToken cancellationToken)
+    {
+        if (reconnectDelayMs <= 0)
+            return;
+
+        DateTimeOffset? nextReconnectAttemptAt;
+        int consecutiveFailures;
+        lock (session.SyncRoot)
+        {
+            nextReconnectAttemptAt = session.NextReconnectAttemptAt;
+            consecutiveFailures = session.ConsecutiveReconnectFailures;
+        }
+
+        if (nextReconnectAttemptAt is not { } dueAt)
+            return;
+
+        var delay = dueAt - DateTimeOffset.UtcNow;
+        if (delay <= TimeSpan.Zero)
+            return;
+
+        logger.LogInformation(
+            "Delaying BLE reconnect for device {DeviceId} by {DelayMs}ms after {ConsecutiveFailures} consecutive reconnect failure(s). ConfiguredReconnectDelayMs={ReconnectDelayMs}.",
+            session.DeviceId,
+            (int)delay.TotalMilliseconds,
+            consecutiveFailures,
+            reconnectDelayMs);
+        await Task.Delay(delay, cancellationToken);
+    }
+
+    private static void ScheduleReconnectAttempt(BleSession session, DeviceDefinition definition)
+    {
+        var reconnectDelayMs = definition.Connection.Transport.Defaults?.ReconnectDelayMs ?? 0;
+        ScheduleReconnectAttempt(session, reconnectDelayMs);
+    }
+
+    private static void ScheduleReconnectAttempt(BleSession session, int reconnectDelayMs)
+    {
+        if (reconnectDelayMs <= 0)
+            return;
+
+        lock (session.SyncRoot)
+        {
+            var now = DateTimeOffset.UtcNow;
+            if (session.NextReconnectAttemptAt is { } nextReconnectAttemptAt &&
+                nextReconnectAttemptAt > now)
+            {
+                return;
+            }
+
+            session.ConsecutiveReconnectFailures = Math.Min(session.ConsecutiveReconnectFailures + 1, 16);
+            session.NextReconnectAttemptAt = now + GetReconnectBackoffDelay(
+                reconnectDelayMs,
+                session.ConsecutiveReconnectFailures);
+        }
+    }
+
+    internal static TimeSpan GetReconnectBackoffDelay(int reconnectDelayMs, int consecutiveFailures)
+    {
+        if (reconnectDelayMs <= 0)
+            return TimeSpan.Zero;
+
+        var exponent = Math.Clamp(consecutiveFailures - 1, 0, 6);
+        var multiplier = 1 << exponent;
+        var delayMs = Math.Min((long)reconnectDelayMs * multiplier, 60_000L);
+        return TimeSpan.FromMilliseconds(delayMs);
+    }
+
+    private static void MarkConnectionSucceeded(BleSession session)
+    {
+        lock (session.SyncRoot)
+        {
+            session.ConsecutiveReconnectFailures = 0;
+            session.NextReconnectAttemptAt = null;
+        }
+    }
+
     private static async Task ResetSessionAsync(BleSession session)
     {
         TaskCompletionSource<BankCacheEntry>[] pendingReads;
@@ -1992,6 +2111,8 @@ public sealed class GenericBlePollingClient(
         public Dictionary<string, int> NotifyStreamConsecutiveTimeouts { get; } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, TaskCompletionSource<BankCacheEntry>> PendingReads { get; } = new(StringComparer.OrdinalIgnoreCase);
         public string LastFrameHex { get; set; } = string.Empty;
+        public int ConsecutiveReconnectFailures { get; set; }
+        public DateTimeOffset? NextReconnectAttemptAt { get; set; }
     }
 
     private sealed class BleNotifyStreamStalledException(string message, Exception innerException)

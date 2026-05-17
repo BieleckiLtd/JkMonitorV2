@@ -1,4 +1,4 @@
-import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react';
+import { type KeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowDown, ArrowUp, Battery, Check, Droplets, LoaderCircle, Play, Plus, RotateCcw, Square, Thermometer, Trash2, Upload, X } from 'lucide-react';
 import { Button } from '../components/ui/button';
@@ -318,16 +318,16 @@ function BleCandidateCard({
         disabled ? 'cursor-not-allowed opacity-80' : undefined,
       )}
     >
-      <div className='flex items-start justify-between gap-3'>
+      <div className='flex flex-col items-start gap-3 sm:flex-row sm:justify-between'>
         <div className='min-w-0 space-y-2'>
           <div className='flex flex-wrap items-center gap-2'>
-            <div className='text-sm font-semibold text-foreground'>{candidate.displayName}</div>
+            <div className='break-words text-sm font-semibold text-foreground'>{candidate.displayName}</div>
             {candidate.isDefinitionVerified ? <span className='rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-emerald-500'>{candidate.verificationLabel ?? 'Matched'}</span> : null}
             {candidate.rssi != null ? <span className='rounded-full border border-border bg-background/70 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>{candidate.rssi} dBm</span> : null}
           </div>
-          <div className='font-mono text-xs text-muted-foreground'>{candidate.address}</div>
+          <div className='break-all font-mono text-xs text-muted-foreground'>{candidate.address}</div>
           {candidate.alias && candidate.name && candidate.alias !== candidate.name ? (
-            <div className='text-xs text-muted-foreground'>Alias: {candidate.alias} · Name: {candidate.name}</div>
+            <div className='break-words text-xs text-muted-foreground'>Alias: {candidate.alias} · Name: {candidate.name}</div>
           ) : null}
           <div className='grid gap-2 text-xs text-muted-foreground sm:grid-cols-2 xl:grid-cols-4'>
             <div className='flex items-center gap-2 rounded-lg border border-border/70 bg-background/60 px-2.5 py-2'>
@@ -1025,12 +1025,16 @@ export function DevicesPage({
     };
   }, [getSaveFieldTarget]);
 
-  const libraryAssignedBleTargets = libraryBleSelection
-    ? getAssignedBleTargets(devices, libraryBleSelection.definition.id)
-    : new Set<string>();
-  const visibleLibraryBleDevices = activeLibraryBleScanKey
-    ? filterAssignedBleCandidates(bleScanResults[activeLibraryBleScanKey] ?? [], libraryAssignedBleTargets)
-    : [];
+  const libraryAssignedBleTargets = useMemo(() => (
+    libraryBleSelection
+      ? getAssignedBleTargets(devices, libraryBleSelection.definition.id)
+      : new Set<string>()
+  ), [devices, libraryBleSelection]);
+  const visibleLibraryBleDevices = useMemo(() => (
+    activeLibraryBleScanKey
+      ? filterAssignedBleCandidates(bleScanResults[activeLibraryBleScanKey] ?? [], libraryAssignedBleTargets)
+      : []
+  ), [activeLibraryBleScanKey, bleScanResults, libraryAssignedBleTargets]);
 
   useEffect(() => {
     if (!libraryBleSelection) {
@@ -1652,7 +1656,7 @@ export function DevicesPage({
   }, []);
 
   return (
-    <div className='mx-auto max-w-6xl space-y-6 pb-12'>
+    <div className='mx-auto w-full min-w-0 max-w-6xl space-y-6 pb-12'>
       {showOverviewHeader ? (
         <div className='flex flex-wrap gap-3'>
           <Button type='button' variant='outline' onClick={() => { setShowAddPicker(true); setUploadError(null); navigate('/devices/add'); }}>
@@ -1663,31 +1667,31 @@ export function DevicesPage({
       ) : null}
 
       {showAddPicker ? (
-        <div className='rounded-2xl border border-border bg-card/70 p-5 shadow-sm'>
-          <div className='mb-4 flex items-center justify-between'>
-            <h3 className='text-lg font-semibold text-foreground'>Add a new device</h3>
-            <Button type='button' variant='ghost' size='sm' onClick={() => { setShowAddPicker(false); setUploadError(null); navigate('/devices'); }}>
+        <div className='min-w-0 overflow-hidden rounded-xl border border-border bg-card/70 p-3 shadow-sm sm:rounded-2xl sm:p-5'>
+          <div className='mb-4 flex items-center justify-between gap-3'>
+            <h3 className='min-w-0 break-words text-base font-semibold text-foreground sm:text-lg'>Add a new device</h3>
+            <Button type='button' variant='ghost' size='sm' aria-label='Close add device picker' className='h-9 w-9 shrink-0 p-0 sm:h-6 sm:w-auto sm:px-2' onClick={() => { setShowAddPicker(false); setUploadError(null); navigate('/devices'); }}>
               <X className='h-4 w-4' />
             </Button>
           </div>
 
           <div className='mb-4'>
-            <span className='mb-3 block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>From device library</span>
-            <div className='grid gap-3 sm:grid-cols-2 lg:grid-cols-3'>
+            <span className='mb-3 block text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground sm:tracking-[0.18em]'>From device library</span>
+            <div className='grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,18rem),1fr))]'>
               {definitionFamilies.map((family) => {
                 const supportedConnections = family.definitions.filter((definition) => definition.isTransportSupported);
 
                 return (
-                  <div key={family.key} className='rounded-xl border border-border bg-muted/30 p-4'>
-                    <div className='space-y-1'>
-                      <span className='text-sm font-semibold text-foreground'>{family.name}</span>
-                      <span className='block text-xs text-muted-foreground'>{family.manufacturer} · {family.model}</span>
-                      {family.description ? <span className='block text-xs text-muted-foreground/80'>{family.description}</span> : null}
+                  <div key={family.key} className='flex min-w-0 flex-col justify-between gap-4 rounded-xl border border-border bg-muted/30 p-3 sm:p-4'>
+                    <div className='min-w-0 space-y-1.5'>
+                      <span className='block break-words text-sm font-semibold leading-6 text-foreground'>{family.name}</span>
+                      <span className='block break-words text-xs leading-5 text-muted-foreground'>{family.manufacturer} · {family.model}</span>
+                      {family.description ? <span className='block break-words text-xs leading-5 text-muted-foreground/80'>{family.description}</span> : null}
                     </div>
 
-                    <div className='mt-4 space-y-2'>
-                      <span className='block text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground'>Connection</span>
-                      <div className='flex flex-wrap gap-2'>
+                    <div className='space-y-2'>
+                      <span className='block text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground sm:tracking-[0.18em]'>Connection</span>
+                      <div className='grid grid-cols-1 gap-2 sm:flex sm:flex-wrap'>
                         {family.definitions.map((definition) => {
                           const connectionLabel = getConnectionLabel(definition.transportType);
                           return (
@@ -1696,7 +1700,7 @@ export function DevicesPage({
                               type='button'
                               aria-label={`Add ${family.name} using ${connectionLabel}`}
                               className={cn(
-                                'rounded-lg border px-3 py-2 text-sm transition',
+                                'inline-flex min-h-11 w-full items-center justify-center rounded-lg border px-3 py-2 text-sm leading-snug transition sm:min-h-0 sm:w-auto',
                                 definition.isTransportSupported
                                   ? 'border-border bg-background hover:border-primary/50 hover:bg-muted/60'
                                   : 'cursor-not-allowed border-amber-500/30 bg-amber-500/10 text-amber-700 opacity-70 dark:text-amber-300',
@@ -1730,19 +1734,20 @@ export function DevicesPage({
 
           <div>
             {libraryBleSelection && activeLibraryBleScanKey ? (
-              <div className='mb-6 rounded-2xl border border-border/70 bg-background/50 p-4'>
+              <div className='mb-6 rounded-xl border border-border/70 bg-background/50 p-3 sm:rounded-2xl sm:p-4'>
                 <div className='flex flex-wrap items-start justify-between gap-3'>
-                  <div>
-                    <div className='text-sm font-semibold text-foreground'>{libraryBleSelection.familyName} nearby and compatible</div>
-                    <div className='mt-1 text-xs text-muted-foreground'>
+                  <div className='min-w-0 flex-1'>
+                    <div className='break-words text-sm font-semibold text-foreground'>{libraryBleSelection.familyName} nearby and compatible</div>
+                    <div className='mt-1 text-xs leading-5 text-muted-foreground'>
                       Nearby matching broadcasters show live advert status while the shared scanner keeps listening. You can still add one manually if a device is quiet right now.
                     </div>
                   </div>
-                  <div className='flex flex-wrap gap-2'>
+                  <div className='grid w-full grid-cols-1 gap-2 sm:w-auto sm:grid-cols-none sm:flex sm:flex-wrap'>
                     <Button
                       type='button'
                       variant='outline'
                       size='sm'
+                      className='h-10 w-full sm:h-6 sm:w-auto'
                       disabled={bleScanLoading[activeLibraryBleScanKey] || bleScanFollowUpLoading[activeLibraryBleScanKey]}
                       onClick={() => void scanBleDevices(activeLibraryBleScanKey, libraryBleSelection.definition.id)}
                     >
@@ -1752,6 +1757,7 @@ export function DevicesPage({
                     <Button
                       type='button'
                       size='sm'
+                      className='h-10 w-full sm:h-6 sm:w-auto'
                       disabled={selectedLibraryBleAddresses.length === 0}
                       onClick={() => void addSelectedLibraryBleDevices()}
                     >
@@ -1761,6 +1767,7 @@ export function DevicesPage({
                       type='button'
                       variant='ghost'
                       size='sm'
+                      className='h-10 w-full sm:h-6 sm:w-auto'
                       onClick={() => void addManualBleDevice()}
                     >
                       Add manually
@@ -1806,7 +1813,7 @@ export function DevicesPage({
               </div>
             ) : null}
 
-            <span className='mb-3 block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Upload definition JSON</span>
+            <span className='mb-3 block text-xs font-medium uppercase tracking-[0.14em] text-muted-foreground sm:tracking-[0.18em]'>Upload definition JSON</span>
             <input
               ref={fileInputRef}
               type='file'
@@ -1818,7 +1825,7 @@ export function DevicesPage({
                 event.target.value = '';
               }}
             />
-            <Button type='button' variant='outline' onClick={() => fileInputRef.current?.click()}>
+            <Button type='button' variant='outline' className='h-11 w-full sm:h-7 sm:w-auto' onClick={() => fileInputRef.current?.click()}>
               <Upload className='h-4 w-4' />
               Browse for .json file
             </Button>

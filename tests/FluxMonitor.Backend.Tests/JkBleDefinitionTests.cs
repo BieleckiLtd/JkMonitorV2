@@ -12,7 +12,7 @@ public sealed class JkBleDefinitionTests
     [Theory]
     [InlineData("jk-inverter-bms-ble")]
     [InlineData("jk-bd4a8s4p-ble")]
-    public void JkBleLiveBank_UsesNotifyStreamWithStatusCommandFallback(string definitionId)
+    public void JkBleLiveBank_UsesPassiveNotifyStreamAfterStartupCommands(string definitionId)
     {
         var loader = new DeviceDefinitionLoader(
             "devices",
@@ -25,9 +25,16 @@ public sealed class JkBleDefinitionTests
         Assert.Equal(["config", "live", "info"], definition.DataSources.Select(bank => bank.Id).ToArray());
 
         var liveBank = Assert.Single(definition.DataSources, bank => bank.Id == "live");
+        var configBank = Assert.Single(definition.DataSources, bank => bank.Id == "config");
+        var infoBank = Assert.Single(definition.DataSources, bank => bank.Id == "info");
 
         Assert.Equal("notify-stream", liveBank.ReadMode);
-        Assert.Equal(0x96, liveBank.Command);
+        Assert.Equal(0x00, liveBank.Command);
+        Assert.False(GenericBlePollingClient.SupportsNotifyStreamRequestFallback(liveBank));
+        Assert.Equal(0x96, configBank.Command);
+        Assert.Equal(0x97, infoBank.Command);
+        Assert.Equal([0x97, 0x96], definition.Connection.Protocol.Settings?.StartupCommands);
+        Assert.Equal(1000, definition.Connection.Protocol.Settings?.StartupCommandDelayMs);
     }
 
     [Fact]

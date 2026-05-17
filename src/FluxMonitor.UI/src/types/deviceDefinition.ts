@@ -75,6 +75,8 @@ export type ProtocolSettings = {
   writeValueLengthOffset?: number;
   writeValueOffset?: number;
   writeValueByteOrder?: 'big-endian' | 'little-endian';
+  startupCommands?: number[];
+  startupCommandDelayMs?: number;
   advertisement?: BleAdvertisementSettings;
 };
 

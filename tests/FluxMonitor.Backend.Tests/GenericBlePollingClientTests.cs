@@ -123,6 +123,24 @@ public sealed class GenericBlePollingClientTests
         Assert.Equal(expected, shouldReset);
     }
 
+    [Theory]
+    [InlineData(5000, 1, 5000)]
+    [InlineData(5000, 2, 10000)]
+    [InlineData(5000, 4, 40000)]
+    [InlineData(5000, 8, 60000)]
+    [InlineData(0, 3, 0)]
+    public void GetReconnectBackoffDelay_UsesConfiguredDelayWithCap(
+        int reconnectDelayMs,
+        int consecutiveFailures,
+        int expectedDelayMs)
+    {
+        var delay = GenericBlePollingClient.GetReconnectBackoffDelay(
+            reconnectDelayMs,
+            consecutiveFailures);
+
+        Assert.Equal(TimeSpan.FromMilliseconds(expectedDelayMs), delay);
+    }
+
     [Fact]
     public void DefinitionRequiresWriteCharacteristic_IncludesNotifyStreamCommandFallback()
     {
@@ -148,6 +166,14 @@ public sealed class GenericBlePollingClientTests
     }
 
     [Fact]
+    public void DefinitionRequiresWriteCharacteristic_IncludesStartupCommands()
+    {
+        var startupCommandDefinition = CreateDefinition([0x97], CreateBank(0x00));
+
+        Assert.True(GenericBlePollingClient.DefinitionRequiresWriteCharacteristic(startupCommandDefinition));
+    }
+
+    [Fact]
     public void GetUnsupportedDefinitionMessage_RequiresWriteCharacteristicForNotifyStreamCommandFallback()
     {
         var notifyFallbackDefinition = CreateDefinition(CreateBank(0x96));
@@ -155,7 +181,19 @@ public sealed class GenericBlePollingClientTests
         var message = GenericBlePollingClient.GetUnsupportedDefinitionMessage(notifyFallbackDefinition);
 
         Assert.Equal(
-            "BLE writeCharacteristicUuid is required for request-response banks or notify-stream command fallback.",
+            "BLE writeCharacteristicUuid is required for request-response banks, notify-stream command fallback, or startup commands.",
+            message);
+    }
+
+    [Fact]
+    public void GetUnsupportedDefinitionMessage_RequiresWriteCharacteristicForStartupCommands()
+    {
+        var startupCommandDefinition = CreateDefinition([0x97], CreateBank(0x00));
+
+        var message = GenericBlePollingClient.GetUnsupportedDefinitionMessage(startupCommandDefinition);
+
+        Assert.Equal(
+            "BLE writeCharacteristicUuid is required for request-response banks, notify-stream command fallback, or startup commands.",
             message);
     }
 
@@ -212,6 +250,9 @@ public sealed class GenericBlePollingClientTests
     }
 
     private static DeviceDefinition CreateDefinition(params DataSourceDefinition[] banks)
+        => CreateDefinition([], banks);
+
+    private static DeviceDefinition CreateDefinition(IReadOnlyList<byte> startupCommands, params DataSourceDefinition[] banks)
         => new()
         {
             Version = "1",
@@ -239,7 +280,8 @@ public sealed class GenericBlePollingClientTests
                         ResponseFrameSize = 8,
                         ChecksumType = "sum8",
                         ResponsePreamble = [0x55],
-                        RequestPreamble = [0xAA]
+                        RequestPreamble = [0xAA],
+                        StartupCommands = startupCommands
                     }
                 }
             },

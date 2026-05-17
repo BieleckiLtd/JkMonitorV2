@@ -1,7 +1,7 @@
 import { Cable, Gauge, Monitor, Sparkles, type LucideIcon } from 'lucide-react';
 
 export const oneMenuQuery = '(min-width: 768px)';
-export const twoMenuQuery = '(min-width: 1100px)';
+export const twoMenuQuery = '(min-width: 1280px)';
 
 export type PrimaryNavigationItem = {
   name: string;

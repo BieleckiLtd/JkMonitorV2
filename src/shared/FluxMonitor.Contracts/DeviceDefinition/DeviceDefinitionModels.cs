@@ -148,6 +148,12 @@ public sealed class ProtocolSettings
     /// <summary>Minimum delay in milliseconds between sequential bank reads (e.g. BMS requiring wakeup settling time).</summary>
     public int InterBankDelayMs { get; init; }
 
+    /// <summary>BLE commands to send once after notifications are enabled, before normal bank reads begin.</summary>
+    public IReadOnlyList<byte> StartupCommands { get; init; } = [];
+
+    /// <summary>Delay in milliseconds after each BLE startup command.</summary>
+    public int StartupCommandDelayMs { get; init; }
+
     /// <summary>
     /// Optional settings for serial protocols that exchange ASCII-hex framed
     /// request/response messages with configurable length and checksum rules.

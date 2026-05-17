@@ -41,7 +41,9 @@
         "writeValueLengthOffset": 5,
         "writeValueOffset": 6,
         "writeValueByteOrder": "little-endian",
-        "interBankDelayMs": 2500
+        "interBankDelayMs": 2500,
+        "startupCommands": [151, 150],
+        "startupCommandDelayMs": 1000
       }
     }
   },
@@ -63,7 +65,7 @@
     {
       "id": "live",
       "name": "Live Data",
-      "command": 150,
+      "command": 0,
       "responseFrameType": 2,
       "headerSize": 6,
       "readMode": "notify-stream",
