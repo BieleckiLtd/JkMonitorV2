@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Bot, CheckCircle2, Hash, LoaderCircle, Play, Plus, RefreshCcw, Save, Trash2, XCircle } from 'lucide-react';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
@@ -18,6 +18,8 @@ const timeTokens = [
     return day === 0 ? 7 : day;
   } },
 ];
+
+const draftStorageKey = 'fluxmonitor.automations.draft.v1';
 
 function generateId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -94,13 +96,54 @@ function formatRawValue(parameter: AutomationParameterOption | undefined, rawVal
 
 type Tab = 'rules' | 'history';
 
+type AutomationDraftState = {
+  rules: AutomationRuleConfig[];
+  tab: Tab;
+  saveMsg: string | null;
+  testResults: Record<string, TestAutomationRuleResponse | string>;
+};
+
+function readDraftState(): AutomationDraftState | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const stored = window.sessionStorage.getItem(draftStorageKey);
+    if (!stored) return null;
+    const parsed = JSON.parse(stored) as Partial<AutomationDraftState>;
+    if (!Array.isArray(parsed.rules)) return null;
+    return {
+      rules: parsed.rules.map((rule) => ({ ...rule, actions: rule.actions ?? [] })),
+      tab: parsed.tab === 'history' ? 'history' : 'rules',
+      saveMsg: parsed.saveMsg ?? null,
+      testResults: parsed.testResults ?? {},
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeDraftState(state: AutomationDraftState) {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.sessionStorage.setItem(draftStorageKey, JSON.stringify(state));
+  } catch {
+    // Ignore storage failures; drafts are a convenience, not critical data.
+  }
+}
+
+function clearDraftState() {
+  if (typeof window === 'undefined') return;
+  window.sessionStorage.removeItem(draftStorageKey);
+}
+
 function TabButton({ active, label, icon: Icon, onClick }: { active: boolean; label: string; icon: React.ElementType; onClick: () => void }) {
   return (
     <button
       type='button'
       onClick={onClick}
       className={cn(
-        'flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors',
+        'flex min-h-9 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors sm:px-4',
         active ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
       )}
     >
@@ -114,18 +157,26 @@ export function AutomationsPage({ hideHeader = false }: { hideHeader?: boolean }
   const { config, isLoading, error, saveRules, testRule } = useAutomationConfig();
   const { log } = useAutomationLog();
   const { devices, reload: reloadDevices } = useAutomationMetadata();
-  const [tab, setTab] = useState<Tab>('rules');
-  const [rules, setRules] = useState<AutomationRuleConfig[]>([]);
-  const [initialized, setInitialized] = useState(false);
+  const initialDraft = useMemo(readDraftState, []);
+  const [tab, setTab] = useState<Tab>(initialDraft?.tab ?? 'rules');
+  const [rules, setRules] = useState<AutomationRuleConfig[]>(initialDraft?.rules ?? []);
+  const [initialized, setInitialized] = useState(Boolean(initialDraft));
   const [isSaving, setIsSaving] = useState(false);
-  const [saveMsg, setSaveMsg] = useState<string | null>(null);
-  const [testResults, setTestResults] = useState<Record<string, TestAutomationRuleResponse | string>>({});
+  const [saveMsg, setSaveMsg] = useState<string | null>(initialDraft?.saveMsg ?? null);
+  const [testResults, setTestResults] = useState<Record<string, TestAutomationRuleResponse | string>>(initialDraft?.testResults ?? {});
   const [testingRuleId, setTestingRuleId] = useState<string | null>(null);
 
-  if (config && !initialized) {
-    setRules(config.rules.map((rule) => ({ ...rule, actions: rule.actions ?? [] })));
-    setInitialized(true);
-  }
+  useEffect(() => {
+    if (config && !initialized) {
+      setRules(config.rules.map((rule) => ({ ...rule, actions: rule.actions ?? [] })));
+      setInitialized(true);
+    }
+  }, [config, initialized]);
+
+  useEffect(() => {
+    if (!initialized) return;
+    writeDraftState({ rules, tab, saveMsg, testResults });
+  }, [initialized, rules, saveMsg, tab, testResults]);
 
   const updateRule = <K extends keyof AutomationRuleConfig>(index: number, key: K, value: AutomationRuleConfig[K]) => {
     setRules((current) => current.map((rule, ruleIndex) => (ruleIndex === index ? { ...rule, [key]: value } : rule)));
@@ -164,6 +215,7 @@ export function AutomationsPage({ hideHeader = false }: { hideHeader?: boolean }
     setSaveMsg(null);
     try {
       await saveRules(rules);
+      clearDraftState();
       setSaveMsg('Automations saved and active.');
     } catch (err) {
       setSaveMsg(err instanceof Error ? err.message : 'Failed to save automations.');
@@ -199,7 +251,7 @@ export function AutomationsPage({ hideHeader = false }: { hideHeader?: boolean }
   }
 
   return (
-    <div className='mx-auto max-w-7xl space-y-6 pb-12'>
+    <div className='mx-auto max-w-7xl space-y-4 pb-12 sm:space-y-6'>
       {!hideHeader ? (
         <div className='flex flex-col gap-2 border-b border-border pb-4 md:flex-row md:items-end md:justify-between'>
           <div>
@@ -212,7 +264,7 @@ export function AutomationsPage({ hideHeader = false }: { hideHeader?: boolean }
       <div className='flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card/60 p-2'>
         <TabButton active={tab === 'rules'} label='Rules' icon={Bot} onClick={() => setTab('rules')} />
         <TabButton active={tab === 'history'} label='History' icon={Hash} onClick={() => setTab('history')} />
-        <Button variant='outline' size='sm' className='ml-auto' onClick={() => void reloadDevices()}>
+        <Button variant='outline' size='sm' className='w-full sm:ml-auto sm:w-auto' onClick={() => void reloadDevices()}>
           <RefreshCcw className='h-4 w-4' /> Refresh values
         </Button>
       </div>
@@ -223,11 +275,11 @@ export function AutomationsPage({ hideHeader = false }: { hideHeader?: boolean }
 
       {tab === 'rules' ? (
         <div className='space-y-4'>
-          <div className='flex flex-wrap gap-3'>
-            <Button variant='outline' onClick={addRule}>
+          <div className='grid gap-2 sm:flex sm:flex-wrap sm:gap-3'>
+            <Button variant='outline' className='w-full sm:w-auto' onClick={addRule}>
               <Plus className='h-4 w-4' /> Add automation
             </Button>
-            <Button onClick={handleSaveRules} disabled={isSaving}>
+            <Button className='w-full sm:w-auto' onClick={handleSaveRules} disabled={isSaving}>
               {isSaving ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Save className='h-4 w-4' />}
               Save automations
             </Button>
@@ -328,15 +380,15 @@ function AutomationRuleEditor({
   };
 
   return (
-    <section className='rounded-2xl border border-border bg-card/70 p-5 shadow-sm'>
-      <div className='mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-border pb-3'>
-        <div className='flex items-center gap-3'>
-          <Bot className='h-5 w-5 text-primary' />
-          <span className='text-sm font-semibold text-foreground'>{rule.name || 'Unnamed automation'}</span>
+    <section className='rounded-xl border border-border bg-card/70 p-3 shadow-sm sm:rounded-2xl sm:p-5'>
+      <div className='mb-4 grid gap-3 border-b border-border pb-3 sm:flex sm:flex-wrap sm:items-center sm:justify-between'>
+        <div className='flex min-w-0 items-center gap-3'>
+          <Bot className='h-5 w-5 shrink-0 text-primary' />
+          <span className='min-w-0 truncate text-sm font-semibold text-foreground'>{rule.name || 'Unnamed automation'}</span>
         </div>
-        <div className='flex items-center gap-2'>
+        <div className='grid grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-2 sm:flex'>
           <Switch checked={rule.enabled} onCheckedChange={(checked) => onUpdate(index, 'enabled', checked)} />
-          <Button variant='outline' size='sm' onClick={() => void onTest(rule)} disabled={isTesting}>
+          <Button className='w-full sm:w-auto' variant='outline' size='sm' onClick={() => void onTest(rule)} disabled={isTesting}>
             {isTesting ? <LoaderCircle className='h-3.5 w-3.5 animate-spin' /> : <Play className='h-3.5 w-3.5' />}
             Test now
           </Button>
@@ -346,21 +398,21 @@ function AutomationRuleEditor({
         </div>
       </div>
 
-      <div className='grid gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]'>
+      <div className='grid min-w-0 gap-5 2xl:grid-cols-[minmax(0,1fr)_22rem]'>
         <div className='space-y-4'>
-          <div className='grid gap-4 md:grid-cols-[minmax(0,1fr)_10rem]'>
+          <div className='grid gap-4 lg:grid-cols-[minmax(0,1fr)_10rem]'>
             <label className='space-y-1.5'>
-              <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Name</span>
+              <span className='block text-xs font-medium uppercase tracking-wide text-muted-foreground sm:tracking-widest'>Name</span>
               <Input value={rule.name} onChange={(event) => onUpdate(index, 'name', event.target.value)} />
             </label>
             <label className='space-y-1.5'>
-              <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Cooldown</span>
+              <span className='block text-xs font-medium uppercase tracking-wide text-muted-foreground sm:tracking-widest'>Cooldown</span>
               <Input type='number' min={0} value={rule.cooldownMinutes} onChange={(event) => onUpdate(index, 'cooldownMinutes', Number(event.target.value))} />
             </label>
           </div>
 
           <label className='space-y-1.5'>
-            <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Condition expression</span>
+            <span className='block text-xs font-medium uppercase tracking-wide text-muted-foreground sm:tracking-widest'>Condition expression</span>
             <Input
               className='h-10 font-mono text-sm'
               value={rule.expression}
@@ -370,9 +422,9 @@ function AutomationRuleEditor({
           </label>
 
           <div className='space-y-3'>
-            <div className='flex items-center justify-between gap-3'>
-              <span className='text-xs font-medium uppercase tracking-widest text-muted-foreground'>Actions</span>
-              <Button type='button' variant='outline' size='sm' onClick={addAction}>
+            <div className='grid gap-2 sm:flex sm:items-center sm:justify-between sm:gap-3'>
+              <span className='text-xs font-medium uppercase tracking-wide text-muted-foreground sm:tracking-widest'>Actions</span>
+              <Button type='button' className='w-full sm:w-auto' variant='outline' size='sm' onClick={addAction}>
                 <Plus className='h-4 w-4' /> Add action
               </Button>
             </div>
@@ -392,7 +444,7 @@ function AutomationRuleEditor({
           {testResult ? <TestResultPanel result={testResult} /> : null}
         </div>
 
-        <div className='space-y-3'>
+        <div className='min-w-0 space-y-3'>
           <TokenPanel devices={devices} onInsert={insertToken} />
         </div>
       </div>
@@ -403,14 +455,14 @@ function AutomationRuleEditor({
 function TokenPanel({ devices, onInsert }: { devices: AutomationDeviceOption[]; onInsert: (token: string) => void }) {
   return (
     <div className='rounded-xl border border-border bg-background/55 p-3'>
-      <div className='mb-3 text-xs font-medium uppercase tracking-widest text-muted-foreground'>Available values</div>
+      <div className='mb-3 text-xs font-medium uppercase tracking-wide text-muted-foreground sm:tracking-widest'>Available values</div>
       <div className='space-y-3'>
         <div className='space-y-2'>
-          <div className='font-mono text-[11px] uppercase tracking-widest text-muted-foreground'>time</div>
+          <div className='font-mono text-[11px] uppercase tracking-wide text-muted-foreground sm:tracking-widest'>time</div>
           <div className='space-y-1.5'>
             {timeTokens.map((item) => (
               <button key={item.token} type='button' onClick={() => onInsert(item.token)} className='flex w-full items-center justify-between gap-2 rounded-lg border border-border bg-card/80 px-2.5 py-1.5 text-left text-xs hover:bg-muted'>
-                <span className='font-mono text-foreground'>{item.token}</span>
+                <span className='min-w-0 truncate font-mono text-foreground'>{item.token}</span>
                 <span className='text-muted-foreground'>{item.value()}</span>
               </button>
             ))}
@@ -420,7 +472,7 @@ function TokenPanel({ devices, onInsert }: { devices: AutomationDeviceOption[]; 
         <div className='max-h-[30rem] space-y-3 overflow-auto pr-1'>
           {devices.map((device) => (
             <div key={device.id} className='space-y-2'>
-              <div className='truncate font-mono text-[11px] uppercase tracking-widest text-muted-foreground'>{device.id}</div>
+              <div className='truncate font-mono text-[11px] uppercase tracking-wide text-muted-foreground sm:tracking-widest'>{device.id}</div>
               <div className='space-y-1.5'>
                 {device.parameters.map((parameter) => {
                   const token = `${device.id}.${parameter.id}`;
@@ -474,9 +526,9 @@ function AutomationActionEditor({
 
   return (
     <div className='rounded-xl border border-border bg-background/55 p-3'>
-      <div className='grid gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(8rem,12rem)_auto]'>
+      <div className='grid min-w-0 gap-3 2xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(8rem,12rem)_auto]'>
         <label className='space-y-1.5'>
-          <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Device</span>
+          <span className='block text-xs font-medium uppercase tracking-wide text-muted-foreground sm:tracking-widest'>Device</span>
           <select aria-label={`Automation ${ruleIndex + 1} action ${actionIndex + 1} device`} className='flex h-7 w-full rounded-lg border border-input bg-background px-2 py-1 text-sm' value={action.targetDeviceId} onChange={(event) => setTargetDevice(event.target.value)}>
             <option value=''>Select device...</option>
             {devices.map((device) => (
@@ -485,7 +537,7 @@ function AutomationActionEditor({
           </select>
         </label>
         <label className='space-y-1.5'>
-          <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Writable parameter</span>
+          <span className='block text-xs font-medium uppercase tracking-wide text-muted-foreground sm:tracking-widest'>Writable parameter</span>
           <select aria-label={`Automation ${ruleIndex + 1} action ${actionIndex + 1} parameter`} className='flex h-7 w-full rounded-lg border border-input bg-background px-2 py-1 text-sm' value={action.targetParameterKey} onChange={(event) => setTargetParameter(event.target.value)}>
             <option value=''>Select parameter...</option>
             {targetDevice?.writableParameters.map((parameter) => (
@@ -494,7 +546,7 @@ function AutomationActionEditor({
           </select>
         </label>
         <label className='space-y-1.5'>
-          <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Set to</span>
+          <span className='block text-xs font-medium uppercase tracking-wide text-muted-foreground sm:tracking-widest'>Set to</span>
           {targetParameter && targetParameter.options.length > 0 ? (
             <select aria-label={`Automation ${ruleIndex + 1} action ${actionIndex + 1} value`} className='flex h-7 w-full rounded-lg border border-input bg-background px-2 py-1 text-sm' value={action.rawValue} onChange={(event) => onUpdate(ruleIndex, actionIndex, 'rawValue', Number(event.target.value))}>
               {targetParameter.options.map((option) => (
@@ -505,8 +557,8 @@ function AutomationActionEditor({
             <Input type='number' min={0} value={action.rawValue} onChange={(event) => onUpdate(ruleIndex, actionIndex, 'rawValue', Number(event.target.value))} />
           )}
         </label>
-        <div className='flex items-end'>
-          <Button variant='destructive' size='sm' onClick={() => onRemove(actionIndex)}>
+        <div className='flex items-end 2xl:justify-end'>
+          <Button className='w-full 2xl:w-auto' variant='destructive' size='sm' onClick={() => onRemove(actionIndex)}>
             <Trash2 className='h-3.5 w-3.5' />
           </Button>
         </div>

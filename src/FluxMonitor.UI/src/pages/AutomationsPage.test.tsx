@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AutomationsPage } from './AutomationsPage';
 import type { AutomationDeviceOption } from '../types/automation';
@@ -50,10 +50,12 @@ describe('AutomationsPage', () => {
     saveRulesMock.mockReset();
     testRuleMock.mockReset();
     reloadMetadataMock.mockReset();
+    window.sessionStorage.clear();
   });
 
   afterEach(() => {
     cleanup();
+    window.sessionStorage.clear();
   });
 
   it('builds a rule from exposed parameters and writable targets', () => {
@@ -78,5 +80,22 @@ describe('AutomationsPage', () => {
 
     expect(screen.getByText('Automation "New automation": enter an expression.')).toBeInTheDocument();
     expect(saveRulesMock).not.toHaveBeenCalled();
+  });
+
+  it('keeps an unsaved rule draft across remounts', async () => {
+    const firstRender = render(<AutomationsPage hideHeader />);
+
+    fireEvent.click(screen.getByRole('button', { name: /add automation/i }));
+    fireEvent.click(screen.getByRole('button', { name: /state_of_charge/i }));
+    expect(screen.getByPlaceholderText(/state_of_charge/i)).toHaveValue('battery-a.state_of_charge');
+
+    await waitFor(() => {
+      expect(window.sessionStorage.getItem('fluxmonitor.automations.draft.v1')).toContain('battery-a.state_of_charge');
+    });
+
+    firstRender.unmount();
+    render(<AutomationsPage hideHeader />);
+
+    expect(screen.getByPlaceholderText(/state_of_charge/i)).toHaveValue('battery-a.state_of_charge');
   });
 });
