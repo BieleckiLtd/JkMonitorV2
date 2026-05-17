@@ -8,6 +8,7 @@ import { MonitorPage } from './pages/MonitorPage';
 import { DevicesPage } from './pages/DevicesPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { NotificationsPage } from './pages/NotificationsPage';
+import { AutomationsPage } from './pages/AutomationsPage';
 import { ServicesPage } from './pages/ServicesPage';
 
 function App() {
@@ -43,6 +44,10 @@ function App() {
               element={<PageContent><NotificationsPage hideHeader /></PageContent>}
             />
             <Route
+              path='/system/automations'
+              element={<PageContent><AutomationsPage hideHeader /></PageContent>}
+            />
+            <Route
               path='/system/theme'
               element={<PageContent><SettingsPage hideHeader /></PageContent>}
             />
@@ -53,6 +58,7 @@ function App() {
             <Route path='/devices/:deviceId' element={<PageContent><RoutedDevicePage /></PageContent>} />
             <Route path='/services' element={<PageContent><ServicesPage /></PageContent>} />
             <Route path='/notifications' element={<Navigate to='/system/notifications' replace />} />
+            <Route path='/automations' element={<Navigate to='/system/automations' replace />} />
             <Route path='/settings' element={<Navigate to='/system/theme' replace />} />
           </Route>
           <Route path='*' element={<div className='text-muted-foreground font-mono p-8 text-center bg-card border border-white/5'>Route not found or Extension not loaded</div>} />

@@ -21,6 +21,7 @@ public sealed class GenericBleAdvertisementPollingClient(
     ITelemetryRepository telemetryRepository,
     CellVoltageSmoothingFilter smoothingFilter,
     NotificationEvaluator notificationEvaluator,
+    AutomationEvaluator automationEvaluator,
     BluetoothManagementService bluetoothManagementService,
     ILogger<GenericBleAdvertisementPollingClient> logger) : IDevicePollingClient, IPassiveBleAdvertisementMonitor, IDisposable
 {
@@ -832,6 +833,15 @@ public sealed class GenericBleAdvertisementPollingClient(
         catch (Exception exception)
         {
             logger.LogWarning(exception, "Notification evaluation failed for passive BLE device {DeviceId}.", device.DeviceId);
+        }
+
+        try
+        {
+            await automationEvaluator.EvaluateAsync(device.DeviceId, device.DisplayName, sample.Snapshot, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            logger.LogWarning(exception, "Automation evaluation failed for passive BLE device {DeviceId}.", device.DeviceId);
         }
     }
 

@@ -16,7 +16,8 @@ public sealed class DeviceOrchestrator(
     PollTrigger pollTrigger,
     CellVoltageSmoothingFilter smoothingFilter,
     NotificationEvaluator notificationEvaluator,
-    ILogger<DeviceOrchestrator> logger)
+    ILogger<DeviceOrchestrator> logger,
+    AutomationEvaluator? automationEvaluator = null)
 {
     private readonly ConcurrentDictionary<string, DeviceHandle> _handles = new(StringComparer.OrdinalIgnoreCase);
 
@@ -249,6 +250,16 @@ public sealed class DeviceOrchestrator(
                 catch (Exception notifEx)
                 {
                     logger.LogWarning(notifEx, "Notification evaluation failed for device {DeviceId}.", device.DeviceId);
+                }
+
+                try
+                {
+                    if (automationEvaluator is not null)
+                        await automationEvaluator.EvaluateAsync(device.DeviceId, device.DisplayName, sample.Snapshot, cancellationToken);
+                }
+                catch (Exception automationEx)
+                {
+                    logger.LogWarning(automationEx, "Automation evaluation failed for device {DeviceId}.", device.DeviceId);
                 }
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

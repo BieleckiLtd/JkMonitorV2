@@ -96,6 +96,8 @@ builder.Services.AddSingleton<FluxMonitor.Backend.Services.INotificationChannelS
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.INotificationChannelSender, FluxMonitor.Backend.Services.TelegramChannelSender>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.NotificationDispatcher>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.NotificationEvaluator>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.AutomationConfigStore>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.AutomationEvaluator>();
 
 // Device definition loader
 var definitionsPath = monitorSection.GetValue<string>("DeviceDefinitionsPath") ?? "devices";
@@ -178,6 +180,9 @@ using (var scope = app.Services.CreateScope())
 
     var notificationConfigStore = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.NotificationConfigStore>();
     await notificationConfigStore.InitializeAsync(CancellationToken.None);
+
+    var automationConfigStore = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.AutomationConfigStore>();
+    await automationConfigStore.InitializeAsync(CancellationToken.None);
 
     var wifiCredentialStore = scope.ServiceProvider.GetRequiredService<FluxMonitor.Backend.Services.WifiCredentialStore>();
     await wifiCredentialStore.InitializeAsync(CancellationToken.None);

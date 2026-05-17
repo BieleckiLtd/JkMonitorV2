@@ -1,19 +1,17 @@
 ﻿import { useState } from 'react';
-import { Bell, Hash, LoaderCircle, Mail, MailCheck, Megaphone, MessageCircle, Play, Plus, Save, Send, Trash2, X } from 'lucide-react';
+import { LoaderCircle, Mail, MailCheck, Megaphone, MessageCircle, Play, Plus, Save, Send, Trash2, X } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Switch } from '../components/ui/switch';
 import { Badge } from '../components/ui/badge';
 import { cn } from '../lib/utils';
-import { useNotificationConfig, useNotificationLog, useNotificationMetadata } from '../hooks/useNotifications';
+import { useNotificationConfig } from '../hooks/useNotifications';
 import type {
   NotificationChannelConfig,
-  NotificationRuleConfig,
   NtfySettings,
   EmailSettings,
   BrevoSettings,
   TelegramSettings,
-  DeviceOption,
 } from '../types/notification';
 
 // ── helpers ──
@@ -71,49 +69,6 @@ const defaultTelegramChannel = (): NotificationChannelConfig => ({
   } satisfies TelegramSettings as unknown as Record<string, unknown>,
 });
 
-const defaultRule = (): NotificationRuleConfig => ({
-  id: generateId(),
-  name: 'New rule',
-  enabled: true,
-  deviceId: '',
-  entityId: '',
-  expression: 'value == 100',
-  channelIds: [],
-  messageTemplate: '{name}: {entity} is {value} on {device}',
-  severity: 'info',
-  cooldownMinutes: 15,
-});
-
-function getDeviceEntities(devices: DeviceOption[], deviceId: string) {
-  return devices.find((device) => device.id === deviceId)?.entities ?? [];
-}
-
-function getRuleValidationMessage(rules: NotificationRuleConfig[], devices: DeviceOption[]) {
-  for (let index = 0; index < rules.length; index += 1) {
-    const rule = rules[index];
-    const label = rule.name.trim() ? `Rule "${rule.name.trim()}"` : `Rule ${index + 1}`;
-
-    if (!rule.deviceId.trim()) {
-      return `${label}: select a device.`;
-    }
-
-    const entities = getDeviceEntities(devices, rule.deviceId);
-    if (!rule.entityId.trim()) {
-      return `${label}: select an entity.`;
-    }
-
-    if (entities.length > 0 && !entities.some((entity) => entity.id === rule.entityId)) {
-      return `${label}: select a valid entity for the chosen device.`;
-    }
-
-    if (!rule.expression.trim()) {
-      return `${label}: enter an expression.`;
-    }
-  }
-
-  return null;
-}
-
 function getChannelValidationMessage(channels: NotificationChannelConfig[]) {
   for (let index = 0; index < channels.length; index += 1) {
     const channel = channels[index];
@@ -151,35 +106,12 @@ function getChannelAppearance(type: NotificationChannelConfig['type']) {
   }
 }
 
-// ── tab button ──
-
-type Tab = 'channels' | 'rules' | 'log';
-
-function TabButton({ active, label, icon: Icon, onClick }: { active: boolean; label: string; icon: React.ElementType; onClick: () => void }) {
-  return (
-    <button
-      onClick={onClick}
-      className={cn(
-        'flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-medium transition-colors',
-        active ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-muted hover:text-foreground',
-      )}
-    >
-      <Icon className='h-4 w-4' />
-      {label}
-    </button>
-  );
-}
-
 // ── main page ──
 
 export function NotificationsPage({ hideHeader = false }: { hideHeader?: boolean }) {
-  const { config, isLoading, error, saveChannels, saveRules, testChannel } = useNotificationConfig();
-  const { log } = useNotificationLog();
-  const { devices } = useNotificationMetadata();
-  const [tab, setTab] = useState<Tab>('channels');
+  const { config, isLoading, error, saveChannels, testChannel } = useNotificationConfig();
 
   const [channels, setChannels] = useState<NotificationChannelConfig[]>([]);
-  const [rules, setRules] = useState<NotificationRuleConfig[]>([]);
   const [isSaving, setIsSaving] = useState(false);
   const [saveMsg, setSaveMsg] = useState<string | null>(null);
   const [testResults, setTestResults] = useState<Record<string, string>>({});
@@ -188,7 +120,6 @@ export function NotificationsPage({ hideHeader = false }: { hideHeader?: boolean
   // sync config -> local state once
   if (config && !initialized) {
     setChannels(config.channels);
-    setRules(config.rules);
     setInitialized(true);
   }
 
@@ -249,55 +180,8 @@ export function NotificationsPage({ hideHeader = false }: { hideHeader?: boolean
     try {
       const result = await testChannel(channelId);
       setTestResults((prev) => ({ ...prev, [channelId]: result.success ? 'sent!' : `failed: ${result.error}` }));
-    } catch (err) {
+    } catch {
       setTestResults((prev) => ({ ...prev, [channelId]: 'error' }));
-    }
-  };
-
-  // ── rule helpers ──
-
-  const updateRule = <K extends keyof NotificationRuleConfig>(index: number, key: K, value: NotificationRuleConfig[K]) => {
-    setRules((prev) => prev.map((r, i) => (i === index ? { ...r, [key]: value } : r)));
-    setSaveMsg(null);
-  };
-
-  const toggleRuleChannel = (ruleIndex: number, channelId: string) => {
-    setRules((prev) =>
-      prev.map((r, i) => {
-        if (i !== ruleIndex) return r;
-        const has = r.channelIds.includes(channelId);
-        return { ...r, channelIds: has ? r.channelIds.filter((c) => c !== channelId) : [...r.channelIds, channelId] };
-      }),
-    );
-    setSaveMsg(null);
-  };
-
-  const addRule = () => {
-    setRules((prev) => [...prev, defaultRule()]);
-    setSaveMsg(null);
-  };
-
-  const removeRule = (index: number) => {
-    setRules((prev) => prev.filter((_, i) => i !== index));
-    setSaveMsg(null);
-  };
-
-  const handleSaveRules = async () => {
-    const validationMessage = getRuleValidationMessage(rules, devices);
-    if (validationMessage) {
-      setSaveMsg(validationMessage);
-      return;
-    }
-
-    setIsSaving(true);
-    setSaveMsg(null);
-    try {
-      await saveRules(rules);
-      setSaveMsg('Rules saved and active — no restart required.');
-    } catch (err) {
-      setSaveMsg(err instanceof Error ? err.message : 'Failed to save rules.');
-    } finally {
-      setIsSaving(false);
     }
   };
 
@@ -322,26 +206,18 @@ export function NotificationsPage({ hideHeader = false }: { hideHeader?: boolean
           <div>
             <h2 className='text-3xl font-bold tracking-tight text-foreground'>Notifications</h2>
             <p className='mt-2 text-sm text-muted-foreground'>
-              Configure notification channels and rules. Use NCalc expressions for flexible triggers.
+              Configure notification delivery channels.
             </p>
           </div>
         </div>
       ) : null}
-
-      {/* tabs */}
-      <div className='flex gap-2 rounded-xl border border-border bg-card/60 p-2'>
-        <TabButton active={tab === 'channels'} label='Channels' icon={Megaphone} onClick={() => setTab('channels')} />
-        <TabButton active={tab === 'rules'} label='Rules' icon={Bell} onClick={() => setTab('rules')} />
-        <TabButton active={tab === 'log'} label='History' icon={Hash} onClick={() => setTab('log')} />
-      </div>
 
       {saveMsg ? (
         <div className='rounded-xl border border-border bg-muted/60 px-4 py-3 text-sm text-foreground'>{saveMsg}</div>
       ) : null}
 
       {/* ══════ CHANNELS TAB ══════ */}
-      {tab === 'channels' ? (
-        <div className='space-y-4'>
+      <div className='space-y-4'>
           <div className='flex flex-wrap gap-3'>
             <Button variant='outline' onClick={() => addChannel('ntfy')}>
               <Plus className='h-4 w-4' /> Add ntfy channel
@@ -423,232 +299,7 @@ export function NotificationsPage({ hideHeader = false }: { hideHeader?: boolean
             </section>
             );
           })}
-        </div>
-      ) : null}
-
-      {/* ══════ RULES TAB ══════ */}
-      {tab === 'rules' ? (
-        <div className='space-y-4'>
-          <div className='flex flex-wrap gap-3'>
-            <Button variant='outline' onClick={addRule}>
-              <Plus className='h-4 w-4' /> Add rule
-            </Button>
-            <Button onClick={handleSaveRules} disabled={isSaving}>
-              {isSaving ? <LoaderCircle className='h-4 w-4 animate-spin' /> : <Save className='h-4 w-4' />}
-              Save rules
-            </Button>
-          </div>
-
-          {/* expression help */}
-          <div className='rounded-xl border border-border bg-muted/30 px-4 py-3'>
-            <div className='text-xs font-semibold uppercase tracking-widest text-muted-foreground'>Expression help</div>
-            <div className='mt-2 grid gap-2 text-xs text-muted-foreground sm:grid-cols-2'>
-              <div><code className='text-foreground'>value == 100</code> — reaches 100</div>
-              <div><code className='text-foreground'>value &lt; 10</code> — below threshold</div>
-              <div><code className='text-foreground'>prev &gt;= 90 &amp;&amp; value == 100</code> — transition from ≥90 to 100</div>
-              <div><code className='text-foreground'>value &gt; 30</code> — exceeds 30</div>
-              <div><code className='text-foreground'>Abs(value - prev) &gt; 5</code> — change &gt; 5</div>
-              <div><code className='text-foreground'>value &lt; 2 &amp;&amp; prev &gt;= 2</code> — drops below 2</div>
-            </div>
-            <div className='mt-2 text-[11px] text-muted-foreground'>
-              Variables: <code>value</code>, <code>prev</code> (previous value of the observed entity), plus all snapshot fields
-              from the selected device.
-            </div>
-          </div>
-
-          {rules.length === 0 ? (
-            <div className='rounded-2xl border border-dashed border-border bg-card/40 px-6 py-12 text-center'>
-              <Bell className='mx-auto h-10 w-10 text-muted-foreground/50' />
-              <div className='mt-4 text-lg font-semibold text-foreground'>No rules configured</div>
-              <p className='mt-2 text-sm text-muted-foreground'>Create a rule to get notified when entity values match an expression.</p>
-            </div>
-          ) : null}
-
-          {rules.map((rule, index) => (
-            <section key={rule.id} className='rounded-2xl border border-border bg-card/70 p-5 shadow-sm'>
-              <div className='mb-4 flex items-center justify-between border-b border-border pb-3'>
-                <div className='flex items-center gap-3'>
-                  <Bell className='h-5 w-5 text-primary' />
-                  <span className='text-sm font-semibold text-foreground'>{rule.name || 'Unnamed rule'}</span>
-                </div>
-                <div className='flex items-center gap-2'>
-                  <Switch checked={rule.enabled} onCheckedChange={(checked) => updateRule(index, 'enabled', checked)} />
-                  <Button variant='destructive' size='sm' onClick={() => removeRule(index)}>
-                    <Trash2 className='h-3 w-3' />
-                  </Button>
-                </div>
-              </div>
-
-              <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-3'>
-                <label className='space-y-1.5'>
-                  <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Name</span>
-                  <Input value={rule.name} onChange={(e) => updateRule(index, 'name', e.target.value)} />
-                </label>
-
-                <label className='space-y-1.5'>
-                  <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Device</span>
-                  <select
-                    aria-label={`Rule ${index + 1} device`}
-                    className='flex h-7 w-full rounded-lg border border-input bg-background px-2 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
-                    value={rule.deviceId}
-                    onChange={(e) => {
-                      const deviceId = e.target.value;
-                      const nextEntityId = getDeviceEntities(devices, deviceId)[0]?.id ?? '';
-                      updateRule(index, 'deviceId', deviceId);
-                      updateRule(index, 'entityId', nextEntityId);
-                    }}
-                  >
-                    <option value=''>Select device...</option>
-                    {devices.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className='space-y-1.5'>
-                  <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Entity</span>
-                  <select
-                    aria-label={`Rule ${index + 1} entity`}
-                    className='flex h-7 w-full rounded-lg border border-input bg-background px-2 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
-                    value={rule.entityId}
-                    onChange={(e) => updateRule(index, 'entityId', e.target.value)}
-                  >
-                    <option value=''>Select entity...</option>
-                    {getDeviceEntities(devices, rule.deviceId).map((en) => (
-                      <option key={en.id} value={en.id}>
-                        {en.name} {en.unit ? `(${en.unit})` : ''}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-
-                <label className='space-y-1.5 md:col-span-2 xl:col-span-3'>
-                  <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Expression (NCalc)</span>
-                  <Input
-                    className='font-mono text-sm'
-                    value={rule.expression}
-                    onChange={(e) => updateRule(index, 'expression', e.target.value)}
-                    placeholder='value == 100 or prev >= 90 && value == 100'
-                  />
-                </label>
-
-                <label className='space-y-1.5 md:col-span-2 xl:col-span-3'>
-                  <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Message template</span>
-                  <Input
-                    value={rule.messageTemplate}
-                    onChange={(e) => updateRule(index, 'messageTemplate', e.target.value)}
-                    placeholder='{name}: {entity} is {value} on {device}'
-                  />
-                  <span className='block text-[11px] text-muted-foreground'>
-                    Placeholders: {'{value}'}, {'{prev}'}, {'{device}'}, {'{deviceId}'}, {'{entity}'}, {'{name}'}, {'{severity}'}
-                  </span>
-                </label>
-
-                <label className='space-y-1.5'>
-                  <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Severity</span>
-                  <select
-                    aria-label={`Rule ${index + 1} severity`}
-                    className='flex h-7 w-full rounded-lg border border-input bg-background px-2 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
-                    value={rule.severity}
-                    onChange={(e) => updateRule(index, 'severity', e.target.value as NotificationRuleConfig['severity'])}
-                  >
-                    <option value='info'>Info</option>
-                    <option value='warning'>Warning</option>
-                    <option value='critical'>Critical</option>
-                  </select>
-                </label>
-
-                <label className='space-y-1.5'>
-                  <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Cooldown (minutes)</span>
-                  <Input
-                    type='number'
-                    min={0}
-                    value={rule.cooldownMinutes}
-                    onChange={(e) => updateRule(index, 'cooldownMinutes', Number(e.target.value))}
-                  />
-                </label>
-
-                <div className='space-y-1.5'>
-                  <span className='block text-xs font-medium uppercase tracking-widest text-muted-foreground'>Channels</span>
-                  <div className='flex flex-wrap gap-2 pt-1'>
-                    {channels.length === 0 ? (
-                      <span className='text-xs text-muted-foreground'>No channels configured yet.</span>
-                    ) : null}
-                    {channels.map((ch) => {
-                      const selected = rule.channelIds.includes(ch.id);
-                      const ChannelIcon = getChannelAppearance(ch.type).icon;
-                      return (
-                        <button
-                          key={ch.id}
-                          type='button'
-                          onClick={() => toggleRuleChannel(index, ch.id)}
-                          className={cn(
-                            'rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors',
-                            selected
-                              ? 'border-primary bg-primary/10 text-primary'
-                              : 'border-border text-muted-foreground hover:bg-muted',
-                          )}
-                        >
-                          <ChannelIcon className='mr-1 inline h-3 w-3' />
-                          {ch.name}
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </div>
-            </section>
-          ))}
-        </div>
-      ) : null}
-
-      {/* ══════ LOG TAB ══════ */}
-      {tab === 'log' ? (
-        <div className='space-y-4'>
-          {log.length === 0 ? (
-            <div className='rounded-2xl border border-dashed border-border bg-card/40 px-6 py-12 text-center'>
-              <Hash className='mx-auto h-10 w-10 text-muted-foreground/50' />
-              <div className='mt-4 text-lg font-semibold text-foreground'>No notifications fired yet</div>
-              <p className='mt-2 text-sm text-muted-foreground'>Notifications will appear here once rules trigger.</p>
-            </div>
-          ) : null}
-
-          {log.map((entry, index) => (
-            <div key={index} className='rounded-xl border border-border bg-card/70 p-4 shadow-sm'>
-              <div className='flex items-center justify-between'>
-                <div className='flex items-center gap-2'>
-                  <Badge
-                    variant={entry.severity === 'critical' ? 'destructive' : 'default'}
-                    className='text-[10px]'
-                  >
-                    {entry.severity}
-                  </Badge>
-                  <span className='text-sm font-medium text-foreground'>{entry.ruleName}</span>
-                  {entry.ruleId.startsWith('system:') ? (
-                    <Badge variant='outline' className='text-[10px]'>system</Badge>
-                  ) : null}
-                </div>
-                <span className='text-xs text-muted-foreground'>
-                  {new Date(entry.firedAt).toLocaleString()}
-                </span>
-              </div>
-              <div className='mt-2 text-sm text-muted-foreground'>{entry.message}</div>
-              {entry.value != null ? (
-                <div className='mt-1 text-xs text-muted-foreground'>
-                  value={entry.value}{entry.previousValue != null ? `, prev=${entry.previousValue}` : ''}
-                </div>
-              ) : null}
-              <div className='mt-2 flex flex-wrap gap-1'>
-                {entry.channelResults.map((r, ci) => (
-                  <span key={ci} className='rounded-md bg-muted px-2 py-0.5 text-[11px] text-muted-foreground'>{r}</span>
-                ))}
-              </div>
-            </div>
-          ))}
-        </div>
-      ) : null}
+      </div>
     </div>
   );
 }
