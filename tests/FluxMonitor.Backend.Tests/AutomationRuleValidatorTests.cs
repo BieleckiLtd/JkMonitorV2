@@ -55,4 +55,26 @@ public sealed class AutomationRuleValidatorTests
 
         Assert.Empty(errors);
     }
+
+    [Fact]
+    public void ValidateActionsOnly_AllowsBlankExpression()
+    {
+        var errors = AutomationRuleValidator.ValidateActionsOnly(new AutomationRuleConfig
+        {
+            Id = "automation-1",
+            Name = "Test action",
+            Expression = "",
+            Actions =
+            [
+                new AutomationActionConfig
+                {
+                    TargetDeviceId = "inverter-1",
+                    TargetParameterKey = "output_enabled",
+                    RawValue = 1
+                }
+            ]
+        });
+
+        Assert.Empty(errors);
+    }
 }

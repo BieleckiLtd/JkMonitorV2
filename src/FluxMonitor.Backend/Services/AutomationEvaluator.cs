@@ -73,7 +73,7 @@ public sealed class AutomationEvaluator(
 
     public async Task<TestAutomationRuleResponse> TestAsync(AutomationRuleConfig rule, CancellationToken cancellationToken)
     {
-        var validationErrors = AutomationRuleValidator.Validate([rule]);
+        var validationErrors = AutomationRuleValidator.ValidateActionsOnly(rule);
         if (validationErrors.Count > 0)
         {
             return new TestAutomationRuleResponse
@@ -83,23 +83,14 @@ public sealed class AutomationEvaluator(
             };
         }
 
-        var matched = EvaluateCondition(rule.Expression);
-        if (!matched)
-        {
-            return new TestAutomationRuleResponse
-            {
-                ConditionMatched = false,
-                Message = "Condition evaluated to false. No actions were written."
-            };
-        }
-
         var actionResults = await ExecuteActionsAsync(rule, cancellationToken);
+        var success = actionResults.Count > 0 && actionResults.All(result => result.Success);
         return new TestAutomationRuleResponse
         {
-            ConditionMatched = true,
-            Message = actionResults.All(result => result.Success)
-                ? "Condition matched and all actions were written."
-                : "Condition matched, but one or more actions failed.",
+            ConditionMatched = success,
+            Message = success
+                ? $"Test wrote {actionResults.Count} automation action(s)."
+                : "Test ran, but one or more actions failed.",
             ActionResults = actionResults
         };
     }

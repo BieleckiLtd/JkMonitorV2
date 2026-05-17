@@ -49,6 +49,30 @@ public static class AutomationRuleValidator
         return errors;
     }
 
+    public static IReadOnlyList<string> ValidateActionsOnly(AutomationRuleConfig rule)
+    {
+        ArgumentNullException.ThrowIfNull(rule);
+
+        var errors = new List<string>();
+        var label = string.IsNullOrWhiteSpace(rule.Name) ? "Automation test" : $"Automation \"{rule.Name}\"";
+        var actions = NormalizeActions(rule);
+        if (actions.Count == 0)
+            errors.Add($"{label}: add at least one action.");
+
+        for (var actionIndex = 0; actionIndex < actions.Count; actionIndex++)
+        {
+            var action = actions[actionIndex];
+            var actionLabel = $"{label} action {actionIndex + 1}";
+            if (string.IsNullOrWhiteSpace(action.TargetDeviceId))
+                errors.Add($"{actionLabel}: target device is required.");
+
+            if (string.IsNullOrWhiteSpace(action.TargetParameterKey))
+                errors.Add($"{actionLabel}: target parameter is required.");
+        }
+
+        return errors;
+    }
+
     internal static bool TryParseTimeOfDay(string? value, out TimeOnly time)
         => TimeOnly.TryParseExact(value, "HH:mm", out time);
 

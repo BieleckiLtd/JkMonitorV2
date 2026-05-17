@@ -580,10 +580,14 @@ function TestResultPanel({ result }: { result: TestAutomationRuleResponse | stri
     return <div className='rounded-xl border border-border bg-muted/40 px-4 py-3 text-sm text-muted-foreground'>{result}</div>;
   }
 
+  const success = result.actionResults.length > 0
+    ? result.actionResults.every((action) => action.success)
+    : result.conditionMatched;
+
   return (
     <div className={cn(
       'rounded-xl border px-4 py-3 text-sm',
-      result.conditionMatched ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'border-border bg-muted/40 text-muted-foreground',
+      success ? 'border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300' : 'border-border bg-muted/40 text-muted-foreground',
     )}>
       <div>{result.message}</div>
       {result.actionResults.length > 0 ? (
