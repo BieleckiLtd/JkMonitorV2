@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area, ReferenceDot,
-  XAxis, YAxis, Tooltip, CartesianGrid, Legend,
+  XAxis, YAxis, Tooltip, CartesianGrid,
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { cn } from '../lib/utils';
@@ -754,15 +754,158 @@ function renderDefinitionCharts(
 }
 
 /** Shared theme-aware style constants for Recharts */
-const xTickStyle = { fontSize: 10, fill: 'var(--muted-foreground)' };
-const yTickStyle = { fontSize: 9, fill: 'var(--muted-foreground)' };
+const xTickStyle = { fontSize: 10, fill: 'var(--muted-foreground)', fontWeight: 500 };
 const tooltipContentStyle = { backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '0.5rem', fontSize: 12, color: 'var(--foreground)' };
 const tooltipLabelStyle = { color: 'var(--muted-foreground)' };
-const legendStyle = { fontSize: 11, paddingTop: 4, color: 'var(--muted-foreground)' };
-const chartMargin = { top: 4, right: 8, bottom: 0, left: 8 };
-const singleAxisWidth = 64;
-const dualAxisWidth = 60;
+const chartHeight = 208;
+const chartMargin = { top: 44, right: 0, bottom: 12, left: 0 };
+const singleAxisWidth = 48;
+const dualAxisWidth = 42;
 const cellVoltageDecimals = 3;
+const axisLabelShadow = 'drop-shadow(0 1px 2px rgba(5, 8, 15, 0.42))';
+
+type AxisTickRendererProps = {
+  x?: number;
+  y?: number;
+  payload?: {
+    value?: string | number;
+  };
+};
+
+function OverlayAxisLabel({ x, y, value, textAnchor = 'middle' }: {
+  x: number;
+  y: number;
+  value: string;
+  textAnchor?: 'start' | 'middle' | 'end';
+}) {
+  if (value.length === 0) {
+    return null;
+  }
+
+  return (
+    <text
+      x={x}
+      y={y}
+      textAnchor={textAnchor}
+      dominantBaseline='middle'
+      fill={String(xTickStyle.fill)}
+      fontSize={xTickStyle.fontSize}
+      fontWeight={xTickStyle.fontWeight}
+      fontVariant='tabular-nums'
+      stroke='var(--background)'
+      strokeOpacity={0.78}
+      strokeWidth={3.5}
+      strokeLinejoin='round'
+      paintOrder='stroke'
+      style={{ filter: axisLabelShadow }}
+    >
+      {value}
+    </text>
+  );
+}
+
+function XAxisOverlayTick({ x = 0, y = 0, payload }: AxisTickRendererProps) {
+  return (
+    <g>
+      <OverlayAxisLabel x={x} y={y - 10} value={String(payload?.value ?? '')} />
+    </g>
+  );
+}
+
+function RightYAxisOverlayTick({ x = 0, y = 0, payload }: AxisTickRendererProps) {
+  return (
+    <g>
+      <OverlayAxisLabel x={x - 6} y={y} value={String(payload?.value ?? '')} textAnchor='end' />
+    </g>
+  );
+}
+
+function LeftYAxisOverlayTick({ x = 0, y = 0, payload }: AxisTickRendererProps) {
+  return (
+    <g>
+      <OverlayAxisLabel x={x + 6} y={y} value={String(payload?.value ?? '')} textAnchor='start' />
+    </g>
+  );
+}
+
+function ChartLegendOverlay({ lines }: { lines: LineSpec[] }) {
+  if (lines.length <= 1) {
+    return null;
+  }
+
+  return (
+    <div className='mt-1.5 flex flex-wrap gap-x-3 gap-y-1.5'>
+      {lines.map((line) => (
+        <span
+          key={line.key}
+          className='inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.16em] text-foreground/85'
+          style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.42)' }}
+        >
+          <span className='h-2 w-2 rounded-full shadow-[0_0_0_1px_rgba(255,255,255,0.06)]' style={{ backgroundColor: line.color }} />
+          {line.name}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function ChartHeaderOverlay({
+  title,
+  subtitle,
+  meta,
+  valueText,
+  valueClassName,
+  selectedTime,
+  onClearSelection,
+  action,
+}: {
+  title: string;
+  subtitle?: React.ReactNode;
+  meta?: React.ReactNode;
+  valueText?: React.ReactNode;
+  valueClassName?: string;
+  selectedTime: string | null;
+  onClearSelection: () => void;
+  action?: React.ReactNode;
+}) {
+  const hasRightContent = valueText != null || selectedTime != null;
+
+  return (
+    <div className='pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-4 bg-gradient-to-b from-background/80 via-background/28 to-transparent px-3 pt-3 pb-8 sm:px-4'>
+      <div className='min-w-0'>
+        <div
+          className='text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground'
+          style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.45)' }}
+        >
+          {title}
+        </div>
+        {subtitle && <div className='mt-1'>{subtitle}</div>}
+        {meta && <div>{meta}</div>}
+        {action && <div className='pointer-events-auto mt-2'>{action}</div>}
+      </div>
+      {hasRightContent ? (
+        <div className='pointer-events-auto shrink-0 text-right'>
+          {valueText != null && (
+            <div className={cn(
+              'rounded-full bg-background/55 px-2.5 py-1 text-[11px] font-medium text-foreground shadow-[0_10px_24px_rgba(0,0,0,0.22)] backdrop-blur-[3px]',
+              valueClassName,
+            )}>
+              {valueText}
+            </div>
+          )}
+          {selectedTime != null && (
+            <button
+              onClick={onClearSelection}
+              className='mt-2 rounded-full bg-background/45 px-2.5 py-1 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground shadow-[0_8px_18px_rgba(0,0,0,0.18)] backdrop-blur-[2px] transition-colors hover:text-foreground'
+            >
+              Show latest
+            </button>
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
 
 function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitForKey, getFormatterForKey, hoveredTime, selectedTime, onHover, onSelect, todayXTicks, subtitle }: {
   title: string; data: ChartDataPoint[]; lines: LineSpec[];
@@ -856,29 +999,16 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
   }, [data, onSelect]);
 
   return (
-    <div>
-      <div className='mb-2 flex items-start justify-between gap-3 px-2 sm:px-0'>
-        <div>
-          <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{title}</div>
-          {subtitle && <div className='mt-1'>{subtitle}</div>}
-        </div>
-        <div className='text-right'>
-          {lines.length === 1 && (
-            <div className='text-[11px] font-medium text-foreground'>
-              {activeValueText ?? 'No data'}
-            </div>
-          )}
-          {selectedTime != null && (
-            <button
-              onClick={() => onSelect(null)}
-              className='mt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground'
-            >
-              Show latest
-            </button>
-          )}
-        </div>
-      </div>
-      <ResponsiveContainer width='100%' height={180}>
+    <div className='relative -mx-1 overflow-hidden sm:mx-0'>
+      <ChartHeaderOverlay
+        title={title}
+        subtitle={subtitle}
+        meta={<ChartLegendOverlay lines={lines} />}
+        valueText={lines.length === 1 ? (activeValueText ?? 'No data') : undefined}
+        selectedTime={selectedTime}
+        onClearSelection={() => onSelect(null)}
+      />
+      <ResponsiveContainer width='100%' height={chartHeight}>
         <LineChart
           data={data}
           margin={chartMargin}
@@ -887,19 +1017,56 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
           onClick={handleChartClick}
         >
           <CartesianGrid strokeDasharray='3 3' stroke='var(--border)' opacity={0.4} />
-          <XAxis dataKey='time' tick={xTickStyle} tickLine={false} axisLine={false} {...(todayXTicks ? { ticks: todayXTicks } : {})} />
+          <XAxis
+            dataKey='time'
+            height={20}
+            mirror
+            tick={<XAxisOverlayTick />}
+            tickLine={false}
+            axisLine={false}
+            {...(todayXTicks ? { ticks: todayXTicks } : {})}
+          />
           {hasSecondaryAxis ? (
             <>
-              <YAxis yAxisId='primary' orientation='left' width={dualAxisWidth} tick={yTickStyle} tickLine={false} axisLine={false} domain={domain ?? ['auto', 'auto']} tickFormatter={primaryTickFormatter} />
-              <YAxis yAxisId='secondary' orientation='right' width={dualAxisWidth} tick={yTickStyle} tickLine={false} axisLine={false} domain={['auto', 'auto']} tickFormatter={secondaryTickFormatter} />
+              <YAxis
+                yAxisId='primary'
+                orientation='left'
+                width={dualAxisWidth}
+                mirror
+                tick={<LeftYAxisOverlayTick />}
+                tickLine={false}
+                axisLine={false}
+                domain={domain ?? ['auto', 'auto']}
+                tickFormatter={primaryTickFormatter}
+              />
+              <YAxis
+                yAxisId='secondary'
+                orientation='right'
+                width={dualAxisWidth}
+                mirror
+                tick={<RightYAxisOverlayTick />}
+                tickLine={false}
+                axisLine={false}
+                domain={['auto', 'auto']}
+                tickFormatter={secondaryTickFormatter}
+              />
             </>
           ) : (
-            <YAxis yAxisId='primary' orientation='right' width={singleAxisWidth} tick={yTickStyle} tickLine={false} axisLine={false} domain={domain ?? ['auto', 'auto']} tickFormatter={primaryTickFormatter} />
+            <YAxis
+              yAxisId='primary'
+              orientation='right'
+              width={singleAxisWidth}
+              mirror
+              tick={<RightYAxisOverlayTick />}
+              tickLine={false}
+              axisLine={false}
+              domain={domain ?? ['auto', 'auto']}
+              tickFormatter={primaryTickFormatter}
+            />
           )}
           <Tooltip
             content={renderTooltipContent}
           />
-          <Legend wrapperStyle={legendStyle} />
           {lines.map((l) => (
             <Line
               key={l.key}
@@ -994,27 +1161,15 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
   }, [data, onSelect]);
 
   return (
-    <div>
-      <div className='mb-2 flex items-start justify-between gap-3 px-2 sm:px-0'>
-        <div>
-          <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{title}</div>
-          {subtitle && <div className='mt-1'>{subtitle}</div>}
-        </div>
-        <div className='text-right'>
-          <div className='text-[11px] font-medium text-foreground'>
-            {activeValueText ?? 'No data'}
-          </div>
-          {selectedTime != null && (
-            <button
-              onClick={() => onSelect(null)}
-              className='mt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground'
-            >
-              Show latest
-            </button>
-          )}
-        </div>
-      </div>
-      <ResponsiveContainer width='100%' height={180}>
+    <div className='relative -mx-1 overflow-hidden sm:mx-0'>
+      <ChartHeaderOverlay
+        title={title}
+        subtitle={subtitle}
+        valueText={activeValueText ?? 'No data'}
+        selectedTime={selectedTime}
+        onClearSelection={() => onSelect(null)}
+      />
+      <ResponsiveContainer width='100%' height={chartHeight}>
         <AreaChart
           data={data}
           margin={chartMargin}
@@ -1029,10 +1184,25 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray='3 3' stroke='var(--border)' opacity={0.4} />
-          <XAxis dataKey='time' tick={xTickStyle} tickLine={false} axisLine={false} {...(todayXTicks ? { ticks: todayXTicks } : {})} />
-          <YAxis orientation='right' width={singleAxisWidth} tick={yTickStyle} tickLine={false} axisLine={false} domain={[0, 100]} />
+          <XAxis
+            dataKey='time'
+            height={20}
+            mirror
+            tick={<XAxisOverlayTick />}
+            tickLine={false}
+            axisLine={false}
+            {...(todayXTicks ? { ticks: todayXTicks } : {})}
+          />
+          <YAxis
+            orientation='right'
+            width={singleAxisWidth}
+            mirror
+            tick={<RightYAxisOverlayTick />}
+            tickLine={false}
+            axisLine={false}
+            domain={[0, 100]}
+          />
           <Tooltip content={renderTooltipContent} />
-          <Legend wrapperStyle={legendStyle} />
           <Area
             type='monotone'
             dataKey={line.key}
@@ -1144,34 +1314,24 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
   const yTickFormatter = useCallback((v: number) => `${Math.abs(v).toFixed(1)}`, []);
 
   return (
-    <div>
-      <div className='mb-2 flex items-start justify-between gap-3 px-2 sm:px-0'>
-        <div>
-          <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Energy</div>
+    <div className='relative -mx-1 overflow-hidden sm:mx-0'>
+      <ChartHeaderOverlay
+        title='Energy'
+        meta={(
           <div className='mt-1.5 flex flex-wrap gap-x-3 gap-y-1'>
-            <span className='flex items-center gap-1 text-xs text-emerald-400'>
+            <span className='flex items-center gap-1 text-xs text-emerald-400' style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.38)' }}>
               <span className='text-[10px]'>↑</span> Charged: <span className='font-semibold'>{chargedKwh.toFixed(1)} kWh</span>
             </span>
-            <span className='flex items-center gap-1 text-xs text-rose-400'>
+            <span className='flex items-center gap-1 text-xs text-rose-400' style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.38)' }}>
               <span className='text-[10px]'>↓</span> Discharged: <span className='font-semibold'>{dischargedKwh.toFixed(1)} kWh</span>
             </span>
           </div>
-        </div>
-        <div className='text-right'>
-          <div className='text-[11px] font-medium text-foreground'>
-            {activeEnergyText ?? 'No data'}
-          </div>
-          {selectedTime != null && (
-            <button
-              onClick={() => onSelect(null)}
-              className='mt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground'
-            >
-              Show latest
-            </button>
-          )}
-        </div>
-      </div>
-      <ResponsiveContainer width='100%' height={180}>
+        )}
+        valueText={activeEnergyText ?? 'No data'}
+        selectedTime={selectedTime}
+        onClearSelection={() => onSelect(null)}
+      />
+      <ResponsiveContainer width='100%' height={chartHeight}>
         <AreaChart
           data={energyData}
           margin={chartMargin}
@@ -1192,8 +1352,25 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
             </linearGradient>
           </defs>
           <CartesianGrid strokeDasharray='3 3' stroke='var(--border)' opacity={0.4} />
-          <XAxis dataKey='time' tick={xTickStyle} tickLine={false} axisLine={false} {...(todayXTicks ? { ticks: todayXTicks } : {})} />
-          <YAxis orientation='right' width={singleAxisWidth} tick={yTickStyle} tickLine={false} axisLine={false} domain={yDomain} tickFormatter={yTickFormatter} />
+          <XAxis
+            dataKey='time'
+            height={20}
+            mirror
+            tick={<XAxisOverlayTick />}
+            tickLine={false}
+            axisLine={false}
+            {...(todayXTicks ? { ticks: todayXTicks } : {})}
+          />
+          <YAxis
+            orientation='right'
+            width={singleAxisWidth}
+            mirror
+            tick={<RightYAxisOverlayTick />}
+            tickLine={false}
+            axisLine={false}
+            domain={yDomain}
+            tickFormatter={yTickFormatter}
+          />
           <Tooltip
             contentStyle={tooltipContentStyle}
             labelStyle={tooltipLabelStyle}
@@ -1263,36 +1440,24 @@ function MultiCellChartSection({ selectedCells, data, onDismiss, hoveredTime, se
   }, [data, onSelect]);
 
   return (
-    <div>
-      <div className='mb-2 flex items-start justify-between gap-3 px-2 sm:px-0'>
-        <div className='flex items-center gap-2'>
-          <div className='text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>
-            Cell Voltage{selectedCells.length > 1 ? 's' : ''}
-          </div>
-          {onDismiss && (
-            <button
-              onClick={onDismiss}
-              className='rounded-full border border-border/70 bg-background/70 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground'
-            >
-              ✕ Show Pack
-            </button>
-          )}
-        </div>
-        <div className='text-right'>
-          <div className='text-[11px] font-medium text-foreground'>
-            {activeCellText ?? 'No data'}
-          </div>
-          {selectedTime != null && (
-            <button
-              onClick={() => onSelect(null)}
-              className='mt-1 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground'
-            >
-              Show latest
-            </button>
-          )}
-        </div>
-      </div>
-      <ResponsiveContainer width='100%' height={180}>
+    <div className='relative -mx-1 overflow-hidden sm:mx-0'>
+      <ChartHeaderOverlay
+        title={`Cell Voltage${selectedCells.length > 1 ? 's' : ''}`}
+        meta={<ChartLegendOverlay lines={cellLines} />}
+        valueText={activeCellText ?? 'No data'}
+        valueClassName='max-w-[12rem] truncate sm:max-w-[20rem]'
+        selectedTime={selectedTime}
+        onClearSelection={() => onSelect(null)}
+        action={onDismiss ? (
+          <button
+            onClick={onDismiss}
+            className='rounded-full border border-border/70 bg-background/70 px-2 py-0.5 text-[10px] font-medium uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground'
+          >
+            ✕ Show Pack
+          </button>
+        ) : null}
+      />
+      <ResponsiveContainer width='100%' height={chartHeight}>
         <LineChart
           data={data}
           margin={chartMargin}
@@ -1301,15 +1466,14 @@ function MultiCellChartSection({ selectedCells, data, onDismiss, hoveredTime, se
           onClick={handleChartClick}
         >
           <CartesianGrid strokeDasharray='3 3' stroke='var(--border)' opacity={0.4} />
-          <XAxis dataKey='time' tick={xTickStyle} tickLine={false} axisLine={false} />
-          <YAxis orientation='right' width={singleAxisWidth} tick={yTickStyle} tickLine={false} axisLine={false} domain={['auto', 'auto']} tickFormatter={yTickFormatter} />
+          <XAxis dataKey='time' height={20} mirror tick={<XAxisOverlayTick />} tickLine={false} axisLine={false} />
+          <YAxis orientation='right' width={singleAxisWidth} mirror tick={<RightYAxisOverlayTick />} tickLine={false} axisLine={false} domain={['auto', 'auto']} tickFormatter={yTickFormatter} />
           <Tooltip
             contentStyle={tooltipContentStyle}
             labelStyle={tooltipLabelStyle}
             itemStyle={{ color: 'var(--foreground)' }}
             formatter={tooltipFormatter}
           />
-          <Legend wrapperStyle={legendStyle} />
           {cellLines.map((l) => (
             <Line key={l.key} type='monotone' dataKey={l.key} stroke={l.color} name={l.name} dot={false} strokeWidth={1.5} connectNulls isAnimationActive={false} />
           ))}
