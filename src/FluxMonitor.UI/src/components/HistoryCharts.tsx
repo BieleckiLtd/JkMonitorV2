@@ -171,6 +171,24 @@ function formatActiveValues(
   return parts.length > 0 ? parts.join(' · ') : null;
 }
 
+function formatLegendValue(
+  point: Record<string, unknown>,
+  line: LineSpec,
+  getDecimalsForKey: (key: string) => number,
+  getUnitForKey: (key: string) => string,
+  getFormatterForKey: (key: string) => string | null | undefined,
+): string {
+  const raw = point[line.key];
+  if (raw == null) {
+    return 'N/D';
+  }
+
+  const num = typeof raw === 'number' ? raw : Number(raw);
+  return Number.isNaN(num)
+    ? String(raw)
+    : formatChartValue(num, line.key, getDecimalsForKey, getUnitForKey, getFormatterForKey);
+}
+
 const cellColorPalette = [
   '#a78bfa', '#34d399', '#f87171', '#38bdf8', '#fbbf24', '#fb923c',
   '#ec4899', '#818cf8', '#22d3ee', '#a3e635', '#f472b6', '#c084fc',
@@ -758,9 +776,12 @@ const xTickStyle = { fontSize: 10, fill: 'var(--muted-foreground)', fontWeight: 
 const tooltipContentStyle = { backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '0.5rem', fontSize: 12, color: 'var(--foreground)' };
 const tooltipLabelStyle = { color: 'var(--muted-foreground)' };
 const chartHeight = 208;
-const chartMargin = { top: 44, right: 0, bottom: 12, left: 0 };
+const chartMargin = { top: 56, right: 0, bottom: 12, left: 0 };
+const compactChartMargin = { top: 58, right: -8, bottom: 12, left: -8 };
 const singleAxisWidth = 48;
 const dualAxisWidth = 42;
+const compactSingleAxisWidth = 38;
+const compactDualAxisWidth = 34;
 const cellVoltageDecimals = 3;
 const axisLabelShadow = 'drop-shadow(0 1px 2px rgba(5, 8, 15, 0.42))';
 
@@ -828,13 +849,44 @@ function LeftYAxisOverlayTick({ x = 0, y = 0, payload }: AxisTickRendererProps) 
   );
 }
 
-function ChartLegendOverlay({ lines }: { lines: LineSpec[] }) {
+function useCompactChartLayout() {
+  const [compact, setCompact] = useState(false);
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+
+    const media = window.matchMedia('(max-width: 640px)');
+    const update = () => setCompact(media.matches);
+    update();
+
+    media.addEventListener('change', update);
+    return () => media.removeEventListener('change', update);
+  }, []);
+
+  return compact;
+}
+
+function ChartLegendOverlay({
+  lines,
+  activePoint,
+  getDecimalsForKey,
+  getUnitForKey,
+  getFormatterForKey,
+}: {
+  lines: LineSpec[];
+  activePoint?: Record<string, unknown> | null;
+  getDecimalsForKey?: (key: string) => number;
+  getUnitForKey?: (key: string) => string;
+  getFormatterForKey?: (key: string) => string | null | undefined;
+}) {
   if (lines.length <= 1) {
     return null;
   }
 
   return (
-    <div className='mt-1.5 flex flex-wrap gap-x-3 gap-y-1.5'>
+    <div className='mt-2 mb-2 flex flex-wrap gap-x-3.5 gap-y-1.5'>
       {lines.map((line) => (
         <span
           key={line.key}
@@ -842,7 +894,12 @@ function ChartLegendOverlay({ lines }: { lines: LineSpec[] }) {
           style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.42)' }}
         >
           <span className='h-2 w-2 rounded-full shadow-[0_0_0_1px_rgba(255,255,255,0.06)]' style={{ backgroundColor: line.color }} />
-          {line.name}
+          <span>{line.name}</span>
+          {activePoint && getDecimalsForKey && getUnitForKey && getFormatterForKey ? (
+            <span className='normal-case tracking-normal text-foreground'>
+              {formatLegendValue(activePoint, line, getDecimalsForKey, getUnitForKey, getFormatterForKey)}
+            </span>
+          ) : null}
         </span>
       ))}
     </div>
@@ -919,6 +976,10 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
   subtitle?: React.ReactNode;
 }) {
   const activePoint = getActivePoint(data, hoveredTime, selectedTime);
+  const isCompactChart = useCompactChartLayout();
+  const activeChartMargin = isCompactChart ? compactChartMargin : chartMargin;
+  const activeSingleAxisWidth = isCompactChart ? compactSingleAxisWidth : singleAxisWidth;
+  const activeDualAxisWidth = isCompactChart ? compactDualAxisWidth : dualAxisWidth;
   const hasSecondaryAxis = lines.some((line) => line.secondaryAxis);
   const activeValueText = lines.length === 1 ? formatActiveValues(activePoint, lines, getDecimalsForKey, getUnitForKey, getFormatterForKey) : null;
   const primaryAxisLine = lines.find((line) => !line.secondaryAxis) ?? lines[0];
@@ -938,43 +999,12 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
       return null;
     }
 
-    const tooltipPoint = tooltipState.payload?.[0]?.payload ?? activePoint;
-    if (!tooltipPoint) {
-      return null;
-    }
-
-    const rows = lines.map((line) => {
-      const raw = tooltipPoint[line.key];
-      if (raw == null) {
-        return { name: line.name, value: 'N/D', color: line.color };
-      }
-
-      const num = typeof raw === 'number' ? raw : Number(raw);
-      if (Number.isNaN(num)) {
-        return { name: line.name, value: String(raw), color: line.color };
-      }
-
-      return {
-        name: line.name,
-        value: formatChartValue(num, line.key, getDecimalsForKey, getUnitForKey, getFormatterForKey),
-        color: line.color,
-      };
-    });
-
     return (
       <div style={tooltipContentStyle}>
         <div style={tooltipLabelStyle}>{String(tooltipState.label ?? '')}</div>
-        <div className='mt-2 space-y-1'>
-          {rows.map((row) => (
-            <div key={row.name} className='flex items-center justify-between gap-4 text-[12px]'>
-              <span style={{ color: row.color }}>{row.name}</span>
-              <span>{row.value}</span>
-            </div>
-          ))}
-        </div>
       </div>
     );
-  }, [activePoint, getDecimalsForKey, getFormatterForKey, getUnitForKey, lines]);
+  }, []);
 
   const handleChartMove = useCallback((state: unknown) => {
     const idx = extractActiveIndex(state);
@@ -999,11 +1029,17 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
   }, [data, onSelect]);
 
   return (
-    <div className='relative -mx-1 overflow-hidden sm:mx-0'>
+    <div className='relative -mx-3 overflow-hidden sm:mx-0'>
       <ChartHeaderOverlay
         title={title}
         subtitle={subtitle}
-        meta={<ChartLegendOverlay lines={lines} />}
+        meta={<ChartLegendOverlay
+          lines={lines}
+          activePoint={activePoint}
+          getDecimalsForKey={getDecimalsForKey}
+          getUnitForKey={getUnitForKey}
+          getFormatterForKey={getFormatterForKey}
+        />}
         valueText={lines.length === 1 ? (activeValueText ?? 'No data') : undefined}
         selectedTime={selectedTime}
         onClearSelection={() => onSelect(null)}
@@ -1011,7 +1047,7 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
       <ResponsiveContainer width='100%' height={chartHeight}>
         <LineChart
           data={data}
-          margin={chartMargin}
+          margin={activeChartMargin}
           onMouseMove={handleChartMove}
           onMouseLeave={handleChartLeave}
           onClick={handleChartClick}
@@ -1031,7 +1067,7 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
               <YAxis
                 yAxisId='primary'
                 orientation='left'
-                width={dualAxisWidth}
+                width={activeDualAxisWidth}
                 mirror
                 tick={<LeftYAxisOverlayTick />}
                 tickLine={false}
@@ -1042,7 +1078,7 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
               <YAxis
                 yAxisId='secondary'
                 orientation='right'
-                width={dualAxisWidth}
+                width={activeDualAxisWidth}
                 mirror
                 tick={<RightYAxisOverlayTick />}
                 tickLine={false}
@@ -1055,7 +1091,7 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
             <YAxis
               yAxisId='primary'
               orientation='right'
-              width={singleAxisWidth}
+              width={activeSingleAxisWidth}
               mirror
               tick={<RightYAxisOverlayTick />}
               tickLine={false}

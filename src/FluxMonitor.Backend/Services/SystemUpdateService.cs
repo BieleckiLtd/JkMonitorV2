@@ -184,7 +184,10 @@ public sealed class SystemUpdateService(
         ["Migrated release-local settings from Development to Production."] = "Refreshing configuration so the published build uses the managed runtime settings.",
         ["No compatible ASP.NET Core 10 runtime was found. Install a local copy into this folder?"] = "The required ASP.NET Core runtime is missing on this device.",
         ["Reusing the existing runtime configuration for Production."] = "Keeping the current production runtime configuration.",
-        ["Reusing the existing runtime configuration for Development."] = "Keeping the current development runtime configuration."
+        ["Reusing the existing runtime configuration for Development."] = "Keeping the current development runtime configuration.",
+        ["Managed cloudflared service is already up to date and running. Skipping reinstall."] = "Tunnel service is already up to date and running.",
+        ["Managed cloudflared service is already up to date. Skipping reinstall."] = "Tunnel service is already up to date.",
+        ["Managed cloudflared service configuration was checked. No tunnel restart was needed."] = "Tunnel service was checked without restarting it."
     };
 
     private UpdateProgress? _currentProgress;

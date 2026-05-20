@@ -1517,8 +1517,14 @@ write_elevated_file_if_changed() {
   local target_path="$2"
   local file_mode="${3:-0644}"
 
-  if [ -f "$target_path" ] && run_elevated cmp -s "$source_path" "$target_path"; then
-    return 1
+  if [ -f "$target_path" ]; then
+    if cmp -s "$source_path" "$target_path" 2>/dev/null; then
+      return 1
+    fi
+
+    if ! [ -r "$target_path" ] && run_elevated cmp -s "$source_path" "$target_path"; then
+      return 1
+    fi
   fi
 
   run_elevated mkdir -p "$(dirname "$target_path")"
@@ -1923,11 +1929,11 @@ install_cloudflared_service() {
     service_changed='true'
   fi
 
-  if run_elevated systemctl is-active --quiet "$TUNNEL_SERVICE_NAME"; then
+  if systemctl is-active --quiet "$TUNNEL_SERVICE_NAME"; then
     service_running='true'
   fi
 
-  if run_elevated systemctl is-enabled "$TUNNEL_SERVICE_NAME" >/dev/null 2>&1; then
+  if systemctl is-enabled "$TUNNEL_SERVICE_NAME" >/dev/null 2>&1; then
     service_enabled='true'
   fi
 
