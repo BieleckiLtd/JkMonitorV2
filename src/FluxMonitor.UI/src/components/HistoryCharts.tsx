@@ -884,14 +884,12 @@ function useChartHeaderLayout(isCompactChart: boolean) {
 function ChartLegendOverlay({
   lines,
   activePoint,
-  activeTimeText,
   getDecimalsForKey,
   getUnitForKey,
   getFormatterForKey,
 }: {
   lines: LineSpec[];
   activePoint?: Record<string, unknown> | null;
-  activeTimeText?: string | null;
   getDecimalsForKey?: (key: string) => number;
   getUnitForKey?: (key: string) => string;
   getFormatterForKey?: (key: string) => string | null | undefined;
@@ -902,14 +900,6 @@ function ChartLegendOverlay({
 
   return (
     <div className='flex min-w-0 flex-wrap items-center gap-x-3.5 gap-y-1.5'>
-      {activeTimeText ? (
-        <span
-          className='text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground'
-          style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.42)' }}
-        >
-          {activeTimeText}
-        </span>
-      ) : null}
       {lines.map((line) => (
         <span
           key={line.key}
@@ -932,6 +922,7 @@ function ChartLegendOverlay({
 function ChartHeaderOverlay({
   headerRef,
   title,
+  activeTimeText,
   subtitle,
   meta,
   valueText,
@@ -942,6 +933,7 @@ function ChartHeaderOverlay({
 }: {
   headerRef?: React.Ref<HTMLDivElement>;
   title: string;
+  activeTimeText?: string | null;
   subtitle?: React.ReactNode;
   meta?: React.ReactNode;
   valueText?: React.ReactNode;
@@ -956,11 +948,21 @@ function ChartHeaderOverlay({
     <div ref={headerRef} className='pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-4 bg-gradient-to-b from-background/80 via-background/28 to-transparent px-3 pt-3 pb-3 sm:px-4'>
       <div className='min-w-0 flex-1'>
         <div className='flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2'>
-          <div
-            className='shrink-0 text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground'
-            style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.45)' }}
-          >
-            {title}
+          <div className='flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1'>
+            <div
+              className='text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground'
+              style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.45)' }}
+            >
+              {title}
+            </div>
+            {activeTimeText ? (
+              <div
+                className='text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground'
+                style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.45)' }}
+              >
+                {activeTimeText}
+              </div>
+            ) : null}
           </div>
           {meta && <div className='min-w-0'>{meta}</div>}
         </div>
@@ -1046,11 +1048,11 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
       <ChartHeaderOverlay
         headerRef={chartHeader.headerRef}
         title={title}
+        activeTimeText={activeTimeText}
         subtitle={subtitle}
         meta={<ChartLegendOverlay
           lines={lines}
           activePoint={activePoint}
-          activeTimeText={activeTimeText}
           getDecimalsForKey={getDecimalsForKey}
           getUnitForKey={getUnitForKey}
           getFormatterForKey={getFormatterForKey}
@@ -1188,11 +1190,11 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
       <ChartHeaderOverlay
         headerRef={chartHeader.headerRef}
         title={title}
+        activeTimeText={activeTimeText}
         subtitle={subtitle}
         meta={<ChartLegendOverlay
           lines={[line]}
           activePoint={activePoint}
-          activeTimeText={activeTimeText}
           getDecimalsForKey={getDecimalsForKey}
           getUnitForKey={getUnitForKey}
           getFormatterForKey={getFormatterForKey}
@@ -1349,13 +1351,9 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
       <ChartHeaderOverlay
         headerRef={chartHeader.headerRef}
         title='Energy'
+        activeTimeText={activeTimeText}
         meta={(
           <div className='flex min-w-0 flex-wrap items-center gap-x-3.5 gap-y-1.5'>
-            {activeTimeText ? (
-              <span className='text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground' style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.42)' }}>
-                {activeTimeText}
-              </span>
-            ) : null}
             {activeEnergyText ? (
               <span className='inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.16em] text-foreground/85' style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.42)' }}>
                 <span className='h-2 w-2 rounded-full bg-sky-400 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]' />
@@ -1471,10 +1469,10 @@ function MultiCellChartSection({ selectedCells, data, onDismiss, hoveredTime, se
       <ChartHeaderOverlay
         headerRef={chartHeader.headerRef}
         title={`Cell Voltage${selectedCells.length > 1 ? 's' : ''}`}
+        activeTimeText={activeTimeText}
         meta={<ChartLegendOverlay
           lines={cellLines}
           activePoint={activePoint}
-          activeTimeText={activeTimeText}
           getDecimalsForKey={() => cellVoltageDecimals}
           getUnitForKey={() => 'V'}
           getFormatterForKey={() => undefined}
