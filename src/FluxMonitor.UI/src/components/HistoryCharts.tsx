@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
   ResponsiveContainer, LineChart, Line, AreaChart, Area, ReferenceDot,
-  XAxis, YAxis, Tooltip, CartesianGrid,
+  XAxis, YAxis, CartesianGrid,
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { cn } from '../lib/utils';
@@ -150,25 +150,6 @@ function formatChartValue(
   }
 
   return formatWithUnit(value.toFixed(getDecimalsForKey(key)), getUnitForKey(key));
-}
-
-function formatActiveValues(
-  point: Record<string, unknown> | null,
-  lines: LineSpec[],
-  getDecimalsForKey: (key: string) => number,
-  getUnitForKey: (key: string) => string,
-  getFormatterForKey: (key: string) => string | null | undefined,
-): string | null {
-  if (!point) return null;
-  const parts: string[] = [];
-  for (const l of lines) {
-    const raw = point[l.key];
-    if (raw == null) continue;
-    const num = typeof raw === 'number' ? raw : Number(raw);
-    if (Number.isNaN(num)) continue;
-    parts.push(formatChartValue(num, l.key, getDecimalsForKey, getUnitForKey, getFormatterForKey));
-  }
-  return parts.length > 0 ? parts.join(' · ') : null;
 }
 
 function formatLegendValue(
@@ -777,11 +758,10 @@ function renderDefinitionCharts(
 
 /** Shared theme-aware style constants for Recharts */
 const xTickStyle = { fontSize: 10, fill: 'var(--muted-foreground)', fontWeight: 500 };
-const tooltipContentStyle = { backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '0.5rem', fontSize: 12, color: 'var(--foreground)' };
-const tooltipLabelStyle = { color: 'var(--muted-foreground)' };
 const chartHeight = 208;
 const chartMargin = { top: 44, right: 0, bottom: 12, left: 0 };
 const compactChartMargin = { top: 46, right: 0, bottom: 12, left: 0 };
+const chartHeaderGap = 8;
 const singleAxisWidth = 48;
 const dualAxisWidth = 42;
 const compactSingleAxisWidth = 1;
@@ -872,6 +852,35 @@ function useCompactChartLayout() {
   return compact;
 }
 
+function useChartHeaderLayout(isCompactChart: boolean) {
+  const headerRef = useRef<HTMLDivElement>(null);
+  const [headerHeight, setHeaderHeight] = useState(0);
+  const baseTop = isCompactChart ? compactChartMargin.top : chartMargin.top;
+  const top = Math.max(baseTop, Math.ceil(headerHeight) + chartHeaderGap);
+  const height = chartHeight + Math.max(0, top - baseTop);
+
+  useEffect(() => {
+    const element = headerRef.current;
+    if (!element) {
+      return;
+    }
+
+    const update = () => setHeaderHeight(element.getBoundingClientRect().height);
+    update();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', update);
+      return () => window.removeEventListener('resize', update);
+    }
+
+    const observer = new ResizeObserver(update);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+
+  return { headerRef, top, height };
+}
+
 function ChartLegendOverlay({
   lines,
   activePoint,
@@ -887,7 +896,7 @@ function ChartLegendOverlay({
   getUnitForKey?: (key: string) => string;
   getFormatterForKey?: (key: string) => string | null | undefined;
 }) {
-  if (lines.length <= 1) {
+  if (lines.length === 0) {
     return null;
   }
 
@@ -895,7 +904,7 @@ function ChartLegendOverlay({
     <div className='flex min-w-0 flex-wrap items-center gap-x-3.5 gap-y-1.5'>
       {activeTimeText ? (
         <span
-          className='text-[10px] font-medium tabular-nums text-muted-foreground'
+          className='text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground'
           style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.42)' }}
         >
           {activeTimeText}
@@ -921,6 +930,7 @@ function ChartLegendOverlay({
 }
 
 function ChartHeaderOverlay({
+  headerRef,
   title,
   subtitle,
   meta,
@@ -930,6 +940,7 @@ function ChartHeaderOverlay({
   onClearSelection,
   action,
 }: {
+  headerRef?: React.Ref<HTMLDivElement>;
   title: string;
   subtitle?: React.ReactNode;
   meta?: React.ReactNode;
@@ -942,7 +953,7 @@ function ChartHeaderOverlay({
   const hasRightContent = valueText != null || selectedTime != null;
 
   return (
-    <div className='pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-4 bg-gradient-to-b from-background/80 via-background/28 to-transparent px-3 pt-3 pb-6 sm:px-4'>
+    <div ref={headerRef} className='pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-4 bg-gradient-to-b from-background/80 via-background/28 to-transparent px-3 pt-3 pb-3 sm:px-4'>
       <div className='min-w-0 flex-1'>
         <div className='flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2'>
           <div
@@ -991,13 +1002,13 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
   todayXTicks?: string[];
   subtitle?: React.ReactNode;
 }) {
-  const activePoint = getActivePoint(data, hoveredTime, selectedTime);
   const isCompactChart = useCompactChartLayout();
-  const activeChartMargin = isCompactChart ? compactChartMargin : chartMargin;
+  const chartHeader = useChartHeaderLayout(isCompactChart);
+  const activeChartMargin = { ...(isCompactChart ? compactChartMargin : chartMargin), top: chartHeader.top };
   const activeSingleAxisWidth = isCompactChart ? compactSingleAxisWidth : singleAxisWidth;
   const activeDualAxisWidth = isCompactChart ? compactDualAxisWidth : dualAxisWidth;
+  const activePoint = getActivePoint(data, hoveredTime, selectedTime, lines.map((line) => line.key));
   const hasSecondaryAxis = lines.some((line) => line.secondaryAxis);
-  const activeValueText = lines.length === 1 ? formatActiveValues(activePoint, lines, getDecimalsForKey, getUnitForKey, getFormatterForKey) : null;
   const activeTimeText = formatActiveTime(activePoint);
   const primaryAxisLine = lines.find((line) => !line.secondaryAxis) ?? lines[0];
   const secondaryAxisLine = lines.find((line) => line.secondaryAxis);
@@ -1032,6 +1043,7 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
   return (
     <div className='relative overflow-hidden'>
       <ChartHeaderOverlay
+        headerRef={chartHeader.headerRef}
         title={title}
         subtitle={subtitle}
         meta={<ChartLegendOverlay
@@ -1042,11 +1054,11 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
           getUnitForKey={getUnitForKey}
           getFormatterForKey={getFormatterForKey}
         />}
-        valueText={lines.length === 1 ? (activeValueText ?? 'No data') : undefined}
+        valueText={undefined}
         selectedTime={selectedTime}
         onClearSelection={() => onSelect(null)}
       />
-      <ResponsiveContainer width='100%' height={chartHeight}>
+      <ResponsiveContainer width='100%' height={chartHeader.height}>
         <LineChart
           data={data}
           margin={activeChartMargin}
@@ -1138,40 +1150,12 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
   subtitle?: React.ReactNode;
 }) {
   const gradientId = useId().replace(/:/g, '');
-  const activePoint = getActivePoint(data, hoveredTime, selectedTime);
-  const activeValueText = formatActiveValues(activePoint, [line], getDecimalsForKey, getUnitForKey, getFormatterForKey);
-  const renderTooltipContent = useCallback((tooltipState: {
-    active?: boolean;
-    label?: string | number;
-    payload?: ReadonlyArray<{ payload?: Record<string, unknown> }>;
-  }) => {
-    if (!tooltipState.active) {
-      return null;
-    }
-
-    const tooltipPoint = tooltipState.payload?.[0]?.payload ?? activePoint;
-    if (!tooltipPoint) {
-      return null;
-    }
-
-    const raw = tooltipPoint[line.key];
-    const num = raw == null ? Number.NaN : typeof raw === 'number' ? raw : Number(raw);
-    const value = Number.isNaN(num)
-      ? 'N/D'
-      : formatChartValue(num, line.key, getDecimalsForKey, getUnitForKey, getFormatterForKey);
-
-    return (
-      <div style={tooltipContentStyle}>
-        <div style={tooltipLabelStyle}>{String(tooltipState.label ?? '')}</div>
-        <div className='mt-2 space-y-1'>
-          <div className='flex items-center justify-between gap-4 text-[12px]'>
-            <span style={{ color: line.color }}>{line.name}</span>
-            <span>{value}</span>
-          </div>
-        </div>
-      </div>
-    );
-  }, [activePoint, getDecimalsForKey, getFormatterForKey, getUnitForKey, line]);
+  const isCompactChart = useCompactChartLayout();
+  const chartHeader = useChartHeaderLayout(isCompactChart);
+  const activeChartMargin = { ...(isCompactChart ? compactChartMargin : chartMargin), top: chartHeader.top };
+  const activeSingleAxisWidth = isCompactChart ? compactSingleAxisWidth : singleAxisWidth;
+  const activePoint = getActivePoint(data, hoveredTime, selectedTime, [line.key]);
+  const activeTimeText = formatActiveTime(activePoint);
 
   const handleChartMove = useCallback((state: unknown) => {
     const timestamp = extractActiveTimestamp(state, data);
@@ -1196,18 +1180,27 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
   }, [data, onSelect]);
 
   return (
-    <div className='relative -mx-1 overflow-hidden sm:mx-0'>
+    <div className='relative overflow-hidden'>
       <ChartHeaderOverlay
+        headerRef={chartHeader.headerRef}
         title={title}
         subtitle={subtitle}
-        valueText={activeValueText ?? 'No data'}
+        meta={<ChartLegendOverlay
+          lines={[line]}
+          activePoint={activePoint}
+          activeTimeText={activeTimeText}
+          getDecimalsForKey={getDecimalsForKey}
+          getUnitForKey={getUnitForKey}
+          getFormatterForKey={getFormatterForKey}
+        />}
+        valueText={undefined}
         selectedTime={selectedTime}
         onClearSelection={() => onSelect(null)}
       />
-      <ResponsiveContainer width='100%' height={chartHeight}>
+      <ResponsiveContainer width='100%' height={chartHeader.height}>
         <AreaChart
           data={data}
-          margin={chartMargin}
+          margin={activeChartMargin}
           onMouseMove={handleChartMove}
           onMouseLeave={handleChartLeave}
           onClick={handleChartClick}
@@ -1230,14 +1223,13 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
           />
           <YAxis
             orientation='right'
-            width={singleAxisWidth}
+            width={activeSingleAxisWidth}
             mirror
             tick={<RightYAxisOverlayTick />}
             tickLine={false}
             axisLine={false}
             domain={[0, 100]}
           />
-          <Tooltip content={renderTooltipContent} />
           <Area
             type='monotone'
             dataKey={line.key}
@@ -1308,7 +1300,12 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
     return result;
   }, [displayMode, energyData]);
 
-  const activePoint = getActivePoint(energyData, hoveredTime, selectedTime);
+  const isCompactChart = useCompactChartLayout();
+  const chartHeader = useChartHeaderLayout(isCompactChart);
+  const activeChartMargin = { ...(isCompactChart ? compactChartMargin : chartMargin), top: chartHeader.top };
+  const activeSingleAxisWidth = isCompactChart ? compactSingleAxisWidth : singleAxisWidth;
+  const activePoint = getActivePoint(energyData, hoveredTime, selectedTime, ['displayPowerKw', 'signedPowerKw']);
+  const activeTimeText = formatActiveTime(activePoint);
   const activeEnergyText = useMemo(() => {
     if (!activePoint) return null;
     const raw = activePoint.displayPowerKw;
@@ -1337,23 +1334,28 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
     }
   }, [energyData, onSelect]);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tooltipFormatter: any = useCallback((value: unknown) => {
-    const num = typeof value === 'number' ? value : Number(value);
-    if (Number.isNaN(num)) return [String(value), 'Power'];
-    const fmt = formatEnergyValue(num);
-    return [fmt.text, fmt.label];
-  }, []);
-
   // Show absolute values on Y-axis (no negatives)
   const yTickFormatter = useCallback((v: number) => `${Math.abs(v).toFixed(1)}`, []);
 
   return (
-    <div className='relative -mx-1 overflow-hidden sm:mx-0'>
+    <div className='relative overflow-hidden'>
       <ChartHeaderOverlay
+        headerRef={chartHeader.headerRef}
         title='Energy'
         meta={(
-          <div className='mt-1.5 flex flex-wrap gap-x-3 gap-y-1'>
+          <div className='flex min-w-0 flex-wrap items-center gap-x-3.5 gap-y-1.5'>
+            {activeTimeText ? (
+              <span className='text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground' style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.42)' }}>
+                {activeTimeText}
+              </span>
+            ) : null}
+            {activeEnergyText ? (
+              <span className='inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.16em] text-foreground/85' style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.42)' }}>
+                <span className='h-2 w-2 rounded-full bg-sky-400 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]' />
+                <span>Power</span>
+                <span className='normal-case tracking-normal text-foreground'>{activeEnergyText}</span>
+              </span>
+            ) : null}
             <span className='flex items-center gap-1 text-xs text-emerald-400' style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.38)' }}>
               <span className='text-[10px]'>↑</span> Charged: <span className='font-semibold'>{chargedKwh.toFixed(1)} kWh</span>
             </span>
@@ -1362,14 +1364,14 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
             </span>
           </div>
         )}
-        valueText={activeEnergyText ?? 'No data'}
+        valueText={undefined}
         selectedTime={selectedTime}
         onClearSelection={() => onSelect(null)}
       />
-      <ResponsiveContainer width='100%' height={chartHeight}>
+      <ResponsiveContainer width='100%' height={chartHeader.height}>
         <AreaChart
           data={energyData}
-          margin={chartMargin}
+          margin={activeChartMargin}
           onMouseMove={handleChartMove}
           onMouseLeave={handleChartLeave}
           onClick={handleChartClick}
@@ -1398,19 +1400,13 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
           />
           <YAxis
             orientation='right'
-            width={singleAxisWidth}
+            width={activeSingleAxisWidth}
             mirror
             tick={<RightYAxisOverlayTick />}
             tickLine={false}
             axisLine={false}
             domain={yDomain}
             tickFormatter={yTickFormatter}
-          />
-          <Tooltip
-            contentStyle={tooltipContentStyle}
-            labelStyle={tooltipLabelStyle}
-            itemStyle={{ color: 'var(--foreground)' }}
-            formatter={tooltipFormatter}
           />
           {baselineMarkers.map(({ time, isMajor }, i) => (
             <ReferenceDot key={`bm-${i}`} x={time} y={0} r={isMajor ? 3 : 1.5} fill={isMajor ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.2)'} stroke='none' />
@@ -1433,26 +1429,12 @@ function MultiCellChartSection({ selectedCells, data, onDismiss, hoveredTime, se
     name: `Cell ${idx}`,
   }));
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const tooltipFormatter: any = useCallback((value: unknown, name: string) => {
-    const num = typeof value === 'number' ? value : Number(value);
-    if (Number.isNaN(num)) return [String(value), name];
-    return [formatWithUnit(num.toFixed(cellVoltageDecimals), 'V'), name];
-  }, []);
-
-  const activePoint = getActivePoint(data, hoveredTime, selectedTime);
-  const activeCellText = useMemo(() => {
-    if (!activePoint) return null;
-    const parts: string[] = [];
-    for (const l of cellLines) {
-      const raw = activePoint[l.key];
-      if (raw == null) continue;
-      const num = typeof raw === 'number' ? raw : Number(raw);
-      if (Number.isNaN(num)) continue;
-      parts.push(formatWithUnit(num.toFixed(cellVoltageDecimals), 'V'));
-    }
-    return parts.length > 0 ? parts.join(' · ') : null;
-  }, [activePoint, cellLines]);
+  const isCompactChart = useCompactChartLayout();
+  const chartHeader = useChartHeaderLayout(isCompactChart);
+  const activeChartMargin = { ...(isCompactChart ? compactChartMargin : chartMargin), top: chartHeader.top };
+  const activeSingleAxisWidth = isCompactChart ? compactSingleAxisWidth : singleAxisWidth;
+  const activePoint = getActivePoint(data, hoveredTime, selectedTime, cellLines.map((line) => line.key));
+  const activeTimeText = formatActiveTime(activePoint);
 
   const yTickFormatter = useCallback((value: number) => formatWithUnit(value.toFixed(cellVoltageDecimals), 'V'), []);
 
@@ -1475,12 +1457,19 @@ function MultiCellChartSection({ selectedCells, data, onDismiss, hoveredTime, se
   }, [data, onSelect]);
 
   return (
-    <div className='relative -mx-1 overflow-hidden sm:mx-0'>
+    <div className='relative overflow-hidden'>
       <ChartHeaderOverlay
+        headerRef={chartHeader.headerRef}
         title={`Cell Voltage${selectedCells.length > 1 ? 's' : ''}`}
-        meta={<ChartLegendOverlay lines={cellLines} />}
-        valueText={activeCellText ?? 'No data'}
-        valueClassName='max-w-[12rem] truncate sm:max-w-[20rem]'
+        meta={<ChartLegendOverlay
+          lines={cellLines}
+          activePoint={activePoint}
+          activeTimeText={activeTimeText}
+          getDecimalsForKey={() => cellVoltageDecimals}
+          getUnitForKey={() => 'V'}
+          getFormatterForKey={() => undefined}
+        />}
+        valueText={undefined}
         selectedTime={selectedTime}
         onClearSelection={() => onSelect(null)}
         action={onDismiss ? (
@@ -1492,23 +1481,17 @@ function MultiCellChartSection({ selectedCells, data, onDismiss, hoveredTime, se
           </button>
         ) : null}
       />
-      <ResponsiveContainer width='100%' height={chartHeight}>
+      <ResponsiveContainer width='100%' height={chartHeader.height}>
         <LineChart
           data={data}
-          margin={chartMargin}
+          margin={activeChartMargin}
           onMouseMove={handleChartMove}
           onMouseLeave={handleChartLeave}
           onClick={handleChartClick}
         >
           <CartesianGrid strokeDasharray='3 3' stroke='var(--border)' opacity={0.4} />
           <XAxis dataKey='time' height={20} mirror tick={<XAxisOverlayTick />} tickLine={false} axisLine={false} />
-          <YAxis orientation='right' width={singleAxisWidth} mirror tick={<RightYAxisOverlayTick />} tickLine={false} axisLine={false} domain={['auto', 'auto']} tickFormatter={yTickFormatter} />
-          <Tooltip
-            contentStyle={tooltipContentStyle}
-            labelStyle={tooltipLabelStyle}
-            itemStyle={{ color: 'var(--foreground)' }}
-            formatter={tooltipFormatter}
-          />
+          <YAxis orientation='right' width={activeSingleAxisWidth} mirror tick={<RightYAxisOverlayTick />} tickLine={false} axisLine={false} domain={['auto', 'auto']} tickFormatter={yTickFormatter} />
           {cellLines.map((l) => (
             <Line key={l.key} type='monotone' dataKey={l.key} stroke={l.color} name={l.name} dot={false} strokeWidth={1.5} connectNulls isAnimationActive={false} />
           ))}
@@ -1597,7 +1580,7 @@ function formatActiveTime(point: Record<string, unknown> | null): string | null 
   return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
 }
 
-function getActivePoint(data: Record<string, unknown>[], hoveredTime: string | null, selectedTime: string | null) {
+function getActivePoint(data: Record<string, unknown>[], hoveredTime: string | null, selectedTime: string | null, keys?: string[]) {
   const ts = hoveredTime ?? selectedTime;
   if (ts != null) {
     return data.find(p => p.timestamp === ts) ?? data.at(-1) ?? null;
@@ -1606,8 +1589,10 @@ function getActivePoint(data: Record<string, unknown>[], hoveredTime: string | n
   // Find the last point that has actual data (not just padding with time/timestamp).
   for (let i = data.length - 1; i >= 0; i--) {
     const p = data[i];
-    const keys = Object.keys(p);
-    if (keys.some(k => k !== 'time' && k !== 'timestamp' && p[k] != null)) {
+    const candidateKeys = keys && keys.length > 0
+      ? keys
+      : Object.keys(p).filter(k => k !== 'time' && k !== 'timestamp');
+    if (candidateKeys.some(k => p[k] != null)) {
       return p;
     }
   }
