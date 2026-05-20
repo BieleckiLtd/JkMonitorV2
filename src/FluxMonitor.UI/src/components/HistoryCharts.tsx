@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import {
-  ResponsiveContainer, LineChart, Line, AreaChart, Area, ReferenceDot,
+  ResponsiveContainer, LineChart, Line, AreaChart, Area, ReferenceDot, ReferenceLine,
   XAxis, YAxis, CartesianGrid,
 } from 'recharts';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -1008,6 +1008,7 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
   const activeSingleAxisWidth = isCompactChart ? compactSingleAxisWidth : singleAxisWidth;
   const activeDualAxisWidth = isCompactChart ? compactDualAxisWidth : dualAxisWidth;
   const activePoint = getActivePoint(data, hoveredTime, selectedTime, lines.map((line) => line.key));
+  const interactionX = getInteractionX(data, hoveredTime, selectedTime);
   const hasSecondaryAxis = lines.some((line) => line.secondaryAxis);
   const activeTimeText = formatActiveTime(activePoint);
   const primaryAxisLine = lines.find((line) => !line.secondaryAxis) ?? lines[0];
@@ -1129,6 +1130,7 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
               isAnimationActive={false}
             />
           ))}
+          {renderInteractionReferenceLine(interactionX, 'primary')}
           {renderActiveReferenceDots(activePoint, lines, (line) => line.secondaryAxis ? 'secondary' : 'primary')}
         </LineChart>
       </ResponsiveContainer>
@@ -1156,6 +1158,7 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
   const activeChartMargin = { ...(isCompactChart ? compactChartMargin : chartMargin), top: chartHeader.top };
   const activeSingleAxisWidth = isCompactChart ? compactSingleAxisWidth : singleAxisWidth;
   const activePoint = getActivePoint(data, hoveredTime, selectedTime, [line.key]);
+  const interactionX = getInteractionX(data, hoveredTime, selectedTime);
   const activeTimeText = formatActiveTime(activePoint);
 
   const handleChartMove = useCallback((state: unknown) => {
@@ -1242,6 +1245,7 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
             connectNulls
             isAnimationActive={false}
           />
+          {renderInteractionReferenceLine(interactionX)}
           {renderActiveReferenceDots(activePoint, [line])}
         </AreaChart>
       </ResponsiveContainer>
@@ -1307,6 +1311,7 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
   const activeChartMargin = { ...(isCompactChart ? compactChartMargin : chartMargin), top: chartHeader.top };
   const activeSingleAxisWidth = isCompactChart ? compactSingleAxisWidth : singleAxisWidth;
   const activePoint = getActivePoint(energyData, hoveredTime, selectedTime, ['displayPowerKw', 'signedPowerKw']);
+  const interactionX = getInteractionX(energyData, hoveredTime, selectedTime);
   const activeTimeText = formatActiveTime(activePoint);
   const activeEnergyText = useMemo(() => {
     if (!activePoint) return null;
@@ -1414,6 +1419,7 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
             <ReferenceDot key={`bm-${i}`} x={time} y={0} r={isMajor ? 3 : 1.5} fill={isMajor ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.2)'} stroke='none' />
           ))}
           <Area type='monotone' dataKey='signedPowerKw' stroke='url(#energyStrokeGradient)' fill='url(#energyGradient)' strokeWidth={1.5} dot={false} isAnimationActive={false} baseValue={0} />
+          {renderInteractionReferenceLine(interactionX)}
           {renderActiveReferenceDots(activePoint, [{ key: 'signedPowerKw', color: '#38bdf8', name: 'Power' }])}
         </AreaChart>
       </ResponsiveContainer>
@@ -1437,6 +1443,7 @@ function MultiCellChartSection({ selectedCells, data, onDismiss, hoveredTime, se
   const activeChartMargin = { ...(isCompactChart ? compactChartMargin : chartMargin), top: chartHeader.top };
   const activeSingleAxisWidth = isCompactChart ? compactSingleAxisWidth : singleAxisWidth;
   const activePoint = getActivePoint(data, hoveredTime, selectedTime, cellLines.map((line) => line.key));
+  const interactionX = getInteractionX(data, hoveredTime, selectedTime);
   const activeTimeText = formatActiveTime(activePoint);
 
   const yTickFormatter = useCallback((value: number) => formatWithUnit(value.toFixed(cellVoltageDecimals), 'V'), []);
@@ -1498,6 +1505,7 @@ function MultiCellChartSection({ selectedCells, data, onDismiss, hoveredTime, se
           {cellLines.map((l) => (
             <Line key={l.key} type='monotone' dataKey={l.key} stroke={l.color} name={l.name} dot={false} strokeWidth={1.5} connectNulls isAnimationActive={false} />
           ))}
+          {renderInteractionReferenceLine(interactionX)}
           {renderActiveReferenceDots(activePoint, cellLines)}
         </LineChart>
       </ResponsiveContainer>
@@ -1642,6 +1650,34 @@ function getPointTimeMs(point: Record<string, unknown>) {
 
   const parsed = Date.parse(timestamp);
   return Number.isNaN(parsed) ? null : parsed;
+}
+
+function getInteractionX(data: Record<string, unknown>[], hoveredTime: string | null, selectedTime: string | null): string | null {
+  const timestamp = hoveredTime ?? selectedTime;
+  if (!timestamp) {
+    return null;
+  }
+
+  const point = data.find(p => p.timestamp === timestamp);
+  const time = point?.time;
+  return time != null ? String(time) : null;
+}
+
+function renderInteractionReferenceLine(x: string | null, yAxisId?: string) {
+  if (!x) {
+    return null;
+  }
+
+  return (
+    <ReferenceLine
+      x={x}
+      yAxisId={yAxisId}
+      stroke='var(--foreground)'
+      strokeOpacity={0.55}
+      strokeWidth={1.35}
+      ifOverflow='extendDomain'
+    />
+  );
 }
 
 function renderActiveReferenceDots(
