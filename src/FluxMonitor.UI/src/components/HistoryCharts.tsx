@@ -780,8 +780,8 @@ const xTickStyle = { fontSize: 10, fill: 'var(--muted-foreground)', fontWeight: 
 const tooltipContentStyle = { backgroundColor: 'var(--card)', border: '1px solid var(--border)', borderRadius: '0.5rem', fontSize: 12, color: 'var(--foreground)' };
 const tooltipLabelStyle = { color: 'var(--muted-foreground)' };
 const chartHeight = 208;
-const chartMargin = { top: 56, right: 0, bottom: 12, left: 0 };
-const compactChartMargin = { top: 58, right: 0, bottom: 12, left: 0 };
+const chartMargin = { top: 44, right: 0, bottom: 12, left: 0 };
+const compactChartMargin = { top: 46, right: 0, bottom: 12, left: 0 };
 const singleAxisWidth = 48;
 const dualAxisWidth = 42;
 const compactSingleAxisWidth = 1;
@@ -875,12 +875,14 @@ function useCompactChartLayout() {
 function ChartLegendOverlay({
   lines,
   activePoint,
+  activeTimeText,
   getDecimalsForKey,
   getUnitForKey,
   getFormatterForKey,
 }: {
   lines: LineSpec[];
   activePoint?: Record<string, unknown> | null;
+  activeTimeText?: string | null;
   getDecimalsForKey?: (key: string) => number;
   getUnitForKey?: (key: string) => string;
   getFormatterForKey?: (key: string) => string | null | undefined;
@@ -890,7 +892,15 @@ function ChartLegendOverlay({
   }
 
   return (
-    <div className='mt-2 mb-2 flex flex-wrap gap-x-3.5 gap-y-1.5'>
+    <div className='flex min-w-0 flex-wrap items-center gap-x-3.5 gap-y-1.5'>
+      {activeTimeText ? (
+        <span
+          className='text-[10px] font-medium tabular-nums text-muted-foreground'
+          style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.42)' }}
+        >
+          {activeTimeText}
+        </span>
+      ) : null}
       {lines.map((line) => (
         <span
           key={line.key}
@@ -932,16 +942,18 @@ function ChartHeaderOverlay({
   const hasRightContent = valueText != null || selectedTime != null;
 
   return (
-    <div className='pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-4 bg-gradient-to-b from-background/80 via-background/28 to-transparent px-3 pt-3 pb-8 sm:px-4'>
-      <div className='min-w-0'>
-        <div
-          className='text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground'
-          style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.45)' }}
-        >
-          {title}
+    <div className='pointer-events-none absolute inset-x-0 top-0 z-10 flex items-start justify-between gap-4 bg-gradient-to-b from-background/80 via-background/28 to-transparent px-3 pt-3 pb-6 sm:px-4'>
+      <div className='min-w-0 flex-1'>
+        <div className='flex min-w-0 flex-wrap items-center gap-x-4 gap-y-2'>
+          <div
+            className='shrink-0 text-[11px] font-medium uppercase tracking-[0.24em] text-muted-foreground'
+            style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.45)' }}
+          >
+            {title}
+          </div>
+          {meta && <div className='min-w-0'>{meta}</div>}
         </div>
         {subtitle && <div className='mt-1'>{subtitle}</div>}
-        {meta && <div>{meta}</div>}
         {action && <div className='pointer-events-auto mt-2'>{action}</div>}
       </div>
       {hasRightContent ? (
@@ -986,6 +998,7 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
   const activeDualAxisWidth = isCompactChart ? compactDualAxisWidth : dualAxisWidth;
   const hasSecondaryAxis = lines.some((line) => line.secondaryAxis);
   const activeValueText = lines.length === 1 ? formatActiveValues(activePoint, lines, getDecimalsForKey, getUnitForKey, getFormatterForKey) : null;
+  const activeTimeText = formatActiveTime(activePoint);
   const primaryAxisLine = lines.find((line) => !line.secondaryAxis) ?? lines[0];
   const secondaryAxisLine = lines.find((line) => line.secondaryAxis);
   const primaryTickFormatter = useCallback((value: number) => (
@@ -994,22 +1007,6 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
   const secondaryTickFormatter = useCallback((value: number) => (
     secondaryAxisLine ? formatChartValue(value, secondaryAxisLine.key, getDecimalsForKey, getUnitForKey, getFormatterForKey) : String(value)
   ), [getDecimalsForKey, getFormatterForKey, getUnitForKey, secondaryAxisLine]);
-  const renderTooltipContent = useCallback((tooltipState: {
-    active?: boolean;
-    label?: string | number;
-    payload?: ReadonlyArray<{ payload?: Record<string, unknown> }>;
-  }) => {
-    if (!tooltipState.active) {
-      return null;
-    }
-
-    return (
-      <div style={tooltipContentStyle}>
-        <div style={tooltipLabelStyle}>{String(tooltipState.label ?? '')}</div>
-      </div>
-    );
-  }, []);
-
   const handleChartMove = useCallback((state: unknown) => {
     const timestamp = extractActiveTimestamp(state, data);
     if (timestamp != null) {
@@ -1040,6 +1037,7 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
         meta={<ChartLegendOverlay
           lines={lines}
           activePoint={activePoint}
+          activeTimeText={activeTimeText}
           getDecimalsForKey={getDecimalsForKey}
           getUnitForKey={getUnitForKey}
           getFormatterForKey={getFormatterForKey}
@@ -1104,9 +1102,6 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
               tickFormatter={primaryTickFormatter}
             />
           )}
-          <Tooltip
-            content={renderTooltipContent}
-          />
           {lines.map((l) => (
             <Line
               key={l.key}
@@ -1577,6 +1572,29 @@ function extractActiveTimestamp(state: unknown, data: Record<string, unknown>[])
 function getPointTimestamp(point: Record<string, unknown> | null | undefined): string | null {
   const timestamp = point?.timestamp;
   return typeof timestamp === 'string' && timestamp.length > 0 ? timestamp : null;
+}
+
+function formatActiveTime(point: Record<string, unknown> | null): string | null {
+  if (!point) {
+    return null;
+  }
+
+  const time = point.time;
+  if (time != null) {
+    return String(time);
+  }
+
+  const timestamp = getPointTimestamp(point);
+  if (!timestamp) {
+    return null;
+  }
+
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return null;
+  }
+
+  return `${date.getHours().toString().padStart(2, '0')}:${date.getMinutes().toString().padStart(2, '0')}`;
 }
 
 function getActivePoint(data: Record<string, unknown>[], hoveredTime: string | null, selectedTime: string | null) {
