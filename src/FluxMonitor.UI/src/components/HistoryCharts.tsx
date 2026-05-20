@@ -562,7 +562,7 @@ export function HistoryCharts({ deviceId, precision, selectedCellIndices, onClea
   };
 
   return (
-    <Card className='bg-card/85 shadow-sm'>
+    <Card className='-mx-4 bg-card/85 shadow-sm sm:mx-0'>
       <CardHeader className='border-b border-border/60 pb-3'>
         <CardTitle className='flex items-center justify-between text-sm'>
           <div className='flex items-center gap-2'>
@@ -685,6 +685,10 @@ type LineSpec = {
 type ChartInteractionState = {
   activeTooltipIndex?: number;
   activeIndex?: number;
+  activeLabel?: string | number;
+  activePayload?: ReadonlyArray<{
+    payload?: Record<string, unknown>;
+  }>;
 };
 
 /** Renders history charts from the device definition's chart declarations. */
@@ -1007,9 +1011,9 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
   }, []);
 
   const handleChartMove = useCallback((state: unknown) => {
-    const idx = extractActiveIndex(state);
-    if (idx != null && data[idx]) {
-      onHover(String(data[idx].timestamp ?? ''));
+    const timestamp = extractActiveTimestamp(state, data);
+    if (timestamp != null) {
+      onHover(timestamp);
     } else {
       onHover(null);
     }
@@ -1020,9 +1024,9 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
   }, [onHover]);
 
   const handleChartClick = useCallback((state: unknown) => {
-    const idx = extractActiveIndex(state);
-    if (idx != null && data[idx]) {
-      onSelect(String(data[idx].timestamp ?? ''));
+    const timestamp = extractActiveTimestamp(state, data);
+    if (timestamp != null) {
+      onSelect(timestamp);
     } else {
       onSelect(null);
     }
@@ -1175,9 +1179,9 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
   }, [activePoint, getDecimalsForKey, getFormatterForKey, getUnitForKey, line]);
 
   const handleChartMove = useCallback((state: unknown) => {
-    const idx = extractActiveIndex(state);
-    if (idx != null && data[idx]) {
-      onHover(String(data[idx].timestamp ?? ''));
+    const timestamp = extractActiveTimestamp(state, data);
+    if (timestamp != null) {
+      onHover(timestamp);
     } else {
       onHover(null);
     }
@@ -1188,9 +1192,9 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
   }, [onHover]);
 
   const handleChartClick = useCallback((state: unknown) => {
-    const idx = extractActiveIndex(state);
-    if (idx != null && data[idx]) {
-      onSelect(String(data[idx].timestamp ?? ''));
+    const timestamp = extractActiveTimestamp(state, data);
+    if (timestamp != null) {
+      onSelect(timestamp);
     } else {
       onSelect(null);
     }
@@ -1321,18 +1325,18 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
   }, [activePoint]);
 
   const handleChartMove = useCallback((state: unknown) => {
-    const idx = extractActiveIndex(state);
-    if (idx != null && energyData[idx]) {
-      onHover(String(energyData[idx].timestamp ?? ''));
+    const timestamp = extractActiveTimestamp(state, energyData);
+    if (timestamp != null) {
+      onHover(timestamp);
     } else {
       onHover(null);
     }
   }, [energyData, onHover]);
   const handleChartLeave = useCallback(() => { onHover(null); }, [onHover]);
   const handleChartClick = useCallback((state: unknown) => {
-    const idx = extractActiveIndex(state);
-    if (idx != null && energyData[idx]) {
-      onSelect(String(energyData[idx].timestamp ?? ''));
+    const timestamp = extractActiveTimestamp(state, energyData);
+    if (timestamp != null) {
+      onSelect(timestamp);
     } else {
       onSelect(null);
     }
@@ -1458,18 +1462,18 @@ function MultiCellChartSection({ selectedCells, data, onDismiss, hoveredTime, se
   const yTickFormatter = useCallback((value: number) => formatWithUnit(value.toFixed(cellVoltageDecimals), 'V'), []);
 
   const handleChartMove = useCallback((state: unknown) => {
-    const idx = extractActiveIndex(state);
-    if (idx != null && data[idx]) {
-      onHover(String(data[idx].timestamp ?? ''));
+    const timestamp = extractActiveTimestamp(state, data);
+    if (timestamp != null) {
+      onHover(timestamp);
     } else {
       onHover(null);
     }
   }, [data, onHover]);
   const handleChartLeave = useCallback(() => { onHover(null); }, [onHover]);
   const handleChartClick = useCallback((state: unknown) => {
-    const idx = extractActiveIndex(state);
-    if (idx != null && data[idx]) {
-      onSelect(String(data[idx].timestamp ?? ''));
+    const timestamp = extractActiveTimestamp(state, data);
+    if (timestamp != null) {
+      onSelect(timestamp);
     } else {
       onSelect(null);
     }
@@ -1544,14 +1548,35 @@ function fmtTime(iso: string, resolution: Resolution, displayMode: HistoryDispla
   return time;
 }
 
-function extractActiveIndex(state: unknown): number | null {
+function extractActiveTimestamp(state: unknown, data: Record<string, unknown>[]): string | null {
   if (typeof state !== 'object' || state == null) {
     return null;
   }
 
   const chartState = state as ChartInteractionState;
   const candidate = chartState.activeTooltipIndex ?? chartState.activeIndex;
-  return typeof candidate === 'number' && Number.isFinite(candidate) ? candidate : null;
+  if (typeof candidate === 'number' && Number.isFinite(candidate) && data[candidate]) {
+    return getPointTimestamp(data[candidate]);
+  }
+
+  const payloadTimestamp = getPointTimestamp(chartState.activePayload?.[0]?.payload ?? null);
+  if (payloadTimestamp != null) {
+    return payloadTimestamp;
+  }
+
+  const activeLabel = chartState.activeLabel;
+  if (activeLabel != null) {
+    const label = String(activeLabel);
+    const labelPoint = data.find((point) => String(point.time ?? '') === label);
+    return getPointTimestamp(labelPoint ?? null);
+  }
+
+  return null;
+}
+
+function getPointTimestamp(point: Record<string, unknown> | null | undefined): string | null {
+  const timestamp = point?.timestamp;
+  return typeof timestamp === 'string' && timestamp.length > 0 ? timestamp : null;
 }
 
 function getActivePoint(data: Record<string, unknown>[], hoveredTime: string | null, selectedTime: string | null) {
