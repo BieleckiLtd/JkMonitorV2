@@ -1129,6 +1129,7 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
               isAnimationActive={false}
             />
           ))}
+          {renderActiveReferenceDots(activePoint, lines, (line) => line.secondaryAxis ? 'secondary' : 'primary')}
         </LineChart>
       </ResponsiveContainer>
     </div>
@@ -1241,6 +1242,7 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
             connectNulls
             isAnimationActive={false}
           />
+          {renderActiveReferenceDots(activePoint, [line])}
         </AreaChart>
       </ResponsiveContainer>
     </div>
@@ -1412,6 +1414,7 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
             <ReferenceDot key={`bm-${i}`} x={time} y={0} r={isMajor ? 3 : 1.5} fill={isMajor ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.2)'} stroke='none' />
           ))}
           <Area type='monotone' dataKey='signedPowerKw' stroke='url(#energyStrokeGradient)' fill='url(#energyGradient)' strokeWidth={1.5} dot={false} isAnimationActive={false} baseValue={0} />
+          {renderActiveReferenceDots(activePoint, [{ key: 'signedPowerKw', color: '#38bdf8', name: 'Power' }])}
         </AreaChart>
       </ResponsiveContainer>
     </div>
@@ -1495,6 +1498,7 @@ function MultiCellChartSection({ selectedCells, data, onDismiss, hoveredTime, se
           {cellLines.map((l) => (
             <Line key={l.key} type='monotone' dataKey={l.key} stroke={l.color} name={l.name} dot={false} strokeWidth={1.5} connectNulls isAnimationActive={false} />
           ))}
+          {renderActiveReferenceDots(activePoint, cellLines)}
         </LineChart>
       </ResponsiveContainer>
     </div>
@@ -1581,20 +1585,101 @@ function formatActiveTime(point: Record<string, unknown> | null): string | null 
 }
 
 function getActivePoint(data: Record<string, unknown>[], hoveredTime: string | null, selectedTime: string | null, keys?: string[]) {
+  const candidateKeys = resolveCandidateKeys(data, keys);
   const ts = hoveredTime ?? selectedTime;
   if (ts != null) {
-    return data.find(p => p.timestamp === ts) ?? data.at(-1) ?? null;
+    const exact = data.find(p => p.timestamp === ts) ?? null;
+    if (exact && hasAnyValue(exact, candidateKeys)) {
+      return exact;
+    }
+
+    const cutoff = exact ? getPointTimeMs(exact) : Date.parse(ts);
+    return findLatestPointWithValues(data, candidateKeys, Number.isNaN(cutoff) ? null : cutoff)
+      ?? findLatestPointWithValues(data, candidateKeys)
+      ?? exact;
   }
 
   // Find the last point that has actual data (not just padding with time/timestamp).
+  return findLatestPointWithValues(data, candidateKeys);
+}
+
+function resolveCandidateKeys(data: Record<string, unknown>[], keys?: string[]) {
+  if (keys && keys.length > 0) {
+    return keys;
+  }
+
+  const lastPoint = data.at(-1);
+  return lastPoint
+    ? Object.keys(lastPoint).filter(k => k !== 'time' && k !== 'timestamp')
+    : [];
+}
+
+function findLatestPointWithValues(data: Record<string, unknown>[], keys: string[], latestAt?: number | null) {
   for (let i = data.length - 1; i >= 0; i--) {
     const p = data[i];
-    const candidateKeys = keys && keys.length > 0
-      ? keys
-      : Object.keys(p).filter(k => k !== 'time' && k !== 'timestamp');
-    if (candidateKeys.some(k => p[k] != null)) {
+    const pointTime = getPointTimeMs(p);
+    if (latestAt != null && pointTime != null && pointTime > latestAt) {
+      continue;
+    }
+
+    if (hasAnyValue(p, keys)) {
       return p;
     }
   }
+
   return null;
+}
+
+function hasAnyValue(point: Record<string, unknown>, keys: string[]) {
+  return keys.some(key => point[key] != null);
+}
+
+function getPointTimeMs(point: Record<string, unknown>) {
+  const timestamp = getPointTimestamp(point);
+  if (!timestamp) {
+    return null;
+  }
+
+  const parsed = Date.parse(timestamp);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function renderActiveReferenceDots(
+  activePoint: Record<string, unknown> | null,
+  lines: LineSpec[],
+  getYAxisId?: (line: LineSpec) => string,
+) {
+  if (!activePoint) {
+    return null;
+  }
+
+  const x = activePoint.time;
+  if (x == null) {
+    return null;
+  }
+
+  return lines.map((line) => {
+    const raw = activePoint[line.key];
+    if (raw == null) {
+      return null;
+    }
+
+    const y = typeof raw === 'number' ? raw : Number(raw);
+    if (Number.isNaN(y)) {
+      return null;
+    }
+
+    return (
+      <ReferenceDot
+        key={`active-dot-${line.key}`}
+        x={String(x)}
+        y={y}
+        yAxisId={getYAxisId?.(line)}
+        r={5}
+        fill={line.color}
+        stroke='var(--background)'
+        strokeWidth={2.25}
+      />
+    );
+  });
 }
