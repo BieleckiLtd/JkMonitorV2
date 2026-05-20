@@ -777,11 +777,11 @@ const tooltipContentStyle = { backgroundColor: 'var(--card)', border: '1px solid
 const tooltipLabelStyle = { color: 'var(--muted-foreground)' };
 const chartHeight = 208;
 const chartMargin = { top: 56, right: 0, bottom: 12, left: 0 };
-const compactChartMargin = { top: 58, right: -8, bottom: 12, left: -8 };
+const compactChartMargin = { top: 58, right: 0, bottom: 12, left: 0 };
 const singleAxisWidth = 48;
 const dualAxisWidth = 42;
-const compactSingleAxisWidth = 38;
-const compactDualAxisWidth = 34;
+const compactSingleAxisWidth = 1;
+const compactDualAxisWidth = 1;
 const cellVoltageDecimals = 3;
 const axisLabelShadow = 'drop-shadow(0 1px 2px rgba(5, 8, 15, 0.42))';
 
@@ -1029,7 +1029,7 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
   }, [data, onSelect]);
 
   return (
-    <div className='relative -mx-3 overflow-hidden sm:mx-0'>
+    <div className='relative overflow-hidden'>
       <ChartHeaderOverlay
         title={title}
         subtitle={subtitle}
