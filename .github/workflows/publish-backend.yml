@@ -66,7 +66,7 @@ jobs:
           cache-dependency-path: ${{ env.FRONTEND_PATH }}/package-lock.json
 
       - name: Restore
-        run: dotnet restore ${{ env.PROJECT_PATH }} -p:TargetFramework=net10.0
+        run: dotnet restore ${{ env.PROJECT_PATH }} --runtime linux-arm64 -p:TargetFramework=net10.0
 
       - name: Publish linux-arm64 backend
         shell: bash
@@ -77,6 +77,7 @@ jobs:
             --runtime linux-arm64 \
             --self-contained false \
             -f net10.0 \
+            --no-restore \
             -p:UseAppHost=false \
             -p:FluxMonitorReleaseTag="${{ needs.resolve-release.outputs.tag }}" \
             -p:FluxMonitorSourceRevisionId="${{ github.sha }}" \
