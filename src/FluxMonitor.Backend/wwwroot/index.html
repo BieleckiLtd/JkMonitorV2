@@ -100,7 +100,10 @@
 
         let activeThemeId = defaultThemeId;
         try {
-          activeThemeId = localStorage.getItem(themeStorageKey) || defaultThemeId;
+          const desktopTheme = window.fluxMonitorDesktop?.savedTheme;
+          activeThemeId = (typeof desktopTheme?.id === 'string' ? desktopTheme.id : null)
+            || localStorage.getItem(themeStorageKey)
+            || defaultThemeId;
         } catch {
           activeThemeId = defaultThemeId;
         }

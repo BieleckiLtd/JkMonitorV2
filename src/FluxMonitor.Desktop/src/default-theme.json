@@ -1,0 +1,19 @@
+{
+    "id": "tactical-slate",
+    "mode": "dark",
+    "radius": "0rem",
+    "colors": {
+        "--background": "#0A0B10",
+        "--foreground": "#E3E1E9",
+        "--card": "#1E1F25",
+        "--primary": "#c5ff41",
+        "--muted-foreground": "#8D937B",
+        "--border": "#34343A",
+        "--error-accent": "#f87171",
+        "--error-foreground": "#e2e8f0",
+        "--error-heading": "#ffffff",
+        "--error-message": "#fca5a5",
+        "--error-border": "rgba(248, 113, 113, 0.18)",
+        "--error-pre-border": "rgba(248, 113, 113, 0.12)"
+    }
+}

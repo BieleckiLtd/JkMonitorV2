@@ -117,9 +117,6 @@ public sealed class GenericBlePollingClient(
         DeviceDefinition definition,
         CancellationToken cancellationToken)
     {
-        if (!OperatingSystem.IsLinux())
-            throw new PlatformNotSupportedException("BLE polling is supported on Linux/BlueZ only.");
-
         var unsupportedReason = GetUnsupportedDefinitionMessage(definition);
         if (unsupportedReason is not null)
             throw new NotSupportedException(
@@ -234,9 +231,6 @@ public sealed class GenericBlePollingClient(
         uint rawValue,
         CancellationToken cancellationToken)
     {
-        if (!OperatingSystem.IsLinux())
-            throw new PlatformNotSupportedException("BLE writes are supported on Linux/BlueZ only.");
-
         var unsupportedReason = GetUnsupportedDefinitionMessage(definition);
         if (unsupportedReason is not null)
             throw new NotSupportedException(
@@ -273,7 +267,7 @@ public sealed class GenericBlePollingClient(
                 definition,
                 cancellationToken,
                 requireWriteCharacteristic: true);
-            if (session.WriteCharacteristic is null)
+            if (!session.HasWriteCharacteristic)
             {
                 throw new InvalidOperationException(
                     $"Device '{device.DeviceId}' does not expose a writable BLE characteristic for entity '{entityId}'.");
@@ -324,14 +318,23 @@ public sealed class GenericBlePollingClient(
         CancellationToken cancellationToken,
         bool returnOnFirstMatch = false)
     {
-        if (!OperatingSystem.IsLinux())
-            throw new PlatformNotSupportedException("BLE discovery is supported on Linux/BlueZ only.");
-
         if (definition is not null &&
             !string.Equals(definition.Connection.Transport.Type, "ble", StringComparison.OrdinalIgnoreCase))
         {
             return [];
         }
+
+        if (OperatingSystem.IsWindows())
+        {
+#if WINDOWS
+            return await DiscoverDevicesWindowsAsync(definition, timeout, cancellationToken, returnOnFirstMatch);
+#else
+            throw new PlatformNotSupportedException("BLE discovery is not supported on this Windows build target.");
+#endif
+        }
+
+        if (!OperatingSystem.IsLinux())
+            throw new PlatformNotSupportedException("BLE discovery is supported on Linux and Windows only.");
 
         var discoveryWindow = timeout ?? TimeSpan.FromSeconds(6);
         if (discoveryWindow < TimeSpan.FromSeconds(1))
@@ -457,6 +460,130 @@ public sealed class GenericBlePollingClient(
         return ordered;
     }
 
+#if WINDOWS
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private async Task<IReadOnlyList<BleDiscoveredDevice>> DiscoverDevicesWindowsAsync(
+        DeviceDefinition? definition,
+        TimeSpan? timeout,
+        CancellationToken cancellationToken,
+        bool returnOnFirstMatch = false)
+    {
+        var discoveryWindow = timeout ?? TimeSpan.FromSeconds(6);
+        if (discoveryWindow < TimeSpan.FromSeconds(1))
+            discoveryWindow = TimeSpan.FromSeconds(1);
+
+        logger.LogInformation(
+            "Starting BLE discovery (Windows). DefinitionId={DefinitionId}, TimeoutMs={TimeoutMs}.",
+            definition?.Device.Id ?? "<none>",
+            (int)discoveryWindow.TotalMilliseconds);
+
+        var expectedServiceUuid = definition is not null && IsDefinitionSupported(definition)
+            ? BlueZManager.NormalizeUUID(
+                definition.Connection.Transport.Defaults?.ServiceUuid
+                ?? throw new InvalidOperationException($"Definition '{definition.Device.Id}' has no BLE service UUID."))
+            : null;
+
+        var devices = new ConcurrentDictionary<string, BleDiscoveredDevice>(StringComparer.OrdinalIgnoreCase);
+        var matchFound = returnOnFirstMatch && expectedServiceUuid is not null
+            ? new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
+            : null;
+
+        var watcher = new Windows.Devices.Bluetooth.Advertisement.BluetoothLEAdvertisementWatcher
+        {
+            ScanningMode = Windows.Devices.Bluetooth.Advertisement.BluetoothLEScanningMode.Active
+        };
+
+        watcher.Received += (_, args) =>
+        {
+            var address = WindowsBleHelpers.UlongToMacAddress(args.BluetoothAddress);
+            var rssi = (int)args.RawSignalStrengthInDBm;
+            var name = string.IsNullOrWhiteSpace(args.Advertisement.LocalName) ? null : args.Advertisement.LocalName;
+            var displayName = name ?? address;
+
+            var manufacturerData = new Dictionary<int, byte[]>();
+            foreach (var section in args.Advertisement.DataSections)
+            {
+                if (section.DataType == 0xFF && section.Data.Length >= 2)
+                {
+                    var bytes2 = WindowsBleHelpers.BufferToBytes(section.Data);
+                    var companyId = (int)(bytes2[0] | (bytes2[1] << 8));
+                    manufacturerData[companyId] = bytes2[2..];
+                }
+            }
+
+            var serviceUuids = args.Advertisement.ServiceUuids
+                .Select(g => g.ToString("D").ToLowerInvariant())
+                .ToArray();
+            var mfrDescriptions = DescribeKeyValuePayloads(manufacturerData);
+
+            var discovered = new BleDiscoveredDevice(
+                address, null, name, displayName, false, false, rssi,
+                mfrDescriptions, serviceUuids, false, null, null);
+            devices[address] = discovered;
+
+            if (matchFound is not null && expectedServiceUuid is not null &&
+                serviceUuids.Contains(expectedServiceUuid, StringComparer.OrdinalIgnoreCase))
+            {
+                matchFound.TrySetResult();
+            }
+        };
+
+        watcher.Start();
+        try
+        {
+            if (matchFound is null)
+            {
+                await Task.Delay(discoveryWindow, cancellationToken);
+            }
+            else
+            {
+                var discoveryDelay = Task.Delay(discoveryWindow, cancellationToken);
+                var completed = await Task.WhenAny(discoveryDelay, matchFound.Task);
+                if (completed == matchFound.Task)
+                {
+                    var settleWindow = TimeSpan.FromMilliseconds(
+                        Math.Clamp((int)(discoveryWindow.TotalMilliseconds / 4), 250, 1000));
+                    await Task.Delay(settleWindow, cancellationToken);
+                }
+                else
+                {
+                    await discoveryDelay;
+                }
+            }
+        }
+        finally
+        {
+            watcher.Stop();
+        }
+
+        var discovered2 = devices.Values.ToList();
+
+        if (expectedServiceUuid is not null)
+        {
+            discovered2 = discovered2
+                .Select(d => ApplyAdvertisedServiceVerification(d, expectedServiceUuid))
+                .ToList();
+        }
+
+        var ordered = discovered2
+            .OrderByDescending(d => d.IsDefinitionVerified)
+            .ThenByDescending(d => d.IsConnected)
+            .ThenByDescending(d => d.Rssi ?? int.MinValue)
+            .ThenBy(d => string.IsNullOrWhiteSpace(d.DisplayName) ? 1 : 0)
+            .ThenBy(d => d.DisplayName, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(d => d.Address, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        logger.LogInformation(
+            "BLE discovery (Windows) completed. DefinitionId={DefinitionId}, ResultCount={ResultCount}, VerifiedCount={VerifiedCount}.",
+            definition?.Device.Id ?? "<none>",
+            ordered.Length,
+            ordered.Count(d => d.IsDefinitionVerified));
+
+        return ordered;
+    }
+#endif
+
     private async Task EnsureConnectedAsync(
         BleSession session,
         DeviceConfiguration device,
@@ -464,6 +591,14 @@ public sealed class GenericBlePollingClient(
         CancellationToken cancellationToken,
         bool requireWriteCharacteristic = false)
     {
+        if (OperatingSystem.IsWindows())
+        {
+#if WINDOWS
+            await EnsureConnectedWindowsAsync(session, device, definition, cancellationToken, requireWriteCharacteristic);
+            return;
+#endif
+        }
+
         var requiresWriteCharacteristic = requireWriteCharacteristic || DefinitionRequiresWriteCharacteristic(definition);
         if (session.Device is not null &&
             string.Equals(session.DefinitionId, definition.Device.Id, StringComparison.OrdinalIgnoreCase) &&
@@ -590,6 +725,163 @@ public sealed class GenericBlePollingClient(
         }
     }
 
+#if WINDOWS
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private async Task EnsureConnectedWindowsAsync(
+        BleSession session,
+        DeviceConfiguration device,
+        DeviceDefinition definition,
+        CancellationToken cancellationToken,
+        bool requireWriteCharacteristic)
+    {
+        var requiresWrite = requireWriteCharacteristic || DefinitionRequiresWriteCharacteristic(definition);
+
+        if (session.WindowsDevice is not null &&
+            string.Equals(session.DefinitionId, definition.Device.Id, StringComparison.OrdinalIgnoreCase) &&
+            session.WindowsNotifyCharacteristic is not null &&
+            (!requiresWrite || session.WindowsWriteCharacteristic is not null) &&
+            session.WindowsDevice.ConnectionStatus == Windows.Devices.Bluetooth.BluetoothConnectionStatus.Connected)
+        {
+            return;
+        }
+
+        await ResetSessionAsync(session);
+
+        var transportDefaults = definition.Connection.Transport.Defaults ?? new TransportDefaults();
+        await WaitForReconnectWindowAsync(session, transportDefaults.ReconnectDelayMs, cancellationToken);
+        var timeout = TimeSpan.FromMilliseconds(Math.Max(transportDefaults.ConnectionTimeoutMs, 5000));
+
+        var serviceUuidStr = BlueZManager.NormalizeUUID(
+            transportDefaults.ServiceUuid
+            ?? throw new InvalidOperationException($"Definition '{definition.Device.Id}' has no BLE service UUID."));
+        var notifyUuidStr = BlueZManager.NormalizeUUID(
+            transportDefaults.NotifyCharacteristicUuid
+            ?? throw new InvalidOperationException($"Definition '{definition.Device.Id}' has no BLE notify characteristic UUID."));
+        var writeUuidStr = requiresWrite
+            ? BlueZManager.NormalizeUUID(
+                transportDefaults.WriteCharacteristicUuid
+                ?? throw new InvalidOperationException($"Definition '{definition.Device.Id}' has no BLE write characteristic UUID."))
+            : null;
+
+        var serviceGuid = Guid.Parse(serviceUuidStr);
+        var notifyGuid = Guid.Parse(notifyUuidStr);
+        var writeGuid = writeUuidStr is not null ? Guid.Parse(writeUuidStr) : (Guid?)null;
+
+        var target = device.TransportPortName?.Trim();
+        if (string.IsNullOrWhiteSpace(target))
+            throw new InvalidOperationException($"Device '{device.DeviceId}' has no BLE address or alias configured.");
+
+        if (!WindowsBleHelpers.TryParseMacAddressToUlong(target, out var addressUlong))
+            throw new InvalidOperationException($"Cannot parse BLE MAC address '{target}' for device '{device.DeviceId}'.");
+
+        logger.LogInformation(
+            "Connecting to BLE device {Target} for device {DeviceId} (Windows WinRT).",
+            target,
+            device.DeviceId);
+
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(timeout);
+
+            var leDevice = await Windows.Devices.Bluetooth.BluetoothLEDevice
+                .FromBluetoothAddressAsync(addressUlong)
+                .AsTask(timeoutCts.Token);
+            if (leDevice is null)
+                throw new InvalidOperationException($"BLE device '{target}' was not found.");
+
+            var servicesResult = await leDevice
+                .GetGattServicesForUuidAsync(serviceGuid, Windows.Devices.Bluetooth.BluetoothCacheMode.Uncached)
+                .AsTask(timeoutCts.Token);
+            if (servicesResult.Status != Windows.Devices.Bluetooth.GenericAttributeProfile.GattCommunicationStatus.Success ||
+                servicesResult.Services.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    $"BLE service '{serviceUuidStr}' was not found on device '{target}'. Pairing may be required.");
+            }
+
+            var service = servicesResult.Services[0];
+
+            var notifyResult = await service
+                .GetCharacteristicsForUuidAsync(notifyGuid, Windows.Devices.Bluetooth.BluetoothCacheMode.Uncached)
+                .AsTask(timeoutCts.Token);
+            if (notifyResult.Status != Windows.Devices.Bluetooth.GenericAttributeProfile.GattCommunicationStatus.Success ||
+                notifyResult.Characteristics.Count == 0)
+            {
+                throw new InvalidOperationException(
+                    $"Notify characteristic '{notifyUuidStr}' was not found on device '{target}'.");
+            }
+
+            var notifyChar = notifyResult.Characteristics[0];
+
+            Windows.Devices.Bluetooth.GenericAttributeProfile.GattCharacteristic? writeChar = null;
+            if (writeGuid.HasValue)
+            {
+                var writeResult = await service
+                    .GetCharacteristicsForUuidAsync(writeGuid.Value, Windows.Devices.Bluetooth.BluetoothCacheMode.Uncached)
+                    .AsTask(timeoutCts.Token);
+                if (writeResult.Status != Windows.Devices.Bluetooth.GenericAttributeProfile.GattCommunicationStatus.Success ||
+                    writeResult.Characteristics.Count == 0)
+                {
+                    throw new InvalidOperationException(
+                        $"Write characteristic '{writeUuidStr}' was not found on device '{target}'.");
+                }
+
+                writeChar = writeResult.Characteristics[0];
+            }
+
+            var subscribeStatus = await notifyChar
+                .WriteClientCharacteristicConfigurationDescriptorAsync(
+                    Windows.Devices.Bluetooth.GenericAttributeProfile.GattClientCharacteristicConfigurationDescriptorValue.Notify)
+                .AsTask(timeoutCts.Token);
+            if (subscribeStatus != Windows.Devices.Bluetooth.GenericAttributeProfile.GattCommunicationStatus.Success)
+            {
+                throw new InvalidOperationException(
+                    $"Failed to subscribe to BLE notifications on device '{target}' (status: {subscribeStatus}).");
+            }
+
+            Windows.Foundation.TypedEventHandler<
+                Windows.Devices.Bluetooth.GenericAttributeProfile.GattCharacteristic,
+                Windows.Devices.Bluetooth.GenericAttributeProfile.GattValueChangedEventArgs> handler =
+                (_, args) =>
+                {
+                    var bytes = WindowsBleHelpers.BufferToBytes(args.CharacteristicValue);
+                    if (bytes.Length > 0)
+                        ProcessNotifyChunk(session, definition, bytes);
+                };
+
+            notifyChar.ValueChanged += handler;
+
+            session.WindowsDevice = leDevice;
+            session.WindowsNotifyCharacteristic = notifyChar;
+            session.WindowsWriteCharacteristic = writeChar;
+            session.WindowsNotifyHandler = handler;
+            session.DefinitionId = definition.Device.Id;
+
+            await Task.Delay(150, cancellationToken);
+            await SendStartupCommandsAsync(session, definition, cancellationToken);
+
+            logger.LogInformation(
+                "BLE connection established for device {DeviceId} (Windows WinRT). Target={Target}, ServiceUuid={ServiceUuid}.",
+                device.DeviceId,
+                target,
+                serviceUuidStr);
+            MarkConnectionSucceeded(session);
+        }
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
+        {
+            ScheduleReconnectAttempt(session, definition);
+            logger.LogWarning(
+                ex,
+                "BLE connection/setup failed for device {DeviceId} (Windows WinRT). Target={Target}.",
+                device.DeviceId,
+                target);
+            await ResetSessionAsync(session);
+            throw;
+        }
+    }
+#endif
+
     private async Task<byte[]> ReadBankPayloadAsync(
         BleSession session,
         DeviceDefinition definition,
@@ -608,7 +900,7 @@ public sealed class GenericBlePollingClient(
         DataSourceDefinition bank,
         CancellationToken cancellationToken)
     {
-        if (session.WriteCharacteristic is null)
+        if (!session.HasWriteCharacteristic)
             throw new InvalidOperationException($"Device '{session.DeviceId}' is not connected to a writable BLE characteristic.");
 
         var transportDefaults = definition.Connection.Transport.Defaults ?? new TransportDefaults();
@@ -666,16 +958,36 @@ public sealed class GenericBlePollingClient(
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (session.WriteCharacteristic is null)
+        if (!session.HasWriteCharacteristic)
             throw new InvalidOperationException($"Device '{session.DeviceId}' is not connected to a writable BLE characteristic.");
 
         var commandFrame = BuildBleRequestCommand(command, GetRequiredProtocolSettings(definition));
+
+#if WINDOWS
+        if (OperatingSystem.IsWindows())
+        {
+            var writer = new Windows.Storage.Streams.DataWriter();
+            writer.WriteBytes(commandFrame);
+            var writeOption = session.WindowsWriteCharacteristic!.CharacteristicProperties
+                .HasFlag(Windows.Devices.Bluetooth.GenericAttributeProfile.GattCharacteristicProperties.WriteWithoutResponse)
+                ? Windows.Devices.Bluetooth.GenericAttributeProfile.GattWriteOption.WriteWithoutResponse
+                : Windows.Devices.Bluetooth.GenericAttributeProfile.GattWriteOption.WriteWithResponse;
+            var result = await session.WindowsWriteCharacteristic!
+                .WriteValueWithResultAsync(writer.DetachBuffer(), writeOption)
+                .AsTask(cancellationToken);
+            if (result.Status != Windows.Devices.Bluetooth.GenericAttributeProfile.GattCommunicationStatus.Success)
+                throw new InvalidOperationException(
+                    $"BLE write failed with status {result.Status} for device '{session.DeviceId}'.");
+            return;
+        }
+#endif
+
         var options = new Dictionary<string, object>
         {
-            ["type"] = await SelectWriteTypeAsync(session.WriteCharacteristic)
+            ["type"] = await SelectWriteTypeAsync(session.WriteCharacteristic!)
         };
 
-        await session.WriteCharacteristic.WriteValueAsync(commandFrame, options);
+        await session.WriteCharacteristic!.WriteValueAsync(commandFrame, options);
     }
 
     private async Task SendStartupCommandsAsync(
@@ -730,7 +1042,7 @@ public sealed class GenericBlePollingClient(
                 return cachedPayload;
 
             var supportsRequest = SupportsNotifyStreamRequestFallback(bank);
-            var hasWriteCharacteristic = session.WriteCharacteristic is not null;
+            var hasWriteCharacteristic = session.HasWriteCharacteristic;
             var startRequestIssued = IsNotifyStreamStartRequestIssued(session, bank.Id);
             var consecutiveTimeouts = GetNotifyStreamConsecutiveTimeouts(session, bank.Id);
             if (ShouldSendNotifyStreamRequest(
@@ -788,7 +1100,11 @@ public sealed class GenericBlePollingClient(
             .Value;
         if (changedValue is not byte[] chunk || chunk.Length == 0)
             return;
+        ProcessNotifyChunk(session, definition, chunk);
+    }
 
+    private void ProcessNotifyChunk(BleSession session, DeviceDefinition definition, byte[] chunk)
+    {
         var settings = GetRequiredProtocolSettings(definition);
         var completedReads = new List<(TaskCompletionSource<BankCacheEntry> PendingRead, BankCacheEntry CacheEntry)>();
         var receivedUnmappedFrameTypes = new HashSet<byte>();
@@ -1071,14 +1387,10 @@ public sealed class GenericBlePollingClient(
     {
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (session.WriteCharacteristic is null)
+        if (!session.HasWriteCharacteristic)
             throw new InvalidOperationException($"Device '{session.DeviceId}' is not connected to a writable BLE characteristic.");
 
         var frame = BuildBleFrameWriteCommand(target, rawValue, GetRequiredProtocolSettings(definition));
-        var options = new Dictionary<string, object>
-        {
-            ["type"] = await SelectWriteTypeAsync(session.WriteCharacteristic)
-        };
 
         logger.LogInformation(
             "Sending BLE frame write for device {DeviceId}. Register=0x{Register:X2}, Length={Length}, Value={Value}.",
@@ -1087,7 +1399,31 @@ public sealed class GenericBlePollingClient(
             target.ValueLength,
             rawValue);
 
-        await session.WriteCharacteristic.WriteValueAsync(frame, options);
+#if WINDOWS
+        if (OperatingSystem.IsWindows())
+        {
+            var writer = new Windows.Storage.Streams.DataWriter();
+            writer.WriteBytes(frame);
+            var writeOption = session.WindowsWriteCharacteristic!.CharacteristicProperties
+                .HasFlag(Windows.Devices.Bluetooth.GenericAttributeProfile.GattCharacteristicProperties.WriteWithoutResponse)
+                ? Windows.Devices.Bluetooth.GenericAttributeProfile.GattWriteOption.WriteWithoutResponse
+                : Windows.Devices.Bluetooth.GenericAttributeProfile.GattWriteOption.WriteWithResponse;
+            var result = await session.WindowsWriteCharacteristic!
+                .WriteValueWithResultAsync(writer.DetachBuffer(), writeOption)
+                .AsTask(cancellationToken);
+            if (result.Status != Windows.Devices.Bluetooth.GenericAttributeProfile.GattCommunicationStatus.Success)
+                throw new InvalidOperationException(
+                    $"BLE frame write failed with status {result.Status} for device '{session.DeviceId}'.");
+            return;
+        }
+#endif
+
+        var options = new Dictionary<string, object>
+        {
+            ["type"] = await SelectWriteTypeAsync(session.WriteCharacteristic!)
+        };
+
+        await session.WriteCharacteristic!.WriteValueAsync(frame, options);
     }
 
     private static ProtocolSettings GetRequiredProtocolSettings(DeviceDefinition definition)
@@ -1935,6 +2271,13 @@ public sealed class GenericBlePollingClient(
 
     private static async Task<bool> IsSessionConnectedAsync(BleSession session)
     {
+#if WINDOWS
+        if (OperatingSystem.IsWindows())
+        {
+            return session.WindowsDevice?.ConnectionStatus ==
+                Windows.Devices.Bluetooth.BluetoothConnectionStatus.Connected;
+        }
+#endif
         if (session.Device is null)
             return false;
         try
@@ -2043,6 +2386,26 @@ public sealed class GenericBlePollingClient(
         foreach (var pendingRead in pendingReads)
             pendingRead.TrySetCanceled();
 
+#if WINDOWS
+        if (OperatingSystem.IsWindows())
+        {
+            if (session.WindowsNotifyCharacteristic is not null && session.WindowsNotifyHandler is not null)
+            {
+                try { session.WindowsNotifyCharacteristic.ValueChanged -= session.WindowsNotifyHandler; } catch { /* best effort */ }
+            }
+            if (session.WindowsDevice is not null)
+            {
+                try { session.WindowsDevice.Dispose(); } catch { /* best effort */ }
+            }
+            session.WindowsNotifyCharacteristic = null;
+            session.WindowsWriteCharacteristic = null;
+            session.WindowsNotifyHandler = null;
+            session.WindowsDevice = null;
+            session.DefinitionId = null;
+            return;
+        }
+#endif
+
         try { session.NotifyWatcher?.Dispose(); } catch { /* best effort */ }
         session.NotifyWatcher = null;
 
@@ -2113,6 +2476,20 @@ public sealed class GenericBlePollingClient(
         public string LastFrameHex { get; set; } = string.Empty;
         public int ConsecutiveReconnectFailures { get; set; }
         public DateTimeOffset? NextReconnectAttemptAt { get; set; }
+#if WINDOWS
+        public Windows.Devices.Bluetooth.BluetoothLEDevice? WindowsDevice { get; set; }
+        public Windows.Devices.Bluetooth.GenericAttributeProfile.GattCharacteristic? WindowsNotifyCharacteristic { get; set; }
+        public Windows.Devices.Bluetooth.GenericAttributeProfile.GattCharacteristic? WindowsWriteCharacteristic { get; set; }
+        public Windows.Foundation.TypedEventHandler<
+            Windows.Devices.Bluetooth.GenericAttributeProfile.GattCharacteristic,
+            Windows.Devices.Bluetooth.GenericAttributeProfile.GattValueChangedEventArgs>? WindowsNotifyHandler { get; set; }
+#endif
+
+        public bool HasWriteCharacteristic =>
+#if WINDOWS
+            OperatingSystem.IsWindows() ? WindowsWriteCharacteristic is not null :
+#endif
+            WriteCharacteristic is not null;
     }
 
     private sealed class BleNotifyStreamStalledException(string message, Exception innerException)

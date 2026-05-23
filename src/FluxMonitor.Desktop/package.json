@@ -6,10 +6,10 @@
   "author": "Bielecki Ltd",
   "main": "dist/main.js",
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.json && node -e \"const {cpSync}=require('fs');cpSync('src/pages','dist/pages',{recursive:true,force:true})\"",
     "build:backend:dev": "dotnet build ../FluxMonitor.Backend/FluxMonitor.Backend.csproj",
     "dev": "npm run build && npm run build:backend:dev && node ./scripts/start-electron.cjs",
-    "publish:backend:win": "dotnet publish ../FluxMonitor.Backend/FluxMonitor.Backend.csproj -c Release -r win-x64 --self-contained true -o ../../.artifacts/desktop/backend/win-x64",
+    "publish:backend:win": "dotnet publish ../FluxMonitor.Backend/FluxMonitor.Backend.csproj -c Release -r win-x64 --self-contained true -f net10.0-windows10.0.17763.0 -o ../../.artifacts/desktop/backend/win-x64",
     "dist:win": "npm run build && npm run publish:backend:win && electron-builder --win"
   },
   "build": {

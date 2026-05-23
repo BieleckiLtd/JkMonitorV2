@@ -76,6 +76,7 @@ jobs:
             --configuration Release \
             --runtime linux-arm64 \
             --self-contained false \
+            -f net10.0 \
             -p:UseAppHost=false \
             -p:FluxMonitorReleaseTag="${{ needs.resolve-release.outputs.tag }}" \
             -p:FluxMonitorSourceRevisionId="${{ github.sha }}" \

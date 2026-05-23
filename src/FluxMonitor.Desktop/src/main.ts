@@ -1,10 +1,11 @@
-import { app, BrowserWindow, shell } from "electron";
+import { app, BrowserWindow, ipcMain, shell } from "electron";
 import { spawn, type ChildProcess } from "node:child_process";
 import fs from "node:fs";
 import { get as httpGet } from "node:http";
 import { get as httpsGet } from "node:https";
 import net from "node:net";
 import path from "node:path";
+import defaultThemeJson from "./default-theme.json";
 
 type WindowState = {
     width: number;
@@ -13,6 +14,46 @@ type WindowState = {
     y?: number;
     isMaximized?: boolean;
 };
+
+type ThemeSnapshot = {
+    id: string;
+    mode: "dark" | "light";
+    radius: string;
+    colors: Record<string, string>;
+};
+
+const defaultThemeSnapshot: ThemeSnapshot = {
+    id: defaultThemeJson.id,
+    mode: defaultThemeJson.mode === "light" ? "light" : "dark",
+    radius: defaultThemeJson.radius,
+    colors: defaultThemeJson.colors as Record<string, string>
+};
+
+function getThemeSnapshotPath(): string {
+    return path.join(app.getPath("userData"), "active-theme.json");
+}
+
+function readSavedTheme(): ThemeSnapshot {
+    try {
+        const p = getThemeSnapshotPath();
+        if (!fs.existsSync(p)) {
+            return defaultThemeSnapshot;
+        }
+        const raw = fs.readFileSync(p, "utf8");
+        const parsed = JSON.parse(raw) as Partial<ThemeSnapshot>;
+        if (typeof parsed.id !== "string" || typeof parsed.radius !== "string" || !parsed.colors) {
+            return defaultThemeSnapshot;
+        }
+        return {
+            id: parsed.id,
+            mode: parsed.mode === "light" ? "light" : "dark",
+            radius: parsed.radius,
+            colors: { ...defaultThemeSnapshot.colors, ...parsed.colors }
+        };
+    } catch {
+        return defaultThemeSnapshot;
+    }
+}
 
 const desktopRoot = path.resolve(__dirname, "..");
 const defaultWindowState: WindowState = {
@@ -41,80 +82,31 @@ function escapeHtml(value: string): string {
         .replaceAll("'", "&#39;");
 }
 
-function buildInlinePage(title: string, heading: string, detail: string, accent: string): string {
+function readPageCss(name: string): string {
+    try {
+        return fs.readFileSync(path.join(__dirname, "pages", name), "utf8");
+    } catch {
+        return "";
+    }
+}
+
+function buildThemeRootBlock(theme: ThemeSnapshot): string {
+    const vars = Object.entries(theme.colors)
+        .map(([k, v]) => `  ${k}: ${v};`)
+        .join("\n");
+    return `:root {\n${vars}\n  --radius: ${theme.radius};\n}`;
+}
+
+function buildInlinePage(title: string, heading: string, detail: string, theme: ThemeSnapshot): string {
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>${escapeHtml(title)}</title>
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #0b1220;
-      --panel: rgba(15, 23, 42, 0.88);
-      --text: #e2e8f0;
-      --muted: #94a3b8;
-      --accent: ${accent};
-      --border: rgba(148, 163, 184, 0.24);
-    }
-
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: grid;
-      place-items: center;
-      background:
-        radial-gradient(circle at top, rgba(34, 197, 94, 0.16), transparent 40%),
-        linear-gradient(160deg, #020617 0%, #0f172a 52%, #111827 100%);
-      color: var(--text);
-      font: 15px/1.6 "Segoe UI", system-ui, sans-serif;
-    }
-
-    main {
-      width: min(720px, calc(100vw - 48px));
-      padding: 32px;
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      background: var(--panel);
-      backdrop-filter: blur(16px);
-      box-shadow: 0 24px 60px rgba(2, 6, 23, 0.5);
-    }
-
-    .eyebrow {
-      margin: 0 0 8px;
-      color: var(--accent);
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.16em;
-      text-transform: uppercase;
-    }
-
-    h1 {
-      margin: 0 0 12px;
-      font-size: clamp(28px, 5vw, 40px);
-      line-height: 1.1;
-    }
-
-    p {
-      margin: 0;
-      color: var(--muted);
-      white-space: pre-wrap;
-    }
-
-    pre {
-      margin: 20px 0 0;
-      padding: 16px;
-      border-radius: 14px;
-      border: 1px solid rgba(148, 163, 184, 0.18);
-      background: rgba(2, 6, 23, 0.72);
-      color: #cbd5e1;
-      overflow: auto;
-      font: 12px/1.55 Consolas, "Courier New", monospace;
-    }
-  </style>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <style>${buildThemeRootBlock(theme)}\n${readPageCss("inline-page.css")}</style>
 </head>
 <body>
   <main>
@@ -131,86 +123,22 @@ function buildInlinePage(title: string, heading: string, detail: string, accent:
 function buildStartupErrorPage(error: unknown): string {
     const message = error instanceof Error ? error.message : String(error);
     const logOutput = backendLogs.length > 0 ? backendLogs.join("") : "No backend output was captured.";
+    const theme = readSavedTheme();
     const html = `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Flux Monitor Startup Failed</title>
-  <style>
-    :root {
-      color-scheme: dark;
-      --bg: #120a0a;
-      --panel: rgba(29, 10, 10, 0.9);
-      --text: #fee2e2;
-      --muted: #fecaca;
-      --accent: #f97316;
-      --border: rgba(248, 113, 113, 0.28);
-    }
-
-    * { box-sizing: border-box; }
-
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: grid;
-      place-items: center;
-      background:
-        radial-gradient(circle at top, rgba(248, 113, 113, 0.22), transparent 42%),
-        linear-gradient(165deg, #160505 0%, #1f0b0b 54%, #050816 100%);
-      color: var(--text);
-      font: 15px/1.6 "Segoe UI", system-ui, sans-serif;
-    }
-
-    main {
-      width: min(880px, calc(100vw - 48px));
-      padding: 32px;
-      border: 1px solid var(--border);
-      border-radius: 20px;
-      background: var(--panel);
-      backdrop-filter: blur(16px);
-      box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
-    }
-
-    .eyebrow {
-      margin: 0 0 8px;
-      color: var(--accent);
-      font-size: 12px;
-      font-weight: 700;
-      letter-spacing: 0.16em;
-      text-transform: uppercase;
-    }
-
-    h1 {
-      margin: 0 0 12px;
-      font-size: clamp(28px, 5vw, 40px);
-      line-height: 1.1;
-    }
-
-    p {
-      margin: 0;
-      color: var(--muted);
-      white-space: pre-wrap;
-    }
-
-    pre {
-      margin: 20px 0 0;
-      padding: 16px;
-      border-radius: 14px;
-      border: 1px solid rgba(248, 113, 113, 0.22);
-      background: rgba(2, 6, 23, 0.72);
-      color: #fed7d7;
-      overflow: auto;
-      font: 12px/1.55 Consolas, "Courier New", monospace;
-      max-height: 44vh;
-    }
-  </style>
+  <title>Flux Monitor – Startup Failed</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <style>${buildThemeRootBlock(theme)}\n${readPageCss("error-page.css")}</style>
 </head>
 <body>
   <main>
     <p class="eyebrow">Flux Monitor Desktop</p>
     <h1>Startup failed</h1>
-    <p>${escapeHtml(message)}</p>
+    <p class="error-msg">${escapeHtml(message)}</p>
     <pre>${escapeHtml(logOutput)}</pre>
   </main>
 </body>
@@ -466,7 +394,7 @@ async function waitForBackendReady(baseUrl: string): Promise<void> {
 function buildBackendEnvironment(urls: string): NodeJS.ProcessEnv {
     const environmentName =
         process.env.FLUXMONITOR_DESKTOP_ENVIRONMENT
-        ?? "Production";
+        ?? (app.isPackaged ? "Production" : "Development");
 
     return {
         ...process.env,
@@ -477,7 +405,280 @@ function buildBackendEnvironment(urls: string): NodeJS.ProcessEnv {
     };
 }
 
+function getBackendSettingsPath(): string {
+    const environmentName = process.env.FLUXMONITOR_DESKTOP_ENVIRONMENT ?? (app.isPackaged ? "Production" : "Development");
+    const baseDir = app.isPackaged 
+        ? getPackagedBackendDirectory() 
+        : path.dirname(getDevelopmentBackendProjectPath());
+    return path.join(baseDir, `appsettings.${environmentName}.Local.json`);
+}
+
+function isPostgresConfigured(): boolean {
+    const settingsPath = getBackendSettingsPath();
+    if (!fs.existsSync(settingsPath)) {
+        return false;
+    }
+    try {
+        const content = fs.readFileSync(settingsPath, "utf8").replace(/^\uFEFF/, ""); // strip UTF-8 BOM written by PowerShell 5.1
+        const parsed = JSON.parse(content);
+        const connStr = parsed?.Monitor?.Storage?.ConnectionString;
+        return typeof connStr === "string" && connStr.trim().length > 0;
+    } catch {
+        return false;
+    }
+}
+
+function getPostgresScriptPath(): string | null {
+    const candidates = [
+        path.join(getPackagedBackendDirectory(), "scripts", "ensure-local-postgres.ps1"),
+        path.resolve(desktopRoot, "../FluxMonitor.Backend/scripts/ensure-local-postgres.ps1"),
+        path.resolve(desktopRoot, "../../scripts/ensure-local-postgres.ps1"),
+        path.resolve(desktopRoot, "../FluxMonitor.Backend/bin/Debug/net10.0/scripts/ensure-local-postgres.ps1")
+    ];
+
+    for (const candidate of candidates) {
+        if (fs.existsSync(candidate)) {
+            return candidate;
+        }
+    }
+    return null;
+}
+
+function buildSetupProgressPage(): string {
+    const theme = readSavedTheme();
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Flux Monitor – Database Setup</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
+  <style>${buildThemeRootBlock(theme)}\n${readPageCss("setup-page.css")}</style>
+</head>
+<body>
+  <main>
+    <p class="eyebrow">Automatic Database Setup</p>
+    <h1>Setting up local storage dependency</h1>
+    <p class="description">Flux Monitor is automatically installing and configuring local PostgreSQL &amp; TimescaleDB. This process takes a moment and only runs once.</p>
+    <div class="progress-track"><div class="progress-fill"></div></div>
+    <div class="terminal" id="logs">Preparing installation...</div>
+  </main>
+</body>
+</html>`;
+
+    return `data:text/html;charset=utf-8,${encodeURIComponent(html)}`;
+}
+
+function appendLogToWebpage(line: string) {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        const escaped = JSON.stringify(line + "\n");
+        mainWindow.webContents.executeJavaScript(
+            `const logs = document.getElementById('logs');
+             if (logs) {
+                 if (logs.innerText === 'Preparing installation...') {
+                     logs.innerText = '';
+                 }
+                 logs.innerText += ${escaped};
+                 logs.scrollTop = logs.scrollHeight;
+             }`
+        ).catch(() => {});
+    }
+}
+
+async function autoInstallPostgresIfNeeded(): Promise<void> {
+    if (process.platform !== "win32") {
+        return;
+    }
+
+    const localAppData = process.env.LOCALAPPDATA;
+    if (!localAppData) {
+        return;
+    }
+
+    const pgBinDir = path.join(localAppData, "PostgreSQL", "17.9-2", "pgsql", "bin");
+    const pgCtl = path.join(pgBinDir, "pg_ctl.exe");
+    const dataDir = path.join(localAppData, "FluxMonitor", "postgresql", "data");
+
+    const binariesExist = fs.existsSync(pgCtl) && fs.existsSync(path.join(dataDir, "PG_VERSION"));
+    const configured = isPostgresConfigured();
+
+    if (binariesExist && configured) {
+        return;
+    }
+
+    console.log("Automatic database installation triggered.");
+    const scriptPath = getPostgresScriptPath();
+    if (!scriptPath) {
+        throw new Error("Could not find ensure-local-postgres.ps1 script path.");
+    }
+
+    if (mainWindow) {
+        await mainWindow.loadURL(buildSetupProgressPage());
+    }
+
+    const settingsPath = getBackendSettingsPath();
+    await new Promise<void>((resolve, reject) => {
+        const child = spawn("powershell", [
+            "-NoProfile",
+            "-ExecutionPolicy", "Bypass",
+            "-File", scriptPath,
+            "-BackendSettingsPath", settingsPath
+        ], {
+            windowsHide: true
+        });
+
+        let outputBuffer = "";
+        
+        const processData = (data: Buffer) => {
+            outputBuffer += data.toString();
+            const lines = outputBuffer.split(/\r?\n/);
+            outputBuffer = lines.pop() ?? "";
+            
+            for (const line of lines) {
+                if (line.trim().length > 0) {
+                    console.log(`[PS INSTALLER] ${line}`);
+                    appendLogToWebpage(line);
+                }
+            }
+        };
+
+        child.stdout.on("data", processData);
+        child.stderr.on("data", processData);
+
+        child.once("exit", (code) => {
+            if (outputBuffer.trim().length > 0) {
+                appendLogToWebpage(outputBuffer);
+            }
+            if (code === 0) {
+                appendLogToWebpage("\nDatabase setup completed successfully!");
+                resolve();
+            } else {
+                reject(new Error(`Database installer exited with code ${code}`));
+            }
+        });
+
+        child.once("error", (err) => {
+            reject(err);
+        });
+    });
+
+    await new Promise((r) => setTimeout(r, 2000));
+}
+
+async function startLocalPostgres(): Promise<void> {
+    if (process.platform !== "win32") {
+        return;
+    }
+
+    const localAppData = process.env.LOCALAPPDATA;
+    if (!localAppData) {
+        return;
+    }
+
+    const pgBinDir = path.join(localAppData, "PostgreSQL", "17.9-2", "pgsql", "bin");
+    const pgCtl = path.join(pgBinDir, "pg_ctl.exe");
+    const pgIsReady = path.join(pgBinDir, "pg_isready.exe");
+    const dataDir = path.join(localAppData, "FluxMonitor", "postgresql", "data");
+    const logPath = path.join(localAppData, "FluxMonitor", "postgresql", "postgresql.log");
+
+    if (!fs.existsSync(pgCtl) || !fs.existsSync(path.join(dataDir, "PG_VERSION"))) {
+        return;
+    }
+
+    // Check if postgres is already running
+    const isRunning = await new Promise<boolean>((resolve) => {
+        const check = spawn(pgCtl, ["status", "-D", dataDir], { windowsHide: true });
+        check.once("exit", (code) => resolve(code === 0));
+        check.once("error", () => resolve(false));
+    });
+
+    if (isRunning) {
+        console.log("Local PostgreSQL is already running.");
+        return;
+    }
+
+    console.log("Starting local PostgreSQL...");
+    await new Promise<void>((resolve, reject) => {
+        const start = spawn(pgCtl, ["-D", dataDir, "-l", logPath, "start"], {
+            windowsHide: true,
+            stdio: "ignore"
+        });
+        start.once("exit", (code) => {
+            if (code === 0) {
+                resolve();
+            } else {
+                reject(new Error(`pg_ctl start exited with code ${code}`));
+            }
+        });
+        start.once("error", (err) => reject(err));
+    });
+
+    // Wait for it to become ready
+    const deadline = Date.now() + 30_000;
+    while (Date.now() < deadline) {
+        const ready = await new Promise<boolean>((resolve) => {
+            const readyCheck = spawn(pgIsReady, ["-h", "127.0.0.1", "-p", "5432", "-U", "postgres"], { windowsHide: true });
+            readyCheck.once("exit", (code) => resolve(code === 0));
+            readyCheck.once("error", () => resolve(false));
+        });
+
+        if (ready) {
+            console.log("Local PostgreSQL is ready.");
+            return;
+        }
+
+        await new Promise((r) => setTimeout(r, 500));
+    }
+
+    throw new Error("Timed out waiting for local PostgreSQL to become ready.");
+}
+
+async function stopLocalPostgres(): Promise<void> {
+    if (process.platform !== "win32") {
+        return;
+    }
+
+    const localAppData = process.env.LOCALAPPDATA;
+    if (!localAppData) {
+        return;
+    }
+
+    const pgCtl = path.join(localAppData, "PostgreSQL", "17.9-2", "pgsql", "bin", "pg_ctl.exe");
+    const dataDir = path.join(localAppData, "FluxMonitor", "postgresql", "data");
+
+    if (!fs.existsSync(pgCtl) || !fs.existsSync(path.join(dataDir, "PG_VERSION"))) {
+        return;
+    }
+
+    console.log("Stopping local PostgreSQL...");
+    await new Promise<void>((resolve) => {
+        const stop = spawn(pgCtl, ["-D", dataDir, "stop", "-m", "fast"], {
+            windowsHide: true,
+            stdio: "ignore"
+        });
+        stop.once("exit", () => resolve());
+        stop.once("error", () => resolve());
+    });
+}
+
 async function startBackend(): Promise<string> {
+    try {
+        await autoInstallPostgresIfNeeded();
+    } catch (error) {
+        console.error("Failed to automatically install database:", error);
+        if (mainWindow) {
+            await mainWindow.loadURL(buildStartupErrorPage(error));
+        }
+        throw error;
+    }
+
+    try {
+        await startLocalPostgres();
+    } catch (error) {
+        console.error("Failed to start local PostgreSQL:", error);
+    }
+
     const baseUrl = await getBackendBaseUrl();
     const env = buildBackendEnvironment(baseUrl);
 
@@ -548,25 +749,25 @@ async function stopBackend(): Promise<void> {
     const processToStop = backendProcess;
     backendProcess = null;
 
-    if (processToStop === null || processToStop.killed) {
-        return;
-    }
+    if (processToStop !== null && !processToStop.killed) {
+        if (process.platform === "win32" && typeof processToStop.pid === "number") {
+            await new Promise<void>((resolve) => {
+                const killer = spawn("taskkill", ["/pid", String(processToStop.pid), "/t", "/f"], {
+                    windowsHide: true,
+                    stdio: "ignore"
+                });
 
-    if (process.platform === "win32" && typeof processToStop.pid === "number") {
-        await new Promise<void>((resolve) => {
-            const killer = spawn("taskkill", ["/pid", String(processToStop.pid), "/t", "/f"], {
-                windowsHide: true,
-                stdio: "ignore"
+                killer.once("exit", () => resolve());
+                killer.once("error", () => resolve());
             });
-
-            killer.once("exit", () => resolve());
-            killer.once("error", () => resolve());
-        });
-
-        return;
+        } else {
+            processToStop.kill("SIGTERM");
+        }
     }
 
-    processToStop.kill("SIGTERM");
+    if (process.platform === "win32") {
+        await stopLocalPostgres();
+    }
 }
 
 async function focusMainWindow(): Promise<void> {
@@ -593,7 +794,7 @@ async function loadBackendWithRecovery(
         "Flux Monitor",
         heading,
         detail,
-        "#22c55e"));
+        readSavedTheme()));
 
     const backendUrl = await startBackend();
 
@@ -684,6 +885,29 @@ if (!app.requestSingleInstanceLock()) {
 
         event.preventDefault();
         void stopBackend().finally(() => app.quit());
+    });
+
+    ipcMain.on("theme:get-sync", (event) => {
+        try {
+            const p = getThemeSnapshotPath();
+            if (!fs.existsSync(p)) {
+                event.returnValue = null;
+                return;
+            }
+            event.returnValue = JSON.parse(fs.readFileSync(p, "utf8"));
+        } catch {
+            event.returnValue = null;
+        }
+    });
+
+    ipcMain.handle("theme:save", (_event, snapshot: unknown) => {
+        try {
+            const p = getThemeSnapshotPath();
+            fs.mkdirSync(path.dirname(p), { recursive: true });
+            fs.writeFileSync(p, JSON.stringify(snapshot, null, 2), "utf8");
+        } catch {
+            // Best effort — inline pages degrade to default theme.
+        }
     });
 
     void app.whenReady().then(async () => {

@@ -50,6 +50,9 @@ public sealed class GenericBleAdvertisementPollingClient(
     private Task? _scannerRefreshTask;
     private readonly Dictionary<string, IDisposable> _devicePropertyWatchers = new(StringComparer.OrdinalIgnoreCase);
     private bool _disposed;
+#if WINDOWS
+    private Windows.Devices.Bluetooth.Advertisement.BluetoothLEAdvertisementWatcher? _windowsWatcher;
+#endif
 
     public static bool IsDefinitionSupported(DeviceDefinition definition)
         => GetUnsupportedDefinitionMessage(definition) is null;
@@ -99,9 +102,6 @@ public sealed class GenericBleAdvertisementPollingClient(
     {
         ArgumentNullException.ThrowIfNull(device);
 
-        if (!OperatingSystem.IsLinux())
-            throw new PlatformNotSupportedException("BLE advertisement monitoring is supported on Linux/BlueZ only.");
-
         if (!device.TryResolveDefinition(definitionLoader, out var definition) || definition is null)
             throw new InvalidOperationException($"Device '{device.DeviceId}' has no valid DefinitionId ('{device.DefinitionId}').");
 
@@ -126,9 +126,6 @@ public sealed class GenericBleAdvertisementPollingClient(
         DeviceDefinition definition,
         CancellationToken cancellationToken)
     {
-        if (!OperatingSystem.IsLinux())
-            throw new PlatformNotSupportedException("BLE advertisement polling is supported on Linux/BlueZ only.");
-
         var unsupportedReason = GetUnsupportedDefinitionMessage(definition);
         if (unsupportedReason is not null)
         {
@@ -195,9 +192,6 @@ public sealed class GenericBleAdvertisementPollingClient(
         TimeSpan? timeout,
         CancellationToken cancellationToken)
     {
-        if (!OperatingSystem.IsLinux())
-            throw new PlatformNotSupportedException("BLE discovery is supported on Linux/BlueZ only.");
-
         await EnsureScannerRunningAsync(cancellationToken);
 
         var window = timeout ?? TimeSpan.FromSeconds(6);
@@ -223,6 +217,14 @@ public sealed class GenericBleAdvertisementPollingClient(
 
     private async Task EnsureScannerRunningAsync(CancellationToken cancellationToken)
     {
+        if (OperatingSystem.IsWindows())
+        {
+#if WINDOWS
+            await EnsureWindowsScannerRunningAsync(cancellationToken);
+            return;
+#endif
+        }
+
         await _scannerLock.WaitAsync(cancellationToken);
         try
         {
@@ -259,6 +261,115 @@ public sealed class GenericBleAdvertisementPollingClient(
             _scannerLock.Release();
         }
     }
+
+#if WINDOWS
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private async Task EnsureWindowsScannerRunningAsync(CancellationToken cancellationToken)
+    {
+        await _scannerLock.WaitAsync(cancellationToken);
+        try
+        {
+            if (_windowsWatcher is not null)
+                return;
+
+            var watcher = new Windows.Devices.Bluetooth.Advertisement.BluetoothLEAdvertisementWatcher
+            {
+                ScanningMode = Windows.Devices.Bluetooth.Advertisement.BluetoothLEScanningMode.Active
+            };
+            watcher.Received += OnWindowsAdvertisementReceived;
+            watcher.Start();
+            _windowsWatcher = watcher;
+        }
+        finally
+        {
+            _scannerLock.Release();
+        }
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private void OnWindowsAdvertisementReceived(
+        Windows.Devices.Bluetooth.Advertisement.BluetoothLEAdvertisementWatcher sender,
+        Windows.Devices.Bluetooth.Advertisement.BluetoothLEAdvertisementReceivedEventArgs args)
+    {
+        try
+        {
+            var address = WindowsBleHelpers.UlongToMacAddress(args.BluetoothAddress);
+            var rssi = (int)args.RawSignalStrengthInDBm;
+            var name = string.IsNullOrWhiteSpace(args.Advertisement.LocalName) ? null : args.Advertisement.LocalName;
+
+            var manufacturerData = new Dictionary<int, byte[]>();
+            foreach (var section in args.Advertisement.DataSections)
+            {
+                if (section.DataType == 0xFF && section.Data.Length >= 2)
+                {
+                    var bytes = WindowsBleHelpers.BufferToBytes(section.Data);
+                    var companyId = (int)(bytes[0] | (bytes[1] << 8));
+                    manufacturerData[companyId] = bytes[2..];
+                }
+            }
+
+            var serviceData = new Dictionary<string, byte[]>(StringComparer.OrdinalIgnoreCase);
+            foreach (var section in args.Advertisement.DataSections)
+            {
+                if (section.DataType != 0x16)
+                    continue;
+                var bytes = WindowsBleHelpers.BufferToBytes(section.Data);
+                if (bytes.Length < 2)
+                    continue;
+                var uuid16 = (ushort)(bytes[0] | (bytes[1] << 8));
+                var normalized = NormalizeUuid($"0000{uuid16:x4}-0000-1000-8000-00805f9b34fb");
+                if (!string.IsNullOrEmpty(normalized))
+                    serviceData[normalized] = bytes[2..];
+            }
+
+            var serviceUuids = args.Advertisement.ServiceUuids
+                .Select(g => g.ToString("D").ToLowerInvariant())
+                .ToArray();
+
+            var displayName = name ?? address;
+            AdvertisementDeviceSnapshot? previous;
+            lock (_cacheGate)
+            {
+                _snapshots.TryGetValue(address, out previous);
+            }
+
+            var advertisementChanged = previous is null ||
+                rssi != previous.Rssi ||
+                !PayloadMapsEqual(manufacturerData, previous.ManufacturerData) ||
+                !PayloadMapsEqual(serviceData, previous.ServiceData);
+            var now = DateTimeOffset.UtcNow;
+            var lastSeen = previous is null || advertisementChanged ? now : previous.LastSeen;
+
+            var snapshot = new AdvertisementDeviceSnapshot(
+                address,
+                null,
+                name,
+                displayName,
+                false,
+                false,
+                rssi,
+                manufacturerData,
+                serviceData,
+                DescribePayloads(manufacturerData),
+                serviceUuids,
+                lastSeen,
+                now);
+
+            bool hasFreshAdvertisement;
+            lock (_cacheGate)
+            {
+                _snapshots[address] = snapshot;
+                hasFreshAdvertisement = previous is null || snapshot.LastSeen > previous.LastSeen;
+            }
+
+            _ = PublishAdvertisementObservationsAsync(snapshot, hasFreshAdvertisement, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "Failed to process Windows BLE advertisement.");
+        }
+    }
+#endif
 
     private async Task EnsureDiscoveryActiveAsync(
         Adapter adapter,
@@ -1271,6 +1382,19 @@ public sealed class GenericBleAdvertisementPollingClient(
             return;
 
         _disposed = true;
+
+#if WINDOWS
+        if (OperatingSystem.IsWindows())
+        {
+            if (_windowsWatcher is not null)
+            {
+                _windowsWatcher.Received -= OnWindowsAdvertisementReceived;
+                try { _windowsWatcher.Stop(); } catch { /* best effort */ }
+            }
+            _scannerLock.Dispose();
+            return;
+        }
+#endif
 
         if (_scannerRefreshCancellationSource is not null)
         {

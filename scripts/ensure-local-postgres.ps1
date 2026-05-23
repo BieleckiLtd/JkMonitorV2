@@ -84,10 +84,21 @@ function Wait-ForDatabase([int]$Port, [int]$TimeoutSeconds = 60) {
             return
         }
 
+        if ($attempt -gt 0 -and $attempt % 5 -eq 0) {
+            Write-Output "Waiting for PostgreSQL to accept connections... (${attempt}s / ${TimeoutSeconds}s)"
+        }
+
         Start-Sleep -Seconds 1
     }
 
-    throw "PostgreSQL did not become ready on ${targetHost}:$Port."
+    $logContent = ''
+    if (Test-Path $postgresLogPath) {
+        try {
+            $tail = Get-Content $postgresLogPath -Tail 30 -ErrorAction SilentlyContinue
+            if ($tail) { $logContent = "`nPostgreSQL log (last 30 lines):`n" + ($tail -join "`n") }
+        } catch {}
+    }
+    throw "PostgreSQL did not become ready on ${targetHost}:$Port after ${TimeoutSeconds} seconds.$logContent"
 }
 
 function Test-DatabaseReady([int]$Port) {
@@ -238,13 +249,17 @@ function Start-PostgresCluster([bool]$RestartIfRunning = $false) {
         }
 
         Write-Section 'Restarting PostgreSQL cluster'
-        & $pgCtlPath -D $postgresDataRoot -l $postgresLogPath restart | Out-Null
+        $restartOutput = & $pgCtlPath -D $postgresDataRoot -l $postgresLogPath restart 2>&1
+        $restartOutput | ForEach-Object { Write-Output $_ }
+        if ($LASTEXITCODE -ne 0) { throw "pg_ctl restart exited with code $LASTEXITCODE." }
         Wait-ForDatabase -Port $targetPort
         return
     }
 
     Write-Section 'Starting PostgreSQL cluster'
-    & $pgCtlPath -D $postgresDataRoot -l $postgresLogPath start | Out-Null
+    $startOutput = & $pgCtlPath -D $postgresDataRoot -l $postgresLogPath start 2>&1
+    $startOutput | ForEach-Object { Write-Output $_ }
+    if ($LASTEXITCODE -ne 0) { throw "pg_ctl start exited with code $LASTEXITCODE." }
     Wait-ForDatabase -Port $targetPort
 }
 
@@ -384,7 +399,8 @@ function Write-BackendLocalSettings() {
         Ensure-Directory $directory
     }
 
-    Set-Content -Path $backendLocalSettingsPath -Value $content -Encoding UTF8
+    # Write UTF-8 without BOM so Node.js JSON.parse() can read the file on next launch
+    [System.IO.File]::WriteAllText($backendLocalSettingsPath, $content, [System.Text.UTF8Encoding]::new($false))
 }
 
 Write-Step 'Starting ensure-local-postgres run'

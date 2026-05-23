@@ -380,7 +380,8 @@ function scheduleUpdateProgressReconnect(
   }, updateProgressReconnectDelayMs);
 }
 
-const storedThemeId = getStoredThemeId();
+const desktopSavedId = typeof window !== 'undefined' ? window.fluxMonitorDesktop?.savedTheme?.id : undefined;
+const storedThemeId = desktopSavedId || getStoredThemeId();
 const initialActiveTheme = findThemeById(storedThemeId, builtInThemes) ?? findThemeById(defaultThemeId, builtInThemes);
 const initialActiveThemeId = initialActiveTheme?.id ?? defaultThemeId;
 
@@ -413,7 +414,10 @@ export const useAppStore = create<AppState>((set, get) => ({
     const theme = get().themes.find(t => t.id === id);
     if (theme) {
       set({ activeThemeId: id });
-      if (typeof window !== 'undefined') localStorage.setItem('FluxMonitor-theme', id);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('FluxMonitor-theme', id);
+        window.fluxMonitorDesktop?.saveThemeConfig?.({ id: theme.id, mode: theme.mode, radius: theme.radius, colors: theme.colors });
+      }
       get().applyTheme(theme);
     }
   },

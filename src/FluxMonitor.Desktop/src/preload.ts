@@ -1,6 +1,10 @@
-import { contextBridge } from "electron";
+import { contextBridge, ipcRenderer } from "electron";
+
+const savedTheme = ipcRenderer.sendSync("theme:get-sync") as unknown;
 
 contextBridge.exposeInMainWorld("fluxMonitorDesktop", {
     isDesktop: true,
-    platform: process.platform
+    platform: process.platform,
+    savedTheme,
+    saveThemeConfig: (snapshot: unknown) => void ipcRenderer.invoke("theme:save", snapshot)
 });
