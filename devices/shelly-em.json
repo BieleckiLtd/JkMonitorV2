@@ -1,0 +1,453 @@
+{
+  "$schema": "https://FluxMonitor.local/schemas/device-definition-v1.json",
+  "version": "1",
+  "device": {
+    "id": "shelly-em",
+    "name": "Shelly EM",
+    "manufacturer": "Shelly",
+    "model": "Shelly EM (Gen1)",
+    "category": "power-monitor",
+    "description": "Local HTTP JSON profile for Shelly EM Gen1 energy monitors. Supports open devices and optional HTTP basic-auth credentials.",
+    "icon": "gauge",
+    "documentationUrl": "https://github.com/BieleckiLtd/JkMonitorV2"
+  },
+  "connection": {
+    "transport": {
+      "type": "http",
+      "defaults": {
+        "readTimeoutMs": 3000
+      }
+    },
+    "protocol": {
+      "type": "http-json",
+      "settings": {
+        "byteOrder": "big-endian",
+        "httpDefaultUsername": "admin"
+      }
+    }
+  },
+  "dataSources": [
+    {
+      "id": "status",
+      "name": "Shelly status",
+      "pollGroup": "fast",
+      "requestPath": "/status",
+      "requestMethod": "GET",
+      "responseLayout": {
+        "bufferSize": 42,
+        "steps": [
+          { "op": "readJsonVar", "path": "emeters[0].power", "var": "channel_1_power" },
+          { "op": "mathMul", "var": "channel_1_power", "value": 100 },
+          { "op": "writeVar", "var": "channel_1_power", "writeTo": 0, "writeAs": "i32" },
+
+          { "op": "readJsonVar", "path": "emeters[1].power", "var": "channel_2_power" },
+          { "op": "mathMul", "var": "channel_2_power", "value": 100 },
+          { "op": "writeVar", "var": "channel_2_power", "writeTo": 4, "writeAs": "i32" },
+
+          { "op": "readJsonVar", "path": "emeters[0].voltage", "var": "channel_1_voltage" },
+          { "op": "mathMul", "var": "channel_1_voltage", "value": 100 },
+          { "op": "writeVar", "var": "channel_1_voltage", "writeTo": 8, "writeAs": "u16" },
+
+          { "op": "readJsonVar", "path": "emeters[1].voltage", "var": "channel_2_voltage" },
+          { "op": "mathMul", "var": "channel_2_voltage", "value": 100 },
+          { "op": "writeVar", "var": "channel_2_voltage", "writeTo": 10, "writeAs": "u16" },
+
+          { "op": "readJsonVar", "path": "emeters[0].pf", "var": "channel_1_pf" },
+          { "op": "mathMul", "var": "channel_1_pf", "value": 1000 },
+          { "op": "writeVar", "var": "channel_1_pf", "writeTo": 12, "writeAs": "i16" },
+
+          { "op": "readJsonVar", "path": "emeters[1].pf", "var": "channel_2_pf" },
+          { "op": "mathMul", "var": "channel_2_pf", "value": 1000 },
+          { "op": "writeVar", "var": "channel_2_pf", "writeTo": 14, "writeAs": "i16" },
+
+          { "op": "readJsonVar", "path": "emeters[0].total", "var": "channel_1_import" },
+          { "op": "mathMul", "var": "channel_1_import", "value": 100 },
+          { "op": "writeVar", "var": "channel_1_import", "writeTo": 16, "writeAs": "u32" },
+
+          { "op": "readJsonVar", "path": "emeters[1].total", "var": "channel_2_import" },
+          { "op": "mathMul", "var": "channel_2_import", "value": 100 },
+          { "op": "writeVar", "var": "channel_2_import", "writeTo": 20, "writeAs": "u32" },
+
+          { "op": "readJsonVar", "path": "emeters[0].total_returned", "var": "channel_1_export" },
+          { "op": "mathMul", "var": "channel_1_export", "value": 100 },
+          { "op": "writeVar", "var": "channel_1_export", "writeTo": 24, "writeAs": "u32" },
+
+          { "op": "readJsonVar", "path": "emeters[1].total_returned", "var": "channel_2_export" },
+          { "op": "mathMul", "var": "channel_2_export", "value": 100 },
+          { "op": "writeVar", "var": "channel_2_export", "writeTo": 28, "writeAs": "u32" },
+
+          { "op": "readJsonVar", "path": "relays[0].ison", "writeTo": 32, "writeAs": "u8" },
+          { "op": "readJsonVar", "path": "cloud.connected", "writeTo": 33, "writeAs": "u8" },
+          { "op": "readJsonVar", "path": "mqtt.connected", "writeTo": 34, "writeAs": "u8" },
+          { "op": "readJsonVar", "path": "wifi_sta.connected", "writeTo": 35, "writeAs": "u8" },
+          { "op": "readJsonVar", "path": "wifi_sta.rssi", "writeTo": 36, "writeAs": "i16" },
+          { "op": "readJsonVar", "path": "uptime", "writeTo": 38, "writeAs": "u32" }
+        ]
+      }
+    }
+  ],
+  "pollGroups": {
+    "fast": {
+      "intervalMs": 5000,
+      "description": "Live meter status from the local Shelly HTTP API."
+    }
+  },
+  "entities": [
+    {
+      "id": "channel_1_power_w",
+      "type": "sensor",
+      "name": "Channel 1 Power",
+      "category": "Channel 1",
+      "icon": "zap",
+      "source": {
+        "bank": "status",
+        "byteOffset": 0,
+        "dataType": "int32",
+        "scale": 0.01,
+        "unit": "W"
+      },
+      "display": { "precision": 1 }
+    },
+    {
+      "id": "channel_1_voltage_v",
+      "type": "sensor",
+      "name": "Channel 1 Voltage",
+      "category": "Channel 1",
+      "icon": "activity",
+      "source": {
+        "bank": "status",
+        "byteOffset": 8,
+        "dataType": "uint16",
+        "scale": 0.01,
+        "unit": "V"
+      },
+      "display": { "precision": 1 }
+    },
+    {
+      "id": "channel_1_power_factor",
+      "type": "sensor",
+      "name": "Channel 1 Power Factor",
+      "category": "Channel 1",
+      "source": {
+        "bank": "status",
+        "byteOffset": 12,
+        "dataType": "int16",
+        "scale": 0.001
+      },
+      "display": { "precision": 3 }
+    },
+    {
+      "id": "channel_1_import_kwh",
+      "type": "sensor",
+      "name": "Channel 1 Import Energy",
+      "category": "Channel 1",
+      "source": {
+        "bank": "status",
+        "byteOffset": 16,
+        "dataType": "uint32",
+        "scale": 0.00001,
+        "unit": "kWh"
+      },
+      "display": { "precision": 3 }
+    },
+    {
+      "id": "channel_1_export_kwh",
+      "type": "sensor",
+      "name": "Channel 1 Export Energy",
+      "category": "Channel 1",
+      "source": {
+        "bank": "status",
+        "byteOffset": 24,
+        "dataType": "uint32",
+        "scale": 0.00001,
+        "unit": "kWh"
+      },
+      "display": { "precision": 3 }
+    },
+    {
+      "id": "channel_2_power_w",
+      "type": "sensor",
+      "name": "Channel 2 Power",
+      "category": "Channel 2",
+      "icon": "zap",
+      "source": {
+        "bank": "status",
+        "byteOffset": 4,
+        "dataType": "int32",
+        "scale": 0.01,
+        "unit": "W"
+      },
+      "display": { "precision": 1 }
+    },
+    {
+      "id": "channel_2_voltage_v",
+      "type": "sensor",
+      "name": "Channel 2 Voltage",
+      "category": "Channel 2",
+      "icon": "activity",
+      "source": {
+        "bank": "status",
+        "byteOffset": 10,
+        "dataType": "uint16",
+        "scale": 0.01,
+        "unit": "V"
+      },
+      "display": { "precision": 1 }
+    },
+    {
+      "id": "channel_2_power_factor",
+      "type": "sensor",
+      "name": "Channel 2 Power Factor",
+      "category": "Channel 2",
+      "source": {
+        "bank": "status",
+        "byteOffset": 14,
+        "dataType": "int16",
+        "scale": 0.001
+      },
+      "display": { "precision": 3 }
+    },
+    {
+      "id": "channel_2_import_kwh",
+      "type": "sensor",
+      "name": "Channel 2 Import Energy",
+      "category": "Channel 2",
+      "source": {
+        "bank": "status",
+        "byteOffset": 20,
+        "dataType": "uint32",
+        "scale": 0.00001,
+        "unit": "kWh"
+      },
+      "display": { "precision": 3 }
+    },
+    {
+      "id": "channel_2_export_kwh",
+      "type": "sensor",
+      "name": "Channel 2 Export Energy",
+      "category": "Channel 2",
+      "source": {
+        "bank": "status",
+        "byteOffset": 28,
+        "dataType": "uint32",
+        "scale": 0.00001,
+        "unit": "kWh"
+      },
+      "display": { "precision": 3 }
+    },
+    {
+      "id": "relay_on",
+      "type": "binary_sensor",
+      "name": "Relay Output",
+      "category": "Device",
+      "source": {
+        "bank": "status",
+        "byteOffset": 32,
+        "dataType": "uint8",
+        "trueValue": 1
+      }
+    },
+    {
+      "id": "cloud_connected",
+      "type": "binary_sensor",
+      "name": "Cloud Connected",
+      "category": "Connectivity",
+      "source": {
+        "bank": "status",
+        "byteOffset": 33,
+        "dataType": "uint8",
+        "trueValue": 1
+      }
+    },
+    {
+      "id": "mqtt_connected",
+      "type": "binary_sensor",
+      "name": "MQTT Connected",
+      "category": "Connectivity",
+      "source": {
+        "bank": "status",
+        "byteOffset": 34,
+        "dataType": "uint8",
+        "trueValue": 1
+      }
+    },
+    {
+      "id": "wifi_connected",
+      "type": "binary_sensor",
+      "name": "Wi-Fi Connected",
+      "category": "Connectivity",
+      "source": {
+        "bank": "status",
+        "byteOffset": 35,
+        "dataType": "uint8",
+        "trueValue": 1
+      }
+    },
+    {
+      "id": "wifi_rssi_dbm",
+      "type": "sensor",
+      "name": "Wi-Fi RSSI",
+      "category": "Connectivity",
+      "source": {
+        "bank": "status",
+        "byteOffset": 36,
+        "dataType": "int16",
+        "unit": "dBm"
+      },
+      "display": { "precision": 0 }
+    },
+    {
+      "id": "uptime_seconds",
+      "type": "sensor",
+      "name": "Uptime",
+      "category": "Device",
+      "source": {
+        "bank": "status",
+        "byteOffset": 38,
+        "dataType": "uint32",
+        "unit": "s"
+      },
+      "display": { "precision": 0 }
+    }
+  ],
+  "computedEntities": [
+    {
+      "id": "total_power_w",
+      "type": "sensor",
+      "name": "Total Power",
+      "category": "Summary",
+      "expression": "channel_1_power_w + channel_2_power_w",
+      "unit": "W",
+      "display": { "precision": 1 },
+      "role": "power"
+    },
+    {
+      "id": "total_import_kwh",
+      "type": "sensor",
+      "name": "Total Import Energy",
+      "category": "Summary",
+      "expression": "channel_1_import_kwh + channel_2_import_kwh",
+      "unit": "kWh",
+      "display": { "precision": 3 }
+    },
+    {
+      "id": "total_export_kwh",
+      "type": "sensor",
+      "name": "Total Export Energy",
+      "category": "Summary",
+      "expression": "channel_1_export_kwh + channel_2_export_kwh",
+      "unit": "kWh",
+      "display": { "precision": 3 }
+    },
+    {
+      "id": "average_voltage_v",
+      "type": "sensor",
+      "name": "Average Voltage",
+      "category": "Summary",
+      "expression": "(channel_1_voltage_v + channel_2_voltage_v) / 2",
+      "unit": "V",
+      "display": { "precision": 1 }
+    }
+  ],
+  "storage": {
+    "database": {
+      "provider": "timescaledb",
+      "defaultNamePattern": "FluxMonitor_{deviceId}"
+    },
+    "timeSeries": [
+      { "entity": "channel_1_power_w", "aggregate": "avg", "column": "channel_1_power_w" },
+      { "entity": "channel_2_power_w", "aggregate": "avg", "column": "channel_2_power_w" },
+      { "entity": "total_power_w", "aggregate": "avg", "column": "total_power_w" },
+      { "entity": "channel_1_voltage_v", "aggregate": "avg", "column": "channel_1_voltage_v" },
+      { "entity": "channel_2_voltage_v", "aggregate": "avg", "column": "channel_2_voltage_v" },
+      { "entity": "total_import_kwh", "aggregate": "last", "column": "total_import_kwh" },
+      { "entity": "total_export_kwh", "aggregate": "last", "column": "total_export_kwh" },
+      { "entity": "wifi_rssi_dbm", "aggregate": "avg", "column": "wifi_rssi_dbm" }
+    ],
+    "retention": {
+      "raw": { "window": "24h" },
+      "1m": { "window": "90d" },
+      "5m": { "window": "2y" },
+      "1h": { "window": "10y" }
+    }
+  },
+  "ui": {
+    "pages": {
+      "monitor": {
+        "sections": [
+          {
+            "type": "hero-metrics",
+            "metrics": [
+              { "entity": "total_power_w", "icon": "zap", "color": "amber" },
+              { "entity": "total_import_kwh", "icon": "activity", "color": "emerald" },
+              { "entity": "total_export_kwh", "icon": "activity", "color": "blue" },
+              { "entity": "average_voltage_v", "icon": "gauge", "color": "orange" }
+            ]
+          },
+          {
+            "type": "parameter-table",
+            "title": "Channel 1",
+            "filter": { "categories": ["Channel 1"] },
+            "groupBy": "category"
+          },
+          {
+            "type": "parameter-table",
+            "title": "Channel 2",
+            "filter": { "categories": ["Channel 2"] },
+            "groupBy": "category"
+          },
+          {
+            "type": "parameter-table",
+            "title": "Device & Connectivity",
+            "filter": { "categories": ["Summary", "Device", "Connectivity"] },
+            "groupBy": "category"
+          }
+        ]
+      },
+      "history": {
+        "resolutions": [
+          { "id": "1m", "label": "1 Minute", "defaultWindow": "6h" },
+          { "id": "5m", "label": "5 Minutes", "defaultWindow": "24h" },
+          { "id": "1h", "label": "1 Hour", "defaultWindow": "30d" }
+        ],
+        "charts": [
+          {
+            "title": "Power",
+            "type": "line-chart",
+            "traces": [
+              { "entity": "total_power_w", "label": "Total", "color": "amber" },
+              { "entity": "channel_1_power_w", "label": "Channel 1", "color": "emerald" },
+              { "entity": "channel_2_power_w", "label": "Channel 2", "color": "blue" }
+            ],
+            "yAxis": { "unit": "W", "label": "Power" }
+          },
+          {
+            "title": "Voltage",
+            "type": "line-chart",
+            "traces": [
+              { "entity": "channel_1_voltage_v", "label": "Channel 1", "color": "orange" },
+              { "entity": "channel_2_voltage_v", "label": "Channel 2", "color": "red" }
+            ],
+            "yAxis": { "unit": "V", "label": "Voltage" }
+          },
+          {
+            "title": "Energy",
+            "type": "line-chart",
+            "traces": [
+              { "entity": "total_import_kwh", "label": "Import", "color": "emerald" },
+              { "entity": "total_export_kwh", "label": "Export", "color": "blue" }
+            ],
+            "yAxis": { "unit": "kWh", "label": "Energy" }
+          }
+        ]
+      },
+      "dashboard": {
+        "card": {
+          "primaryMetric": "total_power_w",
+          "secondaryMetrics": ["total_import_kwh", "total_export_kwh", "average_voltage_v"],
+          "statusEntities": ["relay_on", "wifi_connected"]
+        }
+      }
+    }
+  }
+}

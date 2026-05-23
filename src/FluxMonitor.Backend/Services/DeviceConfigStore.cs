@@ -185,6 +185,8 @@ public sealed class DeviceConfigStore(
                 "HasDefinitionOverride" BOOLEAN NOT NULL DEFAULT FALSE,
                 "TransportPortName" TEXT NULL,
                 "BleSettingsPin" TEXT NULL,
+                "HttpUsername" TEXT NULL,
+                "HttpPassword" TEXT NULL,
                 "Address" SMALLINT NOT NULL,
                 "IsMaster" BOOLEAN NOT NULL DEFAULT FALSE,
                 "PollIntervalMilliseconds" INTEGER NOT NULL,
@@ -216,6 +218,14 @@ public sealed class DeviceConfigStore(
             ALTER TABLE "Devices"
             ADD COLUMN IF NOT EXISTS "TemperatureUnit" TEXT NOT NULL DEFAULT 'c';
             """);
+        await connection.ExecuteAsync("""
+            ALTER TABLE "Devices"
+            ADD COLUMN IF NOT EXISTS "HttpUsername" TEXT NULL;
+            """);
+        await connection.ExecuteAsync("""
+            ALTER TABLE "Devices"
+            ADD COLUMN IF NOT EXISTS "HttpPassword" TEXT NULL;
+            """);
     }
 
     private async Task<LoadedDevices> LoadFromDbAsync(NpgsqlConnection connection)
@@ -233,6 +243,8 @@ public sealed class DeviceConfigStore(
                 "HasDefinitionOverride",
                 "TransportPortName",
                 "BleSettingsPin",
+                "HttpUsername",
+                "HttpPassword",
                 "Address",
                 "IsMaster",
                 "PollIntervalMilliseconds",
@@ -261,6 +273,8 @@ public sealed class DeviceConfigStore(
                 DefinitionId = row.DefinitionId,
                 TransportPortName = row.TransportPortName,
                 BleSettingsPin = row.BleSettingsPin,
+                HttpUsername = row.HttpUsername,
+                HttpPassword = row.HttpPassword,
                 Address = checked((byte)row.Address),
                 IsMaster = row.IsMaster,
                 PollIntervalMilliseconds = row.PollIntervalMilliseconds,
@@ -316,6 +330,8 @@ public sealed class DeviceConfigStore(
                 DefinitionId = device.DefinitionId,
                 TransportPortName = device.TransportPortName,
                 BleSettingsPin = device.BleSettingsPin,
+                HttpUsername = device.HttpUsername,
+                HttpPassword = device.HttpPassword,
                 Address = device.Address,
                 IsMaster = device.IsMaster,
                 SortOrder = device.SortOrder,
@@ -391,6 +407,8 @@ public sealed class DeviceConfigStore(
                 DefinitionId = definition.Device.Id,
                 TransportPortName = string.IsNullOrWhiteSpace(device.TransportPortName) ? null : device.TransportPortName.Trim(),
                 BleSettingsPin = string.IsNullOrWhiteSpace(device.BleSettingsPin) ? null : device.BleSettingsPin.Trim(),
+                HttpUsername = string.IsNullOrWhiteSpace(device.HttpUsername) ? null : device.HttpUsername.Trim(),
+                HttpPassword = string.IsNullOrWhiteSpace(device.HttpPassword) ? null : device.HttpPassword,
                 Address = device.Address,
                 IsMaster = device.IsMaster,
                 PollIntervalMilliseconds = DevicePollingIntervalResolver.Resolve(definition),
@@ -426,6 +444,8 @@ public sealed class DeviceConfigStore(
                 "HasDefinitionOverride",
                 "TransportPortName",
                 "BleSettingsPin",
+                "HttpUsername",
+                "HttpPassword",
                 "Address",
                 "IsMaster",
                 "PollIntervalMilliseconds",
@@ -447,6 +467,8 @@ public sealed class DeviceConfigStore(
                 @HasDefinitionOverride,
                 @TransportPortName,
                 @BleSettingsPin,
+                @HttpUsername,
+                @HttpPassword,
                 @Address,
                 @IsMaster,
                 @PollIntervalMilliseconds,
@@ -467,6 +489,8 @@ public sealed class DeviceConfigStore(
                 "HasDefinitionOverride" = EXCLUDED."HasDefinitionOverride",
                 "TransportPortName" = EXCLUDED."TransportPortName",
                 "BleSettingsPin" = EXCLUDED."BleSettingsPin",
+                "HttpUsername" = EXCLUDED."HttpUsername",
+                "HttpPassword" = EXCLUDED."HttpPassword",
                 "Address" = EXCLUDED."Address",
                 "IsMaster" = EXCLUDED."IsMaster",
                 "PollIntervalMilliseconds" = EXCLUDED."PollIntervalMilliseconds",
@@ -495,6 +519,8 @@ public sealed class DeviceConfigStore(
                         device.HasDefinitionOverride,
                         device.TransportPortName,
                         device.BleSettingsPin,
+                        device.HttpUsername,
+                        device.HttpPassword,
                         device.Address,
                         device.IsMaster,
                         device.PollIntervalMilliseconds,
@@ -611,6 +637,8 @@ public sealed class DeviceConfigStore(
         public bool HasDefinitionOverride { get; set; }
         public string? TransportPortName { get; set; }
         public string? BleSettingsPin { get; set; }
+        public string? HttpUsername { get; set; }
+        public string? HttpPassword { get; set; }
         public short Address { get; set; }
         public bool IsMaster { get; set; }
         public int PollIntervalMilliseconds { get; set; }

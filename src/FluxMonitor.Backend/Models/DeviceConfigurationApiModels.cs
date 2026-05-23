@@ -21,6 +21,10 @@ public sealed record class DeviceConfigurationApiModel
 
     public string? BleSettingsPin { get; init; }
 
+    public string? HttpUsername { get; init; }
+
+    public string? HttpPassword { get; init; }
+
     public byte Address { get; init; }
 
     public bool IsMaster { get; init; }

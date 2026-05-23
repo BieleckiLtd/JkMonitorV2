@@ -73,8 +73,9 @@ public sealed class DeviceConfiguration
     public required string DefinitionId { get; init; }
 
     /// <summary>
-    /// Serial port for this device (e.g. "/dev/ttyUSB0").
-    /// Required for serial transport devices.
+    /// Transport target for this device.
+    /// Serial devices use a port name, BLE devices use an address or alias,
+    /// and HTTP devices use a host, IP, or base URL.
     /// </summary>
     public string? TransportPortName { get; init; }
 
@@ -82,6 +83,16 @@ public sealed class DeviceConfiguration
     /// Optional settings PIN for BLE devices that gate configuration writes.
     /// </summary>
     public string? BleSettingsPin { get; init; }
+
+    /// <summary>
+    /// Optional username for HTTP basic-auth devices.
+    /// </summary>
+    public string? HttpUsername { get; init; }
+
+    /// <summary>
+    /// Optional password for HTTP basic-auth devices.
+    /// </summary>
+    public string? HttpPassword { get; init; }
 
     public byte Address { get; init; }
 

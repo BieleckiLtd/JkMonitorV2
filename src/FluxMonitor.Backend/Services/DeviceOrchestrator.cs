@@ -364,7 +364,9 @@ public sealed class DeviceOrchestrator(
             || a.SortOrder != b.SortOrder
             || a.IsMaster != b.IsMaster
             || a.TemperatureUnit != b.TemperatureUnit
-            || a.BleSettingsPin != b.BleSettingsPin;
+            || a.BleSettingsPin != b.BleSettingsPin
+            || a.HttpUsername != b.HttpUsername
+            || a.HttpPassword != b.HttpPassword;
     }
 
     private enum DeviceExecutionMode

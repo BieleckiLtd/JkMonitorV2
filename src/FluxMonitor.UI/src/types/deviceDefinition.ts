@@ -78,6 +78,7 @@ export type ProtocolSettings = {
   startupCommands?: number[];
   startupCommandDelayMs?: number;
   advertisement?: BleAdvertisementSettings;
+  httpDefaultUsername?: string;
 };
 
 export type BleAdvertisementSettings = {
@@ -106,6 +107,8 @@ export type DataSourceDefinition = {
   command?: number;
   responseFrameType?: number;
   headerSize?: number;
+  requestPath?: string;
+  requestMethod?: string;
 };
 
 export type DataSourceWriteDefinition = {

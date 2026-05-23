@@ -164,6 +164,12 @@ public sealed class ProtocolSettings
     /// Optional settings for passive BLE advertisement-based protocols.
     /// </summary>
     public BleAdvertisementSettings? Advertisement { get; init; }
+
+    /// <summary>
+    /// Default username for HTTP basic-auth devices when the per-device config
+    /// only supplies a password.
+    /// </summary>
+    public string? HttpDefaultUsername { get; init; }
 }
 
 public sealed class BleAdvertisementSettings
@@ -300,6 +306,17 @@ public sealed class DataSourceDefinition
     /// before entity parsing.
     /// </summary>
     public ResponseLayoutDefinition? ResponseLayout { get; init; }
+
+    /// <summary>
+    /// HTTP request path for HTTP-backed data sources.
+    /// Relative paths are resolved against the configured device endpoint.
+    /// </summary>
+    public string? RequestPath { get; init; }
+
+    /// <summary>
+    /// HTTP method for HTTP-backed data sources.
+    /// </summary>
+    public string RequestMethod { get; init; } = "GET";
 
     /// <summary>
     /// Optional hex-encoded INFO payload to include in the request frame (for ASCII-hex protocols).
@@ -742,6 +759,8 @@ public sealed class ResponseLayoutDefinition
 ///   <item><c>copyRemaining</c> — copy all remaining input bytes (up to <see cref="Max"/>) to <see cref="WriteTo"/>.</item>
 ///   <item><c>readVar</c> — read a value of <see cref="Type"/> from input, store as <see cref="Var"/>.
 ///         Optionally write to buffer at <see cref="WriteTo"/> using <see cref="WriteAs"/> type.</item>
+///   <item><c>readJsonVar</c> — read a scalar value from JSON input at <see cref="Path"/>, store as <see cref="Var"/>.
+///         Optionally write to buffer at <see cref="WriteTo"/> using <see cref="WriteAs"/> type.</item>
 ///   <item><c>writeVar</c> — write stored variable <see cref="Var"/> to buffer at <see cref="WriteTo"/> as <see cref="WriteAs"/>.</item>
 ///   <item><c>writeBit</c> — extract bit <see cref="Bit"/> from variable <see cref="Var"/>, write 0 or 1 to <see cref="WriteTo"/>.</item>
 ///   <item><c>copyArray</c> — copy a variable-length array: <see cref="Count"/> × <see cref="ElementSize"/> bytes
@@ -773,6 +792,9 @@ public sealed class ResponseLayoutStep
 
     /// <summary>Input data type: "u8", "u16", "u24", "u32".</summary>
     public string? Type { get; init; }
+
+    /// <summary>JSON path used by <c>readJsonVar</c>, e.g. <c>emeters[0].power</c>.</summary>
+    public string? Path { get; init; }
 
     /// <summary>Output write type for readVar/writeVar: "u8", "u16", "u32". Defaults to match <see cref="Type"/>.</summary>
     public string? WriteAs { get; init; }

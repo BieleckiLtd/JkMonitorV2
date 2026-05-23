@@ -10,10 +10,11 @@ public sealed class PollingClientDispatcher(
     GenericSerialPollingClient serialClient,
     GenericBlePollingClient bleClient,
     GenericBleAdvertisementPollingClient bleAdvertisementClient,
+    GenericHttpPollingClient httpClient,
     DeviceDefinitionLoader definitionLoader) : IDevicePollingClient
 {
     private static readonly HashSet<string> SupportedTransports =
-        new(StringComparer.OrdinalIgnoreCase) { "serial", "ble" };
+        new(StringComparer.OrdinalIgnoreCase) { "serial", "ble", "http" };
 
     public static bool IsTransportSupported(string? transportType)
         => !string.IsNullOrWhiteSpace(transportType) && SupportedTransports.Contains(transportType);
@@ -34,7 +35,10 @@ public sealed class PollingClientDispatcher(
             return false;
 
         if (!string.Equals(transportType, "ble", StringComparison.OrdinalIgnoreCase))
-            return true;
+        {
+            return !string.Equals(transportType, "http", StringComparison.OrdinalIgnoreCase)
+                || GenericHttpPollingClient.IsDefinitionSupported(definition);
+        }
 
         return string.Equals(definition.Connection.Protocol.Type, "ble-advertisement", StringComparison.OrdinalIgnoreCase)
             ? GenericBleAdvertisementPollingClient.IsDefinitionSupported(definition)
@@ -53,6 +57,9 @@ public sealed class PollingClientDispatcher(
                 ? GenericBleAdvertisementPollingClient.GetUnsupportedDefinitionMessage(definition)
                 : GenericBlePollingClient.GetUnsupportedDefinitionMessage(definition);
         }
+
+        if (string.Equals(transportType, "http", StringComparison.OrdinalIgnoreCase))
+            return GenericHttpPollingClient.GetUnsupportedDefinitionMessage(definition);
 
         return null;
     }
@@ -91,6 +98,8 @@ public sealed class PollingClientDispatcher(
                 => bleAdvertisementClient.PollAsync(device, definition, cancellationToken),
             "ble" when GenericBlePollingClient.IsDefinitionSupported(definition)
                 => bleClient.PollAsync(device, definition, cancellationToken),
+            "http" when GenericHttpPollingClient.IsDefinitionSupported(definition)
+                => httpClient.PollAsync(device, definition, cancellationToken),
             _ => throw new NotSupportedException(
                 $"Device '{device.DeviceId}' cannot be polled: " +
                 $"{GetUnsupportedDefinitionMessage(definition) ?? $"transport '{transport}' is not supported."}")

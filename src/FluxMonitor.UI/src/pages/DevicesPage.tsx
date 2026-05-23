@@ -26,6 +26,8 @@ type DeviceConfigurationWire = {
   definitionVersion?: string | null;
   transportPortName?: string | null;
   bleSettingsPin?: string | null;
+  httpUsername?: string | null;
+  httpPassword?: string | null;
   address: number;
   isMaster: boolean;
   pollIntervalMilliseconds: number;
@@ -129,6 +131,8 @@ function getConnectionLabel(transportType: string | null | undefined) {
       return 'USB / serial';
     case 'ble':
       return 'Bluetooth';
+    case 'http':
+      return 'HTTP';
     case 'network':
       return 'Network';
     default:
@@ -146,6 +150,8 @@ function getTransportSortOrder(transportType: string) {
       return 0;
     case 'ble':
       return 1;
+    case 'http':
+      return 2;
     default:
       return 10;
   }
@@ -550,6 +556,8 @@ function mergeDeviceConfigurations(
       definitionVersion: device.definitionVersion ?? null,
       transportPortName: device.transportPortName ?? '',
       bleSettingsPin: device.bleSettingsPin ?? '',
+      httpUsername: device.httpUsername ?? '',
+      httpPassword: device.httpPassword ?? '',
       address: device.address,
       isMaster: device.isMaster,
       pollIntervalMilliseconds: device.pollIntervalMilliseconds,
@@ -574,6 +582,8 @@ function serializeDevice(device: DeviceConfiguration): DeviceConfigurationWire {
     definitionVersion: device.definitionVersion ?? null,
     transportPortName: device.transportPortName?.trim() ? device.transportPortName.trim() : null,
     bleSettingsPin: device.bleSettingsPin?.trim() ? device.bleSettingsPin.trim() : null,
+    httpUsername: device.httpUsername?.trim() ? device.httpUsername.trim() : null,
+    httpPassword: device.httpPassword?.trim() ? device.httpPassword : null,
     address: device.address,
     isMaster: device.isMaster,
     pollIntervalMilliseconds: getDefinitionPollInterval(device.definition, device.pollIntervalMilliseconds),
@@ -672,6 +682,8 @@ const defaultDevice = (
   definitionVersion: definitionSnapshot.version,
   transportPortName: '',
   bleSettingsPin: '',
+  httpUsername: '',
+  httpPassword: '',
   address: index,
   isMaster: false,
   pollIntervalMilliseconds: getDefinitionPollInterval(definitionSnapshot, 1000),
@@ -737,7 +749,7 @@ function getDefinition(device: DeviceConfiguration, definitions: DeviceDefinitio
 
 function requiresTransportIdentifier(device: DeviceConfiguration, definitions: DeviceDefinitionSummary[]) {
   const transportType = getTransportType(device, definitions);
-  return transportType === 'serial' || transportType === 'ble';
+  return transportType === 'serial' || transportType === 'ble' || transportType === 'http';
 }
 
 function getActionResultClassName(result: StartStopResult) {
@@ -1265,6 +1277,8 @@ export function DevicesPage({
         definitionVersion: nextDefinitionSnapshot.version,
         transportPortName: currentTransportType === nextTransportType ? (device.transportPortName ?? '') : '',
         bleSettingsPin: nextTransportType === 'ble' ? (device.bleSettingsPin ?? '') : '',
+        httpUsername: nextTransportType === 'http' && currentTransportType === nextTransportType ? (device.httpUsername ?? '') : '',
+        httpPassword: nextTransportType === 'http' && currentTransportType === nextTransportType ? (device.httpPassword ?? '') : '',
         definition: nextDefinitionSnapshot,
         hasDefinitionOverride: false,
         pollIntervalMilliseconds: getDefinitionPollInterval(nextDefinitionSnapshot, device.pollIntervalMilliseconds),
@@ -1863,11 +1877,16 @@ export function DevicesPage({
             const manufacturerAndModel = [device.definition?.device.manufacturer ?? definitionSummary?.manufacturer, device.definition?.device.model ?? definitionSummary?.model]
               .filter((value): value is string => Boolean(value))
               .join(' · ');
+            const httpDefaultUsername = device.definition?.connection.protocol.settings?.httpDefaultUsername?.trim() ?? '';
             const definitionSections = [
               {
                 key: 'transport-defaults',
                 title: 'Transport defaults',
-                description: transportType === 'ble' ? 'BLE transport settings stored with this device.' : 'Serial transport settings stored with this device.',
+                description: transportType === 'ble'
+                  ? 'BLE transport settings stored with this device.'
+                  : transportType === 'http'
+                    ? 'HTTP transport settings stored with this device definition.'
+                    : 'Serial transport settings stored with this device.',
                 path: ['connection', 'transport', 'defaults'],
                 value: filterTransportDefaults(device.definition?.connection.transport.defaults as Record<string, unknown> | undefined, transportType),
               },
@@ -1962,7 +1981,9 @@ export function DevicesPage({
                   <div className='mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300'>
                     {transportType === 'ble'
                       ? 'Scan and choose a nearby BLE device, or enter the MAC address or alias before starting this device.'
-                      : 'Select the serial port before starting this device.'}
+                      : transportType === 'http'
+                        ? 'Enter the device host or base URL before starting this device.'
+                        : 'Select the serial port before starting this device.'}
                   </div>
                 ) : null}
 
@@ -2049,6 +2070,23 @@ export function DevicesPage({
                     </label>
                   ) : null}
 
+                  {transportType === 'http' ? (
+                    <div className='space-y-2 text-sm text-foreground md:col-span-2 xl:col-span-2'>
+                      <div className='flex items-center justify-between gap-2'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Host / base URL</span>
+                        {renderFieldSaveState(device.clientKey, 'transportPortName')}
+                      </div>
+                      <Input
+                        value={device.transportPortName ?? ''}
+                        disabled={device.enabled}
+                        placeholder='10.0.0.29 or http://10.0.0.29'
+                        {...deferInputSaveUntilFinished(index, 'transportPortName')}
+                        onChange={(event) => updateDevice(index, 'transportPortName', event.target.value)}
+                      />
+                      <p className='text-[11px] text-muted-foreground'>If no scheme is provided, the monitor assumes `http://`.</p>
+                    </div>
+                  ) : null}
+
                   {transportType === 'ble' ? (
                     <>
                       <div className='space-y-2 text-sm text-foreground md:col-span-2 xl:col-span-3'>
@@ -2105,7 +2143,7 @@ export function DevicesPage({
                     </>
                   ) : null}
 
-                  {transportType !== 'ble' ? (
+                  {transportType === 'serial' ? (
                     <label className='space-y-2 text-sm text-foreground'>
                       <div className='flex items-center justify-between gap-2'>
                         <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Address</span>
@@ -2120,6 +2158,40 @@ export function DevicesPage({
                         {...deferInputSaveUntilFinished(index, 'address')}
                         onChange={(event) => updateDevice(index, 'address', Number(event.target.value))}
                       />
+                    </label>
+                  ) : null}
+
+                  {transportType === 'http' ? (
+                    <label className='space-y-2 text-sm text-foreground'>
+                      <div className='flex items-center justify-between gap-2'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>HTTP username</span>
+                        {renderFieldSaveState(device.clientKey, 'httpUsername')}
+                      </div>
+                      <Input
+                        value={device.httpUsername ?? ''}
+                        disabled={device.enabled}
+                        placeholder={httpDefaultUsername || 'Optional'}
+                        {...deferInputSaveUntilFinished(index, 'httpUsername')}
+                        onChange={(event) => updateDevice(index, 'httpUsername', event.target.value)}
+                      />
+                    </label>
+                  ) : null}
+
+                  {transportType === 'http' ? (
+                    <label className='space-y-2 text-sm text-foreground'>
+                      <div className='flex items-center justify-between gap-2'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>HTTP password</span>
+                        {renderFieldSaveState(device.clientKey, 'httpPassword')}
+                      </div>
+                      <Input
+                        type='password'
+                        value={device.httpPassword ?? ''}
+                        disabled={device.enabled}
+                        placeholder='Optional'
+                        {...deferInputSaveUntilFinished(index, 'httpPassword')}
+                        onChange={(event) => updateDevice(index, 'httpPassword', event.target.value)}
+                      />
+                      <p className='text-[11px] text-muted-foreground'>Leave credentials blank for open devices. If only a password is needed, the definition default username is used.</p>
                     </label>
                   ) : null}
 
