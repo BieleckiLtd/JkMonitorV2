@@ -115,6 +115,10 @@ type SaveFieldTarget = {
 
 const catalogDefinitionCache = new Map<string, DeviceDefinition>();
 let nextDeviceClientKey = 0;
+const runtimeTuningDefinitionIds = new Set([
+  'jk-inverter-bms',
+  'jk-bd4a8s4p-ble',
+]);
 const defaultDisplayPrecision: DisplayPrecision = {
   voltage: 2,
   cellVoltage: 3,
@@ -758,6 +762,10 @@ function shouldShowAdvancedDefinitionOverrides(transportType: string | null | un
   }
 
   return sectionCount > 0;
+}
+
+function supportsRuntimeTuning(definitionId: string | null | undefined) {
+  return definitionId != null && runtimeTuningDefinitionIds.has(definitionId);
 }
 
 function getActionResultClassName(result: StartStopResult) {
@@ -1870,6 +1878,7 @@ export function DevicesPage({
             const isPassiveBroadcast = protocolType === 'ble-advertisement';
             const isNotifyStreamDevice = isNotifyStreamDefinition(device.definition);
             const isHttpDevice = transportType === 'http';
+            const showsRuntimeTuning = supportsRuntimeTuning(device.definitionId) && !isNotifyStreamDevice;
             const showPollingFields = !isPassiveBroadcast && !isNotifyStreamDevice;
             const isTransportSupported = definitionSummary?.isTransportSupported ?? true;
             const requiresTransport = requiresTransportIdentifier(device, availableDefinitions);
@@ -2205,7 +2214,7 @@ export function DevicesPage({
                     </label>
                   ) : null}
 
-                  {definitionFamily?.category === 'energy-storage' && !isNotifyStreamDevice ? (
+                  {showsRuntimeTuning ? (
                     <label className='space-y-2 text-sm text-foreground'>
                       <div className='flex items-center justify-between gap-2'>
                         <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Is master</span>
@@ -2239,7 +2248,7 @@ export function DevicesPage({
                   ) : null}
                 </div>
 
-                {definitionFamily?.category === 'energy-storage' ? (
+                {showsRuntimeTuning ? (
                 <details className='mt-4 rounded-2xl border border-border/70 bg-background/40 p-4'>
                   <summary className='cursor-pointer list-none text-sm font-semibold text-foreground'>Runtime tuning</summary>
                   <div className='mt-4 space-y-4'>

@@ -149,6 +149,51 @@ describe('DevicesPage', () => {
       },
       entities: [],
     },
+    'pylon-lv-rs485': {
+      version: '1.0.0',
+      device: {
+        id: 'pylon-lv-rs485',
+        name: 'Pylon LV',
+        manufacturer: 'Pylontech',
+        model: 'US Series',
+        category: 'energy-storage',
+      },
+      connection: {
+        transport: {
+          type: 'serial',
+          defaults: {
+            baudRate: 115200,
+            dataBits: 8,
+            parity: 'none',
+            stopBits: 1,
+            readTimeoutMs: 1000,
+            writeTimeoutMs: 1000,
+          },
+        },
+        protocol: {
+          type: 'modbus',
+          settings: {
+            defaultSlaveAddress: 1,
+            retries: 1,
+            byteOrder: 'big-endian',
+          },
+        },
+      },
+      dataSources: [
+        {
+          id: 'analog',
+          name: 'Analog',
+          pollGroup: 'fast',
+        },
+      ],
+      pollGroups: {
+        fast: {
+          intervalMs: 1000,
+          description: 'Fast polling',
+        },
+      },
+      entities: [],
+    },
   } as const;
 
   beforeEach(() => {
@@ -212,6 +257,15 @@ describe('DevicesPage', () => {
               model: 'Shelly EM (Gen1)',
               category: 'power-monitor',
               transportType: 'http',
+              isTransportSupported: true,
+            },
+            {
+              id: 'pylon-lv-rs485',
+              name: 'Pylon LV',
+              manufacturer: 'Pylontech',
+              model: 'US Series',
+              category: 'energy-storage',
+              transportType: 'serial',
               isTransportSupported: true,
             },
           ]),
@@ -548,6 +602,44 @@ describe('DevicesPage', () => {
     expect(await screen.findByDisplayValue('10.0.0.29')).toBeInTheDocument();
     expect(screen.getByText(/http username/i)).toBeInTheDocument();
     expect(screen.queryByText(/advanced compatibility overrides/i)).not.toBeInTheDocument();
+  });
+
+  it('does not show JK-specific runtime tuning for other battery definitions', async () => {
+    initialDevicesResponse = [
+      {
+        deviceId: 'device-1',
+        displayName: 'Pylon Battery',
+        definitionId: 'pylon-lv-rs485',
+        definitionVersion: '1.0.0',
+        transportPortName: 'COM3',
+        bleSettingsPin: null,
+        address: 1,
+        isMaster: false,
+        pollIntervalMilliseconds: 1000,
+        enabled: false,
+        cellVoltageSmoothingFactor: 0,
+        cellVoltageSmoothingBreakoutMillivolts: 0,
+        displayPrecision: {
+          voltage: 2,
+          cellVoltage: 3,
+          current: 1,
+          power: 0,
+          temperature: 1,
+          soc: 0,
+          deltaVoltage: 3,
+        },
+        hasDefinitionOverride: false,
+        definition: definitionDetailsById['pylon-lv-rs485'],
+      },
+    ];
+
+    renderPage();
+
+    expect(await screen.findByText('Pylon Battery')).toBeInTheDocument();
+    expect(screen.getByText(/serial port/i)).toBeInTheDocument();
+    expect(screen.queryByText(/is master/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/runtime tuning/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/cell smoothing factor/i)).not.toBeInTheDocument();
   });
 
   it('shows a waiting message instead of a blank first-poll failure when start is still in progress', async () => {
