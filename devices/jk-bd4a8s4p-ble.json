@@ -972,6 +972,26 @@
           "secondaryMetrics": ["total_voltage", "current", "power"],
           "statusEntities": ["charging_enabled", "discharging_enabled"]
         }
+      },
+      "configuration": {
+        "deviceSettings": {
+          "inlineFields": ["isMaster"],
+          "runtimeTuning": {
+            "title": "Runtime tuning",
+            "fields": [
+              "cellVoltageSmoothingFactor",
+              "cellVoltageSmoothingBreakoutMillivolts",
+              "displayPrecision.voltage",
+              "displayPrecision.cellVoltage",
+              "displayPrecision.current",
+              "displayPrecision.power",
+              "displayPrecision.temperature",
+              "temperatureUnit",
+              "displayPrecision.soc",
+              "displayPrecision.deltaVoltage"
+            ]
+          }
+        }
       }
     }
   },

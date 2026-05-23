@@ -59,6 +59,30 @@ describe('DevicesPage', () => {
         },
       },
       entities: [],
+      ui: {
+        pages: {
+          configuration: {
+            deviceSettings: {
+              inlineFields: ['isMaster'],
+              runtimeTuning: {
+                title: 'Runtime tuning',
+                fields: [
+                  'cellVoltageSmoothingFactor',
+                  'cellVoltageSmoothingBreakoutMillivolts',
+                  'displayPrecision.voltage',
+                  'displayPrecision.cellVoltage',
+                  'displayPrecision.current',
+                  'displayPrecision.power',
+                  'displayPrecision.temperature',
+                  'temperatureUnit',
+                  'displayPrecision.soc',
+                  'displayPrecision.deltaVoltage',
+                ],
+              },
+            },
+          },
+        },
+      },
     },
     'jk-inverter-bms-ble': {
       version: '1.0.0',
@@ -107,6 +131,15 @@ describe('DevicesPage', () => {
         },
       },
       entities: [],
+      ui: {
+        pages: {
+          configuration: {
+            deviceSettings: {
+              inlineFields: ['isMaster'],
+            },
+          },
+        },
+      },
     },
     'shelly-em': {
       version: '1.0.0',
@@ -640,6 +673,48 @@ describe('DevicesPage', () => {
     expect(screen.queryByText(/is master/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/runtime tuning/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/cell smoothing factor/i)).not.toBeInTheDocument();
+  });
+
+  it('shows definition-declared device settings for JK devices', async () => {
+    initialDevicesResponse = [
+      {
+        deviceId: 'device-1',
+        displayName: 'JK Battery',
+        definitionId: 'jk-inverter-bms',
+        definitionVersion: '1.0.0',
+        transportPortName: 'COM3',
+        bleSettingsPin: null,
+        address: 1,
+        isMaster: false,
+        pollIntervalMilliseconds: 1000,
+        enabled: false,
+        cellVoltageSmoothingFactor: 0.25,
+        cellVoltageSmoothingBreakoutMillivolts: 15,
+        displayPrecision: {
+          voltage: 2,
+          cellVoltage: 3,
+          current: 1,
+          power: 0,
+          temperature: 1,
+          soc: 0,
+          deltaVoltage: 3,
+        },
+        hasDefinitionOverride: false,
+        definition: definitionDetailsById['jk-inverter-bms'],
+      },
+    ];
+
+    renderPage();
+
+    expect(await screen.findByText('JK Battery')).toBeInTheDocument();
+    expect(screen.getByText(/is master/i)).toBeInTheDocument();
+    expect(screen.getByText(/runtime tuning/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText(/runtime tuning/i));
+
+    expect(await screen.findByDisplayValue('0.25')).toBeInTheDocument();
+    expect(screen.getByText(/cell smoothing factor/i)).toBeInTheDocument();
+    expect(screen.getByText(/temperature unit/i)).toBeInTheDocument();
   });
 
   it('shows a waiting message instead of a blank first-poll failure when start is still in progress', async () => {

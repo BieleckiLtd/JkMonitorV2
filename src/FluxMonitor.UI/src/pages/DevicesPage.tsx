@@ -5,7 +5,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { useDeviceDefinitions } from '../hooks/useDeviceDefinition';
 import { cn } from '../lib/utils';
-import type { DeviceDefinition, DeviceDefinitionSummary } from '../types/deviceDefinition';
+import type { DeviceDefinition, DeviceDefinitionSummary, UiDeviceSettingsDefinition } from '../types/deviceDefinition';
 
 type DisplayPrecision = {
   voltage: number;
@@ -115,10 +115,6 @@ type SaveFieldTarget = {
 
 const catalogDefinitionCache = new Map<string, DeviceDefinition>();
 let nextDeviceClientKey = 0;
-const runtimeTuningDefinitionIds = new Set([
-  'jk-inverter-bms',
-  'jk-bd4a8s4p-ble',
-]);
 const defaultDisplayPrecision: DisplayPrecision = {
   voltage: 2,
   cellVoltage: 3,
@@ -764,8 +760,151 @@ function shouldShowAdvancedDefinitionOverrides(transportType: string | null | un
   return sectionCount > 0;
 }
 
-function supportsRuntimeTuning(definitionId: string | null | undefined) {
-  return definitionId != null && runtimeTuningDefinitionIds.has(definitionId);
+function getConfiguredDeviceSettings(definition: DeviceDefinition | null | undefined) {
+  return definition?.ui?.pages?.configuration?.deviceSettings ?? null;
+}
+
+function getConfiguredRuntimeTuningFields(deviceSettings: UiDeviceSettingsDefinition | null | undefined) {
+  return deviceSettings?.runtimeTuning?.fields ?? [];
+}
+
+function renderConfiguredDeviceSettingField(
+  field: string,
+  device: DeviceConfiguration,
+  index: number,
+  deviceEnabled: boolean,
+  updateDevice: <K extends keyof DeviceConfiguration>(index: number, key: K, value: DeviceConfiguration[K]) => void,
+  updateDisplayPrecision: (index: number, key: keyof DisplayPrecision, value: number) => void,
+  renderFieldSaveState: (clientKey: string, fieldKey: string) => ReactNode,
+  deferInputSaveUntilFinished: (index: number, fieldKey: string) => { onBlur: () => void },
+) {
+  switch (field) {
+    case 'isMaster':
+      return (
+        <label key={field} className='space-y-2 text-sm text-foreground'>
+          <div className='flex items-center justify-between gap-2'>
+            <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Is master</span>
+            {renderFieldSaveState(device.clientKey, 'isMaster')}
+          </div>
+          <div className='flex h-7 items-center rounded-lg border border-input bg-background px-2'>
+            <input
+              type='checkbox'
+              checked={device.isMaster}
+              disabled={deviceEnabled}
+              onChange={(event) => updateDevice(index, 'isMaster', event.target.checked)}
+            />
+          </div>
+        </label>
+      );
+    case 'cellVoltageSmoothingFactor':
+      return (
+        <label key={field} className='space-y-2 text-sm text-foreground'>
+          <div className='flex items-center justify-between gap-2'>
+            <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Cell smoothing factor</span>
+            {renderFieldSaveState(device.clientKey, 'cellVoltageSmoothingFactor')}
+          </div>
+          <Input
+            type='number'
+            min={0}
+            max={1}
+            step='0.01'
+            value={device.cellVoltageSmoothingFactor}
+            disabled={deviceEnabled}
+            {...deferInputSaveUntilFinished(index, 'cellVoltageSmoothingFactor')}
+            onChange={(event) => updateDevice(index, 'cellVoltageSmoothingFactor', Number(event.target.value))}
+          />
+        </label>
+      );
+    case 'cellVoltageSmoothingBreakoutMillivolts':
+      return (
+        <label key={field} className='space-y-2 text-sm text-foreground'>
+          <div className='flex items-center justify-between gap-2'>
+            <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Breakout mV</span>
+            {renderFieldSaveState(device.clientKey, 'cellVoltageSmoothingBreakoutMillivolts')}
+          </div>
+          <Input
+            type='number'
+            min={0}
+            step='1'
+            value={device.cellVoltageSmoothingBreakoutMillivolts}
+            disabled={deviceEnabled}
+            {...deferInputSaveUntilFinished(index, 'cellVoltageSmoothingBreakoutMillivolts')}
+            onChange={(event) => updateDevice(index, 'cellVoltageSmoothingBreakoutMillivolts', Number(event.target.value))}
+          />
+        </label>
+      );
+    case 'displayPrecision.voltage':
+    case 'displayPrecision.cellVoltage':
+    case 'displayPrecision.current':
+    case 'displayPrecision.power':
+    case 'displayPrecision.temperature':
+    case 'displayPrecision.soc':
+    case 'displayPrecision.deltaVoltage': {
+      const precisionKey = field.replace('displayPrecision.', '') as keyof DisplayPrecision;
+      const labels: Record<keyof DisplayPrecision, string> = {
+        voltage: 'Voltage precision',
+        cellVoltage: 'Cell precision',
+        current: 'Current precision',
+        power: 'Power precision',
+        temperature: 'Temperature precision',
+        soc: 'SOC precision',
+        deltaVoltage: 'Delta V precision',
+      };
+
+      return (
+        <label key={field} className='space-y-2 text-sm text-foreground'>
+          <div className='flex items-center justify-between gap-2'>
+            <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{labels[precisionKey]}</span>
+            {renderFieldSaveState(device.clientKey, field)}
+          </div>
+          <Input
+            type='number'
+            min={0}
+            step='1'
+            value={device.displayPrecision[precisionKey]}
+            disabled={deviceEnabled}
+            {...deferInputSaveUntilFinished(index, field)}
+            onChange={(event) => updateDisplayPrecision(index, precisionKey, Number(event.target.value))}
+          />
+        </label>
+      );
+    }
+    case 'temperatureUnit':
+      return (
+        <label key={field} className='space-y-2 text-sm text-foreground'>
+          <div className='flex items-center justify-between gap-2'>
+            <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Temperature unit</span>
+            {renderFieldSaveState(device.clientKey, 'temperatureUnit')}
+          </div>
+          <div className='inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/70 p-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
+            <button
+              type='button'
+              disabled={deviceEnabled}
+              onClick={() => updateDevice(index, 'temperatureUnit', 'c')}
+              className={cn(
+                'rounded-full px-3 py-1 transition-colors',
+                device.temperatureUnit === 'c' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted/70',
+              )}
+            >
+              °C
+            </button>
+            <button
+              type='button'
+              disabled={deviceEnabled}
+              onClick={() => updateDevice(index, 'temperatureUnit', 'f')}
+              className={cn(
+                'rounded-full px-3 py-1 transition-colors',
+                device.temperatureUnit === 'f' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted/70',
+              )}
+            >
+              °F
+            </button>
+          </div>
+        </label>
+      );
+    default:
+      return null;
+  }
 }
 
 function getActionResultClassName(result: StartStopResult) {
@@ -1878,7 +2017,10 @@ export function DevicesPage({
             const isPassiveBroadcast = protocolType === 'ble-advertisement';
             const isNotifyStreamDevice = isNotifyStreamDefinition(device.definition);
             const isHttpDevice = transportType === 'http';
-            const showsRuntimeTuning = supportsRuntimeTuning(device.definitionId) && !isNotifyStreamDevice;
+            const configuredDeviceSettings = getConfiguredDeviceSettings(device.definition);
+            const runtimeTuningFields = !isNotifyStreamDevice ? getConfiguredRuntimeTuningFields(configuredDeviceSettings) : [];
+            const inlineDeviceFields = !isNotifyStreamDevice ? (configuredDeviceSettings?.inlineFields ?? []) : [];
+            const showsRuntimeTuning = runtimeTuningFields.length > 0;
             const showPollingFields = !isPassiveBroadcast && !isNotifyStreamDevice;
             const isTransportSupported = definitionSummary?.isTransportSupported ?? true;
             const requiresTransport = requiresTransportIdentifier(device, availableDefinitions);
@@ -2214,22 +2356,16 @@ export function DevicesPage({
                     </label>
                   ) : null}
 
-                  {showsRuntimeTuning ? (
-                    <label className='space-y-2 text-sm text-foreground'>
-                      <div className='flex items-center justify-between gap-2'>
-                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Is master</span>
-                        {renderFieldSaveState(device.clientKey, 'isMaster')}
-                      </div>
-                      <div className='flex h-7 items-center rounded-lg border border-input bg-background px-2'>
-                        <input
-                          type='checkbox'
-                          checked={device.isMaster}
-                          disabled={device.enabled}
-                          onChange={(event) => updateDevice(index, 'isMaster', event.target.checked)}
-                        />
-                      </div>
-                    </label>
-                  ) : null}
+                  {inlineDeviceFields.map((field) => renderConfiguredDeviceSettingField(
+                    field,
+                    device,
+                    index,
+                    device.enabled,
+                    updateDevice,
+                    updateDisplayPrecision,
+                    renderFieldSaveState,
+                    deferInputSaveUntilFinished,
+                  ))}
 
                   {transportType === 'ble' && !isPassiveBroadcast ? (
                     <label className='space-y-2 text-sm text-foreground'>
@@ -2250,120 +2386,20 @@ export function DevicesPage({
 
                 {showsRuntimeTuning ? (
                 <details className='mt-4 rounded-2xl border border-border/70 bg-background/40 p-4'>
-                  <summary className='cursor-pointer list-none text-sm font-semibold text-foreground'>Runtime tuning</summary>
+                  <summary className='cursor-pointer list-none text-sm font-semibold text-foreground'>{configuredDeviceSettings?.runtimeTuning?.title ?? 'Runtime tuning'}</summary>
                   <div className='mt-4 space-y-4'>
                     {device.enabled ? <div className='rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300'>Stop the device before changing runtime or definition settings.</div> : null}
                     <div className='grid gap-4 md:grid-cols-2 xl:grid-cols-4'>
-                      <label className='space-y-2 text-sm text-foreground'>
-                        <div className='flex items-center justify-between gap-2'>
-                          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Cell smoothing factor</span>
-                          {renderFieldSaveState(device.clientKey, 'cellVoltageSmoothingFactor')}
-                        </div>
-                        <Input
-                          type='number'
-                          min={0}
-                          max={1}
-                          step='0.01'
-                          value={device.cellVoltageSmoothingFactor}
-                          disabled={device.enabled}
-                          {...deferInputSaveUntilFinished(index, 'cellVoltageSmoothingFactor')}
-                          onChange={(event) => updateDevice(index, 'cellVoltageSmoothingFactor', Number(event.target.value))}
-                        />
-                      </label>
-                      <label className='space-y-2 text-sm text-foreground'>
-                        <div className='flex items-center justify-between gap-2'>
-                          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Breakout mV</span>
-                          {renderFieldSaveState(device.clientKey, 'cellVoltageSmoothingBreakoutMillivolts')}
-                        </div>
-                        <Input
-                          type='number'
-                          min={0}
-                          step='1'
-                          value={device.cellVoltageSmoothingBreakoutMillivolts}
-                          disabled={device.enabled}
-                          {...deferInputSaveUntilFinished(index, 'cellVoltageSmoothingBreakoutMillivolts')}
-                          onChange={(event) => updateDevice(index, 'cellVoltageSmoothingBreakoutMillivolts', Number(event.target.value))}
-                        />
-                      </label>
-                      <label className='space-y-2 text-sm text-foreground'>
-                        <div className='flex items-center justify-between gap-2'>
-                          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Voltage precision</span>
-                          {renderFieldSaveState(device.clientKey, 'displayPrecision.voltage')}
-                        </div>
-                        <Input type='number' min={0} step='1' value={device.displayPrecision.voltage} disabled={device.enabled} {...deferInputSaveUntilFinished(index, 'displayPrecision.voltage')} onChange={(event) => updateDisplayPrecision(index, 'voltage', Number(event.target.value))} />
-                      </label>
-                      <label className='space-y-2 text-sm text-foreground'>
-                        <div className='flex items-center justify-between gap-2'>
-                          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Cell precision</span>
-                          {renderFieldSaveState(device.clientKey, 'displayPrecision.cellVoltage')}
-                        </div>
-                        <Input type='number' min={0} step='1' value={device.displayPrecision.cellVoltage} disabled={device.enabled} {...deferInputSaveUntilFinished(index, 'displayPrecision.cellVoltage')} onChange={(event) => updateDisplayPrecision(index, 'cellVoltage', Number(event.target.value))} />
-                      </label>
-                      <label className='space-y-2 text-sm text-foreground'>
-                        <div className='flex items-center justify-between gap-2'>
-                          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Current precision</span>
-                          {renderFieldSaveState(device.clientKey, 'displayPrecision.current')}
-                        </div>
-                        <Input type='number' min={0} step='1' value={device.displayPrecision.current} disabled={device.enabled} {...deferInputSaveUntilFinished(index, 'displayPrecision.current')} onChange={(event) => updateDisplayPrecision(index, 'current', Number(event.target.value))} />
-                      </label>
-                      <label className='space-y-2 text-sm text-foreground'>
-                        <div className='flex items-center justify-between gap-2'>
-                          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Power precision</span>
-                          {renderFieldSaveState(device.clientKey, 'displayPrecision.power')}
-                        </div>
-                        <Input type='number' min={0} step='1' value={device.displayPrecision.power} disabled={device.enabled} {...deferInputSaveUntilFinished(index, 'displayPrecision.power')} onChange={(event) => updateDisplayPrecision(index, 'power', Number(event.target.value))} />
-                      </label>
-                      <label className='space-y-2 text-sm text-foreground'>
-                        <div className='flex items-center justify-between gap-2'>
-                          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Temperature precision</span>
-                          {renderFieldSaveState(device.clientKey, 'displayPrecision.temperature')}
-                        </div>
-                        <Input type='number' min={0} step='1' value={device.displayPrecision.temperature} disabled={device.enabled} {...deferInputSaveUntilFinished(index, 'displayPrecision.temperature')} onChange={(event) => updateDisplayPrecision(index, 'temperature', Number(event.target.value))} />
-                      </label>
-                      <label className='space-y-2 text-sm text-foreground'>
-                        <div className='flex items-center justify-between gap-2'>
-                          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Temperature unit</span>
-                          {renderFieldSaveState(device.clientKey, 'temperatureUnit')}
-                        </div>
-                        <div className='inline-flex items-center gap-1 rounded-full border border-border/70 bg-background/70 p-1 text-[11px] font-medium uppercase tracking-[0.18em] text-muted-foreground'>
-                          <button
-                            type='button'
-                            disabled={device.enabled}
-                            onClick={() => updateDevice(index, 'temperatureUnit', 'c')}
-                            className={cn(
-                              'rounded-full px-3 py-1 transition-colors',
-                              device.temperatureUnit === 'c' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted/70',
-                            )}
-                          >
-                            °C
-                          </button>
-                          <button
-                            type='button'
-                            disabled={device.enabled}
-                            onClick={() => updateDevice(index, 'temperatureUnit', 'f')}
-                            className={cn(
-                              'rounded-full px-3 py-1 transition-colors',
-                              device.temperatureUnit === 'f' ? 'bg-primary text-primary-foreground' : 'hover:bg-muted/70',
-                            )}
-                          >
-                            °F
-                          </button>
-                        </div>
-                      </label>
-                      <label className='space-y-2 text-sm text-foreground'>
-                        <div className='flex items-center justify-between gap-2'>
-                          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>SOC precision</span>
-                          {renderFieldSaveState(device.clientKey, 'displayPrecision.soc')}
-                        </div>
-                        <Input type='number' min={0} step='1' value={device.displayPrecision.soc} disabled={device.enabled} {...deferInputSaveUntilFinished(index, 'displayPrecision.soc')} onChange={(event) => updateDisplayPrecision(index, 'soc', Number(event.target.value))} />
-                      </label>
-                      <label className='space-y-2 text-sm text-foreground'>
-                        <div className='flex items-center justify-between gap-2'>
-                          <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Delta V precision</span>
-                          {renderFieldSaveState(device.clientKey, 'displayPrecision.deltaVoltage')}
-                        </div>
-                        <Input type='number' min={0} step='1' value={device.displayPrecision.deltaVoltage} disabled={device.enabled} {...deferInputSaveUntilFinished(index, 'displayPrecision.deltaVoltage')} onChange={(event) => updateDisplayPrecision(index, 'deltaVoltage', Number(event.target.value))} />
-                      </label>
+                      {runtimeTuningFields.map((field) => renderConfiguredDeviceSettingField(
+                        field,
+                        device,
+                        index,
+                        device.enabled,
+                        updateDevice,
+                        updateDisplayPrecision,
+                        renderFieldSaveState,
+                        deferInputSaveUntilFinished,
+                      ))}
                     </div>
                   </div>
                 </details>

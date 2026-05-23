@@ -558,6 +558,22 @@ public sealed class UiPageDefinition
     public IReadOnlyList<UiChartDefinition>? Charts { get; init; }
 
     public UiDashboardCard? Card { get; init; }
+
+    public UiDeviceSettingsDefinition? DeviceSettings { get; init; }
+}
+
+public sealed class UiDeviceSettingsDefinition
+{
+    public IReadOnlyList<string>? InlineFields { get; init; }
+
+    public UiDeviceSettingsGroupDefinition? RuntimeTuning { get; init; }
+}
+
+public sealed class UiDeviceSettingsGroupDefinition
+{
+    public string? Title { get; init; }
+
+    public IReadOnlyList<string>? Fields { get; init; }
 }
 
 public sealed class UiSectionDefinition

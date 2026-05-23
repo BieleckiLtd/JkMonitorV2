@@ -228,6 +228,17 @@ export type UiPageDefinition = {
   resolutions?: UiResolutionDefinition[];
   charts?: UiChartDefinition[];
   card?: UiDashboardCard;
+  deviceSettings?: UiDeviceSettingsDefinition;
+};
+
+export type UiDeviceSettingsDefinition = {
+  inlineFields?: string[];
+  runtimeTuning?: UiDeviceSettingsGroupDefinition;
+};
+
+export type UiDeviceSettingsGroupDefinition = {
+  title?: string;
+  fields?: string[];
 };
 
 export type UiSectionDefinition = {
