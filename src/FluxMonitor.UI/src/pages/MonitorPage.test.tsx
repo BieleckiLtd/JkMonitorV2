@@ -916,6 +916,19 @@ describe('MonitorPage', () => {
       ui: {
         pages: {
           monitor: {
+            card: {
+              statusGlyphs: [
+                {
+                  type: 'last-seen',
+                  icon: 'pulse',
+                  levels: [
+                    { maxAgeSeconds: 5, color: 'green', label: 'less than 5 seconds ago' },
+                    { maxAgeSeconds: 60, color: 'orange', label: 'less than a minute ago' },
+                    { color: 'red', label: 'more than a minute ago' },
+                  ],
+                },
+              ],
+            },
             sections: [
               {
                 type: 'hero-metrics',
@@ -993,6 +1006,145 @@ describe('MonitorPage', () => {
     expect(screen.getByText('0.5')).toBeInTheDocument();
     expect(screen.getByText('Channel 2')).toBeInTheDocument();
     expect(screen.getByText('0.3')).toBeInTheDocument();
+    const lastSeenGlyph = screen.getByTitle('Last seen less than 5 seconds ago (2026-04-12T12:00:00.000Z)');
+    expect(lastSeenGlyph).toBeInTheDocument();
+    expect(lastSeenGlyph).toHaveClass('text-emerald-400');
+    expect(screen.queryByText('Last update')).not.toBeInTheDocument();
+    expect(screen.queryByText('SUCCEEDED')).not.toBeInTheDocument();
+  }, 10000);
+
+  it('colors Shelly-style last-seen heartbeat icons orange after 5 seconds and red after a minute', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-04-12T12:01:05.000Z').getTime());
+
+    useDeviceDefinitionMock.mockReturnValue({
+      version: '1',
+      device: {
+        id: 'shelly-em',
+        name: 'Shelly EM',
+        manufacturer: 'Shelly',
+        model: 'Shelly EM (Gen1)',
+        category: 'power-monitor',
+        icon: 'gauge',
+      },
+      connection: {
+        transport: { type: 'http', defaults: {} },
+        protocol: { type: 'http-json', settings: {} },
+      },
+      dataSources: [],
+      pollGroups: {},
+      entities: [
+        {
+          id: 'total_power_w',
+          type: 'number',
+          name: 'Total Power',
+          category: 'Summary',
+          source: { bank: 'status', byteOffset: 0, unit: 'W' },
+          display: { precision: 1 },
+        },
+      ],
+      computedEntities: [],
+      ui: {
+        pages: {
+          monitor: {
+            card: {
+              statusGlyphs: [
+                {
+                  type: 'last-seen',
+                  icon: 'pulse',
+                  levels: [
+                    { maxAgeSeconds: 5, color: 'green', label: 'less than 5 seconds ago' },
+                    { maxAgeSeconds: 60, color: 'orange', label: 'less than a minute ago' },
+                    { color: 'red', label: 'more than a minute ago' },
+                  ],
+                },
+              ],
+            },
+            sections: [
+              {
+                type: 'hero-metrics',
+                metrics: [
+                  { entity: 'total_power_w', color: 'amber', label: 'Total', format: 'power-short' },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    } satisfies DeviceDefinition);
+
+    class FakeEventSource {
+      static instances: FakeEventSource[] = [];
+
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      close = vi.fn();
+
+      constructor(public readonly url: string) {
+        FakeEventSource.instances.push(this);
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }));
+      }
+    }
+
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    render(<MonitorPage />);
+
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(1);
+    });
+
+    FakeEventSource.instances[0]?.emit({
+      devices: [
+        {
+          deviceId: 'shelly-orange',
+          displayName: 'Shelly Orange',
+          definitionId: 'shelly-em',
+          protocolHandler: 'http-json',
+          enabled: true,
+          isMaster: true,
+          pollIntervalMilliseconds: 1000,
+          lastOutcome: 'Succeeded',
+          latestTelemetry: {
+            collectedAt: '2026-04-12T12:00:55.000Z',
+            cells: [],
+            activeWarnings: [],
+            parameters: [
+              { key: 'total_power_w', displayName: 'Total Power', category: 'Summary', numericValue: 812.3, sortOrder: 0, unit: 'W', displayPrecision: 1 },
+            ],
+          },
+        },
+        {
+          deviceId: 'shelly-red',
+          displayName: 'Shelly Red',
+          definitionId: 'shelly-em',
+          protocolHandler: 'http-json',
+          enabled: true,
+          isMaster: true,
+          pollIntervalMilliseconds: 1000,
+          lastOutcome: 'Succeeded',
+          latestTelemetry: {
+            collectedAt: '2026-04-12T12:00:00.000Z',
+            cells: [],
+            activeWarnings: [],
+            parameters: [
+              { key: 'total_power_w', displayName: 'Total Power', category: 'Summary', numericValue: 500, sortOrder: 0, unit: 'W', displayPrecision: 1 },
+            ],
+          },
+        },
+      ],
+    });
+
+    const orangeGlyph = await screen.findByTitle('Last seen less than a minute ago (2026-04-12T12:00:55.000Z)');
+    const redGlyph = screen.getByTitle('Last seen more than a minute ago (2026-04-12T12:00:00.000Z)');
+    expect(orangeGlyph).toHaveClass('text-orange-400');
+    expect(redGlyph).toHaveClass('text-rose-400');
   }, 10000);
 
   it('renders JK BMS cards collapsed by default and expands them on demand', async () => {

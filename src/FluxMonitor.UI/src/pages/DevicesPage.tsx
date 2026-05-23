@@ -682,7 +682,7 @@ const defaultDevice = (
   definitionVersion: definitionSnapshot.version,
   transportPortName: '',
   bleSettingsPin: '',
-  httpUsername: '',
+  httpUsername: definitionSnapshot.connection.protocol.settings?.httpDefaultUsername ?? '',
   httpPassword: '',
   address: index,
   isMaster: false,

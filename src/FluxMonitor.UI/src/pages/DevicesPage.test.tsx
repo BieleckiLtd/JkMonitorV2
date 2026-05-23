@@ -176,7 +176,7 @@ describe('DevicesPage', () => {
       ],
       pollGroups: {
         fast: {
-          intervalMs: 5000,
+          intervalMs: 1000,
           description: 'Shelly polling',
         },
       },
@@ -635,6 +635,16 @@ describe('DevicesPage', () => {
     expect(await screen.findByDisplayValue('10.0.0.29')).toBeInTheDocument();
     expect(screen.getByText(/http username/i)).toBeInTheDocument();
     expect(screen.queryByText(/advanced compatibility overrides/i)).not.toBeInTheDocument();
+  });
+
+  it('prefills HTTP username defaults and uses the definition poll interval for new Shelly devices', async () => {
+    renderPage();
+
+    fireEvent.click(await screen.findByRole('button', { name: /add first device/i }));
+    fireEvent.click(screen.getByRole('button', { name: /add shelly em using http/i }));
+
+    expect(await screen.findByDisplayValue('admin')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('1000 ms')).toBeInTheDocument();
   });
 
   it('does not show JK-specific runtime tuning for other battery definitions', async () => {

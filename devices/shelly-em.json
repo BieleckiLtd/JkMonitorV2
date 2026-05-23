@@ -88,7 +88,7 @@
   ],
   "pollGroups": {
     "fast": {
-      "intervalMs": 5000,
+      "intervalMs": 1000,
       "description": "Live meter status from the local Shelly HTTP API."
     }
   },
@@ -374,6 +374,19 @@
   "ui": {
     "pages": {
       "monitor": {
+        "card": {
+          "statusGlyphs": [
+            {
+              "type": "last-seen",
+              "icon": "pulse",
+              "levels": [
+                { "maxAgeSeconds": 5, "color": "green", "label": "less than 5 seconds ago" },
+                { "maxAgeSeconds": 60, "color": "orange", "label": "less than a minute ago" },
+                { "color": "red", "label": "more than a minute ago" }
+              ]
+            }
+          ]
+        },
         "sections": [
           {
             "type": "hero-metrics",
