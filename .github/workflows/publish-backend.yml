@@ -66,7 +66,7 @@ jobs:
           cache-dependency-path: ${{ env.FRONTEND_PATH }}/package-lock.json
 
       - name: Restore
-        run: dotnet restore ${{ env.PROJECT_PATH }} -f net10.0
+        run: dotnet restore ${{ env.PROJECT_PATH }} -p:TargetFramework=net10.0
 
       - name: Publish linux-arm64 backend
         shell: bash
