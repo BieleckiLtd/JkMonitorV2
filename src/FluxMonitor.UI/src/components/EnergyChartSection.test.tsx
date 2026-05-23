@@ -1,16 +1,20 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { EnergyChartSection } from './HistoryCharts';
 
 // ---------------------------------------------------------------------------
 // jsdom stubs – Recharts needs ResizeObserver and element sizing
 // ---------------------------------------------------------------------------
 beforeAll(() => {
-  global.ResizeObserver = vi.fn().mockImplementation(() => ({
-    observe: vi.fn(),
-    unobserve: vi.fn(),
-    disconnect: vi.fn(),
-  }));
+  global.ResizeObserver = class ResizeObserver {
+    constructor(_callback: ResizeObserverCallback) {
+      void _callback;
+    }
+
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as typeof ResizeObserver;
 });
 
 // Mock Recharts so we don't need real SVG layout in jsdom.
@@ -74,6 +78,22 @@ describe('EnergyChartSection', () => {
 
     expect(container.textContent).toContain('Charged:');
     expect(container.textContent).toContain('Discharged:');
+  });
+
+  it('keeps power in the title row metadata and groups energy totals below it', () => {
+    const data = [
+      makePoint('12:00', isoAt(0), 600, -3), // discharging
+      makePoint('12:01', isoAt(1), 400, 2),   // charging
+    ];
+    const { container } = render(<EnergyChartSection data={data} resolution='1m' displayMode='1h' />);
+
+    const powerLegend = within(container).getByTestId('energy-power-legend');
+    const totalsLegend = within(container).getByTestId('energy-totals-legend');
+
+    expect(powerLegend).toHaveTextContent('Power');
+    expect(totalsLegend).toHaveTextContent('Charged:');
+    expect(totalsLegend).toHaveTextContent('Discharged:');
+    expect(totalsLegend).not.toContainElement(powerLegend);
   });
 
   it('shows charged label with ↑ arrow (above baseline)', () => {

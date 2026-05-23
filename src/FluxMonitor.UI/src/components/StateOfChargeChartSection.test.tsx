@@ -4,11 +4,15 @@ import { HistoryCharts } from './HistoryCharts';
 import type { DeviceDefinition } from '../types/deviceDefinition';
 
 beforeAll(() => {
-  global.ResizeObserver = vi.fn().mockImplementation(() => ({
-    observe: vi.fn(),
-    unobserve: vi.fn(),
-    disconnect: vi.fn(),
-  }));
+  global.ResizeObserver = class ResizeObserver {
+    constructor(_callback: ResizeObserverCallback) {
+      void _callback;
+    }
+
+    observe() {}
+    unobserve() {}
+    disconnect() {}
+  } as typeof ResizeObserver;
 });
 
 vi.mock('recharts', () => {

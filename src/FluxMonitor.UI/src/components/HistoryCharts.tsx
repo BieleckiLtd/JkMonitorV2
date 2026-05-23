@@ -1345,6 +1345,28 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
 
   // Show absolute values on Y-axis (no negatives)
   const yTickFormatter = useCallback((v: number) => `${Math.abs(v).toFixed(1)}`, []);
+  const powerLegend = activeEnergyText ? (
+    <span
+      data-testid='energy-power-legend'
+      className='inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.16em] text-foreground/85'
+      style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.42)' }}
+    >
+      <span className='h-2 w-2 rounded-full bg-sky-400 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]' />
+      <span>Power</span>
+      <span className='normal-case tracking-normal text-foreground'>{activeEnergyText}</span>
+    </span>
+  ) : null;
+
+  const energyTotalsLegend = (
+    <div data-testid='energy-totals-legend' className='flex min-w-0 flex-wrap items-center gap-x-3.5 gap-y-1.5'>
+      <span className='flex items-center gap-1 text-xs text-emerald-400' style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.38)' }}>
+        <span className='text-[10px]'>↑</span> Charged: <span className='font-semibold'>{chargedKwh.toFixed(1)} kWh</span>
+      </span>
+      <span className='flex items-center gap-1 text-xs text-rose-400' style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.38)' }}>
+        <span className='text-[10px]'>↓</span> Discharged: <span className='font-semibold'>{dischargedKwh.toFixed(1)} kWh</span>
+      </span>
+    </div>
+  );
 
   return (
     <div className='relative overflow-hidden'>
@@ -1352,23 +1374,8 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
         headerRef={chartHeader.headerRef}
         title='Energy'
         activeTimeText={activeTimeText}
-        meta={(
-          <div className='flex min-w-0 flex-wrap items-center gap-x-3.5 gap-y-1.5'>
-            {activeEnergyText ? (
-              <span className='inline-flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.16em] text-foreground/85' style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.42)' }}>
-                <span className='h-2 w-2 rounded-full bg-sky-400 shadow-[0_0_0_1px_rgba(255,255,255,0.06)]' />
-                <span>Power</span>
-                <span className='normal-case tracking-normal text-foreground'>{activeEnergyText}</span>
-              </span>
-            ) : null}
-            <span className='flex items-center gap-1 text-xs text-emerald-400' style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.38)' }}>
-              <span className='text-[10px]'>↑</span> Charged: <span className='font-semibold'>{chargedKwh.toFixed(1)} kWh</span>
-            </span>
-            <span className='flex items-center gap-1 text-xs text-rose-400' style={{ textShadow: '0 1px 2px rgba(0, 0, 0, 0.38)' }}>
-              <span className='text-[10px]'>↓</span> Discharged: <span className='font-semibold'>{dischargedKwh.toFixed(1)} kWh</span>
-            </span>
-          </div>
-        )}
+        meta={powerLegend}
+        subtitle={energyTotalsLegend}
         valueText={undefined}
         selectedTime={selectedTime}
         onClearSelection={() => onSelect(null)}
