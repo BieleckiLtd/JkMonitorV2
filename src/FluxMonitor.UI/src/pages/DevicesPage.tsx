@@ -752,6 +752,14 @@ function requiresTransportIdentifier(device: DeviceConfiguration, definitions: D
   return transportType === 'serial' || transportType === 'ble' || transportType === 'http';
 }
 
+function shouldShowAdvancedDefinitionOverrides(transportType: string | null | undefined, hasDefinitionOverride: boolean, sectionCount: number) {
+  if (transportType === 'http') {
+    return hasDefinitionOverride;
+  }
+
+  return sectionCount > 0;
+}
+
 function getActionResultClassName(result: StartStopResult) {
   if (result.outcome === 'Succeeded') {
     return 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400';
@@ -1861,6 +1869,7 @@ export function DevicesPage({
             const protocolType = device.definition?.connection.protocol.type ?? definitionSummary?.protocolType ?? null;
             const isPassiveBroadcast = protocolType === 'ble-advertisement';
             const isNotifyStreamDevice = isNotifyStreamDefinition(device.definition);
+            const isHttpDevice = transportType === 'http';
             const showPollingFields = !isPassiveBroadcast && !isNotifyStreamDevice;
             const isTransportSupported = definitionSummary?.isTransportSupported ?? true;
             const requiresTransport = requiresTransportIdentifier(device, availableDefinitions);
@@ -1883,28 +1892,29 @@ export function DevicesPage({
                 key: 'transport-defaults',
                 title: 'Transport defaults',
                 description: transportType === 'ble'
-                  ? 'BLE transport settings stored with this device.'
+                  ? 'Advanced transport defaults for this Bluetooth device.'
                   : transportType === 'http'
-                    ? 'HTTP transport settings stored with this device definition.'
-                    : 'Serial transport settings stored with this device.',
+                    ? 'Advanced transport defaults for this HTTP device.'
+                    : 'Advanced transport defaults for this serial device.',
                 path: ['connection', 'transport', 'defaults'],
                 value: filterTransportDefaults(device.definition?.connection.transport.defaults as Record<string, unknown> | undefined, transportType),
               },
-              ...(isNotifyStreamDevice ? [] : [{
+              ...(isNotifyStreamDevice || isHttpDevice ? [] : [{
                 key: 'protocol-settings',
-                title: 'Protocol settings',
-                description: 'Retries, timeouts, framing, and protocol-specific options.',
+                title: 'Protocol defaults',
+                description: 'Advanced request framing, retries, timeouts, and other built-in protocol defaults.',
                 path: ['connection', 'protocol', 'settings'],
                 value: device.definition?.connection.protocol.settings,
               },
               {
                 key: 'poll-groups',
-                title: 'Poll groups',
-                description: 'Polling cadence per group. The fastest interval becomes the device poll rate.',
+                title: 'Polling defaults',
+                description: 'Advanced polling cadence per group. The fastest interval becomes the device poll rate.',
                 path: ['pollGroups'],
                 value: device.definition?.pollGroups,
               }]),
             ].filter((section): section is { key: string; title: string; description: string; path: string[]; value: Record<string, unknown> } => isObjectRecord(section.value));
+            const showDefinitionOverrides = shouldShowAdvancedDefinitionOverrides(transportType, device.hasDefinitionOverride, definitionSections.length);
 
             return (
               <section key={device.clientKey} className='rounded-2xl border border-border bg-card/85 p-5 shadow-sm'>
@@ -2350,12 +2360,15 @@ export function DevicesPage({
                 </details>
                 ) : null}
 
+                {showDefinitionOverrides ? (
                 <details className='mt-4 rounded-2xl border border-border/70 bg-background/40 p-4'>
-                  <summary className='cursor-pointer list-none text-sm font-semibold text-foreground'>Definition overrides</summary>
+                  <summary className='cursor-pointer list-none text-sm font-semibold text-foreground'>Advanced compatibility overrides</summary>
                   <div className='mt-4 space-y-4'>
                     <div className='flex flex-wrap items-center justify-between gap-3'>
                       <p className='text-sm text-muted-foreground'>
-                        These values are saved with this device&apos;s stored definition snapshot so old devices can be corrected without editing the shared catalog file.
+                        {isHttpDevice
+                          ? 'This HTTP device still has a saved compatibility patch from an older definition. Reset it to the catalog version if you no longer need that workaround.'
+                          : 'Advanced. Each configured device keeps its own copy of the device definition so one device can be patched without changing the shared catalog.'}
                       </p>
                       {device.hasDefinitionOverride ? (
                         <Button
@@ -2373,7 +2386,7 @@ export function DevicesPage({
 
                     {!device.definition ? (
                       <div className='rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive'>
-                        The stored definition snapshot could not be loaded for this device.
+                        The saved device definition could not be loaded for this device.
                       </div>
                     ) : null}
 
@@ -2393,6 +2406,7 @@ export function DevicesPage({
                     ))}
                   </div>
                 </details>
+                ) : null}
               </section>
             );
           })}

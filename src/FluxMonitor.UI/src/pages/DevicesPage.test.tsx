@@ -108,6 +108,47 @@ describe('DevicesPage', () => {
       },
       entities: [],
     },
+    'shelly-em': {
+      version: '1.0.0',
+      device: {
+        id: 'shelly-em',
+        name: 'Shelly EM',
+        manufacturer: 'Shelly',
+        model: 'Shelly EM (Gen1)',
+        category: 'power-monitor',
+      },
+      connection: {
+        transport: {
+          type: 'http',
+          defaults: {
+            readTimeoutMs: 3000,
+          },
+        },
+        protocol: {
+          type: 'http-json',
+          settings: {
+            byteOrder: 'big-endian',
+            httpDefaultUsername: 'admin',
+          },
+        },
+      },
+      dataSources: [
+        {
+          id: 'status',
+          name: 'Shelly status',
+          pollGroup: 'fast',
+          requestPath: '/status',
+          requestMethod: 'GET',
+        },
+      ],
+      pollGroups: {
+        fast: {
+          intervalMs: 5000,
+          description: 'Shelly polling',
+        },
+      },
+      entities: [],
+    },
   } as const;
 
   beforeEach(() => {
@@ -162,6 +203,15 @@ describe('DevicesPage', () => {
               model: 'JK-PB2A16S20P',
               category: 'energy-storage',
               transportType: 'ble',
+              isTransportSupported: true,
+            },
+            {
+              id: 'shelly-em',
+              name: 'Shelly EM',
+              manufacturer: 'Shelly',
+              model: 'Shelly EM (Gen1)',
+              category: 'power-monitor',
+              transportType: 'http',
               isTransportSupported: true,
             },
           ]),
@@ -455,11 +505,49 @@ describe('DevicesPage', () => {
     expect(screen.queryByText(/effective poll interval/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/is master/i)).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByText(/definition overrides/i));
+    fireEvent.click(screen.getByText(/advanced compatibility overrides/i));
 
-    expect(screen.queryByText(/protocol settings/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/poll groups/i)).not.toBeInTheDocument();
-    expect(screen.getByText(/transport defaults/i)).toBeInTheDocument();
+    expect(screen.queryByText(/protocol defaults/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/polling defaults/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText(/transport defaults/i).length).toBeGreaterThan(0);
+  });
+
+  it('hides advanced compatibility overrides for HTTP devices without a saved override', async () => {
+    initialDevicesResponse = [
+      {
+        deviceId: 'device-1',
+        displayName: 'Shelly EM',
+        definitionId: 'shelly-em',
+        definitionVersion: '1.0.0',
+        transportPortName: '10.0.0.29',
+        httpUsername: null,
+        httpPassword: null,
+        bleSettingsPin: null,
+        address: 1,
+        isMaster: false,
+        pollIntervalMilliseconds: 5000,
+        enabled: false,
+        cellVoltageSmoothingFactor: 0,
+        cellVoltageSmoothingBreakoutMillivolts: 0,
+        displayPrecision: {
+          voltage: 2,
+          cellVoltage: 3,
+          current: 1,
+          power: 0,
+          temperature: 1,
+          soc: 0,
+          deltaVoltage: 3,
+        },
+        hasDefinitionOverride: false,
+        definition: definitionDetailsById['shelly-em'],
+      },
+    ];
+
+    renderPage();
+
+    expect(await screen.findByDisplayValue('10.0.0.29')).toBeInTheDocument();
+    expect(screen.getByText(/http username/i)).toBeInTheDocument();
+    expect(screen.queryByText(/advanced compatibility overrides/i)).not.toBeInTheDocument();
   });
 
   it('shows a waiting message instead of a blank first-poll failure when start is still in progress', async () => {
@@ -810,7 +898,7 @@ describe('DevicesPage', () => {
 
     renderPage();
 
-    fireEvent.click(await screen.findByText(/definition overrides/i));
+    fireEvent.click(await screen.findByText(/advanced compatibility overrides/i));
 
     const pollIntervalInput = await screen.findByDisplayValue('4321');
     fireEvent.change(pollIntervalInput, { target: { value: '2500' } });
