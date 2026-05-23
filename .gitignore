@@ -2,7 +2,9 @@ bin/
 obj/
 .dotnet/
 .vs/
-.vscode/
+.vscode/*
+!.vscode/launch.json
+!.vscode/tasks.json
 *.user
 *.suo
 *.cache

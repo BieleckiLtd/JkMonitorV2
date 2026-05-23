@@ -1,0 +1,91 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "desktop: package windows",
+      "type": "shell",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/scripts/package-desktop.ps1"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}"
+      },
+      "group": "build",
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "clear": true
+      },
+      "problemMatcher": []
+    }
+  ]
+}{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "backend: ensure local postgres",
+      "type": "shell",
+      "command": "powershell.exe",
+      "args": [
+        "-NoProfile",
+        "-ExecutionPolicy",
+        "Bypass",
+        "-File",
+        "${workspaceFolder}/scripts/ensure-local-postgres.ps1"
+      ],
+      "problemMatcher": []
+    },
+    {
+      "label": "frontend: ensure dependencies",
+      "type": "process",
+      "command": "node",
+      "args": [
+        "-e",
+        "const fs = require('fs'); const { spawnSync } = require('child_process'); if (fs.existsSync('node_modules')) { console.log('Frontend dependencies already installed.'); process.exit(0); } const npmCommand = process.platform === 'win32' ? 'npm.cmd' : 'npm'; const result = spawnSync(npmCommand, ['ci'], { stdio: 'inherit' }); process.exit(result.status ?? 1);"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/src/FluxMonitor.UI"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "frontend: build",
+      "type": "shell",
+      "command": "npm",
+      "args": [
+        "run",
+        "build"
+      ],
+      "options": {
+        "cwd": "${workspaceFolder}/src/FluxMonitor.UI"
+      },
+      "problemMatcher": []
+    },
+    {
+      "label": "backend: build",
+      "type": "shell",
+      "command": "dotnet",
+      "args": [
+        "build",
+        "${workspaceFolder}/src/FluxMonitor.Backend/FluxMonitor.Backend.csproj",
+        "--nologo"
+      ],
+      "group": "build",
+      "problemMatcher": "$msCompile"
+    },
+    {
+      "label": "prepare local preview",
+      "dependsOn": [
+        "backend: ensure local postgres",
+        "backend: build"
+      ],
+      "dependsOrder": "sequence",
+      "problemMatcher": []
+    }
+  ]
+}

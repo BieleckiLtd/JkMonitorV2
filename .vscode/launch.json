@@ -1,0 +1,42 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run packaged desktop (Windows)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -Command \"& '${workspaceFolder}\\artifacts\\desktop\\win\\win-unpacked\\Flux Monitor.exe'\"",
+      "cwd": "${workspaceFolder}",
+      "preLaunchTask": "desktop: package windows"
+    }
+  ]
+}{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Run FluxMonitor desktop",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "powershell.exe -NoProfile -ExecutionPolicy Bypass -File \"${workspaceFolder}\\scripts\\start-desktop.ps1\""
+    },
+    {
+      "name": "Run FluxMonitor locally",
+      "type": "coreclr",
+      "request": "launch",
+      "preLaunchTask": "prepare local preview",
+      "program": "${workspaceFolder}/src/FluxMonitor.Backend/bin/Debug/net10.0/FluxMonitor.Backend.dll",
+      "cwd": "${workspaceFolder}/src/FluxMonitor.Backend",
+      "env": {
+        "ASPNETCORE_ENVIRONMENT": "Development",
+        "ASPNETCORE_URLS": "http://localhost:5075"
+      },
+      "console": "internalConsole",
+      "stopAtEntry": false,
+      "serverReadyAction": {
+        "action": "openExternally",
+        "pattern": "Flux Monitor application started\\.",
+        "uriFormat": "http://localhost:5075/system"
+      }
+    }
+  ]
+}
