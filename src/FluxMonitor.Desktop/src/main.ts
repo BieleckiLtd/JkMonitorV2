@@ -705,7 +705,11 @@ async function startBackend(): Promise<string> {
         const projectPath = getDevelopmentBackendProjectPath();
         const backendDirectory = path.dirname(projectPath);
 
-        backendProcess = spawn(getDotnetExecutablePath(), ["run", "--project", projectPath, "--framework", "net10.0", "--no-launch-profile", "--no-build"], {
+        const framework = process.platform === "win32"
+            ? "net10.0-windows10.0.17763.0"
+            : "net10.0";
+
+        backendProcess = spawn(getDotnetExecutablePath(), ["run", "--project", projectPath, "--framework", framework, "--no-launch-profile", "--no-build"], {
             cwd: backendDirectory,
             env,
             stdio: ["ignore", "pipe", "pipe"],
