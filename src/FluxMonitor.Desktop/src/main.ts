@@ -106,7 +106,7 @@ function buildInlinePage(title: string, heading: string, detail: string, theme: 
   <title>${escapeHtml(title)}</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
-  <style>${buildThemeRootBlock(theme)}\n${readPageCss("inline-page.css")}</style>
+  <style>${buildThemeRootBlock(theme)}\n${readPageCss("pages.css")}</style>
 </head>
 <body>
   <main>
@@ -132,9 +132,9 @@ function buildStartupErrorPage(error: unknown): string {
   <title>Flux Monitor – Startup Failed</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
-  <style>${buildThemeRootBlock(theme)}\n${readPageCss("error-page.css")}</style>
+  <style>${buildThemeRootBlock(theme)}\n${readPageCss("pages.css")}</style>
 </head>
-<body>
+<body class="page-error">
   <main>
     <p class="eyebrow">Flux Monitor Desktop</p>
     <h1>Startup failed</h1>
@@ -454,9 +454,9 @@ function buildSetupProgressPage(): string {
   <title>Flux Monitor – Database Setup</title>
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap" rel="stylesheet" />
-  <style>${buildThemeRootBlock(theme)}\n${readPageCss("setup-page.css")}</style>
+  <style>${buildThemeRootBlock(theme)}\n${readPageCss("pages.css")}</style>
 </head>
-<body>
+<body class="page-setup">
   <main>
     <p class="eyebrow">Automatic Database Setup</p>
     <h1>Setting up local storage dependency</h1>
@@ -705,7 +705,7 @@ async function startBackend(): Promise<string> {
         const projectPath = getDevelopmentBackendProjectPath();
         const backendDirectory = path.dirname(projectPath);
 
-        backendProcess = spawn(getDotnetExecutablePath(), ["run", "--project", projectPath, "--no-launch-profile", "--no-build"], {
+        backendProcess = spawn(getDotnetExecutablePath(), ["run", "--project", projectPath, "--framework", "net10.0", "--no-launch-profile", "--no-build"], {
             cwd: backendDirectory,
             env,
             stdio: ["ignore", "pipe", "pipe"],

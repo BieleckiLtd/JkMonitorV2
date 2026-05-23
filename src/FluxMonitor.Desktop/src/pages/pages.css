@@ -1,5 +1,7 @@
+/* Reset */
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
+/* Base layout */
 body {
   min-height: 100vh;
   display: grid;
@@ -12,13 +14,14 @@ body {
 }
 
 main {
-  width: min(760px, calc(100vw - 48px));
+  width: min(720px, calc(100vw - 48px));
   padding: 36px;
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--radius);
 }
 
+/* Eyebrow label */
 .eyebrow {
   color: var(--primary);
   font-size: 11px;
@@ -28,11 +31,69 @@ main {
   margin-bottom: 10px;
 }
 
+/* Headings */
 h1 {
   color: var(--foreground);
-  font-size: clamp(20px, 3.5vw, 28px);
+  font-size: clamp(24px, 4vw, 36px);
   font-weight: 700;
   line-height: 1.2;
+  margin-bottom: 12px;
+}
+
+/* Body copy */
+p {
+  color: var(--muted-foreground);
+}
+
+/* ── Error page ─────────────────────────────────────────────────── */
+.page-error {
+  color: var(--error-foreground);
+}
+
+.page-error main {
+  width: min(880px, calc(100vw - 48px));
+  border-color: var(--error-border);
+}
+
+.page-error .eyebrow {
+  color: var(--error-accent);
+}
+
+.page-error h1 {
+  color: var(--error-heading);
+  font-size: clamp(20px, 3.5vw, 28px);
+}
+
+.error-msg {
+  color: var(--error-message);
+  margin-bottom: 20px;
+}
+
+pre {
+  background: var(--background);
+  border: 1px solid var(--error-pre-border);
+  border-radius: 0;
+  padding: 16px;
+  color: var(--muted-foreground);
+  overflow: auto;
+  font-size: 12px;
+  line-height: 1.55;
+  max-height: 44vh;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+pre::-webkit-scrollbar { width: 4px; }
+pre::-webkit-scrollbar-track { background: transparent; }
+pre::-webkit-scrollbar-thumb { background: var(--error-accent); border-radius: 2px; }
+
+/* ── Setup page ─────────────────────────────────────────────────── */
+.page-setup main {
+  width: min(760px, calc(100vw - 48px));
+}
+
+.page-setup h1 {
+  font-size: clamp(20px, 3.5vw, 28px);
   margin-bottom: 10px;
 }
 
