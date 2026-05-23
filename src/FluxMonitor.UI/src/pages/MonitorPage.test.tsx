@@ -859,6 +859,142 @@ describe('MonitorPage', () => {
     expect(screen.queryByText(/Waiting for first reading/i)).not.toBeInTheDocument();
   }, 10000);
 
+  it('uses the compact collapsed card for monitor definitions that only declare hero metrics', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-04-12T12:00:02.000Z').getTime());
+
+    useDeviceDefinitionMock.mockReturnValue({
+      version: '1',
+      device: {
+        id: 'shelly-em',
+        name: 'Shelly EM',
+        manufacturer: 'Shelly',
+        model: 'Shelly EM (Gen1)',
+        category: 'power-monitor',
+        icon: 'gauge',
+      },
+      connection: {
+        transport: { type: 'http', defaults: {} },
+        protocol: { type: 'http-json', settings: {} },
+      },
+      dataSources: [],
+      pollGroups: {},
+      entities: [
+        {
+          id: 'total_power_w',
+          type: 'number',
+          name: 'Total Power',
+          category: 'Summary',
+          source: { bank: 'status', byteOffset: 0, unit: 'W' },
+          display: { precision: 1 },
+        },
+        {
+          id: 'channel_1_power_w',
+          type: 'number',
+          name: 'Channel 1 Power',
+          category: 'Summary',
+          source: { bank: 'status', byteOffset: 4, unit: 'W' },
+          display: { precision: 1 },
+        },
+        {
+          id: 'channel_2_power_w',
+          type: 'number',
+          name: 'Channel 2 Power',
+          category: 'Summary',
+          source: { bank: 'status', byteOffset: 8, unit: 'W' },
+          display: { precision: 1 },
+        },
+        {
+          id: 'average_voltage_v',
+          type: 'number',
+          name: 'Average Voltage',
+          category: 'Summary',
+          source: { bank: 'status', byteOffset: 12, unit: 'V' },
+          display: { precision: 1 },
+        },
+      ],
+      computedEntities: [],
+      ui: {
+        pages: {
+          monitor: {
+            sections: [
+              {
+                type: 'hero-metrics',
+                metrics: [
+                  { entity: 'total_power_w', color: 'amber', label: 'Total', format: 'power-short' },
+                  { entity: 'channel_1_power_w', color: 'emerald', label: 'Channel 1', format: 'power-short' },
+                  { entity: 'channel_2_power_w', color: 'blue', label: 'Channel 2', format: 'power-short' },
+                  { entity: 'average_voltage_v', color: 'orange' },
+                ],
+              },
+            ],
+          },
+        },
+      },
+    } satisfies DeviceDefinition);
+
+    class FakeEventSource {
+      static instances: FakeEventSource[] = [];
+
+      onmessage: ((event: MessageEvent<string>) => void) | null = null;
+      onerror: (() => void) | null = null;
+      close = vi.fn();
+
+      constructor(public readonly url: string) {
+        FakeEventSource.instances.push(this);
+      }
+
+      emit(payload: unknown) {
+        this.onmessage?.(new MessageEvent('message', { data: JSON.stringify(payload) }));
+      }
+    }
+
+    globalThis.EventSource = FakeEventSource as unknown as typeof EventSource;
+    globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify([]), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })) as typeof fetch;
+
+    render(<MonitorPage />);
+
+    await waitFor(() => {
+      expect(FakeEventSource.instances).toHaveLength(1);
+    });
+
+    FakeEventSource.instances[0]?.emit({
+      devices: [
+        {
+          deviceId: 'device-1',
+          displayName: 'Shelly EM',
+          definitionId: 'shelly-em',
+          protocolHandler: 'http-json',
+          enabled: true,
+          isMaster: true,
+          pollIntervalMilliseconds: 5000,
+          lastOutcome: 'Succeeded',
+          latestTelemetry: {
+            collectedAt: '2026-04-12T12:00:00.000Z',
+            cells: [],
+            activeWarnings: [],
+            parameters: [
+              { key: 'total_power_w', displayName: 'Total Power', category: 'Summary', numericValue: 812.3, sortOrder: 0, unit: 'W', displayPrecision: 1 },
+              { key: 'channel_1_power_w', displayName: 'Channel 1 Power', category: 'Summary', numericValue: 523.1, sortOrder: 1, unit: 'W', displayPrecision: 1 },
+              { key: 'channel_2_power_w', displayName: 'Channel 2 Power', category: 'Summary', numericValue: 289.2, sortOrder: 2, unit: 'W', displayPrecision: 1 },
+              { key: 'average_voltage_v', displayName: 'Average Voltage', category: 'Summary', numericValue: 229.6, sortOrder: 3, unit: 'V', displayPrecision: 1 },
+            ],
+          },
+        },
+      ],
+    });
+
+    expect(await screen.findByText('Shelly EM')).toBeInTheDocument();
+    expect(screen.getByText('Total')).toBeInTheDocument();
+    expect(screen.getByText('0.8')).toBeInTheDocument();
+    expect(screen.getByText('Channel 1')).toBeInTheDocument();
+    expect(screen.getByText('0.5')).toBeInTheDocument();
+    expect(screen.getByText('Channel 2')).toBeInTheDocument();
+    expect(screen.getByText('0.3')).toBeInTheDocument();
+  }, 10000);
+
   it('renders JK BMS cards collapsed by default and expands them on demand', async () => {
     vi.spyOn(Date, 'now').mockReturnValue(new Date('2026-04-12T12:00:02.000Z').getTime());
 

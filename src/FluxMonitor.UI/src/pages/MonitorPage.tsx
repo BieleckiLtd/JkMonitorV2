@@ -154,8 +154,14 @@ function getRelativeAdvertisementAgeSeconds(collectedAt: string | null | undefin
   return Math.max(0, Math.round((nowMs - collectedMs) / 1000));
 }
 
+function hasCompactHeroMetrics(definition: DeviceDefinition | null) {
+  return definition?.ui?.pages?.monitor?.sections?.some(
+    (section) => section.type === 'hero-metrics' && (section.metrics?.length ?? 0) > 0,
+  ) ?? false;
+}
+
 function shouldUseCompactMonitorCard(definition: DeviceDefinition | null) {
-  return definition?.ui?.pages?.monitor?.card != null;
+  return definition?.ui?.pages?.monitor?.card != null || hasCompactHeroMetrics(definition);
 }
 
 function shouldUseCompactMonitorCardFallback(paramByKey: Map<string, DeviceParameter>) {

@@ -378,9 +378,9 @@
           {
             "type": "hero-metrics",
             "metrics": [
-              { "entity": "total_power_w", "icon": "zap", "color": "amber" },
-              { "entity": "total_import_kwh", "icon": "activity", "color": "emerald" },
-              { "entity": "total_export_kwh", "icon": "activity", "color": "blue" },
+              { "entity": "total_power_w", "icon": "zap", "color": "amber", "label": "Total", "format": "power-short" },
+              { "entity": "channel_1_power_w", "icon": "zap", "color": "emerald", "label": "Channel 1", "format": "power-short" },
+              { "entity": "channel_2_power_w", "icon": "zap", "color": "blue", "label": "Channel 2", "format": "power-short" },
               { "entity": "average_voltage_v", "icon": "gauge", "color": "orange" }
             ]
           },
