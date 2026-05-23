@@ -462,6 +462,15 @@ public sealed class GenericBlePollingClient(
 
 #if WINDOWS
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static readonly string[] WindowsBleDeviceInformationProperties =
+    [
+        "System.Devices.Aep.DeviceAddress",
+        "System.Devices.Aep.IsConnected",
+        "System.Devices.Aep.SignalStrength",
+        "System.Devices.Aep.Bluetooth.Le.IsConnectable"
+    ];
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private async Task<IReadOnlyList<BleDiscoveredDevice>> DiscoverDevicesWindowsAsync(
         DeviceDefinition? definition,
         TimeSpan? timeout,
@@ -487,6 +496,7 @@ public sealed class GenericBlePollingClient(
         var matchFound = returnOnFirstMatch && expectedServiceUuid is not null
             ? new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously)
             : null;
+        var deviceInformationAddresses = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
         var watcher = new Windows.Devices.Bluetooth.Advertisement.BluetoothLEAdvertisementWatcher
         {
@@ -519,7 +529,10 @@ public sealed class GenericBlePollingClient(
             var discovered = new BleDiscoveredDevice(
                 address, null, name, displayName, false, false, rssi,
                 mfrDescriptions, serviceUuids, false, null, null);
-            devices[address] = discovered;
+            devices.AddOrUpdate(
+                address,
+                discovered,
+                (_, existing) => MergeWindowsDiscoveredDevices(existing, discovered));
 
             if (matchFound is not null && expectedServiceUuid is not null &&
                 serviceUuids.Contains(expectedServiceUuid, StringComparer.OrdinalIgnoreCase))
@@ -528,9 +541,55 @@ public sealed class GenericBlePollingClient(
             }
         };
 
-        watcher.Start();
+        Windows.Devices.Enumeration.DeviceWatcher? deviceWatcher = null;
+        Windows.Foundation.TypedEventHandler<
+            Windows.Devices.Enumeration.DeviceWatcher,
+            Windows.Devices.Enumeration.DeviceInformation>? deviceAdded = (_, info) =>
+        {
+            if (!TryMapWindowsBleDeviceInformation(info, out var discovered))
+                return;
+
+            deviceInformationAddresses[info.Id] = discovered.Address;
+            devices.AddOrUpdate(
+                discovered.Address,
+                discovered,
+                (_, existing) => MergeWindowsDiscoveredDevices(existing, discovered));
+        };
+        Windows.Foundation.TypedEventHandler<
+            Windows.Devices.Enumeration.DeviceWatcher,
+            Windows.Devices.Enumeration.DeviceInformationUpdate>? deviceUpdated = (_, update) =>
+        {
+            var address = TryGetWindowsDeviceAddress(update.Properties);
+            if (string.IsNullOrWhiteSpace(address) &&
+                !deviceInformationAddresses.TryGetValue(update.Id, out address))
+            {
+                return;
+            }
+
+            var rssi = TryGetWindowsInt32(update.Properties, "System.Devices.Aep.SignalStrength");
+            var isConnected = TryGetWindowsBoolean(update.Properties, "System.Devices.Aep.IsConnected");
+            if (devices.TryGetValue(address, out var existing))
+            {
+                var updated = existing with
+                {
+                    IsConnected = isConnected ?? existing.IsConnected,
+                    Rssi = rssi ?? existing.Rssi
+                };
+                devices[address] = updated;
+            }
+        };
+
+        deviceWatcher = Windows.Devices.Enumeration.DeviceInformation.CreateWatcher(
+            Windows.Devices.Bluetooth.BluetoothLEDevice.GetDeviceSelector(),
+            WindowsBleDeviceInformationProperties,
+            Windows.Devices.Enumeration.DeviceInformationKind.AssociationEndpoint);
+        deviceWatcher.Added += deviceAdded;
+        deviceWatcher.Updated += deviceUpdated;
+
         try
         {
+            deviceWatcher.Start();
+            watcher.Start();
             if (matchFound is null)
             {
                 await Task.Delay(discoveryWindow, cancellationToken);
@@ -554,12 +613,27 @@ public sealed class GenericBlePollingClient(
         finally
         {
             watcher.Stop();
+            if (deviceWatcher is not null)
+            {
+                deviceWatcher.Added -= deviceAdded;
+                deviceWatcher.Updated -= deviceUpdated;
+                if (deviceWatcher.Status is Windows.Devices.Enumeration.DeviceWatcherStatus.Started or
+                    Windows.Devices.Enumeration.DeviceWatcherStatus.EnumerationCompleted)
+                {
+                    deviceWatcher.Stop();
+                }
+            }
         }
 
         var discovered2 = devices.Values.ToList();
 
         if (expectedServiceUuid is not null)
         {
+            discovered2 = await VerifyWindowsGattServiceMatchesAsync(
+                discovered2,
+                expectedServiceUuid,
+                cancellationToken);
+
             discovered2 = discovered2
                 .Select(d => ApplyAdvertisedServiceVerification(d, expectedServiceUuid))
                 .ToList();
@@ -581,6 +655,202 @@ public sealed class GenericBlePollingClient(
             ordered.Count(d => d.IsDefinitionVerified));
 
         return ordered;
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static bool TryMapWindowsBleDeviceInformation(
+        Windows.Devices.Enumeration.DeviceInformation info,
+        out BleDiscoveredDevice device)
+    {
+        device = default!;
+        var address = TryGetWindowsDeviceAddress(info.Properties) ?? TryGetWindowsDeviceAddressFromId(info.Id);
+        if (string.IsNullOrWhiteSpace(address))
+            return false;
+
+        var name = string.IsNullOrWhiteSpace(info.Name) ? null : info.Name.Trim();
+        var rssi = TryGetWindowsInt32(info.Properties, "System.Devices.Aep.SignalStrength");
+        var isConnected = TryGetWindowsBoolean(info.Properties, "System.Devices.Aep.IsConnected") ?? false;
+        var displayName = name ?? address;
+
+        device = new BleDiscoveredDevice(
+            address,
+            null,
+            name,
+            displayName,
+            isConnected,
+            info.Pairing.IsPaired,
+            rssi,
+            [],
+            [],
+            false,
+            null,
+            null);
+        return true;
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private async Task<List<BleDiscoveredDevice>> VerifyWindowsGattServiceMatchesAsync(
+        IReadOnlyList<BleDiscoveredDevice> devices,
+        string expectedServiceUuid,
+        CancellationToken cancellationToken)
+    {
+        var serviceGuid = Guid.Parse(expectedServiceUuid);
+        using var throttler = new SemaphoreSlim(3, 3);
+        var tasks = devices.Select(async device =>
+        {
+            if (device.IsDefinitionVerified ||
+                device.AdvertisedServiceUuids.Contains(expectedServiceUuid, StringComparer.OrdinalIgnoreCase))
+            {
+                return device;
+            }
+
+            await throttler.WaitAsync(cancellationToken);
+            try
+            {
+                return await VerifyWindowsGattServiceMatchAsync(device, serviceGuid, expectedServiceUuid, cancellationToken);
+            }
+            finally
+            {
+                throttler.Release();
+            }
+        });
+
+        return (await Task.WhenAll(tasks)).ToList();
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private async Task<BleDiscoveredDevice> VerifyWindowsGattServiceMatchAsync(
+        BleDiscoveredDevice device,
+        Guid serviceGuid,
+        string expectedServiceUuid,
+        CancellationToken cancellationToken)
+    {
+        if (!WindowsBleHelpers.TryParseMacAddressToUlong(device.Address, out var address))
+            return device;
+
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(4));
+
+            using var leDevice = await Windows.Devices.Bluetooth.BluetoothLEDevice
+                .FromBluetoothAddressAsync(address)
+                .AsTask(timeoutCts.Token);
+            if (leDevice is null)
+                return device;
+
+            var servicesResult = await leDevice
+                .GetGattServicesForUuidAsync(serviceGuid, Windows.Devices.Bluetooth.BluetoothCacheMode.Uncached)
+                .AsTask(timeoutCts.Token);
+
+            if (servicesResult.Status != Windows.Devices.Bluetooth.GenericAttributeProfile.GattCommunicationStatus.Success ||
+                servicesResult.Services.Count == 0)
+            {
+                return device;
+            }
+
+            return device with
+            {
+                IsConnected = leDevice.ConnectionStatus == Windows.Devices.Bluetooth.BluetoothConnectionStatus.Connected || device.IsConnected,
+                IsDefinitionVerified = true,
+                VerificationLabel = "Service match",
+                VerificationDetails = $"Windows GATT query found the expected BLE service ({expectedServiceUuid})."
+            };
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException || !cancellationToken.IsCancellationRequested)
+        {
+            logger.LogDebug(
+                ex,
+                "Windows BLE service verification failed for discovered device {Address}.",
+                device.Address);
+            return device;
+        }
+    }
+
+    private static BleDiscoveredDevice MergeWindowsDiscoveredDevices(
+        BleDiscoveredDevice existing,
+        BleDiscoveredDevice incoming)
+    {
+        return incoming with
+        {
+            Alias = incoming.Alias ?? existing.Alias,
+            Name = incoming.Name ?? existing.Name,
+            DisplayName = !string.IsNullOrWhiteSpace(incoming.DisplayName) &&
+                          !string.Equals(incoming.DisplayName, incoming.Address, StringComparison.OrdinalIgnoreCase)
+                ? incoming.DisplayName
+                : existing.DisplayName,
+            IsConnected = incoming.IsConnected || existing.IsConnected,
+            IsPaired = incoming.IsPaired || existing.IsPaired,
+            Rssi = incoming.Rssi ?? existing.Rssi,
+            ManufacturerData = incoming.ManufacturerData.Length > 0 ? incoming.ManufacturerData : existing.ManufacturerData,
+            AdvertisedServiceUuids = incoming.AdvertisedServiceUuids.Length > 0 ? incoming.AdvertisedServiceUuids : existing.AdvertisedServiceUuids,
+            IsDefinitionVerified = incoming.IsDefinitionVerified || existing.IsDefinitionVerified,
+            VerificationLabel = incoming.VerificationLabel ?? existing.VerificationLabel,
+            VerificationDetails = incoming.VerificationDetails ?? existing.VerificationDetails
+        };
+    }
+
+    private static string? TryGetWindowsDeviceAddress(
+        IReadOnlyDictionary<string, object> properties)
+    {
+        if (!properties.TryGetValue("System.Devices.Aep.DeviceAddress", out var value))
+            return null;
+
+        return WindowsBleHelpers.TryNormalizeMacAddress(value?.ToString(), out var normalized)
+            ? normalized
+            : null;
+    }
+
+    private static string? TryGetWindowsDeviceAddressFromId(string id)
+    {
+        foreach (var separator in new[] { ':', '-' })
+        {
+            for (var index = 0; index <= id.Length - 17; index++)
+            {
+                var candidate = id.Substring(index, 17);
+                if (candidate.Count(ch => ch == separator) == 5 &&
+                    WindowsBleHelpers.TryNormalizeMacAddress(candidate, out var normalized))
+                {
+                    return normalized;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static bool? TryGetWindowsBoolean(
+        IReadOnlyDictionary<string, object> properties,
+        string key)
+    {
+        if (!properties.TryGetValue(key, out var value) || value is null)
+            return null;
+
+        try
+        {
+            return Convert.ToBoolean(value);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static int? TryGetWindowsInt32(
+        IReadOnlyDictionary<string, object> properties,
+        string key)
+    {
+        if (!properties.TryGetValue(key, out var value) || value is null)
+            return null;
+
+        try
+        {
+            return Convert.ToInt32(value);
+        }
+        catch
+        {
+            return null;
+        }
     }
 #endif
 
@@ -1492,6 +1762,9 @@ public sealed class GenericBlePollingClient(
     {
         ArgumentNullException.ThrowIfNull(device);
         ArgumentException.ThrowIfNullOrWhiteSpace(serviceUuid);
+
+        if (device.IsDefinitionVerified)
+            return device;
 
         var isMatch = device.AdvertisedServiceUuids.Contains(serviceUuid, StringComparer.OrdinalIgnoreCase);
         return device with

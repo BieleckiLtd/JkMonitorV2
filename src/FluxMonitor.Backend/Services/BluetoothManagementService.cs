@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using Linux.Bluetooth;
 using Linux.Bluetooth.Extensions;
@@ -9,9 +10,31 @@ namespace FluxMonitor.Backend.Services;
 public sealed class BluetoothManagementService(ILogger<BluetoothManagementService> logger)
 {
     private const string ElevationHelperPath = "/usr/local/sbin/fluxmonitor-elevate";
+#if WINDOWS
+    private static readonly string[] WindowsBleDeviceInformationProperties =
+    [
+        "System.Devices.Aep.DeviceAddress",
+        "System.Devices.Aep.IsConnected",
+        "System.Devices.Aep.SignalStrength",
+        "System.Devices.Aep.Bluetooth.Le.IsConnectable"
+    ];
+#endif
 
     public async Task<BluetoothRuntimeSnapshot> GetSnapshotAsync(CancellationToken cancellationToken = default)
     {
+        if (OperatingSystem.IsWindows())
+        {
+#if WINDOWS
+            return await GetWindowsSnapshotAsync(cancellationToken);
+#else
+            return new BluetoothRuntimeSnapshot
+            {
+                Supported = false,
+                StatusMessage = "Bluetooth controls require the Windows build of Flux Monitor."
+            };
+#endif
+        }
+
         if (!OperatingSystem.IsLinux())
         {
             return new BluetoothRuntimeSnapshot
@@ -46,6 +69,28 @@ public sealed class BluetoothManagementService(ILogger<BluetoothManagementServic
 
     public async Task<BluetoothPowerResult> SetPowerAsync(bool enabled, CancellationToken cancellationToken = default)
     {
+        if (OperatingSystem.IsWindows())
+        {
+#if WINDOWS
+            var snapshot = await GetWindowsAdapterStateAsync(cancellationToken);
+            return new BluetoothPowerResult
+            {
+                Success = snapshot.Powered == enabled,
+                Powered = snapshot.Powered,
+                Message = snapshot.Powered == enabled
+                    ? $"Bluetooth is already {(enabled ? "on" : "off")}."
+                    : "Use Windows Settings to change Bluetooth power state."
+            };
+#else
+            return new BluetoothPowerResult
+            {
+                Success = false,
+                Powered = false,
+                Message = "Bluetooth controls require the Windows build of Flux Monitor."
+            };
+#endif
+        }
+
         if (!OperatingSystem.IsLinux())
         {
             return new BluetoothPowerResult
@@ -243,6 +288,19 @@ public sealed class BluetoothManagementService(ILogger<BluetoothManagementServic
 
     public async Task<BluetoothScanResult> ScanAsync(TimeSpan? timeout, CancellationToken cancellationToken = default)
     {
+        if (OperatingSystem.IsWindows())
+        {
+#if WINDOWS
+            return await ScanWindowsAsync(timeout, cancellationToken);
+#else
+            return new BluetoothScanResult
+            {
+                Supported = false,
+                StatusMessage = "Bluetooth scanning requires the Windows build of Flux Monitor."
+            };
+#endif
+        }
+
         if (!OperatingSystem.IsLinux())
         {
             return new BluetoothScanResult
@@ -342,6 +400,301 @@ public sealed class BluetoothManagementService(ILogger<BluetoothManagementServic
             Devices = mappedDevices
         };
     }
+
+#if WINDOWS
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private async Task<BluetoothRuntimeSnapshot> GetWindowsSnapshotAsync(CancellationToken cancellationToken)
+    {
+        var adapterState = await GetWindowsAdapterStateAsync(cancellationToken);
+        return new BluetoothRuntimeSnapshot
+        {
+            Supported = adapterState.Supported,
+            Powered = adapterState.Powered,
+            StatusMessage = adapterState.StatusMessage
+        };
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private async Task<BluetoothScanResult> ScanWindowsAsync(TimeSpan? timeout, CancellationToken cancellationToken)
+    {
+        var adapterState = await GetWindowsAdapterStateAsync(cancellationToken);
+        if (!adapterState.Supported)
+        {
+            return new BluetoothScanResult
+            {
+                Supported = false,
+                Powered = false,
+                StatusMessage = adapterState.StatusMessage
+            };
+        }
+
+        if (!adapterState.Powered)
+        {
+            return new BluetoothScanResult
+            {
+                Supported = true,
+                Powered = false,
+                StatusMessage = adapterState.StatusMessage ?? "Bluetooth is powered off."
+            };
+        }
+
+        var scanDuration = timeout ?? TimeSpan.FromSeconds(6);
+        if (scanDuration < TimeSpan.FromSeconds(1))
+            scanDuration = TimeSpan.FromSeconds(1);
+
+        var devices = new ConcurrentDictionary<string, BluetoothDeviceSnapshot>(StringComparer.OrdinalIgnoreCase);
+        var deviceInformationAddresses = new ConcurrentDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        var advertisementWatcher = new Windows.Devices.Bluetooth.Advertisement.BluetoothLEAdvertisementWatcher
+        {
+            ScanningMode = Windows.Devices.Bluetooth.Advertisement.BluetoothLEScanningMode.Active
+        };
+        advertisementWatcher.Received += (_, args) =>
+        {
+            var address = WindowsBleHelpers.UlongToMacAddress(args.BluetoothAddress);
+            var name = string.IsNullOrWhiteSpace(args.Advertisement.LocalName) ? null : args.Advertisement.LocalName;
+            var serviceUuids = args.Advertisement.ServiceUuids
+                .Select(uuid => uuid.ToString("D").ToLowerInvariant())
+                .ToArray();
+            var snapshot = new BluetoothDeviceSnapshot
+            {
+                Address = address,
+                Name = name,
+                DisplayName = name ?? address,
+                Rssi = (int)args.RawSignalStrengthInDBm,
+                AdvertisedServiceUuids = serviceUuids
+            };
+            devices.AddOrUpdate(
+                address,
+                snapshot,
+                (_, existing) => MergeWindowsBluetoothDeviceSnapshots(existing, snapshot));
+        };
+
+        Windows.Devices.Enumeration.DeviceWatcher? deviceWatcher = null;
+        Windows.Foundation.TypedEventHandler<
+            Windows.Devices.Enumeration.DeviceWatcher,
+            Windows.Devices.Enumeration.DeviceInformation>? deviceAdded = (_, info) =>
+        {
+            if (!TryMapWindowsBluetoothDeviceInformation(info, out var snapshot))
+                return;
+
+            deviceInformationAddresses[info.Id] = snapshot.Address;
+            devices.AddOrUpdate(
+                snapshot.Address,
+                snapshot,
+                (_, existing) => MergeWindowsBluetoothDeviceSnapshots(existing, snapshot));
+        };
+        Windows.Foundation.TypedEventHandler<
+            Windows.Devices.Enumeration.DeviceWatcher,
+            Windows.Devices.Enumeration.DeviceInformationUpdate>? deviceUpdated = (_, update) =>
+        {
+            var address = TryGetWindowsDeviceAddress(update.Properties);
+            if (string.IsNullOrWhiteSpace(address) &&
+                !deviceInformationAddresses.TryGetValue(update.Id, out address))
+            {
+                return;
+            }
+
+            if (!devices.TryGetValue(address, out var existing))
+                return;
+
+            var rssi = TryGetWindowsInt32(update.Properties, "System.Devices.Aep.SignalStrength");
+            var isConnected = TryGetWindowsBoolean(update.Properties, "System.Devices.Aep.IsConnected");
+            devices[address] = existing with
+            {
+                Rssi = rssi ?? existing.Rssi,
+                IsConnected = isConnected ?? existing.IsConnected
+            };
+        };
+
+        deviceWatcher = Windows.Devices.Enumeration.DeviceInformation.CreateWatcher(
+            Windows.Devices.Bluetooth.BluetoothLEDevice.GetDeviceSelector(),
+            WindowsBleDeviceInformationProperties,
+            Windows.Devices.Enumeration.DeviceInformationKind.AssociationEndpoint);
+        deviceWatcher.Added += deviceAdded;
+        deviceWatcher.Updated += deviceUpdated;
+
+        try
+        {
+            logger.LogInformation("Starting Windows Bluetooth discovery for {DurationSeconds} seconds.", scanDuration.TotalSeconds);
+            deviceWatcher.Start();
+            advertisementWatcher.Start();
+            await Task.Delay(scanDuration, cancellationToken);
+        }
+        catch (Exception exception) when (!cancellationToken.IsCancellationRequested)
+        {
+            logger.LogWarning(exception, "Windows Bluetooth discovery failed: {ErrorMessage}", exception.Message);
+            return new BluetoothScanResult
+            {
+                Supported = true,
+                Powered = true,
+                StatusMessage = exception.Message,
+                Devices = devices.Values
+                    .OrderByDescending(device => device.Rssi ?? int.MinValue)
+                    .ThenBy(device => device.DisplayName, StringComparer.OrdinalIgnoreCase)
+                    .ToArray()
+            };
+        }
+        finally
+        {
+            try { advertisementWatcher.Stop(); } catch { /* best effort */ }
+            if (deviceWatcher is not null)
+            {
+                deviceWatcher.Added -= deviceAdded;
+                deviceWatcher.Updated -= deviceUpdated;
+                if (deviceWatcher.Status is Windows.Devices.Enumeration.DeviceWatcherStatus.Started or
+                    Windows.Devices.Enumeration.DeviceWatcherStatus.EnumerationCompleted)
+                {
+                    try { deviceWatcher.Stop(); } catch { /* best effort */ }
+                }
+            }
+        }
+
+        return new BluetoothScanResult
+        {
+            Supported = true,
+            Powered = true,
+            Devices = devices.Values
+                .OrderByDescending(device => device.Rssi ?? int.MinValue)
+                .ThenBy(device => device.DisplayName, StringComparer.OrdinalIgnoreCase)
+                .ThenBy(device => device.Address, StringComparer.OrdinalIgnoreCase)
+                .ToArray()
+        };
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static async Task<WindowsBluetoothAdapterState> GetWindowsAdapterStateAsync(CancellationToken cancellationToken)
+    {
+        var adapter = await Windows.Devices.Bluetooth.BluetoothAdapter.GetDefaultAsync()
+            .AsTask(cancellationToken);
+        if (adapter is null)
+        {
+            return new WindowsBluetoothAdapterState(
+                Supported: false,
+                Powered: false,
+                StatusMessage: "No Bluetooth adapter was detected.");
+        }
+
+        var radio = await adapter.GetRadioAsync().AsTask(cancellationToken);
+        var powered = radio?.State == Windows.Devices.Radios.RadioState.On;
+        return new WindowsBluetoothAdapterState(
+            Supported: true,
+            Powered: powered,
+            StatusMessage: powered ? null : "Bluetooth is powered off in Windows Settings.");
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static bool TryMapWindowsBluetoothDeviceInformation(
+        Windows.Devices.Enumeration.DeviceInformation info,
+        out BluetoothDeviceSnapshot snapshot)
+    {
+        snapshot = default!;
+        var address = TryGetWindowsDeviceAddress(info.Properties) ?? TryGetWindowsDeviceAddressFromId(info.Id);
+        if (string.IsNullOrWhiteSpace(address))
+            return false;
+
+        var name = string.IsNullOrWhiteSpace(info.Name) ? null : info.Name.Trim();
+        snapshot = new BluetoothDeviceSnapshot
+        {
+            Address = address,
+            Name = name,
+            DisplayName = name ?? address,
+            IsConnected = TryGetWindowsBoolean(info.Properties, "System.Devices.Aep.IsConnected") ?? false,
+            IsPaired = info.Pairing.IsPaired,
+            Rssi = TryGetWindowsInt32(info.Properties, "System.Devices.Aep.SignalStrength")
+        };
+        return true;
+    }
+
+    private static BluetoothDeviceSnapshot MergeWindowsBluetoothDeviceSnapshots(
+        BluetoothDeviceSnapshot existing,
+        BluetoothDeviceSnapshot incoming)
+    {
+        return incoming with
+        {
+            Alias = incoming.Alias ?? existing.Alias,
+            Name = incoming.Name ?? existing.Name,
+            DisplayName = !string.IsNullOrWhiteSpace(incoming.DisplayName) &&
+                          !string.Equals(incoming.DisplayName, incoming.Address, StringComparison.OrdinalIgnoreCase)
+                ? incoming.DisplayName
+                : existing.DisplayName,
+            IsConnected = incoming.IsConnected || existing.IsConnected,
+            IsPaired = incoming.IsPaired || existing.IsPaired,
+            Rssi = incoming.Rssi ?? existing.Rssi,
+            AdvertisedServiceUuids = incoming.AdvertisedServiceUuids.Count > 0
+                ? incoming.AdvertisedServiceUuids
+                : existing.AdvertisedServiceUuids
+        };
+    }
+
+    private static string? TryGetWindowsDeviceAddress(
+        IReadOnlyDictionary<string, object> properties)
+    {
+        if (!properties.TryGetValue("System.Devices.Aep.DeviceAddress", out var value))
+            return null;
+
+        return WindowsBleHelpers.TryNormalizeMacAddress(value?.ToString(), out var normalized)
+            ? normalized
+            : null;
+    }
+
+    private static string? TryGetWindowsDeviceAddressFromId(string id)
+    {
+        foreach (var separator in new[] { ':', '-' })
+        {
+            for (var index = 0; index <= id.Length - 17; index++)
+            {
+                var candidate = id.Substring(index, 17);
+                if (candidate.Count(ch => ch == separator) == 5 &&
+                    WindowsBleHelpers.TryNormalizeMacAddress(candidate, out var normalized))
+                {
+                    return normalized;
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static bool? TryGetWindowsBoolean(
+        IReadOnlyDictionary<string, object> properties,
+        string key)
+    {
+        if (!properties.TryGetValue(key, out var value) || value is null)
+            return null;
+
+        try
+        {
+            return Convert.ToBoolean(value);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private static int? TryGetWindowsInt32(
+        IReadOnlyDictionary<string, object> properties,
+        string key)
+    {
+        if (!properties.TryGetValue(key, out var value) || value is null)
+            return null;
+
+        try
+        {
+            return Convert.ToInt32(value);
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private sealed record WindowsBluetoothAdapterState(
+        bool Supported,
+        bool Powered,
+        string? StatusMessage);
+#endif
 
     internal async Task<BluetoothAdapterAccessState> GetDirectAccessStateAsync(CancellationToken cancellationToken = default)
     {
