@@ -847,8 +847,8 @@ function resolveChartAxes(chart: UiChartDefinition, lines: LineSpec[]): AxisSpec
 /** Shared theme-aware style constants for Recharts */
 const xTickStyle = { fontSize: 10, fill: 'var(--muted-foreground)', fontWeight: 500 };
 const chartHeight = 208;
-const chartMargin = { top: 44, right: 0, bottom: 12, left: 0 };
-const compactChartMargin = { top: 46, right: 0, bottom: 12, left: 0 };
+const chartMargin = { top: 44, right: 0, bottom: 20, left: 0 };
+const compactChartMargin = { top: 46, right: 0, bottom: 20, left: 0 };
 const chartHeaderGap = 8;
 const singleAxisWidth = 48;
 const dualAxisWidth = 42;
@@ -909,7 +909,7 @@ function XAxisOverlayTick({ x = 0, y = 0, payload }: AxisTickRendererProps) {
   const tickY = numericCoordinate(y);
   return (
     <g>
-      <OverlayAxisLabel x={tickX} y={tickY - 10} value={String(payload?.value ?? '')} />
+      <OverlayAxisLabel x={tickX} y={tickY + 10} value={String(payload?.value ?? '')} />
     </g>
   );
 }
@@ -1194,7 +1194,6 @@ function ChartSection({ title, data, lines, axes, getDecimalsForKey, getUnitForK
           <XAxis
             dataKey='time'
             height={20}
-            mirror
             tick={<XAxisOverlayTick />}
             tickLine={false}
             axisLine={false}
@@ -1326,7 +1325,6 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
           <XAxis
             dataKey='time'
             height={20}
-            mirror
             tick={<XAxisOverlayTick />}
             tickLine={false}
             axisLine={false}
@@ -1631,7 +1629,6 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
           <XAxis
             dataKey='time'
             height={20}
-            mirror
             tick={<XAxisOverlayTick />}
             tickLine={false}
             axisLine={false}
@@ -1736,7 +1733,7 @@ function MultiCellChartSection({ selectedCells, data, onDismiss, hoveredTime, se
           onClick={handleChartClick}
         >
           <CartesianGrid strokeDasharray='3 3' stroke='var(--border)' opacity={0.4} />
-          <XAxis dataKey='time' height={20} mirror tick={<XAxisOverlayTick />} tickLine={false} axisLine={false} />
+          <XAxis dataKey='time' height={20} tick={<XAxisOverlayTick />} tickLine={false} axisLine={false} />
           <YAxis orientation='right' width={activeSingleAxisWidth} mirror tick={<RightYAxisOverlayTick formatValue={(value) => formatNumericAxisTick(value, yTickFormatter)} />} tickLine={false} axisLine={false} domain={['auto', 'auto']} tickFormatter={yTickFormatter} />
           {cellLines.map((l) => (
             <Line key={l.key} type='monotone' dataKey={l.key} stroke={l.color} name={l.name} dot={false} strokeWidth={1.5} connectNulls isAnimationActive={false} />
