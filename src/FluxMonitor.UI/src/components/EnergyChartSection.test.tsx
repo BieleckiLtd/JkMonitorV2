@@ -31,8 +31,17 @@ vi.mock('recharts', () => {
       <span data-testid='ref-dot' data-x={x} data-r={r} />
     ),
     XAxis: Noop,
-    YAxis: ({ orientation }: { orientation?: string }) => (
-      <span data-testid='y-axis' data-orientation={orientation} />
+    YAxis: ({ orientation, ticks, tickFormatter }: {
+      orientation?: string;
+      ticks?: number[];
+      tickFormatter?: (value: number) => string;
+    }) => (
+      <span
+        data-testid='y-axis'
+        data-orientation={orientation}
+        data-ticks={JSON.stringify(ticks ?? [])}
+        data-labels={JSON.stringify((ticks ?? []).map((tick) => tickFormatter ? tickFormatter(tick) : String(tick)))}
+      />
     ),
     Tooltip: Noop,
     CartesianGrid: Noop,
@@ -185,6 +194,34 @@ describe('EnergyChartSection', () => {
       const yAxes = container.querySelectorAll('[data-testid="y-axis"]');
       expect(yAxes.length).toBeGreaterThanOrEqual(1);
       expect(yAxes[0].getAttribute('data-orientation')).toBe('right');
+    });
+
+    it('uses watt labels rounded to 50 W when the scale is below 1 kW', () => {
+      const data = [
+        makePoint('12:00', isoAt(0), 50, 1),
+        makePoint('12:01', isoAt(1), 100, 1),
+        makePoint('12:02', isoAt(2), 150, 1),
+        makePoint('12:03', isoAt(3), 200, 1),
+      ];
+      const { container } = render(<EnergyChartSection data={data} resolution='1m' displayMode='1h' />);
+
+      const yAxis = within(container).getByTestId('y-axis');
+      const labels = JSON.parse(yAxis.getAttribute('data-labels') ?? '[]') as string[];
+
+      expect(labels).toEqual(['0', '50', '100', '150', '200']);
+    });
+
+    it('uses one decimal place for kW scale labels', () => {
+      const data = [
+        makePoint('12:00', isoAt(0), 1200, 1),
+      ];
+      const { container } = render(<EnergyChartSection data={data} resolution='1m' displayMode='1h' />);
+
+      const yAxis = within(container).getByTestId('y-axis');
+      const labels = JSON.parse(yAxis.getAttribute('data-labels') ?? '[]') as string[];
+
+      expect(labels).toContain('1.2');
+      expect(labels.every((label) => /^\d+\.\d$/.test(label))).toBe(true);
     });
   });
 });

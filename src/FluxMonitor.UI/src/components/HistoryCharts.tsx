@@ -775,6 +775,7 @@ type AxisTickRendererProps = {
   payload?: {
     value?: string | number;
   };
+  formatValue?: (value: string | number) => string;
 };
 
 function OverlayAxisLabel({ x, y, value, textAnchor = 'middle' }: {
@@ -817,18 +818,32 @@ function XAxisOverlayTick({ x = 0, y = 0, payload }: AxisTickRendererProps) {
   );
 }
 
-function RightYAxisOverlayTick({ x = 0, y = 0, payload }: AxisTickRendererProps) {
+function formatAxisTickPayload(payload: AxisTickRendererProps['payload'], formatValue?: (value: string | number) => string) {
+  const rawValue = payload?.value;
+  if (rawValue == null) {
+    return '';
+  }
+
+  return formatValue ? formatValue(rawValue) : String(rawValue);
+}
+
+function formatNumericAxisTick(value: string | number, formatter: (value: number) => string) {
+  const numericValue = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(numericValue) ? formatter(numericValue) : String(value);
+}
+
+function RightYAxisOverlayTick({ x = 0, y = 0, payload, formatValue }: AxisTickRendererProps) {
   return (
     <g>
-      <OverlayAxisLabel x={x - 6} y={y} value={String(payload?.value ?? '')} textAnchor='end' />
+      <OverlayAxisLabel x={x - 6} y={y} value={formatAxisTickPayload(payload, formatValue)} textAnchor='end' />
     </g>
   );
 }
 
-function LeftYAxisOverlayTick({ x = 0, y = 0, payload }: AxisTickRendererProps) {
+function LeftYAxisOverlayTick({ x = 0, y = 0, payload, formatValue }: AxisTickRendererProps) {
   return (
     <g>
-      <OverlayAxisLabel x={x + 6} y={y} value={String(payload?.value ?? '')} textAnchor='start' />
+      <OverlayAxisLabel x={x + 6} y={y} value={formatAxisTickPayload(payload, formatValue)} textAnchor='start' />
     </g>
   );
 }
@@ -1086,7 +1101,7 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
                 orientation='left'
                 width={activeDualAxisWidth}
                 mirror
-                tick={<LeftYAxisOverlayTick />}
+                tick={<LeftYAxisOverlayTick formatValue={(value) => formatNumericAxisTick(value, primaryTickFormatter)} />}
                 tickLine={false}
                 axisLine={false}
                 domain={domain ?? ['auto', 'auto']}
@@ -1097,7 +1112,7 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
                 orientation='right'
                 width={activeDualAxisWidth}
                 mirror
-                tick={<RightYAxisOverlayTick />}
+                tick={<RightYAxisOverlayTick formatValue={(value) => formatNumericAxisTick(value, secondaryTickFormatter)} />}
                 tickLine={false}
                 axisLine={false}
                 domain={['auto', 'auto']}
@@ -1110,7 +1125,7 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
               orientation='right'
               width={activeSingleAxisWidth}
               mirror
-              tick={<RightYAxisOverlayTick />}
+              tick={<RightYAxisOverlayTick formatValue={(value) => formatNumericAxisTick(value, primaryTickFormatter)} />}
               tickLine={false}
               axisLine={false}
               domain={domain ?? ['auto', 'auto']}
@@ -1255,16 +1270,70 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
   );
 }
 
+function buildEnergyPowerAxisScale(data: Record<string, unknown>[]) {
+  const values = data
+    .map((point) => point.signedPowerKw)
+    .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  const dataMin = values.length > 0 ? Math.min(...values) : 0;
+  const dataMax = values.length > 0 ? Math.max(...values) : 0;
+  const rawMin = Math.min(dataMin, 0);
+  const rawMax = Math.max(dataMax, 0);
+  const maxAbs = Math.max(Math.abs(rawMin), Math.abs(rawMax));
+  const useWatts = maxAbs < 1;
+  const minimumStep = useWatts ? 0.05 : 0.1;
+  const targetIntervals = 5;
+  const rawSpan = rawMax - rawMin;
+  const step = Math.max(
+    minimumStep,
+    Math.ceil((rawSpan || minimumStep) / targetIntervals / minimumStep) * minimumStep,
+  );
+  let domainMin = Math.floor((rawMin + Number.EPSILON) / step) * step;
+  let domainMax = Math.ceil((rawMax - Number.EPSILON) / step) * step;
+
+  if (domainMin === domainMax) {
+    domainMin -= step;
+    domainMax += step;
+  }
+
+  const precision = useWatts ? 3 : 1;
+  const normalize = (value: number) => Number(value.toFixed(precision));
+  const ticks: number[] = [];
+  for (let tick = domainMin; tick <= domainMax + step / 2; tick += step) {
+    ticks.push(normalize(tick));
+  }
+
+  const formatTick = (value: string | number) => {
+    const numericValue = typeof value === 'number' ? value : Number(value);
+    if (!Number.isFinite(numericValue)) {
+      return String(value);
+    }
+
+    const absValue = Math.abs(numericValue);
+    if (useWatts) {
+      return String(Math.round(absValue * 1000 / 50) * 50);
+    }
+
+    return absValue.toFixed(1);
+  };
+
+  return {
+    domain: [normalize(domainMin), normalize(domainMax)] as [number, number],
+    ticks,
+    formatTick,
+  };
+}
+
 export function EnergyChartSection({ data, resolution, displayMode, hoveredTime, selectedTime, onHover, onSelect, todayXTicks }: {
   data: Record<string, unknown>[]; resolution: Resolution; displayMode: HistoryDisplayMode;
   hoveredTime: string | null; selectedTime: string | null;
   onHover: (time: string | null) => void; onSelect: (time: string | null) => void;
   todayXTicks?: string[];
 }) {
-  const { energyData, dischargedKwh, chargedKwh, yDomain, zeroOffset } = useMemo(
+  const { energyData, dischargedKwh, chargedKwh, zeroOffset } = useMemo(
     () => computeEnergyData(data, resolution),
     [data, resolution],
   );
+  const energyPowerAxisScale = useMemo(() => buildEnergyPowerAxisScale(energyData), [energyData]);
 
   const baselineMarkers = useMemo(() => {
     const result: { time: string; isMajor: boolean }[] = [];
@@ -1343,8 +1412,8 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
     }
   }, [energyData, onSelect]);
 
-  // Show absolute values on Y-axis (no negatives)
-  const yTickFormatter = useCallback((v: number) => `${Math.abs(v).toFixed(1)}`, []);
+  // Show absolute values on Y-axis (no negatives).
+  const yTickFormatter = useCallback((v: number) => energyPowerAxisScale.formatTick(v), [energyPowerAxisScale]);
   const powerLegend = activeEnergyText ? (
     <span
       data-testid='energy-power-legend'
@@ -1414,10 +1483,11 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
             orientation='right'
             width={activeSingleAxisWidth}
             mirror
-            tick={<RightYAxisOverlayTick />}
+            tick={<RightYAxisOverlayTick formatValue={energyPowerAxisScale.formatTick} />}
             tickLine={false}
             axisLine={false}
-            domain={yDomain}
+            domain={energyPowerAxisScale.domain}
+            ticks={energyPowerAxisScale.ticks}
             tickFormatter={yTickFormatter}
           />
           {baselineMarkers.map(({ time, isMajor }, i) => (
@@ -1506,7 +1576,7 @@ function MultiCellChartSection({ selectedCells, data, onDismiss, hoveredTime, se
         >
           <CartesianGrid strokeDasharray='3 3' stroke='var(--border)' opacity={0.4} />
           <XAxis dataKey='time' height={20} mirror tick={<XAxisOverlayTick />} tickLine={false} axisLine={false} />
-          <YAxis orientation='right' width={activeSingleAxisWidth} mirror tick={<RightYAxisOverlayTick />} tickLine={false} axisLine={false} domain={['auto', 'auto']} tickFormatter={yTickFormatter} />
+          <YAxis orientation='right' width={activeSingleAxisWidth} mirror tick={<RightYAxisOverlayTick formatValue={(value) => formatNumericAxisTick(value, yTickFormatter)} />} tickLine={false} axisLine={false} domain={['auto', 'auto']} tickFormatter={yTickFormatter} />
           {cellLines.map((l) => (
             <Line key={l.key} type='monotone' dataKey={l.key} stroke={l.color} name={l.name} dot={false} strokeWidth={1.5} connectNulls isAnimationActive={false} />
           ))}
