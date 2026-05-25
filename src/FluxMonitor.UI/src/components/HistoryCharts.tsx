@@ -1228,6 +1228,7 @@ function ChartSection({ title, data, lines, axes, getDecimalsForKey, getUnitForK
               stroke={l.color}
               name={l.name}
               dot={false}
+              activeDot={false}
               strokeWidth={1.5}
               strokeDasharray={l.dashed ? '4 4' : undefined}
               connectNulls
@@ -1348,6 +1349,7 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
             fill={`url(#${gradientId})`}
             name={line.name}
             dot={false}
+            activeDot={false}
             strokeWidth={1.75}
             connectNulls
             isAnimationActive={false}
@@ -1651,7 +1653,7 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
           {baselineMarkers.map(({ time, isMajor }, i) => (
             <ReferenceDot key={`bm-${i}`} x={time} y={0} r={isMajor ? 3 : 1.5} fill={isMajor ? 'rgba(255,255,255,0.45)' : 'rgba(255,255,255,0.2)'} stroke='none' />
           ))}
-          <Area type='monotone' dataKey='signedPowerKw' stroke='url(#energyStrokeGradient)' fill='url(#energyGradient)' strokeWidth={1.5} dot={false} isAnimationActive={false} baseValue={0} />
+          <Area type='monotone' dataKey='signedPowerKw' stroke='url(#energyStrokeGradient)' fill='url(#energyGradient)' strokeWidth={1.5} dot={false} activeDot={false} isAnimationActive={false} baseValue={0} />
           {renderInteractionReferenceLine(interactionX)}
           {renderActiveReferenceDots(activePoint, [{ key: 'signedPowerKw', color: '#38bdf8', name: 'Power' }])}
         </AreaChart>
@@ -1736,7 +1738,7 @@ function MultiCellChartSection({ selectedCells, data, onDismiss, hoveredTime, se
           <XAxis dataKey='time' height={20} tick={<XAxisOverlayTick />} tickLine={false} axisLine={false} />
           <YAxis orientation='right' width={activeSingleAxisWidth} mirror tick={<RightYAxisOverlayTick formatValue={(value) => formatNumericAxisTick(value, yTickFormatter)} />} tickLine={false} axisLine={false} domain={['auto', 'auto']} tickFormatter={yTickFormatter} />
           {cellLines.map((l) => (
-            <Line key={l.key} type='monotone' dataKey={l.key} stroke={l.color} name={l.name} dot={false} strokeWidth={1.5} connectNulls isAnimationActive={false} />
+            <Line key={l.key} type='monotone' dataKey={l.key} stroke={l.color} name={l.name} dot={false} activeDot={false} strokeWidth={1.5} connectNulls isAnimationActive={false} />
           ))}
           {renderInteractionReferenceLine(interactionX)}
           {renderActiveReferenceDots(activePoint, cellLines)}
