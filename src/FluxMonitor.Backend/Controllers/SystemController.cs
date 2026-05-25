@@ -24,6 +24,8 @@ public sealed class SystemController(
     HostServicesCatalogService hostServicesCatalogService,
     ILogger<SystemController> logger) : ControllerBase
 {
+    private static readonly TimeSpan UpdateProgressStreamHeartbeatInterval = TimeSpan.FromSeconds(20);
+
     private static readonly JsonSerializerOptions UpdateProgressStreamJsonOptions = new(JsonSerializerDefaults.Web);
 
     [HttpGet("services")]
@@ -382,6 +384,9 @@ public sealed class SystemController(
         Response.ContentType = "text/event-stream";
 
         await using var subscription = updateProgressBroadcaster.Subscribe(updateService.GetProgress());
+        using var writeLock = new SemaphoreSlim(1, 1);
+        using var heartbeatTimer = new PeriodicTimer(UpdateProgressStreamHeartbeatInterval);
+        var heartbeatTask = SendUpdateProgressStreamHeartbeatsAsync(Response, heartbeatTimer, writeLock, cancellationToken);
 
         try
         {
@@ -389,13 +394,25 @@ public sealed class SystemController(
             {
                 var payload = SerializeUpdateProgressStream(progress);
 
-                await Response.WriteAsync($"data: {payload}\n\n", cancellationToken);
-                await Response.Body.FlushAsync(cancellationToken);
+                await WriteUpdateProgressStreamFrameAsync(Response, $"data: {payload}\n\n", writeLock, cancellationToken);
             }
         }
         catch (OperationCanceledException)
         {
             // The client disconnected.
+        }
+        finally
+        {
+            heartbeatTimer.Dispose();
+
+            try
+            {
+                await heartbeatTask;
+            }
+            catch (OperationCanceledException)
+            {
+                // The client disconnected.
+            }
         }
     }
 
@@ -405,6 +422,46 @@ public sealed class SystemController(
         {
             Progress = progress
         }, UpdateProgressStreamJsonOptions);
+    }
+
+    internal static string SerializeUpdateProgressStreamHeartbeat()
+    {
+        return ": keepalive\n\n";
+    }
+
+    private static async Task SendUpdateProgressStreamHeartbeatsAsync(
+        HttpResponse response,
+        PeriodicTimer timer,
+        SemaphoreSlim writeLock,
+        CancellationToken cancellationToken)
+    {
+        while (await timer.WaitForNextTickAsync(cancellationToken))
+        {
+            await WriteUpdateProgressStreamFrameAsync(
+                response,
+                SerializeUpdateProgressStreamHeartbeat(),
+                writeLock,
+                cancellationToken);
+        }
+    }
+
+    private static async Task WriteUpdateProgressStreamFrameAsync(
+        HttpResponse response,
+        string frame,
+        SemaphoreSlim writeLock,
+        CancellationToken cancellationToken)
+    {
+        await writeLock.WaitAsync(cancellationToken);
+
+        try
+        {
+            await response.WriteAsync(frame, cancellationToken);
+            await response.Body.FlushAsync(cancellationToken);
+        }
+        finally
+        {
+            writeLock.Release();
+        }
     }
 
     [HttpGet("interfaces")]

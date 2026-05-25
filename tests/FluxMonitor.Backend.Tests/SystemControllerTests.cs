@@ -37,4 +37,12 @@ public sealed class SystemControllerTests
         Assert.Equal(18, progress.GetProperty("percentComplete").GetInt32());
         Assert.False(progress.TryGetProperty("SessionId", out _));
     }
+
+    [Fact]
+    public void SerializeUpdateProgressStreamHeartbeat_UsesSseCommentFrame()
+    {
+        var payload = SystemController.SerializeUpdateProgressStreamHeartbeat();
+
+        Assert.Equal(": keepalive\n\n", payload);
+    }
 }
