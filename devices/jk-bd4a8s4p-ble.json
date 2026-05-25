@@ -927,7 +927,7 @@
             "traces": [
               { "entity": "power", "color": "amber", "positiveLabel": "Charging", "negativeLabel": "Discharging" }
             ],
-            "yAxis": { "unit": "W", "label": "Power" },
+            "yAxis": { "unit": "W", "label": "Power", "display": { "precision": 1, "smallValueThreshold": 1000, "smallValueTickStep": 50, "smallValuePrecision": 0 } },
             "showEnergyTotals": true
           },
           {

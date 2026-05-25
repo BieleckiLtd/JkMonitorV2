@@ -280,6 +280,7 @@ export type UiChartDefinition = {
   entity?: string;
   selectable?: boolean;
   yAxis?: UiAxisDefinition;
+  yAxes?: UiAxisDefinition[];
   showEnergyTotals?: boolean;
 };
 
@@ -288,15 +289,27 @@ export type UiChartTrace = {
   label?: string;
   color: string;
   dashed?: boolean;
+  yAxis?: string;
   secondaryAxis?: boolean;
   positiveLabel?: string;
   negativeLabel?: string;
 };
 
 export type UiAxisDefinition = {
-  unit: string;
-  label: string;
+  id?: string;
+  unit?: string;
+  label?: string;
+  orientation?: 'left' | 'right';
+  width?: number;
   domain?: [number, number];
+  display?: UiAxisDisplayDefinition;
+};
+
+export type UiAxisDisplayDefinition = {
+  precision?: number;
+  smallValueThreshold?: number;
+  smallValueTickStep?: number;
+  smallValuePrecision?: number;
 };
 
 export type UiDashboardCard = {

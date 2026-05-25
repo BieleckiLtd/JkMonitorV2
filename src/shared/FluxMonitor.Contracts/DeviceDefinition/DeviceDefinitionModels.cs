@@ -638,6 +638,8 @@ public sealed class UiChartDefinition
 
     public UiAxisDefinition? YAxis { get; init; }
 
+    public IReadOnlyList<UiAxisDefinition>? YAxes { get; init; }
+
     public bool ShowEnergyTotals { get; init; }
 }
 
@@ -651,6 +653,8 @@ public sealed class UiChartTrace
 
     public bool Dashed { get; init; }
 
+    public string? YAxis { get; init; }
+
     public bool SecondaryAxis { get; init; }
 
     public string? PositiveLabel { get; init; }
@@ -660,11 +664,30 @@ public sealed class UiChartTrace
 
 public sealed class UiAxisDefinition
 {
+    public string? Id { get; init; }
+
     public string? Unit { get; init; }
 
     public string? Label { get; init; }
 
+    public string? Orientation { get; init; }
+
+    public int? Width { get; init; }
+
     public IReadOnlyList<double>? Domain { get; init; }
+
+    public UiAxisDisplayDefinition? Display { get; init; }
+}
+
+public sealed class UiAxisDisplayDefinition
+{
+    public int? Precision { get; init; }
+
+    public double? SmallValueThreshold { get; init; }
+
+    public double? SmallValueTickStep { get; init; }
+
+    public int? SmallValuePrecision { get; init; }
 }
 
 public sealed class UiDashboardCard

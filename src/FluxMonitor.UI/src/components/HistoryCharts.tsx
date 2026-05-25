@@ -16,7 +16,7 @@ import {
 } from '../lib/energyUtils';
 import { computeBatteryStatus } from '../lib/batteryStatus';
 import { TrendingUp } from 'lucide-react';
-import type { DeviceDefinition, UiChartDefinition } from '../types/deviceDefinition';
+import type { DeviceDefinition, UiAxisDefinition, UiAxisDisplayDefinition, UiChartDefinition } from '../types/deviceDefinition';
 import {
   convertTemperatureValue,
   getTemperatureDisplayUnit,
@@ -662,6 +662,14 @@ type LineSpec = {
   name: string;
   dashed?: boolean;
   secondaryAxis?: boolean;
+  yAxisId?: string;
+};
+type AxisSpec = {
+  id: string;
+  orientation: 'left' | 'right';
+  width?: number;
+  domain?: [number, number];
+  line?: LineSpec;
 };
 type ChartInteractionState = {
   activeTooltipIndex?: number;
@@ -701,6 +709,11 @@ function renderDefinitionCharts(
           onHover={onHover}
           onSelect={onSelect}
           todayXTicks={todayXTicks}
+          axisUnit={chart.yAxis?.unit}
+          axisDisplay={chart.yAxis?.display}
+          axisOrientation={chart.yAxis?.orientation}
+          axisWidth={chart.yAxis?.width}
+          axisDomain={axisDomain(chart.yAxis)}
         />
       );
     }
@@ -711,7 +724,9 @@ function renderDefinitionCharts(
       name: t.label ?? t.entity,
       dashed: t.dashed,
       secondaryAxis: t.secondaryAxis,
+      yAxisId: t.yAxis ?? (t.secondaryAxis ? 'secondary' : 'primary'),
     }));
+    const axes = resolveChartAxes(chart, lines);
 
     const isSocChart = lines.length === 1 && chart.traces?.[0]?.entity === 'state_of_charge';
 
@@ -731,6 +746,7 @@ function renderDefinitionCharts(
           onSelect={onSelect}
           todayXTicks={todayXTicks}
           subtitle={batteryStatusSubtitle}
+          axis={chart.yAxis}
         />
       );
     }
@@ -744,7 +760,7 @@ function renderDefinitionCharts(
           getDecimalsForKey={getDecimalsForKey ?? (() => 2)}
           getUnitForKey={getUnitForKey ?? (() => '')}
           getFormatterForKey={getFormatterForKey ?? (() => undefined)}
-        domain={chart.yAxis?.domain}
+        axes={axes}
         hoveredTime={hoveredTime}
         selectedTime={selectedTime}
         onHover={onHover}
@@ -754,6 +770,68 @@ function renderDefinitionCharts(
       />
     );
   });
+}
+
+function normalizeAxisOrientation(orientation: string | undefined, fallback: 'left' | 'right'): 'left' | 'right' {
+  return orientation === 'left' || orientation === 'right' ? orientation : fallback;
+}
+
+function axisDomain(axis: UiAxisDefinition | undefined): [number, number] | undefined {
+  return axis?.domain && axis.domain.length >= 2
+    ? [axis.domain[0], axis.domain[1]]
+    : undefined;
+}
+
+function resolveChartAxes(chart: UiChartDefinition, lines: LineSpec[]): AxisSpec[] {
+  const linesByAxis = new Map<string, LineSpec[]>();
+  for (const line of lines) {
+    const axisId = line.yAxisId ?? (line.secondaryAxis ? 'secondary' : 'primary');
+    const bucket = linesByAxis.get(axisId);
+    if (bucket) {
+      bucket.push(line);
+    } else {
+      linesByAxis.set(axisId, [line]);
+    }
+  }
+
+  if (chart.yAxes && chart.yAxes.length > 0) {
+    return chart.yAxes.map((axis, index) => {
+      const id = axis.id ?? (index === 0 ? 'primary' : `axis-${index + 1}`);
+      return {
+        id,
+        orientation: normalizeAxisOrientation(axis.orientation, index === 0 ? 'right' : 'left'),
+        width: axis.width,
+        domain: axisDomain(axis),
+        line: linesByAxis.get(id)?.[0],
+      };
+    });
+  }
+
+  const hasSecondaryAxis = lines.some((line) => line.secondaryAxis || line.yAxisId === 'secondary');
+  if (hasSecondaryAxis) {
+    return [
+      {
+        id: 'primary',
+        orientation: normalizeAxisOrientation(chart.yAxis?.orientation, 'left'),
+        width: chart.yAxis?.width,
+        domain: axisDomain(chart.yAxis),
+        line: linesByAxis.get('primary')?.[0],
+      },
+      {
+        id: 'secondary',
+        orientation: 'right',
+        line: linesByAxis.get('secondary')?.[0],
+      },
+    ];
+  }
+
+  return [{
+    id: 'primary',
+    orientation: normalizeAxisOrientation(chart.yAxis?.orientation, 'right'),
+    width: chart.yAxis?.width,
+    domain: axisDomain(chart.yAxis),
+    line: linesByAxis.get('primary')?.[0] ?? lines[0],
+  }];
 }
 
 /** Shared theme-aware style constants for Recharts */
@@ -1008,9 +1086,9 @@ function ChartHeaderOverlay({
   );
 }
 
-function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitForKey, getFormatterForKey, hoveredTime, selectedTime, onHover, onSelect, todayXTicks, subtitle }: {
+function ChartSection({ title, data, lines, axes, getDecimalsForKey, getUnitForKey, getFormatterForKey, hoveredTime, selectedTime, onHover, onSelect, todayXTicks, subtitle }: {
   title: string; data: ChartDataPoint[]; lines: LineSpec[];
-  domain?: [number, number];
+  axes?: AxisSpec[];
   getDecimalsForKey: (key: string) => number;
   getUnitForKey: (key: string) => string;
   getFormatterForKey: (key: string) => string | null | undefined;
@@ -1026,16 +1104,22 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
   const activeDualAxisWidth = isCompactChart ? compactDualAxisWidth : dualAxisWidth;
   const activePoint = getActivePoint(data, hoveredTime, selectedTime, lines.map((line) => line.key));
   const interactionX = getInteractionX(data, hoveredTime, selectedTime);
-  const hasSecondaryAxis = lines.some((line) => line.secondaryAxis);
   const activeTimeText = formatActiveTime(activePoint);
-  const primaryAxisLine = lines.find((line) => !line.secondaryAxis) ?? lines[0];
-  const secondaryAxisLine = lines.find((line) => line.secondaryAxis);
-  const primaryTickFormatter = useCallback((value: number) => (
-    primaryAxisLine ? formatChartValue(value, primaryAxisLine.key, getDecimalsForKey, getUnitForKey, getFormatterForKey) : String(value)
-  ), [getDecimalsForKey, getFormatterForKey, getUnitForKey, primaryAxisLine]);
-  const secondaryTickFormatter = useCallback((value: number) => (
-    secondaryAxisLine ? formatChartValue(value, secondaryAxisLine.key, getDecimalsForKey, getUnitForKey, getFormatterForKey) : String(value)
-  ), [getDecimalsForKey, getFormatterForKey, getUnitForKey, secondaryAxisLine]);
+  const activeAxes = useMemo(() => axes && axes.length > 0 ? axes : [{
+    id: 'primary',
+    orientation: 'right' as const,
+    line: lines[0],
+  }], [axes, lines]);
+  const axisFormatters = useMemo(() => {
+    const formatters = new Map<string, (value: number) => string>();
+    for (const axis of activeAxes) {
+      formatters.set(axis.id, (value: number) => (
+        axis.line ? formatChartValue(value, axis.line.key, getDecimalsForKey, getUnitForKey, getFormatterForKey) : String(value)
+      ));
+    }
+    return formatters;
+  }, [activeAxes, getDecimalsForKey, getFormatterForKey, getUnitForKey]);
+  const defaultAxisId = activeAxes[0]?.id ?? 'primary';
   const handleChartMove = useCallback((state: unknown) => {
     const timestamp = extractActiveTimestamp(state, data);
     if (timestamp != null) {
@@ -1094,50 +1178,32 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
             axisLine={false}
             {...(todayXTicks ? { ticks: todayXTicks } : {})}
           />
-          {hasSecondaryAxis ? (
-            <>
+          {activeAxes.map((axis) => {
+            const tickFormatter = axisFormatters.get(axis.id) ?? String;
+            const tick = axis.orientation === 'left'
+              ? <LeftYAxisOverlayTick formatValue={(value) => formatNumericAxisTick(value, tickFormatter)} />
+              : <RightYAxisOverlayTick formatValue={(value) => formatNumericAxisTick(value, tickFormatter)} />;
+            return (
               <YAxis
-                yAxisId='primary'
-                orientation='left'
-                width={activeDualAxisWidth}
+                key={axis.id}
+                yAxisId={axis.id}
+                orientation={axis.orientation}
+                width={isCompactChart ? compactSingleAxisWidth : axis.width ?? (activeAxes.length > 1 ? activeDualAxisWidth : activeSingleAxisWidth)}
                 mirror
-                tick={<LeftYAxisOverlayTick formatValue={(value) => formatNumericAxisTick(value, primaryTickFormatter)} />}
+                tick={tick}
                 tickLine={false}
                 axisLine={false}
-                domain={domain ?? ['auto', 'auto']}
-                tickFormatter={primaryTickFormatter}
+                domain={axis.domain ?? ['auto', 'auto']}
+                tickFormatter={tickFormatter}
               />
-              <YAxis
-                yAxisId='secondary'
-                orientation='right'
-                width={activeDualAxisWidth}
-                mirror
-                tick={<RightYAxisOverlayTick formatValue={(value) => formatNumericAxisTick(value, secondaryTickFormatter)} />}
-                tickLine={false}
-                axisLine={false}
-                domain={['auto', 'auto']}
-                tickFormatter={secondaryTickFormatter}
-              />
-            </>
-          ) : (
-            <YAxis
-              yAxisId='primary'
-              orientation='right'
-              width={activeSingleAxisWidth}
-              mirror
-              tick={<RightYAxisOverlayTick formatValue={(value) => formatNumericAxisTick(value, primaryTickFormatter)} />}
-              tickLine={false}
-              axisLine={false}
-              domain={domain ?? ['auto', 'auto']}
-              tickFormatter={primaryTickFormatter}
-            />
-          )}
+            );
+          })}
           {lines.map((l) => (
             <Line
               key={l.key}
               type='monotone'
               dataKey={l.key}
-              yAxisId={l.secondaryAxis ? 'secondary' : 'primary'}
+              yAxisId={l.yAxisId ?? (l.secondaryAxis ? 'secondary' : defaultAxisId)}
               stroke={l.color}
               name={l.name}
               dot={false}
@@ -1147,15 +1213,15 @@ function ChartSection({ title, data, lines, domain, getDecimalsForKey, getUnitFo
               isAnimationActive={false}
             />
           ))}
-          {renderInteractionReferenceLine(interactionX, 'primary')}
-          {renderActiveReferenceDots(activePoint, lines, (line) => line.secondaryAxis ? 'secondary' : 'primary')}
+          {renderInteractionReferenceLine(interactionX, defaultAxisId)}
+          {renderActiveReferenceDots(activePoint, lines, (line) => line.yAxisId ?? (line.secondaryAxis ? 'secondary' : defaultAxisId))}
         </LineChart>
       </ResponsiveContainer>
     </div>
   );
 }
 
-function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUnitForKey, getFormatterForKey, hoveredTime, selectedTime, onHover, onSelect, todayXTicks, subtitle }: {
+function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUnitForKey, getFormatterForKey, hoveredTime, selectedTime, onHover, onSelect, todayXTicks, subtitle, axis }: {
   title: string;
   data: ChartDataPoint[];
   line: LineSpec;
@@ -1168,12 +1234,14 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
   onSelect: (time: string | null) => void;
   todayXTicks?: string[];
   subtitle?: React.ReactNode;
+  axis?: UiAxisDefinition;
 }) {
   const gradientId = useId().replace(/:/g, '');
   const isCompactChart = useCompactChartLayout();
   const chartHeader = useChartHeaderLayout(isCompactChart);
   const activeChartMargin = { ...(isCompactChart ? compactChartMargin : chartMargin), top: chartHeader.top };
   const activeSingleAxisWidth = isCompactChart ? compactSingleAxisWidth : singleAxisWidth;
+  const axisOrientation = normalizeAxisOrientation(axis?.orientation, 'right');
   const activePoint = getActivePoint(data, hoveredTime, selectedTime, [line.key]);
   const interactionX = getInteractionX(data, hoveredTime, selectedTime);
   const activeTimeText = formatActiveTime(activePoint);
@@ -1243,13 +1311,13 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
             {...(todayXTicks ? { ticks: todayXTicks } : {})}
           />
           <YAxis
-            orientation='right'
-            width={activeSingleAxisWidth}
+            orientation={axisOrientation}
+            width={isCompactChart ? compactSingleAxisWidth : axis?.width ?? activeSingleAxisWidth}
             mirror
-            tick={<RightYAxisOverlayTick />}
+            tick={axisOrientation === 'left' ? <LeftYAxisOverlayTick /> : <RightYAxisOverlayTick />}
             tickLine={false}
             axisLine={false}
-            domain={[0, 100]}
+            domain={axisDomain(axis) ?? [0, 100]}
           />
           <Area
             type='monotone'
@@ -1270,7 +1338,21 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
   );
 }
 
-function buildEnergyPowerAxisScale(data: Record<string, unknown>[]) {
+function convertEnergyAxisValueToKilowatts(value: number, unit: string | undefined) {
+  const normalizedUnit = unit?.toLowerCase() ?? 'w';
+  return normalizedUnit === 'w' ? value / 1000 : value;
+}
+
+function formatEnergySmallAxisValue(value: number, precision: number) {
+  const rounded = Number(value.toFixed(Math.max(0, precision)));
+  return precision > 0 ? rounded.toFixed(precision) : String(Math.round(rounded));
+}
+
+function buildEnergyPowerAxisScale(
+  data: Record<string, unknown>[],
+  axisUnit?: string,
+  axisDisplay?: UiAxisDisplayDefinition,
+) {
   const values = data
     .map((point) => point.signedPowerKw)
     .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
@@ -1279,8 +1361,16 @@ function buildEnergyPowerAxisScale(data: Record<string, unknown>[]) {
   const rawMin = Math.min(dataMin, 0);
   const rawMax = Math.max(dataMax, 0);
   const maxAbs = Math.max(Math.abs(rawMin), Math.abs(rawMax));
-  const useWatts = maxAbs < 1;
-  const minimumStep = useWatts ? 0.05 : 0.1;
+  const precision = Math.max(0, axisDisplay?.precision ?? 1);
+  const smallValuePrecision = Math.max(0, axisDisplay?.smallValuePrecision ?? 0);
+  const smallValueThreshold = convertEnergyAxisValueToKilowatts(axisDisplay?.smallValueThreshold ?? 1000, axisUnit);
+  const configuredSmallValueTickStep = axisDisplay?.smallValueTickStep ?? 50;
+  const smallValueTickStep = Math.max(
+    Number.EPSILON,
+    convertEnergyAxisValueToKilowatts(configuredSmallValueTickStep, axisUnit),
+  );
+  const useSmallValueLabels = maxAbs < smallValueThreshold;
+  const minimumStep = useSmallValueLabels ? smallValueTickStep : 10 ** -precision;
   const targetIntervals = 5;
   const rawSpan = rawMax - rawMin;
   const step = Math.max(
@@ -1295,8 +1385,8 @@ function buildEnergyPowerAxisScale(data: Record<string, unknown>[]) {
     domainMax += step;
   }
 
-  const precision = useWatts ? 3 : 1;
-  const normalize = (value: number) => Number(value.toFixed(precision));
+  const normalizedPrecision = useSmallValueLabels ? 3 : precision;
+  const normalize = (value: number) => Number(value.toFixed(normalizedPrecision));
   const ticks: number[] = [];
   for (let tick = domainMin; tick <= domainMax + step / 2; tick += step) {
     ticks.push(normalize(tick));
@@ -1309,11 +1399,13 @@ function buildEnergyPowerAxisScale(data: Record<string, unknown>[]) {
     }
 
     const absValue = Math.abs(numericValue);
-    if (useWatts) {
-      return String(Math.round(absValue * 1000 / 50) * 50);
+    if (useSmallValueLabels) {
+      const labelValue = (axisUnit?.toLowerCase() ?? 'w') === 'w' ? absValue * 1000 : absValue;
+      const roundedValue = Math.round(labelValue / configuredSmallValueTickStep) * configuredSmallValueTickStep;
+      return formatEnergySmallAxisValue(roundedValue, smallValuePrecision);
     }
 
-    return absValue.toFixed(1);
+    return absValue.toFixed(precision);
   };
 
   return {
@@ -1323,17 +1415,25 @@ function buildEnergyPowerAxisScale(data: Record<string, unknown>[]) {
   };
 }
 
-export function EnergyChartSection({ data, resolution, displayMode, hoveredTime, selectedTime, onHover, onSelect, todayXTicks }: {
+export function EnergyChartSection({ data, resolution, displayMode, hoveredTime, selectedTime, onHover, onSelect, todayXTicks, axisUnit, axisDisplay, axisOrientation, axisWidth, axisDomain: configuredAxisDomain }: {
   data: Record<string, unknown>[]; resolution: Resolution; displayMode: HistoryDisplayMode;
   hoveredTime: string | null; selectedTime: string | null;
   onHover: (time: string | null) => void; onSelect: (time: string | null) => void;
   todayXTicks?: string[];
+  axisUnit?: string;
+  axisDisplay?: UiAxisDisplayDefinition;
+  axisOrientation?: 'left' | 'right';
+  axisWidth?: number;
+  axisDomain?: [number, number];
 }) {
   const { energyData, dischargedKwh, chargedKwh, zeroOffset } = useMemo(
     () => computeEnergyData(data, resolution),
     [data, resolution],
   );
-  const energyPowerAxisScale = useMemo(() => buildEnergyPowerAxisScale(energyData), [energyData]);
+  const energyPowerAxisScale = useMemo(
+    () => buildEnergyPowerAxisScale(energyData, axisUnit, axisDisplay),
+    [axisDisplay, axisUnit, energyData],
+  );
 
   const baselineMarkers = useMemo(() => {
     const result: { time: string; isMajor: boolean }[] = [];
@@ -1381,6 +1481,7 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
   const chartHeader = useChartHeaderLayout(isCompactChart);
   const activeChartMargin = { ...(isCompactChart ? compactChartMargin : chartMargin), top: chartHeader.top };
   const activeSingleAxisWidth = isCompactChart ? compactSingleAxisWidth : singleAxisWidth;
+  const activeAxisOrientation = axisOrientation ?? 'right';
   const activePoint = getActivePoint(energyData, hoveredTime, selectedTime, ['displayPowerKw', 'signedPowerKw']);
   const interactionX = getInteractionX(energyData, hoveredTime, selectedTime);
   const activeTimeText = formatActiveTime(activePoint);
@@ -1480,13 +1581,15 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
             {...(todayXTicks ? { ticks: todayXTicks } : {})}
           />
           <YAxis
-            orientation='right'
-            width={activeSingleAxisWidth}
+            orientation={activeAxisOrientation}
+            width={isCompactChart ? compactSingleAxisWidth : axisWidth ?? activeSingleAxisWidth}
             mirror
-            tick={<RightYAxisOverlayTick formatValue={energyPowerAxisScale.formatTick} />}
+            tick={activeAxisOrientation === 'left'
+              ? <LeftYAxisOverlayTick formatValue={energyPowerAxisScale.formatTick} />
+              : <RightYAxisOverlayTick formatValue={energyPowerAxisScale.formatTick} />}
             tickLine={false}
             axisLine={false}
-            domain={energyPowerAxisScale.domain}
+            domain={configuredAxisDomain ?? energyPowerAxisScale.domain}
             ticks={energyPowerAxisScale.ticks}
             tickFormatter={yTickFormatter}
           />

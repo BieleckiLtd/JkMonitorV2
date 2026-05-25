@@ -215,13 +215,44 @@ describe('EnergyChartSection', () => {
       const data = [
         makePoint('12:00', isoAt(0), 1200, 1),
       ];
-      const { container } = render(<EnergyChartSection data={data} resolution='1m' displayMode='1h' />);
+      const { container } = render(
+        <EnergyChartSection
+          data={data}
+          resolution='1m'
+          displayMode='1h'
+          axisUnit='W'
+          axisDisplay={{ precision: 1, smallValueThreshold: 1000, smallValueTickStep: 50, smallValuePrecision: 0 }}
+        />,
+      );
 
       const yAxis = within(container).getByTestId('y-axis');
       const labels = JSON.parse(yAxis.getAttribute('data-labels') ?? '[]') as string[];
 
       expect(labels).toContain('1.2');
       expect(labels.every((label) => /^\d+\.\d$/.test(label))).toBe(true);
+    });
+
+    it('honors configured watt tick steps from the chart axis display settings', () => {
+      const data = [
+        makePoint('12:00', isoAt(0), 25, 1),
+        makePoint('12:01', isoAt(1), 50, 1),
+        makePoint('12:02', isoAt(2), 75, 1),
+        makePoint('12:03', isoAt(3), 100, 1),
+      ];
+      const { container } = render(
+        <EnergyChartSection
+          data={data}
+          resolution='1m'
+          displayMode='1h'
+          axisUnit='W'
+          axisDisplay={{ precision: 1, smallValueThreshold: 1000, smallValueTickStep: 25, smallValuePrecision: 0 }}
+        />,
+      );
+
+      const yAxis = within(container).getByTestId('y-axis');
+      const labels = JSON.parse(yAxis.getAttribute('data-labels') ?? '[]') as string[];
+
+      expect(labels).toEqual(['0', '25', '50', '75', '100']);
     });
   });
 });
