@@ -241,6 +241,60 @@ describe('EnergyChartSection', () => {
       expect(labels.every((label) => /^\d+\.\d$/.test(label))).toBe(true);
     });
 
+    it('uses the configured 0.2 kW step when the displayed kW range is 2 kW or less', () => {
+      const data = [
+        makePoint('12:00', isoAt(0), 800, -1),
+        makePoint('12:01', isoAt(1), 1200, 1),
+      ];
+      const { container } = render(
+        <EnergyChartSection
+          data={data}
+          resolution='1m'
+          displayMode='1h'
+          axisUnit='W'
+          axisDisplay={{
+            precision: 1,
+            smallValueThreshold: 1000,
+            smallValueTickStep: 50,
+            smallValuePrecision: 0,
+            rangeTickSteps: [{ maxRange: 2, step: 0.2 }, { step: 0.5 }],
+          }}
+        />,
+      );
+
+      const yAxis = within(container).getByTestId('y-axis');
+      const ticks = JSON.parse(yAxis.getAttribute('data-ticks') ?? '[]') as number[];
+
+      expect(ticks).toEqual([-0.8, -0.6, -0.4, -0.2, 0, 0.2, 0.4, 0.6, 0.8, 1, 1.2]);
+    });
+
+    it('uses the configured 0.5 kW step when the displayed kW range is over 2 kW', () => {
+      const data = [
+        makePoint('12:00', isoAt(0), 1100, -1),
+        makePoint('12:01', isoAt(1), 1200, 1),
+      ];
+      const { container } = render(
+        <EnergyChartSection
+          data={data}
+          resolution='1m'
+          displayMode='1h'
+          axisUnit='W'
+          axisDisplay={{
+            precision: 1,
+            smallValueThreshold: 1000,
+            smallValueTickStep: 50,
+            smallValuePrecision: 0,
+            rangeTickSteps: [{ maxRange: 2, step: 0.2 }, { step: 0.5 }],
+          }}
+        />,
+      );
+
+      const yAxis = within(container).getByTestId('y-axis');
+      const ticks = JSON.parse(yAxis.getAttribute('data-ticks') ?? '[]') as number[];
+
+      expect(ticks).toEqual([-1.5, -1, -0.5, 0, 0.5, 1, 1.5]);
+    });
+
     it('rounds raw generated kW tick labels through the custom tick renderer', () => {
       const data = [
         makePoint('12:00', isoAt(0), 1200, 1),

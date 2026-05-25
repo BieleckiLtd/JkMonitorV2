@@ -692,6 +692,15 @@ public sealed class UiAxisDisplayDefinition
     public double? SmallValueTickStep { get; init; }
 
     public int? SmallValuePrecision { get; init; }
+
+    public IReadOnlyList<UiAxisRangeTickStepDefinition>? RangeTickSteps { get; init; }
+}
+
+public sealed class UiAxisRangeTickStepDefinition
+{
+    public double? MaxRange { get; init; }
+
+    public double Step { get; init; }
 }
 
 public sealed class UiDashboardCard

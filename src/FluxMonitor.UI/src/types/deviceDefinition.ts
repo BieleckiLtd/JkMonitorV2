@@ -312,6 +312,12 @@ export type UiAxisDisplayDefinition = {
   smallValueThreshold?: number;
   smallValueTickStep?: number;
   smallValuePrecision?: number;
+  rangeTickSteps?: UiAxisRangeTickStepDefinition[];
+};
+
+export type UiAxisRangeTickStepDefinition = {
+  maxRange?: number;
+  step: number;
 };
 
 export type UiDashboardCard = {

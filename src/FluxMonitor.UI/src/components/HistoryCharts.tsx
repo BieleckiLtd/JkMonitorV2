@@ -1372,6 +1372,32 @@ function formatEnergySmallAxisValue(value: number, precision: number) {
   return precision > 0 ? rounded.toFixed(precision) : String(Math.round(rounded));
 }
 
+function decimalPlaces(value: number) {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+
+  const valueText = String(value);
+  if (valueText.includes('e-')) {
+    const [, exponent] = valueText.split('e-');
+    return Number(exponent) || 0;
+  }
+
+  return valueText.includes('.') ? valueText.split('.')[1].length : 0;
+}
+
+function resolveEnergyRangeTickStep(rangeKw: number, axisDisplay?: UiAxisDisplayDefinition) {
+  const steps = axisDisplay?.rangeTickSteps
+    ?.filter((step) => Number.isFinite(step.step) && step.step > 0)
+    .sort((a, b) => (a.maxRange ?? Number.POSITIVE_INFINITY) - (b.maxRange ?? Number.POSITIVE_INFINITY));
+
+  if (!steps || steps.length === 0) {
+    return undefined;
+  }
+
+  return steps.find((step) => step.maxRange == null || rangeKw <= step.maxRange)?.step;
+}
+
 function buildEnergyPowerAxisScale(
   data: Record<string, unknown>[],
   axisUnit?: string,
@@ -1394,10 +1420,15 @@ function buildEnergyPowerAxisScale(
     convertEnergyAxisValueToKilowatts(configuredSmallValueTickStep, axisUnit),
   );
   const useSmallValueLabels = maxAbs < smallValueThreshold;
-  const minimumStep = useSmallValueLabels ? smallValueTickStep : 10 ** -precision;
-  const targetIntervals = 5;
   const rawSpan = rawMax - rawMin;
-  const step = Math.max(
+  const configuredRangeTickStep = useSmallValueLabels
+    ? undefined
+    : resolveEnergyRangeTickStep(rawSpan, axisDisplay);
+  const minimumStep = useSmallValueLabels
+    ? smallValueTickStep
+    : configuredRangeTickStep ?? 10 ** -precision;
+  const targetIntervals = 5;
+  const step = configuredRangeTickStep ?? Math.max(
     minimumStep,
     Math.ceil((rawSpan || minimumStep) / targetIntervals / minimumStep) * minimumStep,
   );
@@ -1409,7 +1440,7 @@ function buildEnergyPowerAxisScale(
     domainMax += step;
   }
 
-  const normalizedPrecision = useSmallValueLabels ? 3 : precision;
+  const normalizedPrecision = useSmallValueLabels ? 3 : Math.max(precision, decimalPlaces(step));
   const normalize = (value: number) => Number(value.toFixed(normalizedPrecision));
   const ticks: number[] = [];
   for (let tick = domainMin; tick <= domainMax + step / 2; tick += step) {
