@@ -674,6 +674,10 @@ public sealed class UiAxisDefinition
 
     public int? Width { get; init; }
 
+    public bool? Mirror { get; init; }
+
+    public int? TickOffset { get; init; }
+
     public IReadOnlyList<double>? Domain { get; init; }
 
     public UiAxisDisplayDefinition? Display { get; init; }

@@ -668,6 +668,8 @@ type AxisSpec = {
   id: string;
   orientation: 'left' | 'right';
   width?: number;
+  mirror?: boolean;
+  tickOffset?: number;
   domain?: [number, number];
   line?: LineSpec;
 };
@@ -713,6 +715,8 @@ function renderDefinitionCharts(
           axisDisplay={chart.yAxis?.display}
           axisOrientation={chart.yAxis?.orientation}
           axisWidth={chart.yAxis?.width}
+          axisMirror={chart.yAxis?.mirror}
+          axisTickOffset={chart.yAxis?.tickOffset}
           axisDomain={axisDomain(chart.yAxis)}
         />
       );
@@ -801,6 +805,8 @@ function resolveChartAxes(chart: UiChartDefinition, lines: LineSpec[]): AxisSpec
         id,
         orientation: normalizeAxisOrientation(axis.orientation, index === 0 ? 'right' : 'left'),
         width: axis.width,
+        mirror: axis.mirror,
+        tickOffset: axis.tickOffset,
         domain: axisDomain(axis),
         line: linesByAxis.get(id)?.[0],
       };
@@ -814,6 +820,8 @@ function resolveChartAxes(chart: UiChartDefinition, lines: LineSpec[]): AxisSpec
         id: 'primary',
         orientation: normalizeAxisOrientation(chart.yAxis?.orientation, 'left'),
         width: chart.yAxis?.width,
+        mirror: chart.yAxis?.mirror,
+        tickOffset: chart.yAxis?.tickOffset,
         domain: axisDomain(chart.yAxis),
         line: linesByAxis.get('primary')?.[0],
       },
@@ -829,6 +837,8 @@ function resolveChartAxes(chart: UiChartDefinition, lines: LineSpec[]): AxisSpec
     id: 'primary',
     orientation: normalizeAxisOrientation(chart.yAxis?.orientation, 'right'),
     width: chart.yAxis?.width,
+    mirror: chart.yAxis?.mirror,
+    tickOffset: chart.yAxis?.tickOffset,
     domain: axisDomain(chart.yAxis),
     line: linesByAxis.get('primary')?.[0] ?? lines[0],
   }];
@@ -854,6 +864,7 @@ type AxisTickRendererProps = {
     value?: string | number;
   };
   formatValue?: (value: string | number) => string;
+  tickOffset?: number;
 };
 
 function OverlayAxisLabel({ x, y, value, textAnchor = 'middle' }: {
@@ -910,18 +921,18 @@ function formatNumericAxisTick(value: string | number, formatter: (value: number
   return Number.isFinite(numericValue) ? formatter(numericValue) : String(value);
 }
 
-function RightYAxisOverlayTick({ x = 0, y = 0, payload, formatValue }: AxisTickRendererProps) {
+function RightYAxisOverlayTick({ x = 0, y = 0, payload, formatValue, tickOffset = 6 }: AxisTickRendererProps) {
   return (
     <g>
-      <OverlayAxisLabel x={x - 6} y={y} value={formatAxisTickPayload(payload, formatValue)} textAnchor='end' />
+      <OverlayAxisLabel x={x - tickOffset} y={y} value={formatAxisTickPayload(payload, formatValue)} textAnchor='end' />
     </g>
   );
 }
 
-function LeftYAxisOverlayTick({ x = 0, y = 0, payload, formatValue }: AxisTickRendererProps) {
+function LeftYAxisOverlayTick({ x = 0, y = 0, payload, formatValue, tickOffset = 6 }: AxisTickRendererProps) {
   return (
     <g>
-      <OverlayAxisLabel x={x + 6} y={y} value={formatAxisTickPayload(payload, formatValue)} textAnchor='start' />
+      <OverlayAxisLabel x={x + tickOffset} y={y} value={formatAxisTickPayload(payload, formatValue)} textAnchor='start' />
     </g>
   );
 }
@@ -1181,15 +1192,15 @@ function ChartSection({ title, data, lines, axes, getDecimalsForKey, getUnitForK
           {activeAxes.map((axis) => {
             const tickFormatter = axisFormatters.get(axis.id) ?? String;
             const tick = axis.orientation === 'left'
-              ? <LeftYAxisOverlayTick formatValue={(value) => formatNumericAxisTick(value, tickFormatter)} />
-              : <RightYAxisOverlayTick formatValue={(value) => formatNumericAxisTick(value, tickFormatter)} />;
+              ? <LeftYAxisOverlayTick formatValue={(value) => formatNumericAxisTick(value, tickFormatter)} tickOffset={axis.tickOffset} />
+              : <RightYAxisOverlayTick formatValue={(value) => formatNumericAxisTick(value, tickFormatter)} tickOffset={axis.tickOffset} />;
             return (
               <YAxis
                 key={axis.id}
                 yAxisId={axis.id}
                 orientation={axis.orientation}
                 width={isCompactChart ? compactSingleAxisWidth : axis.width ?? (activeAxes.length > 1 ? activeDualAxisWidth : activeSingleAxisWidth)}
-                mirror
+                mirror={axis.mirror ?? true}
                 tick={tick}
                 tickLine={false}
                 axisLine={false}
@@ -1313,8 +1324,10 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
           <YAxis
             orientation={axisOrientation}
             width={isCompactChart ? compactSingleAxisWidth : axis?.width ?? activeSingleAxisWidth}
-            mirror
-            tick={axisOrientation === 'left' ? <LeftYAxisOverlayTick /> : <RightYAxisOverlayTick />}
+            mirror={axis?.mirror ?? true}
+            tick={axisOrientation === 'left'
+              ? <LeftYAxisOverlayTick tickOffset={axis?.tickOffset} />
+              : <RightYAxisOverlayTick tickOffset={axis?.tickOffset} />}
             tickLine={false}
             axisLine={false}
             domain={axisDomain(axis) ?? [0, 100]}
@@ -1415,7 +1428,7 @@ function buildEnergyPowerAxisScale(
   };
 }
 
-export function EnergyChartSection({ data, resolution, displayMode, hoveredTime, selectedTime, onHover, onSelect, todayXTicks, axisUnit, axisDisplay, axisOrientation, axisWidth, axisDomain: configuredAxisDomain }: {
+export function EnergyChartSection({ data, resolution, displayMode, hoveredTime, selectedTime, onHover, onSelect, todayXTicks, axisUnit, axisDisplay, axisOrientation, axisWidth, axisMirror, axisTickOffset, axisDomain: configuredAxisDomain }: {
   data: Record<string, unknown>[]; resolution: Resolution; displayMode: HistoryDisplayMode;
   hoveredTime: string | null; selectedTime: string | null;
   onHover: (time: string | null) => void; onSelect: (time: string | null) => void;
@@ -1424,6 +1437,8 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
   axisDisplay?: UiAxisDisplayDefinition;
   axisOrientation?: 'left' | 'right';
   axisWidth?: number;
+  axisMirror?: boolean;
+  axisTickOffset?: number;
   axisDomain?: [number, number];
 }) {
   const { energyData, dischargedKwh, chargedKwh, zeroOffset } = useMemo(
@@ -1583,10 +1598,10 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
           <YAxis
             orientation={activeAxisOrientation}
             width={isCompactChart ? compactSingleAxisWidth : axisWidth ?? activeSingleAxisWidth}
-            mirror
+            mirror={axisMirror ?? true}
             tick={activeAxisOrientation === 'left'
-              ? <LeftYAxisOverlayTick formatValue={energyPowerAxisScale.formatTick} />
-              : <RightYAxisOverlayTick formatValue={energyPowerAxisScale.formatTick} />}
+              ? <LeftYAxisOverlayTick formatValue={energyPowerAxisScale.formatTick} tickOffset={axisTickOffset} />
+              : <RightYAxisOverlayTick formatValue={energyPowerAxisScale.formatTick} tickOffset={axisTickOffset} />}
             tickLine={false}
             axisLine={false}
             domain={configuredAxisDomain ?? energyPowerAxisScale.domain}

@@ -301,6 +301,8 @@ export type UiAxisDefinition = {
   label?: string;
   orientation?: 'left' | 'right';
   width?: number;
+  mirror?: boolean;
+  tickOffset?: number;
   domain?: [number, number];
   display?: UiAxisDisplayDefinition;
 };

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeAll } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, within } from '@testing-library/react';
 import { HistoryCharts } from './HistoryCharts';
 import type { DeviceDefinition } from '../types/deviceDefinition';
 
@@ -194,7 +194,7 @@ describe('StateOfChargeChartSection', () => {
       },
     } satisfies DeviceDefinition;
 
-    render(
+    const { container } = render(
       <HistoryCharts
         deviceId='pack-1'
         precision={{ voltage: 1, cellVoltage: 3, current: 1, power: 0, temperature: 1, soc: 0, deltaVoltage: 3 }}
@@ -203,12 +203,13 @@ describe('StateOfChargeChartSection', () => {
     );
 
     expect(await screen.findByText('Electrical')).toBeInTheDocument();
-    const axes = screen.getAllByTestId('y-axis');
+    const chart = within(container);
+    const axes = chart.getAllByTestId('y-axis');
     expect(axes).toHaveLength(2);
     expect(axes.map(axis => axis.getAttribute('data-axis-id'))).toEqual(['amps', 'volts']);
     expect(axes.every(axis => axis.getAttribute('data-orientation') === 'right')).toBe(true);
 
-    const lines = screen.getAllByTestId('line');
+    const lines = chart.getAllByTestId('line');
     expect(lines.map(line => [line.getAttribute('data-key'), line.getAttribute('data-y-axis-id')])).toEqual([
       ['current', 'amps'],
       ['total_voltage', 'volts'],
