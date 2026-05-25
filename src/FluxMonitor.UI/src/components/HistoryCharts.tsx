@@ -1125,7 +1125,7 @@ function ChartSection({ title, data, lines, axes, getDecimalsForKey, getUnitForK
   const activeSingleAxisWidth = isCompactChart ? compactSingleAxisWidth : singleAxisWidth;
   const activeDualAxisWidth = isCompactChart ? compactDualAxisWidth : dualAxisWidth;
   const activePoint = getActivePoint(data, hoveredTime, selectedTime, lines.map((line) => line.key));
-  const interactionX = getInteractionX(data, hoveredTime, selectedTime);
+  const interactionX = getInteractionX(data, hoveredTime, selectedTime, lines.map((line) => line.key));
   const activeTimeText = formatActiveTime(activePoint);
   const activeAxes = useMemo(() => axes && axes.length > 0 ? axes : [{
     id: 'primary',
@@ -1264,7 +1264,7 @@ function StateOfChargeChartSection({ title, data, line, getDecimalsForKey, getUn
   const activeSingleAxisWidth = isCompactChart ? compactSingleAxisWidth : singleAxisWidth;
   const axisOrientation = normalizeAxisOrientation(axis?.orientation, 'right');
   const activePoint = getActivePoint(data, hoveredTime, selectedTime, [line.key]);
-  const interactionX = getInteractionX(data, hoveredTime, selectedTime);
+  const interactionX = getInteractionX(data, hoveredTime, selectedTime, [line.key]);
   const activeTimeText = formatActiveTime(activePoint);
 
   const handleChartMove = useCallback((state: unknown) => {
@@ -1538,7 +1538,7 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
   const activeSingleAxisWidth = isCompactChart ? compactSingleAxisWidth : singleAxisWidth;
   const activeAxisOrientation = axisOrientation ?? 'right';
   const activePoint = getActivePoint(energyData, hoveredTime, selectedTime, ['displayPowerKw', 'signedPowerKw']);
-  const interactionX = getInteractionX(energyData, hoveredTime, selectedTime);
+  const interactionX = getInteractionX(energyData, hoveredTime, selectedTime, ['displayPowerKw', 'signedPowerKw']);
   const activeTimeText = formatActiveTime(activePoint);
   const activeEnergyText = useMemo(() => {
     if (!activePoint) return null;
@@ -1676,7 +1676,7 @@ function MultiCellChartSection({ selectedCells, data, onDismiss, hoveredTime, se
   const activeChartMargin = { ...(isCompactChart ? compactChartMargin : chartMargin), top: chartHeader.top };
   const activeSingleAxisWidth = isCompactChart ? compactSingleAxisWidth : singleAxisWidth;
   const activePoint = getActivePoint(data, hoveredTime, selectedTime, cellLines.map((line) => line.key));
-  const interactionX = getInteractionX(data, hoveredTime, selectedTime);
+  const interactionX = getInteractionX(data, hoveredTime, selectedTime, cellLines.map((line) => line.key));
   const activeTimeText = formatActiveTime(activePoint);
 
   const yTickFormatter = useCallback((value: number) => formatWithUnit(value.toFixed(cellVoltageDecimals), 'V'), []);
@@ -1885,13 +1885,13 @@ function getPointTimeMs(point: Record<string, unknown>) {
   return Number.isNaN(parsed) ? null : parsed;
 }
 
-function getInteractionX(data: Record<string, unknown>[], hoveredTime: string | null, selectedTime: string | null): string | null {
+function getInteractionX(data: Record<string, unknown>[], hoveredTime: string | null, selectedTime: string | null, keys?: string[]): string | null {
   const timestamp = hoveredTime ?? selectedTime;
   if (!timestamp) {
     return null;
   }
 
-  const point = data.find(p => p.timestamp === timestamp);
+  const point = getActivePoint(data, hoveredTime, selectedTime, keys);
   const time = point?.time;
   return time != null ? String(time) : null;
 }

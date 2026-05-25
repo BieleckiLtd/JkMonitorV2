@@ -26,7 +26,9 @@ vi.mock('recharts', () => {
     ResponsiveContainer: Passthrough,
     AreaChart: Passthrough,
     Area: Noop,
-    ReferenceLine: Noop,
+    ReferenceLine: ({ x }: { x?: string }) => (
+      <span data-testid='ref-line' data-x={x} />
+    ),
     ReferenceDot: ({ x, r }: { x?: string; r?: number }) => (
       <span data-testid='ref-dot' data-x={x} data-r={r} />
     ),
@@ -336,6 +338,29 @@ describe('EnergyChartSection', () => {
       const labels = JSON.parse(yAxis.getAttribute('data-labels') ?? '[]') as string[];
 
       expect(labels).toEqual(['0', '25', '50', '75', '100']);
+    });
+  });
+
+  describe('interaction marker', () => {
+    it('snaps the vertical line to the latest data point with values when hovering over empty future data', () => {
+      const data = [
+        makePoint('12:20', isoAt(0), 500, -1),
+        makePoint('14:00', isoAt(100), null, null),
+      ];
+
+      const { container } = render(
+        <EnergyChartSection
+          data={data}
+          resolution='1m'
+          displayMode='1h'
+          hoveredTime={isoAt(100)}
+          selectedTime={null}
+          onHover={() => {}}
+          onSelect={() => {}}
+        />,
+      );
+
+      expect(within(container).getByTestId('ref-line')).toHaveAttribute('data-x', '12:20');
     });
   });
 });
