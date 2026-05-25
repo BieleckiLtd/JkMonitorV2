@@ -683,7 +683,7 @@ function DevicePanel({
                       : resolveColorClass(m.color);
 
                   return (
-                    <div key={m.entity} className='min-w-0'>
+                    <div key={m.entity} className='flex min-w-0 flex-col justify-between'>
                       <div className='text-[10px] font-medium uppercase tracking-[0.22em] text-muted-foreground/70'>
                         {m.label ?? param?.displayName ?? entity?.name ?? m.entity}
                       </div>
