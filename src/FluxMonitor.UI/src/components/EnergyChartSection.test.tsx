@@ -31,16 +31,25 @@ vi.mock('recharts', () => {
       <span data-testid='ref-dot' data-x={x} data-r={r} />
     ),
     XAxis: Noop,
-    YAxis: ({ orientation, ticks, tickFormatter }: {
+    YAxis: ({ orientation, ticks, tickFormatter, tick }: {
       orientation?: string;
       ticks?: number[];
       tickFormatter?: (value: number) => string;
+      tick?: (props: { x: number; y: number; payload: { value: number } }) => React.ReactNode;
     }) => (
       <span
         data-testid='y-axis'
         data-orientation={orientation}
         data-ticks={JSON.stringify(ticks ?? [])}
         data-labels={JSON.stringify((ticks ?? []).map((tick) => tickFormatter ? tickFormatter(tick) : String(tick)))}
+        data-rendered-raw-labels={JSON.stringify([1.0514823943661973, 0.6831, -0.1169].map((value) => {
+          const rendered = tick?.({ x: 0, y: 0, payload: { value } });
+          if (rendered && typeof rendered === 'object' && 'props' in rendered) {
+            const props = (rendered as { props?: { formatValue?: (v: number) => string; payload?: { value: number } } }).props;
+            return props?.formatValue && props.payload ? props.formatValue(props.payload.value) : String(value);
+          }
+          return tickFormatter ? tickFormatter(value) : String(value);
+        }))}
       />
     ),
     Tooltip: Noop,
@@ -230,6 +239,26 @@ describe('EnergyChartSection', () => {
 
       expect(labels).toContain('1.2');
       expect(labels.every((label) => /^\d+\.\d$/.test(label))).toBe(true);
+    });
+
+    it('rounds raw generated kW tick labels through the custom tick renderer', () => {
+      const data = [
+        makePoint('12:00', isoAt(0), 1200, 1),
+      ];
+      const { container } = render(
+        <EnergyChartSection
+          data={data}
+          resolution='1m'
+          displayMode='1h'
+          axisUnit='W'
+          axisDisplay={{ precision: 1, smallValueThreshold: 1000, smallValueTickStep: 50, smallValuePrecision: 0 }}
+        />,
+      );
+
+      const yAxis = within(container).getByTestId('y-axis');
+      const labels = JSON.parse(yAxis.getAttribute('data-rendered-raw-labels') ?? '[]') as string[];
+
+      expect(labels).toEqual(['1.1', '0.7', '0.1']);
     });
 
     it('honors configured watt tick steps from the chart axis display settings', () => {

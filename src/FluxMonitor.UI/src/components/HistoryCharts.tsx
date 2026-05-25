@@ -858,14 +858,19 @@ const cellVoltageDecimals = 3;
 const axisLabelShadow = 'drop-shadow(0 1px 2px rgba(5, 8, 15, 0.42))';
 
 type AxisTickRendererProps = {
-  x?: number;
-  y?: number;
+  x?: string | number;
+  y?: string | number;
   payload?: {
     value?: string | number;
   };
   formatValue?: (value: string | number) => string;
   tickOffset?: number;
 };
+
+function numericCoordinate(value: string | number | undefined, fallback = 0) {
+  const numericValue = typeof value === 'number' ? value : Number(value);
+  return Number.isFinite(numericValue) ? numericValue : fallback;
+}
 
 function OverlayAxisLabel({ x, y, value, textAnchor = 'middle' }: {
   x: number;
@@ -900,9 +905,11 @@ function OverlayAxisLabel({ x, y, value, textAnchor = 'middle' }: {
 }
 
 function XAxisOverlayTick({ x = 0, y = 0, payload }: AxisTickRendererProps) {
+  const tickX = numericCoordinate(x);
+  const tickY = numericCoordinate(y);
   return (
     <g>
-      <OverlayAxisLabel x={x} y={y - 10} value={String(payload?.value ?? '')} />
+      <OverlayAxisLabel x={tickX} y={tickY - 10} value={String(payload?.value ?? '')} />
     </g>
   );
 }
@@ -922,17 +929,21 @@ function formatNumericAxisTick(value: string | number, formatter: (value: number
 }
 
 function RightYAxisOverlayTick({ x = 0, y = 0, payload, formatValue, tickOffset = 6 }: AxisTickRendererProps) {
+  const tickX = numericCoordinate(x);
+  const tickY = numericCoordinate(y);
   return (
     <g>
-      <OverlayAxisLabel x={x - tickOffset} y={y} value={formatAxisTickPayload(payload, formatValue)} textAnchor='end' />
+      <OverlayAxisLabel x={tickX - tickOffset} y={tickY} value={formatAxisTickPayload(payload, formatValue)} textAnchor='end' />
     </g>
   );
 }
 
 function LeftYAxisOverlayTick({ x = 0, y = 0, payload, formatValue, tickOffset = 6 }: AxisTickRendererProps) {
+  const tickX = numericCoordinate(x);
+  const tickY = numericCoordinate(y);
   return (
     <g>
-      <OverlayAxisLabel x={x + tickOffset} y={y} value={formatAxisTickPayload(payload, formatValue)} textAnchor='start' />
+      <OverlayAxisLabel x={tickX + tickOffset} y={tickY} value={formatAxisTickPayload(payload, formatValue)} textAnchor='start' />
     </g>
   );
 }
@@ -1599,13 +1610,14 @@ export function EnergyChartSection({ data, resolution, displayMode, hoveredTime,
             orientation={activeAxisOrientation}
             width={isCompactChart ? compactSingleAxisWidth : axisWidth ?? activeSingleAxisWidth}
             mirror={axisMirror ?? true}
-            tick={activeAxisOrientation === 'left'
-              ? <LeftYAxisOverlayTick formatValue={energyPowerAxisScale.formatTick} tickOffset={axisTickOffset} />
-              : <RightYAxisOverlayTick formatValue={energyPowerAxisScale.formatTick} tickOffset={axisTickOffset} />}
+            tick={(props) => activeAxisOrientation === 'left'
+              ? <LeftYAxisOverlayTick {...props} formatValue={energyPowerAxisScale.formatTick} tickOffset={axisTickOffset} />
+              : <RightYAxisOverlayTick {...props} formatValue={energyPowerAxisScale.formatTick} tickOffset={axisTickOffset} />}
             tickLine={false}
             axisLine={false}
             domain={configuredAxisDomain ?? energyPowerAxisScale.domain}
             ticks={energyPowerAxisScale.ticks}
+            interval={0}
             tickFormatter={yTickFormatter}
           />
           {baselineMarkers.map(({ time, isMajor }, i) => (
