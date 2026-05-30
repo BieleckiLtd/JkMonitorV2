@@ -1,0 +1,216 @@
+{
+  "$schema": "https://FluxMonitor.local/schemas/device-definition-v1.json",
+  "version": "1",
+  "device": {
+    "id": "ecoflow-stream-microinverter-ble",
+    "name": "EcoFlow STREAM Microinverter (BLE)",
+    "manufacturer": "EcoFlow",
+    "model": "STREAM Microinverter",
+    "category": "solar-inverter",
+    "description": "EcoFlow STREAM Microinverter over authenticated BLE. Reads live PV, grid, limit, grid-code, diagnostics, and connectivity telemetry.",
+    "icon": "zap",
+    "documentationUrl": "https://github.com/GnoX/ha-ef-ble"
+  },
+  "connection": {
+    "transport": {
+      "type": "ble",
+      "defaults": {
+        "serviceUuid": "00000001-0000-1000-8000-00805f9b34fb",
+        "notifyCharacteristicUuid": "00000003-0000-1000-8000-00805f9b34fb",
+        "writeCharacteristicUuid": "00000002-0000-1000-8000-00805f9b34fb",
+        "connectionTimeoutMs": 20000,
+        "reconnectDelayMs": 5000
+      }
+    },
+    "protocol": {
+      "type": "ecoflow-ble",
+      "settings": {
+        "byteOrder": "little-endian"
+      }
+    }
+  },
+  "dataSources": [
+    {
+      "id": "display",
+      "name": "Display properties",
+      "pollGroup": "fast",
+      "readMode": "notify-stream",
+      "headerSize": 0
+    }
+  ],
+  "pollGroups": {
+    "fast": {
+      "intervalMs": 1000,
+      "description": "Authenticated BLE DisplayPropertyUpload stream."
+    }
+  },
+  "entities": [
+    { "id": "pv1_power_w", "type": "sensor", "name": "Solar 1 Input", "category": "Power", "icon": "zap", "source": { "bank": "display", "byteOffset": 0, "dataType": "int32", "scale": 0.1, "unit": "W" }, "display": { "precision": 0 } },
+    { "id": "pv2_power_w", "type": "sensor", "name": "Solar 2 Input", "category": "Power", "icon": "zap", "source": { "bank": "display", "byteOffset": 4, "dataType": "int32", "scale": 0.1, "unit": "W" }, "display": { "precision": 0 } },
+    { "id": "pv1_voltage_v", "type": "sensor", "name": "Solar 1 Voltage", "category": "Solar 1", "source": { "bank": "display", "byteOffset": 8, "dataType": "uint16", "scale": 0.01, "unit": "V" }, "display": { "precision": 2 } },
+    { "id": "pv1_current_a", "type": "sensor", "name": "Solar 1 Current", "category": "Solar 1", "source": { "bank": "display", "byteOffset": 10, "dataType": "uint16", "scale": 0.01, "unit": "A" }, "display": { "precision": 2 } },
+    { "id": "pv2_voltage_v", "type": "sensor", "name": "Solar 2 Voltage", "category": "Solar 2", "source": { "bank": "display", "byteOffset": 12, "dataType": "uint16", "scale": 0.01, "unit": "V" }, "display": { "precision": 2 } },
+    { "id": "pv2_current_a", "type": "sensor", "name": "Solar 2 Current", "category": "Solar 2", "source": { "bank": "display", "byteOffset": 14, "dataType": "uint16", "scale": 0.01, "unit": "A" }, "display": { "precision": 2 } },
+    { "id": "grid_voltage_v", "type": "sensor", "name": "Grid Voltage", "category": "Grid", "source": { "bank": "display", "byteOffset": 16, "dataType": "uint16", "scale": 0.01, "unit": "V" }, "display": { "precision": 1 } },
+    { "id": "grid_current_a", "type": "sensor", "name": "Grid Current", "category": "Grid", "source": { "bank": "display", "byteOffset": 18, "dataType": "uint16", "scale": 0.01, "unit": "A" }, "display": { "precision": 2 } },
+    { "id": "grid_frequency_hz", "type": "sensor", "name": "Grid Frequency", "category": "Grid", "source": { "bank": "display", "byteOffset": 20, "dataType": "uint16", "scale": 0.01, "unit": "Hz" }, "display": { "precision": 2 } },
+    { "id": "grid_power_w", "type": "sensor", "name": "Grid Power", "category": "Grid", "icon": "zap", "source": { "bank": "display", "byteOffset": 22, "dataType": "int32", "scale": 0.1, "unit": "W" }, "display": { "precision": 0 } },
+    { "id": "grid_power_factor", "type": "sensor", "name": "Grid Power Factor", "category": "Grid", "source": { "bank": "display", "byteOffset": 26, "dataType": "int16", "scale": 0.001 }, "display": { "precision": 3 } },
+    {
+      "id": "grid_connection_status",
+      "type": "select",
+      "name": "Grid Connection Status",
+      "category": "Grid",
+      "source": { "bank": "display", "byteOffset": 28, "dataType": "uint16" },
+      "options": [
+        { "value": 0, "label": "No valid grid" },
+        { "value": 1, "label": "Grid input" },
+        { "value": 2, "label": "Not online" },
+        { "value": 3, "label": "Feeding grid" }
+      ]
+    },
+    { "id": "wifi_rssi_dbm", "type": "sensor", "name": "Signal Strength", "category": "Diagnostics", "source": { "bank": "display", "byteOffset": 30, "dataType": "int16", "unit": "dBm" }, "display": { "precision": 0 } },
+    { "id": "feed_grid_mode_power_limit_w", "type": "sensor", "name": "Feed Grid Mode Power Limit", "category": "Limits", "source": { "bank": "display", "byteOffset": 32, "dataType": "uint16", "unit": "W" }, "display": { "precision": 0 } },
+    { "id": "feed_grid_mode_power_max_w", "type": "sensor", "name": "Feed Grid Mode Power Max", "category": "Limits", "source": { "bank": "display", "byteOffset": 34, "dataType": "uint16", "unit": "W" }, "display": { "precision": 0 } },
+    { "id": "inverter_target_power_w", "type": "sensor", "name": "Inverter Target Power", "category": "Limits", "source": { "bank": "display", "byteOffset": 36, "dataType": "int32", "scale": 0.1, "unit": "W" }, "display": { "precision": 0 } },
+    { "id": "utc_timezone", "type": "sensor", "name": "UTC Timezone", "category": "Device", "source": { "bank": "display", "byteOffset": 40, "dataType": "int16" }, "display": { "precision": 0 } },
+    { "id": "utc_set_mode", "type": "binary_sensor", "name": "UTC Set Mode", "category": "Device", "source": { "bank": "display", "byteOffset": 42, "dataType": "uint8", "trueValue": 1 } },
+    { "id": "factory_mode_enabled", "type": "binary_sensor", "name": "Factory Mode", "category": "Device", "source": { "bank": "display", "byteOffset": 43, "dataType": "uint8", "trueValue": 1 } },
+    { "id": "debug_mode_enabled", "type": "binary_sensor", "name": "Debug Mode", "category": "Device", "source": { "bank": "display", "byteOffset": 44, "dataType": "uint8", "trueValue": 1 } },
+    { "id": "country_code", "type": "text", "name": "Country Code", "category": "Grid Code", "source": { "bank": "display", "byteOffset": 45, "dataType": "ascii", "length": 8 } },
+    { "id": "town_code", "type": "sensor", "name": "Town Code", "category": "Grid Code", "source": { "bank": "display", "byteOffset": 53, "dataType": "uint16" }, "display": { "precision": 0 } },
+    {
+      "id": "grid_code_selection",
+      "type": "select",
+      "name": "Grid Code",
+      "category": "Grid Code",
+      "source": { "bank": "display", "byteOffset": 55, "dataType": "uint16" },
+      "options": [
+        { "value": 0, "label": "Null" },
+        { "value": 3, "label": "Poland" },
+        { "value": 5, "label": "VDE 4105" },
+        { "value": 20, "label": "Italy" },
+        { "value": 21, "label": "G98" },
+        { "value": 22, "label": "G99" },
+        { "value": 29, "label": "Belgium" },
+        { "value": 33, "label": "EU General" },
+        { "value": 34, "label": "Japan" },
+        { "value": 1001, "label": "North America" }
+      ]
+    },
+    { "id": "grid_code_version", "type": "sensor", "name": "Grid Code Version", "category": "Grid Code", "source": { "bank": "display", "byteOffset": 57, "dataType": "uint32" }, "display": { "precision": 0 } },
+    { "id": "grid_power_factor_setting", "type": "sensor", "name": "Grid Power Factor Setting", "category": "Grid Code", "source": { "bank": "display", "byteOffset": 61, "dataType": "int16", "scale": 0.001 }, "display": { "precision": 3 } },
+    { "id": "utc_timezone_id", "type": "text", "name": "Timezone ID", "category": "Device", "source": { "bank": "display", "byteOffset": 63, "dataType": "ascii", "length": 32 } },
+    { "id": "error_list", "type": "text", "name": "Error List", "category": "Diagnostics", "source": { "bank": "display", "byteOffset": 95, "dataType": "ascii", "length": 64 } },
+    { "id": "grid_power_setting_w", "type": "sensor", "name": "Grid Power Setting", "category": "Limits", "source": { "bank": "display", "byteOffset": 159, "dataType": "int32", "scale": 0.1, "unit": "W" }, "display": { "precision": 0 } },
+    { "id": "feed_grid_safety_power_max_w", "type": "sensor", "name": "Feed Grid Safety Power Max", "category": "Limits", "source": { "bank": "display", "byteOffset": 163, "dataType": "uint16", "unit": "W" }, "display": { "precision": 0 } }
+  ],
+  "computedEntities": [
+    { "id": "total_generation_w", "type": "sensor", "name": "Total Generation", "category": "Power", "expression": "pv1_power_w + pv2_power_w", "unit": "W", "display": { "precision": 0 }, "role": "power" }
+  ],
+  "storage": {
+    "database": { "provider": "timescaledb", "defaultNamePattern": "FluxMonitor_{deviceId}" },
+    "timeSeries": [
+      { "entity": "total_generation_w", "aggregate": "avg", "column": "total_generation_w" },
+      { "entity": "pv1_power_w", "aggregate": "avg", "column": "pv1_power_w" },
+      { "entity": "pv2_power_w", "aggregate": "avg", "column": "pv2_power_w" },
+      { "entity": "grid_power_w", "aggregate": "avg", "column": "grid_power_w" },
+      { "entity": "grid_voltage_v", "aggregate": "avg", "column": "grid_voltage_v" },
+      { "entity": "grid_current_a", "aggregate": "avg", "column": "grid_current_a" },
+      { "entity": "grid_frequency_hz", "aggregate": "avg", "column": "grid_frequency_hz" },
+      { "entity": "pv1_voltage_v", "aggregate": "avg", "column": "pv1_voltage_v" },
+      { "entity": "pv1_current_a", "aggregate": "avg", "column": "pv1_current_a" },
+      { "entity": "pv2_voltage_v", "aggregate": "avg", "column": "pv2_voltage_v" },
+      { "entity": "pv2_current_a", "aggregate": "avg", "column": "pv2_current_a" },
+      { "entity": "feed_grid_mode_power_limit_w", "aggregate": "last", "column": "feed_grid_mode_power_limit_w" },
+      { "entity": "feed_grid_mode_power_max_w", "aggregate": "last", "column": "feed_grid_mode_power_max_w" },
+      { "entity": "inverter_target_power_w", "aggregate": "avg", "column": "inverter_target_power_w" },
+      { "entity": "wifi_rssi_dbm", "aggregate": "avg", "column": "wifi_rssi_dbm" }
+    ],
+    "retention": {
+      "raw": { "window": "24h" },
+      "1m": { "window": "90d" },
+      "5m": { "window": "2y" },
+      "1h": { "window": "10y" }
+    }
+  },
+  "ui": {
+    "pages": {
+      "configuration": { "deviceSettings": { "inlineFields": ["protocolUserId"] } },
+      "monitor": {
+        "card": {
+          "statusGlyphs": [
+            {
+              "type": "last-seen",
+              "icon": "pulse",
+              "levels": [
+                { "maxAgeSeconds": 5, "color": "green", "label": "less than 5 seconds ago" },
+                { "maxAgeSeconds": 60, "color": "orange", "label": "less than a minute ago" },
+                { "color": "red", "label": "more than a minute ago" }
+              ]
+            }
+          ]
+        },
+        "sections": [
+          { "type": "hero-metrics", "metrics": [
+            { "entity": "total_generation_w", "icon": "zap", "color": "amber" },
+            { "entity": "pv1_power_w", "icon": "zap", "color": "emerald" },
+            { "entity": "pv2_power_w", "icon": "zap", "color": "blue" }
+          ] },
+          { "type": "parameter-table", "title": "Power", "filter": { "categories": ["Power", "Solar 1", "Solar 2"] }, "groupBy": "category" },
+          { "type": "parameter-table", "title": "Grid", "filter": { "categories": ["Grid", "Grid Code"] }, "groupBy": "category" },
+          { "type": "parameter-table", "title": "Device & Diagnostics", "filter": { "categories": ["Limits", "Device", "Diagnostics"] }, "groupBy": "category" }
+        ]
+      },
+      "history": {
+        "resolutions": [
+          { "id": "1m", "label": "1 Minute", "defaultWindow": "6h" },
+          { "id": "5m", "label": "5 Minutes", "defaultWindow": "24h" },
+          { "id": "1h", "label": "1 Hour", "defaultWindow": "30d" }
+        ],
+        "charts": [
+          { "title": "Generation", "type": "line-chart", "traces": [
+            { "entity": "total_generation_w", "label": "Total", "color": "amber" },
+            { "entity": "pv1_power_w", "label": "Solar 1", "color": "emerald" },
+            { "entity": "pv2_power_w", "label": "Solar 2", "color": "blue" },
+            { "entity": "grid_power_w", "label": "Grid", "color": "teal" }
+          ], "yAxis": { "unit": "W", "label": "Power" } },
+          { "title": "Solar Inputs", "type": "line-chart", "traces": [
+            { "entity": "pv1_voltage_v", "label": "Solar 1 Voltage", "color": "emerald", "yAxis": "voltage" },
+            { "entity": "pv2_voltage_v", "label": "Solar 2 Voltage", "color": "blue", "yAxis": "voltage" },
+            { "entity": "pv1_current_a", "label": "Solar 1 Current", "color": "amber", "yAxis": "current" },
+            { "entity": "pv2_current_a", "label": "Solar 2 Current", "color": "teal", "yAxis": "current" }
+          ], "yAxes": [
+            { "id": "voltage", "unit": "V", "label": "Voltage", "orientation": "left" },
+            { "id": "current", "unit": "A", "label": "Current", "orientation": "right" }
+          ] },
+          { "title": "Grid", "type": "line-chart", "traces": [
+            { "entity": "grid_voltage_v", "label": "Voltage", "color": "orange", "yAxis": "voltage" },
+            { "entity": "grid_current_a", "label": "Current", "color": "rose", "yAxis": "current" },
+            { "entity": "grid_frequency_hz", "label": "Frequency", "color": "blue", "yAxis": "frequency" }
+          ], "yAxes": [
+            { "id": "voltage", "unit": "V", "label": "Voltage", "orientation": "left" },
+            { "id": "current", "unit": "A", "label": "Current", "orientation": "right" },
+            { "id": "frequency", "unit": "Hz", "label": "Frequency", "orientation": "right" }
+          ] },
+          { "title": "Limits & Signal", "type": "line-chart", "traces": [
+            { "entity": "feed_grid_mode_power_limit_w", "label": "Feed Limit", "color": "amber", "yAxis": "power" },
+            { "entity": "feed_grid_mode_power_max_w", "label": "Feed Max", "color": "blue", "yAxis": "power" },
+            { "entity": "inverter_target_power_w", "label": "Target", "color": "emerald", "yAxis": "power" },
+            { "entity": "wifi_rssi_dbm", "label": "RSSI", "color": "teal", "yAxis": "signal" }
+          ], "yAxes": [
+            { "id": "power", "unit": "W", "label": "Power", "orientation": "left" },
+            { "id": "signal", "unit": "dBm", "label": "Signal", "orientation": "right" }
+          ] }
+        ]
+      },
+      "dashboard": {
+        "card": {
+          "primaryMetric": "total_generation_w",
+          "secondaryMetrics": ["pv1_power_w", "pv2_power_w", "grid_power_w"],
+          "statusEntities": ["grid_connection_status", "wifi_rssi_dbm", "error_list"]
+        }
+      }
+    }
+  }
+}

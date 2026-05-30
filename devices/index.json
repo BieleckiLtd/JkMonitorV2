@@ -5,6 +5,7 @@
     "jk-bd4a8s4p-ble.json",
     "pylontech-us-rs485.json",
     "govee-thermo-hygrometer-ble.json",
+    "ecoflow-stream-microinverter-ble.json",
     "shelly-em.json",
     "anenji-inverter-rs232.json"
   ]

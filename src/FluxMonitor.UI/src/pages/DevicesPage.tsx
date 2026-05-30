@@ -26,6 +26,7 @@ type DeviceConfigurationWire = {
   definitionVersion?: string | null;
   transportPortName?: string | null;
   bleSettingsPin?: string | null;
+  protocolUserId?: string | null;
   httpUsername?: string | null;
   httpPassword?: string | null;
   address: number;
@@ -556,6 +557,7 @@ function mergeDeviceConfigurations(
       definitionVersion: device.definitionVersion ?? null,
       transportPortName: device.transportPortName ?? '',
       bleSettingsPin: device.bleSettingsPin ?? '',
+      protocolUserId: device.protocolUserId ?? '',
       httpUsername: device.httpUsername ?? '',
       httpPassword: device.httpPassword ?? '',
       address: device.address,
@@ -582,6 +584,7 @@ function serializeDevice(device: DeviceConfiguration): DeviceConfigurationWire {
     definitionVersion: device.definitionVersion ?? null,
     transportPortName: device.transportPortName?.trim() ? device.transportPortName.trim() : null,
     bleSettingsPin: device.bleSettingsPin?.trim() ? device.bleSettingsPin.trim() : null,
+    protocolUserId: device.protocolUserId?.trim() ? device.protocolUserId.trim() : null,
     httpUsername: device.httpUsername?.trim() ? device.httpUsername.trim() : null,
     httpPassword: device.httpPassword?.trim() ? device.httpPassword : null,
     address: device.address,
@@ -682,6 +685,7 @@ const defaultDevice = (
   definitionVersion: definitionSnapshot.version,
   transportPortName: '',
   bleSettingsPin: '',
+  protocolUserId: '',
   httpUsername: definitionSnapshot.connection.protocol.settings?.httpDefaultUsername ?? '',
   httpPassword: '',
   address: index,
@@ -900,6 +904,23 @@ function renderConfiguredDeviceSettingField(
               °F
             </button>
           </div>
+        </label>
+      );
+    case 'protocolUserId':
+      return (
+        <label key={field} className='space-y-2 text-sm text-foreground'>
+          <div className='flex items-center justify-between gap-2'>
+            <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Protocol user ID</span>
+            {renderFieldSaveState(device.clientKey, 'protocolUserId')}
+          </div>
+          <Input
+            type='text'
+            inputMode='numeric'
+            value={device.protocolUserId ?? ''}
+            disabled={deviceEnabled}
+            {...deferInputSaveUntilFinished(index, 'protocolUserId')}
+            onChange={(event) => updateDevice(index, 'protocolUserId', event.target.value)}
+          />
         </label>
       );
     default:

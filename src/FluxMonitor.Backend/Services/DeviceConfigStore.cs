@@ -185,6 +185,7 @@ public sealed class DeviceConfigStore(
                 "HasDefinitionOverride" BOOLEAN NOT NULL DEFAULT FALSE,
                 "TransportPortName" TEXT NULL,
                 "BleSettingsPin" TEXT NULL,
+                "ProtocolUserId" TEXT NULL,
                 "HttpUsername" TEXT NULL,
                 "HttpPassword" TEXT NULL,
                 "Address" SMALLINT NOT NULL,
@@ -220,6 +221,10 @@ public sealed class DeviceConfigStore(
             """);
         await connection.ExecuteAsync("""
             ALTER TABLE "Devices"
+            ADD COLUMN IF NOT EXISTS "ProtocolUserId" TEXT NULL;
+            """);
+        await connection.ExecuteAsync("""
+            ALTER TABLE "Devices"
             ADD COLUMN IF NOT EXISTS "HttpUsername" TEXT NULL;
             """);
         await connection.ExecuteAsync("""
@@ -243,6 +248,7 @@ public sealed class DeviceConfigStore(
                 "HasDefinitionOverride",
                 "TransportPortName",
                 "BleSettingsPin",
+                "ProtocolUserId",
                 "HttpUsername",
                 "HttpPassword",
                 "Address",
@@ -273,6 +279,7 @@ public sealed class DeviceConfigStore(
                 DefinitionId = row.DefinitionId,
                 TransportPortName = row.TransportPortName,
                 BleSettingsPin = row.BleSettingsPin,
+                ProtocolUserId = row.ProtocolUserId,
                 HttpUsername = row.HttpUsername,
                 HttpPassword = row.HttpPassword,
                 Address = checked((byte)row.Address),
@@ -330,6 +337,7 @@ public sealed class DeviceConfigStore(
                 DefinitionId = device.DefinitionId,
                 TransportPortName = device.TransportPortName,
                 BleSettingsPin = device.BleSettingsPin,
+                ProtocolUserId = device.ProtocolUserId,
                 HttpUsername = device.HttpUsername,
                 HttpPassword = device.HttpPassword,
                 Address = device.Address,
@@ -407,6 +415,7 @@ public sealed class DeviceConfigStore(
                 DefinitionId = definition.Device.Id,
                 TransportPortName = string.IsNullOrWhiteSpace(device.TransportPortName) ? null : device.TransportPortName.Trim(),
                 BleSettingsPin = string.IsNullOrWhiteSpace(device.BleSettingsPin) ? null : device.BleSettingsPin.Trim(),
+                ProtocolUserId = string.IsNullOrWhiteSpace(device.ProtocolUserId) ? null : device.ProtocolUserId.Trim(),
                 HttpUsername = string.IsNullOrWhiteSpace(device.HttpUsername) ? null : device.HttpUsername.Trim(),
                 HttpPassword = string.IsNullOrWhiteSpace(device.HttpPassword) ? null : device.HttpPassword,
                 Address = device.Address,
@@ -444,6 +453,7 @@ public sealed class DeviceConfigStore(
                 "HasDefinitionOverride",
                 "TransportPortName",
                 "BleSettingsPin",
+                "ProtocolUserId",
                 "HttpUsername",
                 "HttpPassword",
                 "Address",
@@ -467,6 +477,7 @@ public sealed class DeviceConfigStore(
                 @HasDefinitionOverride,
                 @TransportPortName,
                 @BleSettingsPin,
+                @ProtocolUserId,
                 @HttpUsername,
                 @HttpPassword,
                 @Address,
@@ -489,6 +500,7 @@ public sealed class DeviceConfigStore(
                 "HasDefinitionOverride" = EXCLUDED."HasDefinitionOverride",
                 "TransportPortName" = EXCLUDED."TransportPortName",
                 "BleSettingsPin" = EXCLUDED."BleSettingsPin",
+                "ProtocolUserId" = EXCLUDED."ProtocolUserId",
                 "HttpUsername" = EXCLUDED."HttpUsername",
                 "HttpPassword" = EXCLUDED."HttpPassword",
                 "Address" = EXCLUDED."Address",
@@ -519,6 +531,7 @@ public sealed class DeviceConfigStore(
                         device.HasDefinitionOverride,
                         device.TransportPortName,
                         device.BleSettingsPin,
+                        device.ProtocolUserId,
                         device.HttpUsername,
                         device.HttpPassword,
                         device.Address,
@@ -637,6 +650,7 @@ public sealed class DeviceConfigStore(
         public bool HasDefinitionOverride { get; set; }
         public string? TransportPortName { get; set; }
         public string? BleSettingsPin { get; set; }
+        public string? ProtocolUserId { get; set; }
         public string? HttpUsername { get; set; }
         public string? HttpPassword { get; set; }
         public short Address { get; set; }

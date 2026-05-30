@@ -85,6 +85,11 @@ public sealed class DeviceConfiguration
     public string? BleSettingsPin { get; init; }
 
     /// <summary>
+    /// Optional protocol-level user/account identifier required by some authenticated device protocols.
+    /// </summary>
+    public string? ProtocolUserId { get; init; }
+
+    /// <summary>
     /// Optional username for HTTP basic-auth devices.
     /// </summary>
     public string? HttpUsername { get; init; }

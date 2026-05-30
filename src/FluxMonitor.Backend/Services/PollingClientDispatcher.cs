@@ -9,6 +9,7 @@ namespace FluxMonitor.Backend.Services;
 public sealed class PollingClientDispatcher(
     GenericSerialPollingClient serialClient,
     GenericBlePollingClient bleClient,
+    EcoFlowBlePollingClient ecoFlowBleClient,
     GenericBleAdvertisementPollingClient bleAdvertisementClient,
     GenericHttpPollingClient httpClient,
     DeviceDefinitionLoader definitionLoader) : IDevicePollingClient
@@ -42,6 +43,8 @@ public sealed class PollingClientDispatcher(
 
         return string.Equals(definition.Connection.Protocol.Type, "ble-advertisement", StringComparison.OrdinalIgnoreCase)
             ? GenericBleAdvertisementPollingClient.IsDefinitionSupported(definition)
+            : string.Equals(definition.Connection.Protocol.Type, EcoFlowBlePollingClient.ProtocolType, StringComparison.OrdinalIgnoreCase)
+                ? EcoFlowBlePollingClient.IsDefinitionSupported(definition)
             : GenericBlePollingClient.IsDefinitionSupported(definition);
     }
 
@@ -55,6 +58,8 @@ public sealed class PollingClientDispatcher(
         {
             return string.Equals(definition.Connection.Protocol.Type, "ble-advertisement", StringComparison.OrdinalIgnoreCase)
                 ? GenericBleAdvertisementPollingClient.GetUnsupportedDefinitionMessage(definition)
+                : string.Equals(definition.Connection.Protocol.Type, EcoFlowBlePollingClient.ProtocolType, StringComparison.OrdinalIgnoreCase)
+                    ? EcoFlowBlePollingClient.GetUnsupportedDefinitionMessage(definition)
                 : GenericBlePollingClient.GetUnsupportedDefinitionMessage(definition);
         }
 
@@ -96,6 +101,9 @@ public sealed class PollingClientDispatcher(
             "ble" when string.Equals(definition.Connection.Protocol.Type, "ble-advertisement", StringComparison.OrdinalIgnoreCase) &&
                        GenericBleAdvertisementPollingClient.IsDefinitionSupported(definition)
                 => bleAdvertisementClient.PollAsync(device, definition, cancellationToken),
+            "ble" when string.Equals(definition.Connection.Protocol.Type, EcoFlowBlePollingClient.ProtocolType, StringComparison.OrdinalIgnoreCase) &&
+                       EcoFlowBlePollingClient.IsDefinitionSupported(definition)
+                => ecoFlowBleClient.PollAsync(device, definition, cancellationToken),
             "ble" when GenericBlePollingClient.IsDefinitionSupported(definition)
                 => bleClient.PollAsync(device, definition, cancellationToken),
             "http" when GenericHttpPollingClient.IsDefinitionSupported(definition)

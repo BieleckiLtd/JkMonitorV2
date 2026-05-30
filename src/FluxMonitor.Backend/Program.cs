@@ -80,6 +80,7 @@ builder.Services.AddSingleton<FluxMonitor.Backend.Services.ExpressionEvaluator>(
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.DefinitionDrivenTelemetryBuilder>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.GenericSerialPollingClient>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.GenericBlePollingClient>();
+builder.Services.AddSingleton<FluxMonitor.Backend.Services.EcoFlowBlePollingClient>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.GenericBleAdvertisementPollingClient>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.GenericHttpPollingClient>();
 builder.Services.AddSingleton<FluxMonitor.Backend.Services.IPassiveBleAdvertisementMonitor>(sp => sp.GetRequiredService<FluxMonitor.Backend.Services.GenericBleAdvertisementPollingClient>());

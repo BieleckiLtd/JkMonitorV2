@@ -51,6 +51,7 @@ public static class DevicePollingIntervalResolver
             DefinitionId = device.DefinitionId,
             TransportPortName = device.TransportPortName,
             BleSettingsPin = device.BleSettingsPin,
+            ProtocolUserId = device.ProtocolUserId,
             HttpUsername = device.HttpUsername,
             HttpPassword = device.HttpPassword,
             Address = device.Address,

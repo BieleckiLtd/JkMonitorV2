@@ -21,6 +21,8 @@ public sealed record class DeviceConfigurationApiModel
 
     public string? BleSettingsPin { get; init; }
 
+    public string? ProtocolUserId { get; init; }
+
     public string? HttpUsername { get; init; }
 
     public string? HttpPassword { get; init; }

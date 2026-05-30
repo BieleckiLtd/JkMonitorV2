@@ -365,6 +365,7 @@ public sealed class DeviceOrchestrator(
             || a.IsMaster != b.IsMaster
             || a.TemperatureUnit != b.TemperatureUnit
             || a.BleSettingsPin != b.BleSettingsPin
+            || a.ProtocolUserId != b.ProtocolUserId
             || a.HttpUsername != b.HttpUsername
             || a.HttpPassword != b.HttpPassword;
     }
