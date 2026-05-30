@@ -136,7 +136,15 @@
   },
   "ui": {
     "pages": {
-      "configuration": { "deviceSettings": { "inlineFields": ["protocolUserId"] } },
+      "configuration": {
+        "deviceSettings": {
+          "inlineFields": ["protocolUserId"],
+          "hiddenControls": ["definitionId", "transportPortName", "bleSettingsPin", "definitionOverrides"],
+          "fieldLabels": {
+            "protocolUserId": "EcoFlow user ID"
+          }
+        }
+      },
       "monitor": {
         "card": {
           "statusGlyphs": [

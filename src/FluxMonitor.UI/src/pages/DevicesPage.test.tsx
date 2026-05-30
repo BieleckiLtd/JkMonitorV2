@@ -131,15 +131,6 @@ describe('DevicesPage', () => {
         },
       },
       entities: [],
-      ui: {
-        pages: {
-          configuration: {
-            deviceSettings: {
-              inlineFields: ['isMaster'],
-            },
-          },
-        },
-      },
     },
     'shelly-em': {
       version: '1.0.0',
@@ -181,6 +172,62 @@ describe('DevicesPage', () => {
         },
       },
       entities: [],
+    },
+    'ecoflow-stream-microinverter-ble': {
+      version: '1.0.0',
+      device: {
+        id: 'ecoflow-stream-microinverter-ble',
+        name: 'EcoFlow STREAM Microinverter (BLE)',
+        manufacturer: 'EcoFlow',
+        model: 'STREAM Microinverter',
+        category: 'solar-inverter',
+      },
+      connection: {
+        transport: {
+          type: 'ble',
+          defaults: {
+            serviceUuid: '00000001-0000-1000-8000-00805f9b34fb',
+            notifyCharacteristicUuid: '00000003-0000-1000-8000-00805f9b34fb',
+            writeCharacteristicUuid: '00000002-0000-1000-8000-00805f9b34fb',
+            connectionTimeoutMs: 20000,
+            reconnectDelayMs: 5000,
+          },
+        },
+        protocol: {
+          type: 'ecoflow-ble',
+          settings: {
+            byteOrder: 'little-endian',
+          },
+        },
+      },
+      dataSources: [
+        {
+          id: 'display',
+          name: 'Display properties',
+          pollGroup: 'fast',
+          readMode: 'notify-stream',
+        },
+      ],
+      pollGroups: {
+        fast: {
+          intervalMs: 1000,
+          description: 'Authenticated BLE display stream',
+        },
+      },
+      entities: [],
+      ui: {
+        pages: {
+          configuration: {
+            deviceSettings: {
+              inlineFields: ['protocolUserId'],
+              hiddenControls: ['definitionId', 'transportPortName', 'bleSettingsPin', 'definitionOverrides'],
+              fieldLabels: {
+                protocolUserId: 'EcoFlow user ID',
+              },
+            },
+          },
+        },
+      },
     },
     'pylon-lv-rs485': {
       version: '1.0.0',
@@ -290,6 +337,16 @@ describe('DevicesPage', () => {
               model: 'Shelly EM (Gen1)',
               category: 'power-monitor',
               transportType: 'http',
+              isTransportSupported: true,
+            },
+            {
+              id: 'ecoflow-stream-microinverter-ble',
+              name: 'EcoFlow STREAM Microinverter (BLE)',
+              manufacturer: 'EcoFlow',
+              model: 'STREAM Microinverter',
+              category: 'solar-inverter',
+              transportType: 'ble',
+              protocolType: 'ecoflow-ble',
               isTransportSupported: true,
             },
             {
@@ -597,6 +654,46 @@ describe('DevicesPage', () => {
     expect(screen.queryByText(/protocol defaults/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/polling defaults/i)).not.toBeInTheDocument();
     expect(screen.getAllByText(/transport defaults/i).length).toBeGreaterThan(0);
+  });
+
+  it('shows EcoFlow user ID and hides generic BLE editor controls for EcoFlow BLE devices', async () => {
+    initialDevicesResponse = [
+      {
+        deviceId: 'ecoflow-stream-bk082450',
+        displayName: 'EcoFlow Stream BK082450',
+        definitionId: 'ecoflow-stream-microinverter-ble',
+        definitionVersion: '1.0.0',
+        transportPortName: 'DC:06:75:AD:8B:65',
+        protocolUserId: '2057522524693626881',
+        bleSettingsPin: null,
+        address: 1,
+        isMaster: false,
+        pollIntervalMilliseconds: 1000,
+        enabled: false,
+        cellVoltageSmoothingFactor: 0,
+        cellVoltageSmoothingBreakoutMillivolts: 0,
+        displayPrecision: {
+          voltage: 2,
+          cellVoltage: 3,
+          current: 1,
+          power: 0,
+          temperature: 1,
+          soc: 0,
+          deltaVoltage: 3,
+        },
+        hasDefinitionOverride: false,
+        definition: definitionDetailsById['ecoflow-stream-microinverter-ble'],
+      },
+    ];
+
+    renderPage();
+
+    expect(await screen.findByRole('textbox', { name: /ecoflow user id/i })).toHaveValue('2057522524693626881');
+    expect(screen.queryByRole('combobox', { name: /connection/i })).not.toBeInTheDocument();
+    expect(screen.queryByPlaceholderText(/aa:bb:cc:dd:ee:ff or device alias/i)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /scan nearby/i })).not.toBeInTheDocument();
+    expect(screen.queryByText(/ble settings pin/i)).not.toBeInTheDocument();
+    expect(screen.queryByText(/advanced compatibility overrides/i)).not.toBeInTheDocument();
   });
 
   it('hides advanced compatibility overrides for HTTP devices without a saved override', async () => {

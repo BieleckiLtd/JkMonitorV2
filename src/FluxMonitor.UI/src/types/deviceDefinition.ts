@@ -233,6 +233,8 @@ export type UiPageDefinition = {
 
 export type UiDeviceSettingsDefinition = {
   inlineFields?: string[];
+  hiddenControls?: string[];
+  fieldLabels?: Record<string, string>;
   runtimeTuning?: UiDeviceSettingsGroupDefinition;
 };
 

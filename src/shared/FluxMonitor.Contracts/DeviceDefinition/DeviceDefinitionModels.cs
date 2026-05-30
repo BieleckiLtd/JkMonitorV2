@@ -566,6 +566,10 @@ public sealed class UiDeviceSettingsDefinition
 {
     public IReadOnlyList<string>? InlineFields { get; init; }
 
+    public IReadOnlyList<string>? HiddenControls { get; init; }
+
+    public IReadOnlyDictionary<string, string>? FieldLabels { get; init; }
+
     public UiDeviceSettingsGroupDefinition? RuntimeTuning { get; init; }
 }
 

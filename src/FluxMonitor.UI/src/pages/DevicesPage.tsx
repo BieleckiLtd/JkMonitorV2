@@ -772,6 +772,31 @@ function getConfiguredRuntimeTuningFields(deviceSettings: UiDeviceSettingsDefini
   return deviceSettings?.runtimeTuning?.fields ?? [];
 }
 
+function isConfiguredDeviceControlHidden(deviceSettings: UiDeviceSettingsDefinition | null | undefined, controlKey: string) {
+  return (deviceSettings?.hiddenControls ?? []).some((entry) => entry.trim().toLowerCase() === controlKey.toLowerCase());
+}
+
+function getConfiguredDeviceFieldLabel(
+  deviceSettings: UiDeviceSettingsDefinition | null | undefined,
+  fieldKey: string,
+  fallbackLabel: string,
+) {
+  if (!deviceSettings?.fieldLabels) {
+    return fallbackLabel;
+  }
+
+  const exactMatch = deviceSettings.fieldLabels[fieldKey];
+  if (exactMatch?.trim()) {
+    return exactMatch.trim();
+  }
+
+  const normalizedFieldKey = fieldKey.toLowerCase();
+  const matchingEntry = Object.entries(deviceSettings.fieldLabels)
+    .find(([entryKey, entryValue]) => entryKey.toLowerCase() === normalizedFieldKey && entryValue.trim().length > 0);
+
+  return matchingEntry?.[1].trim() ?? fallbackLabel;
+}
+
 function renderConfiguredDeviceSettingField(
   field: string,
   device: DeviceConfiguration,
@@ -907,10 +932,13 @@ function renderConfiguredDeviceSettingField(
         </label>
       );
     case 'protocolUserId':
+      const configuredDeviceSettings = getConfiguredDeviceSettings(device.definition);
+      const protocolUserIdLabel = getConfiguredDeviceFieldLabel(configuredDeviceSettings, 'protocolUserId', 'Protocol user ID');
+
       return (
         <label key={field} className='space-y-2 text-sm text-foreground'>
           <div className='flex items-center justify-between gap-2'>
-            <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Protocol user ID</span>
+            <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>{protocolUserIdLabel}</span>
             {renderFieldSaveState(device.clientKey, 'protocolUserId')}
           </div>
           <Input
@@ -2035,12 +2063,13 @@ export function DevicesPage({
             const connectionChoices = definitionFamily?.definitions ?? (definitionSummary ? [definitionSummary] : []);
             const transportType = getTransportType(device, availableDefinitions);
             const protocolType = device.definition?.connection.protocol.type ?? definitionSummary?.protocolType ?? null;
-            const isPassiveBroadcast = protocolType === 'ble-advertisement';
+            const normalizedProtocolType = protocolType?.toLowerCase() ?? null;
+            const isPassiveBroadcast = normalizedProtocolType === 'ble-advertisement';
             const isNotifyStreamDevice = isNotifyStreamDefinition(device.definition);
             const isHttpDevice = transportType === 'http';
             const configuredDeviceSettings = getConfiguredDeviceSettings(device.definition);
-            const runtimeTuningFields = !isNotifyStreamDevice ? getConfiguredRuntimeTuningFields(configuredDeviceSettings) : [];
-            const inlineDeviceFields = !isNotifyStreamDevice ? (configuredDeviceSettings?.inlineFields ?? []) : [];
+            const runtimeTuningFields = getConfiguredRuntimeTuningFields(configuredDeviceSettings);
+            const inlineDeviceFields = configuredDeviceSettings?.inlineFields ?? [];
             const showsRuntimeTuning = runtimeTuningFields.length > 0;
             const showPollingFields = !isPassiveBroadcast && !isNotifyStreamDevice;
             const isTransportSupported = definitionSummary?.isTransportSupported ?? true;
@@ -2059,6 +2088,10 @@ export function DevicesPage({
               .filter((value): value is string => Boolean(value))
               .join(' · ');
             const httpDefaultUsername = device.definition?.connection.protocol.settings?.httpDefaultUsername?.trim() ?? '';
+            const connectionSelectorHidden = isConfiguredDeviceControlHidden(configuredDeviceSettings, 'definitionId');
+            const transportTargetHidden = isConfiguredDeviceControlHidden(configuredDeviceSettings, 'transportPortName');
+            const bleSettingsPinHidden = isConfiguredDeviceControlHidden(configuredDeviceSettings, 'bleSettingsPin');
+            const definitionOverridesHidden = isConfiguredDeviceControlHidden(configuredDeviceSettings, 'definitionOverrides');
             const definitionSections = [
               {
                 key: 'transport-defaults',
@@ -2086,7 +2119,8 @@ export function DevicesPage({
                 value: device.definition?.pollGroups,
               }]),
             ].filter((section): section is { key: string; title: string; description: string; path: string[]; value: Record<string, unknown> } => isObjectRecord(section.value));
-            const showDefinitionOverrides = shouldShowAdvancedDefinitionOverrides(transportType, device.hasDefinitionOverride, definitionSections.length);
+            const showDefinitionOverrides = !definitionOverridesHidden
+              && shouldShowAdvancedDefinitionOverrides(transportType, device.hasDefinitionOverride, definitionSections.length);
 
             return (
               <section key={device.clientKey} className='rounded-2xl border border-border bg-card/85 p-5 shadow-sm'>
@@ -2161,8 +2195,10 @@ export function DevicesPage({
                 {!isTransportSupported ? <div className='mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300'>{definitionSummary?.unsupportedTransportMessage ?? 'This device transport is not supported in the current build.'}</div> : null}
                 {isTransportSupported && requiresTransport && !hasTransportTarget ? (
                   <div className='mb-4 rounded-lg border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-700 dark:text-amber-300'>
-                    {transportType === 'ble'
-                      ? 'Scan and choose a nearby BLE device, or enter the MAC address or alias before starting this device.'
+                    {transportTargetHidden
+                      ? 'This device definition hides the transport target editor. Re-add the device if the saved target is missing.'
+                      : transportType === 'ble'
+                        ? 'Scan and choose a nearby BLE device, or enter the MAC address or alias before starting this device.'
                       : transportType === 'http'
                         ? 'Enter the device host or base URL before starting this device.'
                         : 'Select the serial port before starting this device.'}
@@ -2210,22 +2246,24 @@ export function DevicesPage({
                     />
                   </label>
 
-                  <label className='space-y-2 text-sm text-foreground'>
-                    <div className='flex items-center justify-between gap-2'>
-                      <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Connection</span>
-                      {renderFieldSaveState(device.clientKey, 'definitionId')}
-                    </div>
-                    <select
-                      className='flex h-7 w-full rounded-lg border border-input bg-background px-2 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
-                      value={device.definitionId}
-                      disabled={device.enabled || connectionChoices.length <= 1}
-                      onChange={(event) => { void updateDeviceConnection(index, event.target.value); }}
-                    >
-                      {connectionChoices.map((entry) => (
-                        <option key={entry.id} value={entry.id}>{getConnectionLabel(entry.transportType)}</option>
-                      ))}
-                    </select>
-                  </label>
+                  {!connectionSelectorHidden ? (
+                    <label className='space-y-2 text-sm text-foreground'>
+                      <div className='flex items-center justify-between gap-2'>
+                        <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>Connection</span>
+                        {renderFieldSaveState(device.clientKey, 'definitionId')}
+                      </div>
+                      <select
+                        className='flex h-7 w-full rounded-lg border border-input bg-background px-2 py-1 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2'
+                        value={device.definitionId}
+                        disabled={device.enabled || connectionChoices.length <= 1}
+                        onChange={(event) => { void updateDeviceConnection(index, event.target.value); }}
+                      >
+                        {connectionChoices.map((entry) => (
+                          <option key={entry.id} value={entry.id}>{getConnectionLabel(entry.transportType)}</option>
+                        ))}
+                      </select>
+                    </label>
+                  ) : null}
 
                   {showPollingFields ? (
                     <label className='space-y-2 text-sm text-foreground'>
@@ -2269,7 +2307,7 @@ export function DevicesPage({
                     </div>
                   ) : null}
 
-                  {transportType === 'ble' ? (
+                  {transportType === 'ble' && !transportTargetHidden ? (
                     <>
                       <div className='space-y-2 text-sm text-foreground md:col-span-2 xl:col-span-3'>
                         <div className='flex items-center justify-between gap-2'>
@@ -2388,7 +2426,7 @@ export function DevicesPage({
                     deferInputSaveUntilFinished,
                   ))}
 
-                  {transportType === 'ble' && !isPassiveBroadcast ? (
+                  {transportType === 'ble' && !isPassiveBroadcast && !bleSettingsPinHidden ? (
                     <label className='space-y-2 text-sm text-foreground'>
                       <div className='flex items-center justify-between gap-2'>
                         <span className='block text-xs font-medium uppercase tracking-[0.18em] text-muted-foreground'>BLE settings PIN</span>
