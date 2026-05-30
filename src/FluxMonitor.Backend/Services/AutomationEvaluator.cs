@@ -15,6 +15,7 @@ public sealed class AutomationEvaluator(
     DeviceDefinitionLoader definitionLoader,
     GenericSerialPollingClient genericSerialPollingClient,
     GenericBlePollingClient genericBlePollingClient,
+    EcoFlowBlePollingClient ecoFlowBlePollingClient,
     PollTrigger pollTrigger,
     ILogger<AutomationEvaluator> logger)
 {
@@ -278,7 +279,9 @@ public sealed class AutomationEvaluator(
         try
         {
             var result = string.Equals(definition.Connection.Transport.Type, "ble", StringComparison.OrdinalIgnoreCase)
-                ? await genericBlePollingClient.WriteEntityAsync(device, definition, action.TargetParameterKey, action.RawValue, cancellationToken)
+                ? string.Equals(definition.Connection.Protocol.Type, EcoFlowBlePollingClient.ProtocolType, StringComparison.OrdinalIgnoreCase)
+                    ? await ecoFlowBlePollingClient.WriteEntityAsync(device, definition, action.TargetParameterKey, action.RawValue, cancellationToken)
+                    : await genericBlePollingClient.WriteEntityAsync(device, definition, action.TargetParameterKey, action.RawValue, cancellationToken)
                 : await genericSerialPollingClient.WriteEntityAsync(device, definition, action.TargetParameterKey, action.RawValue, cancellationToken);
 
             pollTrigger.Signal();

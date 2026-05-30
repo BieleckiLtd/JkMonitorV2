@@ -19,6 +19,7 @@ public sealed class DevicesController(
     DeviceConfigStore deviceConfigStore,
     GenericSerialPollingClient genericModbusPollingClient,
     GenericBlePollingClient genericBlePollingClient,
+    EcoFlowBlePollingClient ecoFlowBlePollingClient,
     GenericBleAdvertisementPollingClient genericBleAdvertisementPollingClient,
     PollingClientDispatcher pollingClientDispatcher,
     DeviceDefinitionLoader definitionLoader,
@@ -378,8 +379,11 @@ public sealed class DevicesController(
                 return BadRequest(new { message = blockedWriteReason });
 
             var result = string.Equals(definition.Connection.Transport.Type, "ble", StringComparison.OrdinalIgnoreCase)
-                ? await genericBlePollingClient.WriteEntityAsync(
-                    device, definition, parameterKey, request.RawValue, cancellationToken)
+                ? string.Equals(definition.Connection.Protocol.Type, EcoFlowBlePollingClient.ProtocolType, StringComparison.OrdinalIgnoreCase)
+                    ? await ecoFlowBlePollingClient.WriteEntityAsync(
+                        device, definition, parameterKey, request.RawValue, cancellationToken)
+                    : await genericBlePollingClient.WriteEntityAsync(
+                        device, definition, parameterKey, request.RawValue, cancellationToken)
                 : await genericModbusPollingClient.WriteEntityAsync(
                     device, definition, parameterKey, request.RawValue, cancellationToken);
 
@@ -450,12 +454,19 @@ public sealed class DevicesController(
                 var bleResults = new List<EntityWriteResult>(request.Parameters.Count);
                 foreach (var parameter in request.Parameters)
                 {
-                    var result = await genericBlePollingClient.WriteEntityAsync(
-                        device,
-                        definition,
-                        parameter.ParameterKey,
-                        parameter.RawValue,
-                        cancellationToken);
+                    var result = string.Equals(definition.Connection.Protocol.Type, EcoFlowBlePollingClient.ProtocolType, StringComparison.OrdinalIgnoreCase)
+                        ? await ecoFlowBlePollingClient.WriteEntityAsync(
+                            device,
+                            definition,
+                            parameter.ParameterKey,
+                            parameter.RawValue,
+                            cancellationToken)
+                        : await genericBlePollingClient.WriteEntityAsync(
+                            device,
+                            definition,
+                            parameter.ParameterKey,
+                            parameter.RawValue,
+                            cancellationToken);
                     bleResults.Add(new EntityWriteResult(
                         parameter.ParameterKey,
                         result.Success,

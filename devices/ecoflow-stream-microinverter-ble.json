@@ -70,9 +70,9 @@
       ]
     },
     { "id": "wifi_rssi_dbm", "type": "sensor", "name": "Signal Strength", "category": "Diagnostics", "source": { "bank": "display", "byteOffset": 30, "dataType": "int16", "unit": "dBm" }, "display": { "precision": 0 } },
-    { "id": "feed_grid_mode_power_limit_w", "type": "sensor", "name": "Feed Grid Mode Power Limit", "category": "Limits", "source": { "bank": "display", "byteOffset": 32, "dataType": "uint16", "unit": "W" }, "display": { "precision": 0 } },
+    { "id": "feed_grid_mode_power_limit_w", "type": "sensor", "name": "Feed Grid Mode Power Limit", "category": "Limits", "source": { "bank": "display", "byteOffset": 32, "dataType": "uint16", "unit": "W" }, "display": { "precision": 0 }, "writable": true },
     { "id": "feed_grid_mode_power_max_w", "type": "sensor", "name": "Feed Grid Mode Power Max", "category": "Limits", "source": { "bank": "display", "byteOffset": 34, "dataType": "uint16", "unit": "W" }, "display": { "precision": 0 } },
-    { "id": "inverter_target_power_w", "type": "sensor", "name": "Inverter Target Power", "category": "Limits", "source": { "bank": "display", "byteOffset": 36, "dataType": "int32", "scale": 0.1, "unit": "W" }, "display": { "precision": 0 } },
+    { "id": "inverter_target_power_w", "type": "sensor", "name": "Inverter Target Power", "category": "Limits", "source": { "bank": "display", "byteOffset": 36, "dataType": "int32", "scale": 0.1, "unit": "W" }, "display": { "precision": 0 }, "writable": true },
     { "id": "utc_timezone", "type": "sensor", "name": "UTC Timezone", "category": "Device", "source": { "bank": "display", "byteOffset": 40, "dataType": "int16" }, "display": { "precision": 0 } },
     { "id": "utc_set_mode", "type": "binary_sensor", "name": "UTC Set Mode", "category": "Device", "source": { "bank": "display", "byteOffset": 42, "dataType": "uint8", "trueValue": 1 } },
     { "id": "factory_mode_enabled", "type": "binary_sensor", "name": "Factory Mode", "category": "Device", "source": { "bank": "display", "byteOffset": 43, "dataType": "uint8", "trueValue": 1 } },
@@ -180,35 +180,23 @@
           { "title": "Generation", "type": "line-chart", "traces": [
             { "entity": "total_generation_w", "label": "Total", "color": "amber" },
             { "entity": "pv1_power_w", "label": "Solar 1", "color": "emerald" },
-            { "entity": "pv2_power_w", "label": "Solar 2", "color": "blue" },
-            { "entity": "grid_power_w", "label": "Grid", "color": "teal" }
+            { "entity": "pv2_power_w", "label": "Solar 2", "color": "blue" }
           ], "yAxis": { "unit": "W", "label": "Power" } },
-          { "title": "Solar Inputs", "type": "line-chart", "traces": [
-            { "entity": "pv1_voltage_v", "label": "Solar 1 Voltage", "color": "emerald", "yAxis": "voltage" },
-            { "entity": "pv2_voltage_v", "label": "Solar 2 Voltage", "color": "blue", "yAxis": "voltage" },
-            { "entity": "pv1_current_a", "label": "Solar 1 Current", "color": "amber", "yAxis": "current" },
-            { "entity": "pv2_current_a", "label": "Solar 2 Current", "color": "teal", "yAxis": "current" }
-          ], "yAxes": [
-            { "id": "voltage", "unit": "V", "label": "Voltage", "orientation": "left" },
-            { "id": "current", "unit": "A", "label": "Current", "orientation": "right" }
-          ] },
           { "title": "Grid", "type": "line-chart", "traces": [
             { "entity": "grid_voltage_v", "label": "Voltage", "color": "orange", "yAxis": "voltage" },
             { "entity": "grid_current_a", "label": "Current", "color": "rose", "yAxis": "current" },
-            { "entity": "grid_frequency_hz", "label": "Frequency", "color": "blue", "yAxis": "frequency" }
+            { "entity": "grid_power_w", "label": "Power", "color": "teal", "yAxis": "power" }
           ], "yAxes": [
             { "id": "voltage", "unit": "V", "label": "Voltage", "orientation": "left" },
             { "id": "current", "unit": "A", "label": "Current", "orientation": "right" },
-            { "id": "frequency", "unit": "Hz", "label": "Frequency", "orientation": "right" }
+            { "id": "power", "unit": "W", "label": "Power", "orientation": "right" }
           ] },
-          { "title": "Limits & Signal", "type": "line-chart", "traces": [
+          { "title": "Limits", "type": "line-chart", "traces": [
             { "entity": "feed_grid_mode_power_limit_w", "label": "Feed Limit", "color": "amber", "yAxis": "power" },
             { "entity": "feed_grid_mode_power_max_w", "label": "Feed Max", "color": "blue", "yAxis": "power" },
-            { "entity": "inverter_target_power_w", "label": "Target", "color": "emerald", "yAxis": "power" },
-            { "entity": "wifi_rssi_dbm", "label": "RSSI", "color": "teal", "yAxis": "signal" }
+            { "entity": "inverter_target_power_w", "label": "Target", "color": "emerald", "yAxis": "power" }
           ], "yAxes": [
-            { "id": "power", "unit": "W", "label": "Power", "orientation": "left" },
-            { "id": "signal", "unit": "dBm", "label": "Signal", "orientation": "right" }
+            { "id": "power", "unit": "W", "label": "Power", "orientation": "left" }
           ] }
         ]
       },
@@ -216,7 +204,7 @@
         "card": {
           "primaryMetric": "total_generation_w",
           "secondaryMetrics": ["pv1_power_w", "pv2_power_w", "grid_power_w"],
-          "statusEntities": ["grid_connection_status", "wifi_rssi_dbm", "error_list"]
+          "statusEntities": ["grid_connection_status", "error_list"]
         }
       }
     }

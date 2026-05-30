@@ -110,6 +110,87 @@ public sealed class EcoFlowBlePollingClient(
         }
     }
 
+    public async Task<WriteRegisterResult> WriteEntityAsync(
+        DeviceConfiguration device,
+        DeviceDefinition definition,
+        string entityId,
+        uint rawValue,
+        CancellationToken cancellationToken)
+    {
+        var unsupported = GetUnsupportedDefinitionMessage(definition);
+        if (unsupported is not null)
+            throw new NotSupportedException(
+                $"EcoFlow BLE definition '{definition.Device.Id}' is not supported for device '{device.DeviceId}': {unsupported}");
+
+        var entity = definition.Entities.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, entityId, StringComparison.OrdinalIgnoreCase) && candidate.Writable);
+        if (entity is null)
+            throw new ArgumentException($"Writable entity '{entityId}' not found in definition '{definition.Device.Id}'.");
+
+        if (!TryResolveWriteTarget(entity, out var writeTarget))
+        {
+            throw new NotSupportedException(
+                $"EcoFlow BLE writes are not implemented for entity '{entityId}' in definition '{definition.Device.Id}'.");
+        }
+
+        var session = GetSession(device.DeviceId);
+        await session.Lock.WaitAsync(cancellationToken);
+        try
+        {
+            await EnsureConnectedAndAuthenticatedAsync(session, device, definition, cancellationToken);
+
+            if (writeTarget.ConfigFieldNumber == 169 &&
+                TryGetEntityRawValue(definition, session.LastTelemetry, "feed_grid_mode_power_max_w", out var feedGridModePowerMaxRaw) &&
+                rawValue > feedGridModePowerMaxRaw)
+            {
+                return new WriteRegisterResult(
+                    false,
+                    rawValue,
+                    feedGridModePowerMaxRaw,
+                    $"Requested value {rawValue} exceeds the current feed-grid power max of {feedGridModePowerMaxRaw}.");
+            }
+
+            var payload = BuildConfigWritePayload(writeTarget, entity, rawValue);
+            await SendConfigWriteAsync(session, payload, cancellationToken);
+
+            var timeoutMs = Math.Max(definition.Connection.Transport.Defaults?.ConnectionTimeoutMs ?? 20000, 5000);
+            var refreshedTelemetry = await WaitForTelemetryAsync(
+                session,
+                timeoutMs,
+                cancellationToken,
+                allowFreshCache: false);
+
+            if (!GenericBlePollingClient.TryReadRawValue(
+                entity,
+                refreshedTelemetry,
+                definition.Connection.Protocol.Settings?.ByteOrder,
+                out var readBackValue))
+            {
+                return new WriteRegisterResult(
+                    false,
+                    rawValue,
+                    null,
+                    $"Unable to read back value for entity '{entityId}' after EcoFlow BLE write.");
+            }
+
+            var success = readBackValue == rawValue;
+            return new WriteRegisterResult(
+                success,
+                rawValue,
+                readBackValue,
+                success ? null : $"Read-back mismatch: expected {rawValue}, got {readBackValue}");
+        }
+        catch
+        {
+            await ResetSessionAsync(session);
+            throw;
+        }
+        finally
+        {
+            session.Lock.Release();
+        }
+    }
+
     private EcoFlowSession GetSession(string deviceId)
     {
         lock (_sessions)
@@ -260,11 +341,13 @@ public sealed class EcoFlowBlePollingClient(
     private async Task<byte[]> WaitForTelemetryAsync(
         EcoFlowSession session,
         int timeoutMs,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        bool allowFreshCache = true)
     {
         lock (session.SyncRoot)
         {
-            if (session.LastTelemetry is not null &&
+            if (allowFreshCache &&
+                session.LastTelemetry is not null &&
                 DateTimeOffset.UtcNow - session.LastTelemetryAt <= MinFreshTelemetryAge)
             {
                 return session.LastTelemetry;
@@ -294,6 +377,70 @@ public sealed class EcoFlowBlePollingClient(
         }
 
         return await tcs.Task;
+    }
+
+    private static bool TryResolveWriteTarget(EntityDefinition entity, out EcoFlowWriteTarget writeTarget)
+    {
+        writeTarget = entity.Id.ToLowerInvariant() switch
+        {
+            "feed_grid_mode_power_limit_w" => new EcoFlowWriteTarget(169, EcoFlowWriteValueType.UInt32),
+            "inverter_target_power_w" => new EcoFlowWriteTarget(220, EcoFlowWriteValueType.Float32),
+            _ => default,
+        };
+
+        return writeTarget != default;
+    }
+
+    private static byte[] BuildConfigWritePayload(EcoFlowWriteTarget writeTarget, EntityDefinition entity, uint rawValue)
+    {
+        var writer = new ProtobufWriter();
+        writer.WriteVarintField(6, checked((ulong)DateTimeOffset.UtcNow.ToUnixTimeSeconds()));
+
+        switch (writeTarget.ValueType)
+        {
+            case EcoFlowWriteValueType.UInt32:
+                writer.WriteVarintField(writeTarget.ConfigFieldNumber, rawValue);
+                break;
+
+            case EcoFlowWriteValueType.Float32:
+                writer.WriteFloatField(writeTarget.ConfigFieldNumber, (float)(rawValue * entity.Source.Scale));
+                break;
+
+            default:
+                throw new InvalidOperationException($"Unsupported EcoFlow write type '{writeTarget.ValueType}'.");
+        }
+
+        return writer.ToArray();
+    }
+
+    private async Task SendConfigWriteAsync(EcoFlowSession session, byte[] payload, CancellationToken cancellationToken)
+    {
+        await SendPacketAsync(
+            session,
+            EcoFlowWire.BuildPacket(0x20, 0x02, 0xFE, 0x11, payload),
+            cancellationToken);
+    }
+
+    private static bool TryGetEntityRawValue(
+        DeviceDefinition definition,
+        byte[]? telemetry,
+        string entityId,
+        out uint rawValue)
+    {
+        rawValue = 0;
+        if (telemetry is null)
+            return false;
+
+        var entity = definition.Entities.FirstOrDefault(candidate =>
+            string.Equals(candidate.Id, entityId, StringComparison.OrdinalIgnoreCase));
+        if (entity is null)
+            return false;
+
+        return GenericBlePollingClient.TryReadRawValue(
+            entity,
+            telemetry,
+            definition.Connection.Protocol.Settings?.ByteOrder,
+            out rawValue);
     }
 
     private async Task<byte[]> WaitForOuterPayloadAsync(EcoFlowSession session, CancellationToken cancellationToken)
@@ -882,6 +1029,14 @@ internal static class EcoFlowCrypto
 
 internal sealed record EcoFlowPacket(byte Src, byte Dst, byte CmdSet, byte CmdId, byte[] Payload, byte[] Seq);
 
+internal enum EcoFlowWriteValueType
+{
+    UInt32,
+    Float32,
+}
+
+internal readonly record struct EcoFlowWriteTarget(int ConfigFieldNumber, EcoFlowWriteValueType ValueType);
+
 internal static class EcoFlowWire
 {
     public const byte FrameTypeCommand = 0x00;
@@ -1314,5 +1469,40 @@ internal ref struct ProtobufReader(ReadOnlySpan<byte> data)
     {
         if (actual != expected)
             throw new InvalidOperationException($"Unexpected protobuf wire type {actual}; expected {expected}.");
+    }
+}
+
+internal sealed class ProtobufWriter
+{
+    private readonly List<byte> _buffer = [];
+
+    public void WriteVarintField(int fieldNumber, ulong value)
+    {
+        WriteTag(fieldNumber, 0);
+        WriteRawVarint(value);
+    }
+
+    public void WriteFloatField(int fieldNumber, float value)
+    {
+        WriteTag(fieldNumber, 5);
+        Span<byte> bytes = stackalloc byte[4];
+        BinaryPrimitives.WriteInt32LittleEndian(bytes, BitConverter.SingleToInt32Bits(value));
+        _buffer.AddRange(bytes.ToArray());
+    }
+
+    public byte[] ToArray() => [.. _buffer];
+
+    private void WriteTag(int fieldNumber, int wireType)
+        => WriteRawVarint((ulong)((fieldNumber << 3) | wireType));
+
+    private void WriteRawVarint(ulong value)
+    {
+        while (value >= 0x80)
+        {
+            _buffer.Add((byte)((value & 0x7F) | 0x80));
+            value >>= 7;
+        }
+
+        _buffer.Add((byte)value);
     }
 }

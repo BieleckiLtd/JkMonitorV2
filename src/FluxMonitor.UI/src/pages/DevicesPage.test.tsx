@@ -131,6 +131,30 @@ describe('DevicesPage', () => {
         },
       },
       entities: [],
+      ui: {
+        pages: {
+          configuration: {
+            deviceSettings: {
+              inlineFields: ['isMaster'],
+              runtimeTuning: {
+                title: 'Runtime tuning',
+                fields: [
+                  'cellVoltageSmoothingFactor',
+                  'cellVoltageSmoothingBreakoutMillivolts',
+                  'displayPrecision.voltage',
+                  'displayPrecision.cellVoltage',
+                  'displayPrecision.current',
+                  'displayPrecision.power',
+                  'displayPrecision.temperature',
+                  'temperatureUnit',
+                  'displayPrecision.soc',
+                  'displayPrecision.deltaVoltage',
+                ],
+              },
+            },
+          },
+        },
+      },
     },
     'shelly-em': {
       version: '1.0.0',
@@ -274,6 +298,72 @@ describe('DevicesPage', () => {
       },
       entities: [],
     },
+    'anenji-inverter-rs232': {
+      version: '1.0.0',
+      device: {
+        id: 'anenji-inverter-rs232',
+        name: 'Anenji / Easun SMG-II Inverter',
+        manufacturer: 'Anenji / Easun',
+        model: 'ANJ-HHS-11000W-48V / ISolar-SMG-II-11KW-48V',
+        category: 'inverter',
+      },
+      connection: {
+        transport: {
+          type: 'serial',
+          defaults: {
+            baudRate: 9600,
+            dataBits: 8,
+            parity: 'none',
+            stopBits: 1,
+            readTimeoutMs: 2000,
+            writeTimeoutMs: 1000,
+          },
+        },
+        protocol: {
+          type: 'modbus-rtu',
+          settings: {
+            defaultSlaveAddress: 1,
+            interFrameDelayMs: 100,
+            retries: 1,
+            byteOrder: 'big-endian',
+          },
+        },
+      },
+      dataSources: [
+        {
+          id: 'live_main',
+          name: 'Live - Status & Frequency',
+          pollGroup: 'fast',
+        },
+      ],
+      pollGroups: {
+        fast: {
+          intervalMs: 5000,
+          description: 'Live measurements',
+        },
+      },
+      entities: [],
+      ui: {
+        pages: {
+          configuration: {
+            deviceSettings: {
+              hiddenControls: ['definitionId'],
+              runtimeTuning: {
+                title: 'Display tuning',
+                fields: [
+                  'displayPrecision.voltage',
+                  'displayPrecision.current',
+                  'displayPrecision.power',
+                  'displayPrecision.temperature',
+                  'displayPrecision.soc',
+                  'temperatureUnit',
+                ],
+              },
+            },
+          },
+        },
+      },
+    },
   } as const;
 
   beforeEach(() => {
@@ -355,6 +445,15 @@ describe('DevicesPage', () => {
               manufacturer: 'Pylontech',
               model: 'US Series',
               category: 'energy-storage',
+              transportType: 'serial',
+              isTransportSupported: true,
+            },
+            {
+              id: 'anenji-inverter-rs232',
+              name: 'Anenji / Easun SMG-II Inverter',
+              manufacturer: 'Anenji / Easun',
+              model: 'ANJ-HHS-11000W-48V / ISolar-SMG-II-11KW-48V',
+              category: 'inverter',
               transportType: 'serial',
               isTransportSupported: true,
             },
@@ -613,7 +712,7 @@ describe('DevicesPage', () => {
     expect(screen.queryByRole('combobox', { name: /serial port/i })).not.toBeInTheDocument();
   });
 
-  it('hides polling and master controls for BLE notification-stream devices', async () => {
+  it('shows definition-declared settings but still hides polling fields for BLE notification-stream devices', async () => {
     initialDevicesResponse = [
       {
         deviceId: 'device-1',
@@ -647,13 +746,55 @@ describe('DevicesPage', () => {
     expect(await screen.findByText(/connection: bluetooth .* notification stream/i)).toBeInTheDocument();
     expect(screen.queryByText(/effective poll/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/effective poll interval/i)).not.toBeInTheDocument();
-    expect(screen.queryByText(/is master/i)).not.toBeInTheDocument();
+    expect(screen.getByText(/is master/i)).toBeInTheDocument();
+    expect(screen.getByText(/runtime tuning/i)).toBeInTheDocument();
 
     fireEvent.click(screen.getByText(/advanced compatibility overrides/i));
 
     expect(screen.queryByText(/protocol defaults/i)).not.toBeInTheDocument();
     expect(screen.queryByText(/polling defaults/i)).not.toBeInTheDocument();
     expect(screen.getAllByText(/transport defaults/i).length).toBeGreaterThan(0);
+  });
+
+  it('shows definition-declared display tuning for the Anenji inverter and hides the connection picker', async () => {
+    initialDevicesResponse = [
+      {
+        deviceId: 'anenji-main',
+        displayName: 'Anenji Inverter',
+        definitionId: 'anenji-inverter-rs232',
+        definitionVersion: '1.0.0',
+        transportPortName: 'COM7',
+        bleSettingsPin: null,
+        address: 1,
+        isMaster: false,
+        pollIntervalMilliseconds: 5000,
+        enabled: false,
+        cellVoltageSmoothingFactor: 0,
+        cellVoltageSmoothingBreakoutMillivolts: 0,
+        displayPrecision: {
+          voltage: 1,
+          cellVoltage: 3,
+          current: 1,
+          power: 0,
+          temperature: 1,
+          soc: 0,
+          deltaVoltage: 3,
+        },
+        hasDefinitionOverride: false,
+        definition: definitionDetailsById['anenji-inverter-rs232'],
+      },
+    ];
+
+    renderPage();
+
+    expect(await screen.findByText('Anenji Inverter')).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: /connection/i })).not.toBeInTheDocument();
+    expect(screen.getByText(/display tuning/i)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByText(/display tuning/i));
+
+    expect(await screen.findByText(/temperature unit/i)).toBeInTheDocument();
+    expect(screen.getByDisplayValue('5000 ms')).toBeInTheDocument();
   });
 
   it('shows EcoFlow user ID and hides generic BLE editor controls for EcoFlow BLE devices', async () => {

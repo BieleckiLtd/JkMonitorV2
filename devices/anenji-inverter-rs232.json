@@ -1986,6 +1986,22 @@
             }
           }
         ]
+      },
+      "configuration": {
+        "deviceSettings": {
+          "hiddenControls": ["definitionId"],
+          "runtimeTuning": {
+            "title": "Display tuning",
+            "fields": [
+              "displayPrecision.voltage",
+              "displayPrecision.current",
+              "displayPrecision.power",
+              "displayPrecision.temperature",
+              "displayPrecision.soc",
+              "temperatureUnit"
+            ]
+          }
+        }
       }
     }
   }
