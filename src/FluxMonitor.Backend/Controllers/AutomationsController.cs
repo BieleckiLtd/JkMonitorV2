@@ -161,7 +161,7 @@ public sealed class AutomationsController(
         pollTrigger.Signal();
 
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(2));
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(12));
 
         try
         {

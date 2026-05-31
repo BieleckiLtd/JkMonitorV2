@@ -89,7 +89,11 @@ public sealed class GenericSerialPollingClient(
                     continue;
                 }
 
-                if (!_bankCache.ContainsKey(cacheKey) &&
+                if (ShouldConsiderColdSlowBankDeferral(
+                        includeDetailBanks,
+                        _bankCache.ContainsKey(cacheKey),
+                        intervalMs,
+                        fastestPollIntervalMs) &&
                     ShouldDeferColdSlowBank(cacheKey, intervalMs, fastestPollIntervalMs, now))
                 {
                     continue;
@@ -487,6 +491,15 @@ public sealed class GenericSerialPollingClient(
 
     private static bool IsDetailBank(int intervalMs, int fastestPollIntervalMs)
         => intervalMs <= 0 || intervalMs > fastestPollIntervalMs;
+
+    internal static bool ShouldConsiderColdSlowBankDeferral(
+        bool includeDetailBanks,
+        bool hasCachedBank,
+        int intervalMs,
+        int fastestPollIntervalMs)
+        => !includeDetailBanks
+            && !hasCachedBank
+            && intervalMs > fastestPollIntervalMs;
 
     private bool ShouldDeferColdSlowBank(
         string cacheKey,
