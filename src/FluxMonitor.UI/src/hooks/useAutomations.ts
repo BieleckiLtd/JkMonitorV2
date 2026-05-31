@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from 'react';
 import type {
   AutomationConfigResponse,
   AutomationDeviceOption,
+  AutomationExpressionValidationResponse,
   AutomationLogEntry,
   AutomationRuleConfig,
   TestAutomationRuleResponse,
@@ -68,7 +69,17 @@ export function useAutomationConfig() {
     return (await response.json()) as TestAutomationRuleResponse;
   }, []);
 
-  return { config, isLoading, error, reload: load, saveRules, testRule };
+  const validateExpression = useCallback(async (expression: string): Promise<AutomationExpressionValidationResponse> => {
+    const response = await fetch('/api/automations/expressions/validate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ expression }),
+    });
+    if (!response.ok) throw new Error(await readErrorMessage(response, 'Failed to validate automation expression.'));
+    return (await response.json()) as AutomationExpressionValidationResponse;
+  }, []);
+
+  return { config, isLoading, error, reload: load, saveRules, testRule, validateExpression };
 }
 
 export function useAutomationLog() {

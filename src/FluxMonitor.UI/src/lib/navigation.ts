@@ -1,4 +1,4 @@
-import { Cable, Gauge, Monitor, Sparkles, type LucideIcon } from 'lucide-react';
+import { Bot, Cable, Gauge, Monitor, Sparkles, type LucideIcon } from 'lucide-react';
 
 export const oneMenuQuery = '(min-width: 768px)';
 export const twoMenuQuery = '(min-width: 1280px)';
@@ -14,6 +14,7 @@ export const primaryNavigationItems: readonly PrimaryNavigationItem[] = [
   { name: 'System', description: 'Host status, updates, and logs', path: '/system', icon: Monitor },
   { name: 'Monitor', description: 'Live telemetry and power flow', path: '/monitor', icon: Gauge },
   { name: 'Devices', description: 'Ports, transports, and device setup', path: '/devices', icon: Cable },
+  { name: 'Automations', description: 'Saved rules and expression writes', path: '/automations', icon: Bot },
   { name: 'Services', description: 'Installed packages and runtime insight', path: '/services', icon: Sparkles },
 ];
 

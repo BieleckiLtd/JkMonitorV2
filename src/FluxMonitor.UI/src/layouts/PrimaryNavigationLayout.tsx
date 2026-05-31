@@ -1,5 +1,6 @@
 import { Navigate, Outlet, useLocation } from 'react-router-dom';
 import { type ReactNode } from 'react';
+import { AutomationsNavigationPanel } from '../components/AutomationsNavigationPanel';
 import { DevicesNavigationPanel } from '../components/DevicesNavigationPanel';
 import { PrimaryNavigationPanel, PrimaryNavigationEmptyState } from '../components/PrimaryNavigationPanel';
 import { SystemNavigationPanel } from '../components/SystemNavigationPanel';
@@ -27,7 +28,12 @@ export function PrimaryNavigationLayout() {
   const deviceChildId = deviceChildMatch?.[1] ?? null;
   const isDevicesChild = deviceChildId !== null;
   const isDevicesRoute = isDevicesRoot || isDevicesChild;
-  const isPrimaryPage = !isRoot && !isSystemRoute && !isDevicesRoute;
+  const isAutomationsRoot = pathname === '/automations';
+  const automationChildMatch = pathname.match(/^\/automations\/([^/]+)/);
+  const automationChildId = automationChildMatch?.[1] ?? null;
+  const isAutomationsChild = automationChildId !== null;
+  const isAutomationsRoute = isAutomationsRoot || isAutomationsChild;
+  const isPrimaryPage = !isRoot && !isSystemRoute && !isDevicesRoute && !isAutomationsRoute;
 
   const shouldRedirect = isSystemRoot && menuSlots >= 2;
 
@@ -112,6 +118,36 @@ export function PrimaryNavigationLayout() {
     return <Outlet />;
   }
 
+  // ── Automations root (/automations) ───────────────────────────────
+  if (isAutomationsRoot) {
+    return menuSlots === 0
+      ? <AutomationsNavigationPanel />
+      : (
+          <MenuAndContent menu={<PrimaryNavigationPanel />}>
+            <AutomationsNavigationPanel />
+          </MenuAndContent>
+        );
+  }
+
+  // ── Automation pages (/automations/new, /automations/:ruleId) ─────
+  if (isAutomationsChild) {
+    if (menuSlots >= 2) {
+      return (
+        <TwoMenusAndContent menu1={<PrimaryNavigationPanel />} menu2={<AutomationsNavigationPanel />}>
+          <Outlet />
+        </TwoMenusAndContent>
+      );
+    }
+    if (menuSlots === 1) {
+      return (
+        <MenuAndContent menu={<AutomationsNavigationPanel />}>
+          <Outlet />
+        </MenuAndContent>
+      );
+    }
+    return <Outlet />;
+  }
+
   // ── Primary pages (/monitor, /devices, /services) ──────────────────
   if (menuSlots >= 1) {
     return (
@@ -138,6 +174,10 @@ function computeAppBarState(
   const deviceChildMatch = pathname.match(/^\/devices\/([^/]+)/);
   const deviceChildId = deviceChildMatch?.[1] ?? null;
   const isDevicesChild = deviceChildId !== null;
+  const isAutomationsRoot = pathname === '/automations';
+  const automationChildMatch = pathname.match(/^\/automations\/([^/]+)/);
+  const automationChildId = automationChildMatch?.[1] ?? null;
+  const isAutomationsChild = automationChildId !== null;
 
   if (isRoot) {
     return { title: 'FLUX_MONITOR', description: '' };
@@ -175,6 +215,22 @@ function computeAppBarState(
         ? 'Add a device from the library or upload a definition'
         : 'Live telemetry and quick readout controls',
       backTo: menuSlots < 2 ? '/devices' : undefined,
+    };
+  }
+
+  if (isAutomationsRoot) {
+    return {
+      title: 'Automations',
+      description: '',
+      backTo: menuSlots === 0 ? '/' : undefined,
+    };
+  }
+
+  if (isAutomationsChild) {
+    return {
+      title: automationChildId === 'new' ? 'Create automation' : 'Automations',
+      description: '',
+      backTo: menuSlots < 2 ? '/automations' : undefined,
     };
   }
 

@@ -1,4 +1,4 @@
-import { Bell, Bot, Cpu, Database, List, Palette, RefreshCcw, SquareTerminal, Usb, Wifi, Wrench, type LucideIcon } from 'lucide-react';
+import { Bell, Cpu, Database, List, Palette, RefreshCcw, SquareTerminal, Usb, Wifi, Wrench, type LucideIcon } from 'lucide-react';
 
 export type SystemSection =
   | 'resource-usage'
@@ -49,7 +49,6 @@ export type SystemShortcutItem = {
 
 export const systemShortcutItems: readonly SystemShortcutItem[] = [
   { id: 'notifications', label: 'Notifications', description: 'Alert delivery channels', icon: Bell, path: '/system/notifications' },
-  { id: 'automations', label: 'Automations', description: 'Expression rules and device writes', icon: Bot, path: '/system/automations' },
   { id: 'theme', label: 'Theme', description: 'Choose the active visual theme', icon: Palette, path: '/system/theme' },
 ];
 

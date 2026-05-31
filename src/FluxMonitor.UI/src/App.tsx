@@ -45,7 +45,7 @@ function App() {
             />
             <Route
               path='/system/automations'
-              element={<PageContent><AutomationsPage hideHeader /></PageContent>}
+              element={<Navigate to='/automations' replace />}
             />
             <Route
               path='/system/theme'
@@ -56,9 +56,11 @@ function App() {
             <Route path='/devices' element={null} />
             <Route path='/devices/add' element={<PageContent><DevicesPage initialShowAddPicker /></PageContent>} />
             <Route path='/devices/:deviceId' element={<PageContent><RoutedDevicePage /></PageContent>} />
+            <Route path='/automations' element={null} />
+            <Route path='/automations/new' element={<PageContent><AutomationsPage createNew /></PageContent>} />
+            <Route path='/automations/:ruleId' element={<PageContent><RoutedAutomationPage /></PageContent>} />
             <Route path='/services' element={<PageContent><ServicesPage /></PageContent>} />
             <Route path='/notifications' element={<Navigate to='/system/notifications' replace />} />
-            <Route path='/automations' element={<Navigate to='/system/automations' replace />} />
             <Route path='/settings' element={<Navigate to='/system/theme' replace />} />
           </Route>
           <Route path='*' element={<div className='text-muted-foreground font-mono p-8 text-center bg-card border border-white/5'>Route not found or Extension not loaded</div>} />
@@ -78,4 +80,10 @@ function RoutedDevicePage() {
   const { deviceId } = useParams();
 
   return <DevicesPage selectedDeviceId={deviceId ? decodeURIComponent(deviceId) : undefined} />;
+}
+
+function RoutedAutomationPage() {
+  const { ruleId } = useParams();
+
+  return <AutomationsPage selectedRuleId={ruleId ? decodeURIComponent(ruleId) : undefined} />;
 }

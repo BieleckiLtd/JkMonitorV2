@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Bot, CheckCircle2, ChevronDown, ChevronRight, Hash, LoaderCircle, Play, Plus, RefreshCcw, Save, Search, Trash2, XCircle } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
 import { Badge } from '../components/ui/badge';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
@@ -21,6 +22,22 @@ const timeTokens = [
 ];
 
 const draftStorageKey = 'fluxmonitor.automations.draft.v1';
+
+type Tab = 'automation' | 'history';
+
+type AutomationDraftState = {
+  rules: AutomationRuleConfig[];
+  tab: Tab;
+  ruleMessages: Record<string, string>;
+  testResults: Record<string, TestAutomationRuleResponse | string>;
+  activeRuleId: string | null;
+};
+
+type ExpressionValidationState = {
+  status: 'validating' | 'valid' | 'invalid';
+  expression: string;
+  message?: string;
+};
 
 function generateId() {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
@@ -59,6 +76,37 @@ function defaultRule(devices: AutomationDeviceOption[]): AutomationRuleConfig {
   };
 }
 
+function normalizeRule(rule: AutomationRuleConfig): AutomationRuleConfig {
+  return { ...rule, actions: rule.actions ?? [] };
+}
+
+function normalizeRules(rules: AutomationRuleConfig[]) {
+  return rules.map(normalizeRule);
+}
+
+function mergeDraftRules(savedRules: AutomationRuleConfig[], draftRules: AutomationRuleConfig[]) {
+  const savedRuleMap = new Map(savedRules.map((rule) => [rule.id, rule]));
+  const mergedRules: AutomationRuleConfig[] = [];
+
+  for (const draftRule of draftRules) {
+    const savedRule = savedRuleMap.get(draftRule.id);
+    mergedRules.push(savedRule ? { ...savedRule, ...draftRule, actions: draftRule.actions ?? savedRule.actions } : draftRule);
+    savedRuleMap.delete(draftRule.id);
+  }
+
+  mergedRules.push(...savedRuleMap.values());
+  return mergedRules;
+}
+
+function areRulesEqual(left: AutomationRuleConfig[], right: AutomationRuleConfig[]) {
+  return JSON.stringify(normalizeRules(left)) === JSON.stringify(normalizeRules(right));
+}
+
+function notifyAutomationsChanged() {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new Event('automations:config-changed'));
+}
+
 function getValidationMessage(rule: AutomationRuleConfig, devices: AutomationDeviceOption[], index: number) {
   const label = rule.name.trim() ? `Automation "${rule.name.trim()}"` : `Automation ${index + 1}`;
   if (!rule.name.trim()) return `${label}: enter a name.`;
@@ -92,16 +140,6 @@ function formatRawValue(parameter: AutomationParameterOption | undefined, rawVal
   return selectedOption ? `${selectedOption.label} (${rawValue})` : String(rawValue);
 }
 
-type Tab = 'rules' | 'history';
-
-type AutomationDraftState = {
-  rules: AutomationRuleConfig[];
-  tab: Tab;
-  ruleMessages: Record<string, string>;
-  testResults: Record<string, TestAutomationRuleResponse | string>;
-  activeRuleId: string | null;
-};
-
 function readDraftState(): AutomationDraftState | null {
   if (typeof window === 'undefined') return null;
 
@@ -111,8 +149,8 @@ function readDraftState(): AutomationDraftState | null {
     const parsed = JSON.parse(stored) as Partial<AutomationDraftState>;
     if (!Array.isArray(parsed.rules)) return null;
     return {
-      rules: parsed.rules.map((rule) => ({ ...rule, actions: rule.actions ?? [] })),
-      tab: parsed.tab === 'history' ? 'history' : 'rules',
+      rules: normalizeRules(parsed.rules),
+      tab: parsed.tab === 'history' ? 'history' : 'automation',
       ruleMessages: parsed.ruleMessages ?? {},
       testResults: parsed.testResults ?? {},
       activeRuleId: parsed.activeRuleId ?? null,
@@ -153,46 +191,151 @@ function TabButton({ active, label, icon: Icon, onClick }: { active: boolean; la
   );
 }
 
-export function AutomationsPage({ hideHeader = false }: { hideHeader?: boolean }) {
-  const { config, isLoading, error, saveRules, testRule } = useAutomationConfig();
+export function AutomationsPage({ hideHeader = false, selectedRuleId, createNew = false }: { hideHeader?: boolean; selectedRuleId?: string; createNew?: boolean }) {
+  const navigate = useNavigate();
+  const { config, isLoading, error, saveRules, testRule, validateExpression } = useAutomationConfig();
   const { log } = useAutomationLog();
   const { devices, reload: reloadDevices } = useAutomationMetadata();
   const initialDraft = useMemo(readDraftState, []);
-  const [tab, setTab] = useState<Tab>(initialDraft?.tab ?? 'rules');
-  const [rules, setRules] = useState<AutomationRuleConfig[]>(initialDraft?.rules ?? []);
+  const [tab, setTab] = useState<Tab>(initialDraft?.tab ?? 'automation');
+  const [rules, setRules] = useState<AutomationRuleConfig[]>([]);
   const [savedRules, setSavedRules] = useState<AutomationRuleConfig[]>([]);
-  const [initialized, setInitialized] = useState(Boolean(initialDraft));
+  const [initialized, setInitialized] = useState(false);
   const [savingRuleId, setSavingRuleId] = useState<string | null>(null);
   const [ruleMessages, setRuleMessages] = useState<Record<string, string>>(initialDraft?.ruleMessages ?? {});
   const [testResults, setTestResults] = useState<Record<string, TestAutomationRuleResponse | string>>(initialDraft?.testResults ?? {});
   const [testingRuleId, setTestingRuleId] = useState<string | null>(null);
   const [activeRuleId, setActiveRuleId] = useState<string | null>(initialDraft?.activeRuleId ?? null);
+  const [draftRuleId, setDraftRuleId] = useState<string | null>(null);
+  const [expressionValidation, setExpressionValidation] = useState<Record<string, ExpressionValidationState>>({});
 
   useEffect(() => {
     if (config && !initialized) {
-      const normalizedRules = config.rules.map((rule) => ({ ...rule, actions: rule.actions ?? [] }));
+      const normalizedRules = normalizeRules(config.rules);
       setSavedRules(normalizedRules);
-      setRules(normalizedRules);
-      setActiveRuleId((current) => current ?? normalizedRules[0]?.id ?? null);
+      setRules(initialDraft ? mergeDraftRules(normalizedRules, initialDraft.rules) : normalizedRules);
+      setActiveRuleId((current) => current ?? selectedRuleId ?? initialDraft?.activeRuleId ?? normalizedRules[0]?.id ?? null);
       setInitialized(true);
     }
-  }, [config, initialized]);
+  }, [config, initialDraft, initialized, selectedRuleId]);
+
+  useEffect(() => {
+    if (!initialized || !createNew || draftRuleId) return;
+
+    const existingDraftRule = rules.find((rule) => !savedRules.some((savedRule) => savedRule.id === rule.id));
+    const nextRule = existingDraftRule ?? defaultRule(devices);
+
+    if (!existingDraftRule) {
+      setRules((current) => [...current, nextRule]);
+    }
+
+    setDraftRuleId(nextRule.id);
+    setActiveRuleId(nextRule.id);
+  }, [createNew, devices, draftRuleId, initialized, rules, savedRules]);
+
+  useEffect(() => {
+    if (!initialized || createNew || !selectedRuleId) return;
+
+    if (rules.some((rule) => rule.id === selectedRuleId)) {
+      setActiveRuleId(selectedRuleId);
+      return;
+    }
+
+    navigate('/automations', { replace: true });
+  }, [createNew, initialized, navigate, rules, selectedRuleId]);
 
   useEffect(() => {
     if (!initialized) return;
-    writeDraftState({ rules, tab, ruleMessages, testResults, activeRuleId });
-  }, [activeRuleId, initialized, ruleMessages, rules, tab, testResults]);
 
-  const updateRule = <K extends keyof AutomationRuleConfig>(index: number, key: K, value: AutomationRuleConfig[K]) => {
-    setRules((current) => current.map((rule, ruleIndex) => (ruleIndex === index ? { ...rule, [key]: value } : rule)));
+    if (areRulesEqual(rules, savedRules)) {
+      clearDraftState();
+      return;
+    }
+
+    writeDraftState({ rules, tab, ruleMessages, testResults, activeRuleId });
+  }, [activeRuleId, initialized, ruleMessages, rules, savedRules, tab, testResults]);
+
+  const visibleRuleId = createNew ? draftRuleId : (selectedRuleId ?? activeRuleId);
+  const visibleRuleIndex = visibleRuleId ? rules.findIndex((rule) => rule.id === visibleRuleId) : -1;
+  const visibleRule = visibleRuleIndex >= 0 ? rules[visibleRuleIndex] : undefined;
+
+  useEffect(() => {
+    if (!visibleRule || tab !== 'automation') return;
+
+    const expressionText = visibleRule.expression.trim();
+    if (!expressionText) {
+      setExpressionValidation((current) => {
+        if (!(visibleRule.id in current)) return current;
+        const next = { ...current };
+        delete next[visibleRule.id];
+        return next;
+      });
+      return;
+    }
+
+    let cancelled = false;
+    const timeoutHandle = window.setTimeout(async () => {
+      setExpressionValidation((current) => ({
+        ...current,
+        [visibleRule.id]: { status: 'validating', expression: expressionText },
+      }));
+
+      try {
+        const result = await validateExpression(expressionText);
+        if (cancelled) return;
+
+        setExpressionValidation((current) => ({
+          ...current,
+          [visibleRule.id]: {
+            status: result.isValid ? 'valid' : 'invalid',
+            expression: expressionText,
+            message: result.message ?? undefined,
+          },
+        }));
+      } catch (err) {
+        if (cancelled) return;
+
+        setExpressionValidation((current) => ({
+          ...current,
+          [visibleRule.id]: {
+            status: 'invalid',
+            expression: expressionText,
+            message: err instanceof Error ? err.message : 'Failed to validate expression.',
+          },
+        }));
+      }
+    }, 300);
+
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timeoutHandle);
+    };
+  }, [tab, validateExpression, visibleRule?.expression, visibleRule?.id]);
+
+  const clearRuleFeedback = (ruleId: string | undefined) => {
+    if (!ruleId) return;
+
     setRuleMessages((current) => {
       const next = { ...current };
-      delete next[rules[index]?.id ?? ''];
+      delete next[ruleId];
+      return next;
+    });
+
+    setExpressionValidation((current) => {
+      const next = { ...current };
+      delete next[ruleId];
       return next;
     });
   };
 
+  const updateRule = <K extends keyof AutomationRuleConfig>(index: number, key: K, value: AutomationRuleConfig[K]) => {
+    const ruleId = rules[index]?.id;
+    setRules((current) => current.map((rule, ruleIndex) => (ruleIndex === index ? { ...rule, [key]: value } : rule)));
+    clearRuleFeedback(ruleId);
+  };
+
   const updateAction = <K extends keyof AutomationActionConfig>(ruleIndex: number, actionIndex: number, key: K, value: AutomationActionConfig[K]) => {
+    const ruleId = rules[ruleIndex]?.id;
     setRules((current) => current.map((rule, index) => {
       if (index !== ruleIndex) return rule;
       return {
@@ -200,43 +343,57 @@ export function AutomationsPage({ hideHeader = false }: { hideHeader?: boolean }
         actions: rule.actions.map((action, candidateIndex) => candidateIndex === actionIndex ? { ...action, [key]: value } : action),
       };
     }));
-    setRuleMessages((current) => {
-      const next = { ...current };
-      delete next[rules[ruleIndex]?.id ?? ''];
-      return next;
-    });
-  };
-
-  const addRule = () => {
-    const nextRule = defaultRule(devices);
-    setRules((current) => [...current, nextRule]);
-    setActiveRuleId(nextRule.id);
+    clearRuleFeedback(ruleId);
   };
 
   const removeRule = async (index: number) => {
     const rule = rules[index];
     if (!rule) return;
 
-    setRules((current) => current.filter((_, ruleIndex) => ruleIndex !== index));
+    const nextRules = rules.filter((_, ruleIndex) => ruleIndex !== index);
+
+    setRules(nextRules);
     setRuleMessages((current) => {
       const next = { ...current };
       delete next[rule.id];
       return next;
     });
-    setActiveRuleId((current) => current === rule.id ? rules.find((_, ruleIndex) => ruleIndex !== index)?.id ?? null : current);
+    setTestResults((current) => {
+      const next = { ...current };
+      delete next[rule.id];
+      return next;
+    });
+    setExpressionValidation((current) => {
+      const next = { ...current };
+      delete next[rule.id];
+      return next;
+    });
+    setActiveRuleId((current) => current === rule.id ? nextRules[0]?.id ?? null : current);
 
-    if (!savedRules.some((savedRule) => savedRule.id === rule.id)) return;
+    if (!savedRules.some((savedRule) => savedRule.id === rule.id)) {
+      navigate('/automations', { replace: true });
+      return;
+    }
 
     setSavingRuleId(rule.id);
     try {
       const data = await saveRules(savedRules.filter((savedRule) => savedRule.id !== rule.id));
-      setSavedRules(data.rules.map((savedRule) => ({ ...savedRule, actions: savedRule.actions ?? [] })));
+      const normalizedSavedRules = normalizeRules(data.rules);
+      setSavedRules(normalizedSavedRules);
+      setRules(mergeDraftRules(normalizedSavedRules, nextRules));
+      clearDraftState();
+      notifyAutomationsChanged();
+
+      const nextRuleId = normalizedSavedRules[index]?.id ?? normalizedSavedRules[index - 1]?.id ?? normalizedSavedRules[0]?.id;
+      navigate(nextRuleId ? `/automations/${encodeURIComponent(nextRuleId)}` : '/automations', { replace: true });
     } catch (err) {
       setRules((current) => {
         const next = [...current];
         next.splice(index, 0, rule);
         return next;
       });
+      setActiveRuleId(rule.id);
+      navigate(`/automations/${encodeURIComponent(rule.id)}`, { replace: true });
       setRuleMessages((current) => ({ ...current, [rule.id]: err instanceof Error ? err.message : 'Failed to delete automation.' }));
     } finally {
       setSavingRuleId(null);
@@ -253,6 +410,25 @@ export function AutomationsPage({ hideHeader = false }: { hideHeader?: boolean }
       return;
     }
 
+    try {
+      const expressionResult = await validateExpression(rule.expression);
+      setExpressionValidation((current) => ({
+        ...current,
+        [rule.id]: {
+          status: expressionResult.isValid ? 'valid' : 'invalid',
+          expression: rule.expression.trim(),
+          message: expressionResult.message ?? undefined,
+        },
+      }));
+
+      if (!expressionResult.isValid) {
+        return;
+      }
+    } catch (err) {
+      setRuleMessages((current) => ({ ...current, [rule.id]: err instanceof Error ? err.message : 'Failed to validate expression.' }));
+      return;
+    }
+
     const nextSavedRules = savedRules.some((savedRule) => savedRule.id === rule.id)
       ? savedRules.map((savedRule) => savedRule.id === rule.id ? rule : savedRule)
       : [...savedRules, rule];
@@ -265,9 +441,17 @@ export function AutomationsPage({ hideHeader = false }: { hideHeader?: boolean }
     });
     try {
       const data = await saveRules(nextSavedRules);
-      setSavedRules(data.rules.map((savedRule) => ({ ...savedRule, actions: savedRule.actions ?? [] })));
+      const normalizedSavedRules = normalizeRules(data.rules);
+      setSavedRules(normalizedSavedRules);
+      setRules((current) => mergeDraftRules(normalizedSavedRules, current));
       clearDraftState();
+      notifyAutomationsChanged();
       setRuleMessages((current) => ({ ...current, [rule.id]: 'Automation saved and active.' }));
+
+      if (createNew) {
+        setDraftRuleId(null);
+        navigate(`/automations/${encodeURIComponent(rule.id)}`, { replace: true });
+      }
     } catch (err) {
       setRuleMessages((current) => ({ ...current, [rule.id]: err instanceof Error ? err.message : 'Failed to save automation.' }));
     } finally {
@@ -290,11 +474,10 @@ export function AutomationsPage({ hideHeader = false }: { hideHeader?: boolean }
   };
 
   const insertTokenIntoActiveRule = (token: string) => {
-    const activeIndex = rules.findIndex((rule) => rule.id === activeRuleId);
-    if (activeIndex < 0) return;
-    const activeRule = rules[activeIndex];
+    if (!visibleRule || visibleRuleIndex < 0) return;
+    const activeRule = visibleRule;
     const prefix = activeRule.expression.trim() ? `${activeRule.expression.trim()} ` : '';
-    updateRule(activeIndex, 'expression', `${prefix}${token}`);
+    updateRule(visibleRuleIndex, 'expression', `${prefix}${token}`);
   };
 
   if (isLoading) {
@@ -312,62 +495,53 @@ export function AutomationsPage({ hideHeader = false }: { hideHeader?: boolean }
   return (
     <div className='mx-auto max-w-7xl space-y-4 pb-12 sm:space-y-6'>
       {!hideHeader ? (
-        <div className='flex flex-col gap-2 border-b border-border pb-4 md:flex-row md:items-end md:justify-between'>
-          <div>
-            <h2 className='text-3xl font-bold tracking-tight text-foreground'>Automations</h2>
-            <p className='mt-2 text-sm text-muted-foreground'>Build expression conditions from live device and time values, then write one or more device parameters.</p>
-          </div>
+        <div className='border-b border-border pb-4'>
+          <h2 className='text-3xl font-bold tracking-tight text-foreground'>Automations</h2>
         </div>
       ) : null}
 
       <div className='flex flex-wrap items-center gap-2 rounded-xl border border-border bg-card/60 p-2'>
-        <TabButton active={tab === 'rules'} label='Rules' icon={Bot} onClick={() => setTab('rules')} />
+        <TabButton active={tab === 'automation'} label='Automation' icon={Bot} onClick={() => setTab('automation')} />
         <TabButton active={tab === 'history'} label='History' icon={Hash} onClick={() => setTab('history')} />
         <Button variant='outline' size='sm' className='w-full sm:ml-auto sm:w-auto' onClick={() => void reloadDevices()}>
           <RefreshCcw className='h-4 w-4' /> Refresh values
         </Button>
       </div>
 
-      {tab === 'rules' ? (
+      {tab === 'automation' ? (
         <div className='space-y-4'>
-          <div className='grid gap-2 sm:flex sm:flex-wrap sm:gap-3'>
-            <Button variant='outline' className='w-full sm:w-auto' onClick={addRule}>
-              <Plus className='h-4 w-4' /> Add automation
-            </Button>
-          </div>
+          {visibleRule ? (
+            <>
+              <TokenPanel
+                devices={devices}
+                activeRule={visibleRule}
+                onInsert={insertTokenIntoActiveRule}
+              />
 
-          <TokenPanel
-            devices={devices}
-            activeRule={rules.find((rule) => rule.id === activeRuleId)}
-            onInsert={insertTokenIntoActiveRule}
-          />
-
-          {rules.length === 0 ? (
+              <AutomationRuleEditor
+                key={visibleRule.id}
+                devices={devices}
+                rule={visibleRule}
+                index={visibleRuleIndex}
+                expressionValidation={expressionValidation[visibleRule.id]}
+                testResult={testResults[visibleRule.id]}
+                message={ruleMessages[visibleRule.id]}
+                isTesting={testingRuleId === visibleRule.id}
+                isSaving={savingRuleId === visibleRule.id}
+                onUpdate={updateRule}
+                onUpdateAction={updateAction}
+                onRemove={removeRule}
+                onTest={handleTestRule}
+                onSave={handleSaveRule}
+                onActivate={setActiveRuleId}
+              />
+            </>
+          ) : (
             <div className='rounded-2xl border border-dashed border-border bg-card/40 px-6 py-12 text-center'>
               <Bot className='mx-auto h-10 w-10 text-muted-foreground/50' />
-              <div className='mt-4 text-lg font-semibold text-foreground'>No automations configured</div>
-              <p className='mt-2 text-sm text-muted-foreground'>Add a rule to write device parameters when an expression is true.</p>
+              <div className='mt-4 text-lg font-semibold text-foreground'>Select an automation</div>
             </div>
-          ) : null}
-
-          {rules.map((rule, index) => (
-            <AutomationRuleEditor
-              key={rule.id}
-              devices={devices}
-              rule={rule}
-              index={index}
-              testResult={testResults[rule.id]}
-              message={ruleMessages[rule.id]}
-              isTesting={testingRuleId === rule.id}
-              isSaving={savingRuleId === rule.id}
-              onUpdate={updateRule}
-              onUpdateAction={updateAction}
-              onRemove={removeRule}
-              onTest={handleTestRule}
-              onSave={handleSaveRule}
-              onActivate={setActiveRuleId}
-            />
-          ))}
+          )}
         </div>
       ) : null}
 
@@ -376,8 +550,7 @@ export function AutomationsPage({ hideHeader = false }: { hideHeader?: boolean }
           {log.length === 0 ? (
             <div className='rounded-2xl border border-dashed border-border bg-card/40 px-6 py-12 text-center'>
               <Hash className='mx-auto h-10 w-10 text-muted-foreground/50' />
-              <div className='mt-4 text-lg font-semibold text-foreground'>No automation runs yet</div>
-              <p className='mt-2 text-sm text-muted-foreground'>Runs will appear here when a rule writes target parameters.</p>
+              <div className='mt-4 text-lg font-semibold text-foreground'>No runs yet</div>
             </div>
           ) : null}
 
@@ -414,6 +587,7 @@ function AutomationRuleEditor({
   message,
   isTesting,
   isSaving,
+  expressionValidation,
   onUpdate,
   onUpdateAction,
   onRemove,
@@ -428,6 +602,7 @@ function AutomationRuleEditor({
   message?: string;
   isTesting: boolean;
   isSaving: boolean;
+  expressionValidation?: ExpressionValidationState;
   onUpdate: <K extends keyof AutomationRuleConfig>(index: number, key: K, value: AutomationRuleConfig[K]) => void;
   onUpdateAction: <K extends keyof AutomationActionConfig>(ruleIndex: number, actionIndex: number, key: K, value: AutomationActionConfig[K]) => void;
   onRemove: (index: number) => void | Promise<void>;
@@ -480,14 +655,24 @@ function AutomationRuleEditor({
           </div>
 
           <label className='space-y-1.5'>
-            <span className='block text-xs font-medium uppercase tracking-wide text-muted-foreground sm:tracking-widest'>Condition expression</span>
+            <div className='flex items-center justify-between gap-2'>
+              <span className='block text-xs font-medium uppercase tracking-wide text-muted-foreground sm:tracking-widest'>Condition expression</span>
+              {expressionValidation?.status === 'validating' ? <LoaderCircle className='h-3.5 w-3.5 animate-spin text-muted-foreground' /> : null}
+              {expressionValidation?.status === 'valid' ? <span className='text-xs text-emerald-600 dark:text-emerald-300'>Valid</span> : null}
+            </div>
             <Input
-              className='h-10 font-mono text-sm'
+              className={cn(
+                'h-10 font-mono text-sm',
+                expressionValidation?.status === 'invalid' ? 'border-destructive focus-visible:ring-destructive/30' : null,
+              )}
               value={rule.expression}
               onChange={(event) => onUpdate(index, 'expression', event.target.value)}
               onFocus={() => onActivate(rule.id)}
               placeholder='device-1.state_of_charge == 22 && time.day_of_week == 7'
             />
+            {expressionValidation?.status === 'invalid' ? (
+              <div className='text-xs text-destructive'>{expressionValidation.message ?? 'Invalid expression.'}</div>
+            ) : null}
           </label>
 
           <div className='space-y-3'>
@@ -559,12 +744,7 @@ function TokenPanel({
   return (
     <div className='rounded-xl border border-border bg-background/55 p-3'>
       <div className='mb-3 grid gap-3 lg:grid-cols-[minmax(0,1fr)_minmax(12rem,18rem)] lg:items-center'>
-        <div>
-          <div className='text-xs font-medium uppercase tracking-wide text-muted-foreground sm:tracking-widest'>Available values</div>
-          <div className='mt-1 truncate text-xs text-muted-foreground'>
-            Insert into: <span className='text-foreground'>{activeRule?.name || 'select an automation expression'}</span>
-          </div>
-        </div>
+        <div className='text-xs font-medium uppercase tracking-wide text-muted-foreground sm:tracking-widest'>Values</div>
         <label className='relative block'>
           <Search className='pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground' />
           <Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder='Find value...' className='pl-8' />

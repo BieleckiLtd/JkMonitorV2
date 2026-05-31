@@ -94,6 +94,11 @@ public sealed class TestAutomationRuleRequest
     public required AutomationRuleConfig Rule { get; init; }
 }
 
+public sealed class ValidateAutomationExpressionRequest
+{
+    public string Expression { get; init; } = string.Empty;
+}
+
 public sealed class TestAutomationRuleResponse
 {
     public required bool ConditionMatched { get; init; }
@@ -101,6 +106,13 @@ public sealed class TestAutomationRuleResponse
     public required string Message { get; init; }
 
     public IReadOnlyList<AutomationActionLogEntry> ActionResults { get; init; } = [];
+}
+
+public sealed class ValidateAutomationExpressionResponse
+{
+    public bool IsValid { get; init; }
+
+    public string? Message { get; init; }
 }
 
 public sealed record AutomationDeviceOption(

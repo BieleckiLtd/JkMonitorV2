@@ -31,7 +31,19 @@ public sealed class AutomationsController(
         [FromBody] SaveAutomationRulesRequest request,
         CancellationToken cancellationToken)
     {
-        var validationErrors = AutomationRuleValidator.Validate(request.Rules);
+        var validationErrors = AutomationRuleValidator.Validate(request.Rules).ToList();
+        for (var index = 0; index < request.Rules.Count; index++)
+        {
+            var rule = request.Rules[index];
+            if (string.IsNullOrWhiteSpace(rule.Expression))
+                continue;
+
+            if (!AutomationExpressionSyntaxValidator.TryValidate(rule.Expression, out var expressionError))
+            {
+                validationErrors.Add($"{GetRuleLabel(rule, index)}: {expressionError}");
+            }
+        }
+
         if (validationErrors.Count > 0)
         {
             return ValidationProblem(new ValidationProblemDetails(new Dictionary<string, string[]>
@@ -62,6 +74,18 @@ public sealed class AutomationsController(
         CancellationToken cancellationToken)
     {
         return Ok(await evaluator.TestAsync(request.Rule, cancellationToken));
+    }
+
+    [HttpPost("expressions/validate")]
+    public ActionResult<ValidateAutomationExpressionResponse> ValidateExpression(
+        [FromBody] ValidateAutomationExpressionRequest request)
+    {
+        var isValid = AutomationExpressionSyntaxValidator.TryValidate(request.Expression, out var error);
+        return Ok(new ValidateAutomationExpressionResponse
+        {
+            IsValid = isValid,
+            Message = isValid ? null : error
+        });
     }
 
     [HttpGet("devices")]
@@ -159,4 +183,7 @@ public sealed class AutomationsController(
             .ThenBy(parameter => parameter.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
+
+    private static string GetRuleLabel(AutomationRuleConfig rule, int index)
+        => string.IsNullOrWhiteSpace(rule.Name) ? $"Rule {index + 1}" : $"Rule \"{rule.Name}\"";
 }

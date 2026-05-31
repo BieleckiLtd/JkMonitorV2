@@ -1,11 +1,14 @@
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MemoryRouter } from 'react-router-dom';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { AutomationsPage } from './AutomationsPage';
-import type { AutomationDeviceOption } from '../types/automation';
+import type { AutomationDeviceOption, AutomationRuleConfig } from '../types/automation';
 
 const saveRulesMock = vi.fn();
 const testRuleMock = vi.fn();
 const reloadMetadataMock = vi.fn();
+const validateExpressionMock = vi.fn();
+let configRules: AutomationRuleConfig[] = [];
 
 const devices: AutomationDeviceOption[] = [
   {
@@ -29,11 +32,12 @@ const devices: AutomationDeviceOption[] = [
 
 vi.mock('../hooks/useAutomations', () => ({
   useAutomationConfig: () => ({
-    config: { rules: [] },
+    config: { rules: configRules },
     isLoading: false,
     error: null,
     saveRules: saveRulesMock,
     testRule: testRuleMock,
+    validateExpression: validateExpressionMock,
   }),
   useAutomationLog: () => ({
     log: [],
@@ -45,11 +49,35 @@ vi.mock('../hooks/useAutomations', () => ({
   }),
 }));
 
+function renderPage(ui: React.ReactElement) {
+  return render(<MemoryRouter>{ui}</MemoryRouter>);
+}
+
+function createSavedRule(id: string, name: string): AutomationRuleConfig {
+  return {
+    id,
+    name,
+    enabled: true,
+    expression: 'time.hour == 5',
+    actions: [
+      {
+        targetDeviceId: 'battery-a',
+        targetParameterKey: 'charging_enabled',
+        rawValue: 1,
+      },
+    ],
+    cooldownMinutes: 15,
+  };
+}
+
 describe('AutomationsPage', () => {
   beforeEach(() => {
+    configRules = [];
     saveRulesMock.mockReset();
     testRuleMock.mockReset();
     reloadMetadataMock.mockReset();
+    validateExpressionMock.mockReset();
+    validateExpressionMock.mockResolvedValue({ isValid: true, message: null });
     window.sessionStorage.clear();
   });
 
@@ -58,12 +86,10 @@ describe('AutomationsPage', () => {
     window.sessionStorage.clear();
   });
 
-  it('builds a rule from exposed parameters and writable targets', () => {
-    render(<AutomationsPage hideHeader />);
+  it('builds a new automation from exposed parameters and writable targets', async () => {
+    renderPage(<AutomationsPage hideHeader createNew />);
 
-    fireEvent.click(screen.getByRole('button', { name: /add automation/i }));
-
-    expect(screen.getByLabelText('Automation 1 action 1 device')).toHaveValue('battery-a');
+    expect(await screen.findByLabelText('Automation 1 action 1 device')).toHaveValue('battery-a');
     expect(screen.getByLabelText('Automation 1 action 1 parameter')).toHaveValue('charging_enabled');
     expect(screen.getByLabelText('Automation 1 action 1 value')).toHaveValue('1');
     expect(screen.getByText('current: On')).toBeInTheDocument();
@@ -73,36 +99,36 @@ describe('AutomationsPage', () => {
     expect(screen.getByPlaceholderText(/state_of_charge/i)).toHaveValue('battery-a.state_of_charge');
   });
 
-  it('blocks saving an expression rule without an expression', () => {
-    render(<AutomationsPage hideHeader />);
+  it('blocks saving an expression rule without an expression', async () => {
+    renderPage(<AutomationsPage hideHeader createNew />);
 
-    fireEvent.click(screen.getByRole('button', { name: /add automation/i }));
+    await screen.findByRole('button', { name: /^save$/i });
     fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
 
     expect(screen.getByText('Automation "New automation": enter an expression.')).toBeInTheDocument();
     expect(saveRulesMock).not.toHaveBeenCalled();
   });
 
-  it('renders one shared expandable value picker for all automations', () => {
-    render(<AutomationsPage hideHeader />);
+  it('keeps saved automations visible when a stale draft exists', async () => {
+    configRules = [createSavedRule('server-1', 'Server automation')];
+    window.sessionStorage.setItem('fluxmonitor.automations.draft.v1', JSON.stringify({
+      rules: [createSavedRule('draft-1', 'Draft automation')],
+      tab: 'automation',
+      ruleMessages: {},
+      testResults: {},
+      activeRuleId: 'draft-1',
+    }));
 
-    fireEvent.click(screen.getByRole('button', { name: /add automation/i }));
-    fireEvent.click(screen.getByRole('button', { name: /add automation/i }));
+    renderPage(<AutomationsPage hideHeader selectedRuleId='server-1' />);
 
-    expect(screen.getAllByText('Available values')).toHaveLength(1);
-    const timeSection = screen.getByText('time').closest('button');
-    const batterySection = screen.getByText('battery-a').closest('button');
-    expect(timeSection).toHaveAttribute('aria-expanded', 'true');
-    expect(batterySection).toHaveAttribute('aria-expanded', 'false');
-
-    fireEvent.click(batterySection!);
-    expect(batterySection).toHaveAttribute('aria-expanded', 'true');
+    expect(await screen.findByDisplayValue('Server automation')).toBeInTheDocument();
+    expect(screen.queryByText('Select an automation')).not.toBeInTheDocument();
   });
 
   it('keeps an unsaved rule draft across remounts', async () => {
-    const firstRender = render(<AutomationsPage hideHeader />);
+    const firstRender = renderPage(<AutomationsPage hideHeader createNew />);
 
-    fireEvent.click(screen.getByRole('button', { name: /add automation/i }));
+    await screen.findByRole('button', { name: /^save$/i });
     fireEvent.click(screen.getByRole('button', { name: /battery-a/i }));
     fireEvent.click(screen.getByRole('button', { name: /state_of_charge/i }));
     expect(screen.getByPlaceholderText(/state_of_charge/i)).toHaveValue('battery-a.state_of_charge');
@@ -112,8 +138,26 @@ describe('AutomationsPage', () => {
     });
 
     firstRender.unmount();
-    render(<AutomationsPage hideHeader />);
+    renderPage(<AutomationsPage hideHeader createNew />);
 
     expect(screen.getByPlaceholderText(/state_of_charge/i)).toHaveValue('battery-a.state_of_charge');
+  });
+
+  it('blocks saving when expression validation fails', async () => {
+    validateExpressionMock.mockResolvedValue({ isValid: false, message: 'Unexpected token near time.minute.' });
+
+    renderPage(<AutomationsPage hideHeader createNew />);
+
+    await screen.findByRole('button', { name: /^save$/i });
+    fireEvent.change(screen.getByPlaceholderText(/state_of_charge/i), {
+      target: { value: 'time.hour=5 and time.minute=55' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => {
+      expect(validateExpressionMock).toHaveBeenCalledWith('time.hour=5 and time.minute=55');
+    });
+    expect(screen.getByText('Unexpected token near time.minute.')).toBeInTheDocument();
+    expect(saveRulesMock).not.toHaveBeenCalled();
   });
 });

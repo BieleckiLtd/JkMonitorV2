@@ -62,3 +62,8 @@ export type TestAutomationRuleResponse = {
   message: string;
   actionResults: AutomationActionLogEntry[];
 };
+
+export type AutomationExpressionValidationResponse = {
+  isValid: boolean;
+  message?: string | null;
+};

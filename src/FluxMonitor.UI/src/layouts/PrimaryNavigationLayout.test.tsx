@@ -51,6 +51,9 @@ function renderLayout(initialEntry = '/') {
           <Route path='/devices' element={null} />
           <Route path='/devices/add' element={<div>Add device workspace</div>} />
           <Route path='/devices/:deviceId' element={<div>Device workspace</div>} />
+          <Route path='/automations' element={null} />
+          <Route path='/automations/new' element={<div>Create automation workspace</div>} />
+          <Route path='/automations/:ruleId' element={<div>Automation workspace</div>} />
         </Route>
       </Routes>
     </MemoryRouter>
@@ -63,19 +66,48 @@ describe('PrimaryNavigationLayout', () => {
   beforeEach(() => {
     matchMediaMock = createMatchMediaMock(true);
     window.matchMedia = vi.fn().mockImplementation(() => matchMediaMock);
-    globalThis.fetch = vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        devices: [
-          {
-            deviceId: 'device-1',
-            displayName: 'Battery 1',
-            enabled: true,
-            sortOrder: 0,
-          },
-        ],
-      }),
-    } as Response) as typeof fetch;
+    globalThis.fetch = vi.fn().mockImplementation(async (input) => {
+      const url = String(input);
+
+      if (url === '/api/devices/summary') {
+        return {
+          ok: true,
+          json: async () => ({
+            devices: [
+              {
+                deviceId: 'device-1',
+                displayName: 'Battery 1',
+                enabled: true,
+                sortOrder: 0,
+              },
+            ],
+          }),
+        } as Response;
+      }
+
+      if (url === '/api/automations') {
+        return {
+          ok: true,
+          json: async () => ({
+            rules: [
+              {
+                id: 'automation-1',
+                name: 'Morning start',
+                enabled: true,
+                expression: 'time.hour == 5',
+                actions: [],
+                cooldownMinutes: 15,
+              },
+            ],
+          }),
+        } as Response;
+      }
+
+      return {
+        ok: true,
+        json: async () => ({}),
+      } as Response;
+    }) as typeof fetch;
   });
 
   afterEach(() => {
@@ -106,6 +138,15 @@ describe('PrimaryNavigationLayout', () => {
     expect(await screen.findByRole('navigation', { name: /devices navigation/i })).toBeInTheDocument();
     expect(screen.getByText('Device workspace')).toBeInTheDocument();
     expect(screen.getByText('Battery 1')).toBeInTheDocument();
+  });
+
+  it('shows the automations submenu beside a routed automation page at tablet widths', async () => {
+    renderLayout('/automations/automation-1');
+
+    expect(screen.getByRole('navigation', { name: /primary navigation/i })).toBeInTheDocument();
+    expect(await screen.findByRole('navigation', { name: /automations navigation/i })).toBeInTheDocument();
+    expect(screen.getByText('Automation workspace')).toBeInTheDocument();
+    expect(screen.getByText('Morning start')).toBeInTheDocument();
   });
 
   it('falls back to rendering only the active route below the split breakpoint', () => {

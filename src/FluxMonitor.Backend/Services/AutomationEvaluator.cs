@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Text.RegularExpressions;
 using FluxMonitor.Backend.Controllers;
 using FluxMonitor.Backend.Models;
 using FluxMonitor.Contracts.Configuration;
@@ -20,12 +19,6 @@ public sealed class AutomationEvaluator(
     ILogger<AutomationEvaluator> logger)
 {
     private const int MaxLogEntries = 100;
-
-    private static readonly Regex AndRegex = new(@"\bAND\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex OrRegex = new(@"\bOR\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex NotRegex = new(@"\bNOT\b", RegexOptions.IgnoreCase | RegexOptions.Compiled);
-    private static readonly Regex EqualityRegex = new(@"(?<![<>=!])=(?!=)", RegexOptions.Compiled);
-    private static readonly Regex LeadingIfRegex = new(@"^\s*IF\s*:?\s*", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
     private readonly ConcurrentDictionary<string, DateTimeOffset> _lastTriggered = new(StringComparer.OrdinalIgnoreCase);
     private readonly ConcurrentDictionary<string, bool> _previousExpressionState = new(StringComparer.OrdinalIgnoreCase);
@@ -125,7 +118,7 @@ public sealed class AutomationEvaluator(
 
     private AutomationExpressionContext BuildExpressionContext(string rawExpression)
     {
-        var expression = NormalizeExpressionText(rawExpression);
+        var expression = AutomationExpressionSyntaxValidator.NormalizeExpressionText(rawExpression);
         var parameters = new Dictionary<string, object>(StringComparer.OrdinalIgnoreCase);
 
         var now = DateTimeOffset.Now;
@@ -152,36 +145,11 @@ public sealed class AutomationEvaluator(
 
         void AddToken(string token, object value)
         {
-            var safeName = ToSafeParameterName(token);
-            expression = ReplaceToken(expression, token, safeName);
+            var safeName = AutomationExpressionSyntaxValidator.ToSafeParameterName(token);
+            expression = AutomationExpressionSyntaxValidator.ReplaceToken(expression, token, safeName);
             parameters[safeName] = value;
         }
     }
-
-    private static string NormalizeExpressionText(string expression)
-    {
-        var normalized = expression.Trim();
-        normalized = LeadingIfRegex.Replace(normalized, string.Empty);
-        var thenIndex = normalized.IndexOf("THEN:", StringComparison.OrdinalIgnoreCase);
-        if (thenIndex >= 0)
-            normalized = normalized[..thenIndex].Trim();
-
-        normalized = AndRegex.Replace(normalized, "&&");
-        normalized = OrRegex.Replace(normalized, "||");
-        normalized = NotRegex.Replace(normalized, "!");
-        normalized = EqualityRegex.Replace(normalized, "==");
-        return normalized;
-    }
-
-    private static string ReplaceToken(string expression, string token, string safeName)
-        => Regex.Replace(
-            expression,
-            $@"(?<![A-Za-z0-9_]){Regex.Escape(token)}(?![A-Za-z0-9_])",
-            safeName,
-            RegexOptions.IgnoreCase);
-
-    private static string ToSafeParameterName(string token)
-        => "p_" + Regex.Replace(token, @"[^A-Za-z0-9_]", "_");
 
     private static int GetIsoDayOfWeek(DayOfWeek dayOfWeek)
         => dayOfWeek is DayOfWeek.Sunday ? 7 : (int)dayOfWeek;
