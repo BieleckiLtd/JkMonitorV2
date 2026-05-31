@@ -9,6 +9,7 @@ const testRuleMock = vi.fn();
 const reloadMetadataMock = vi.fn();
 const validateExpressionMock = vi.fn();
 let configRules: AutomationRuleConfig[] = [];
+const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 const devices: AutomationDeviceOption[] = [
   {
@@ -159,5 +160,34 @@ describe('AutomationsPage', () => {
     });
     expect(screen.getByText('Unexpected token near time.minute.')).toBeInTheDocument();
     expect(saveRulesMock).not.toHaveBeenCalled();
+  });
+
+  it('uses a GUID when saving a newly created automation', async () => {
+    saveRulesMock.mockImplementation(async (rules: AutomationRuleConfig[]) => ({ rules }));
+
+    renderPage(<AutomationsPage hideHeader createNew />);
+
+    await screen.findByRole('button', { name: /^save$/i });
+    fireEvent.change(screen.getByPlaceholderText(/state_of_charge/i), {
+      target: { value: 'time.hour == 5' },
+    });
+    fireEvent.click(screen.getByRole('button', { name: /^save$/i }));
+
+    await waitFor(() => {
+      expect(saveRulesMock).toHaveBeenCalledTimes(1);
+    });
+
+    const savedRules = saveRulesMock.mock.calls[0]?.[0] as AutomationRuleConfig[];
+    expect(savedRules[0]?.id).toMatch(uuidRegex);
+  });
+
+  it('renders the values browser below the automation definition panel', async () => {
+    renderPage(<AutomationsPage hideHeader createNew />);
+
+    await screen.findByRole('button', { name: /^save$/i });
+
+    const nameLabel = screen.getByText('Name');
+    const valuesTitle = screen.getByText('Values');
+    expect(nameLabel.compareDocumentPosition(valuesTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 });

@@ -1,12 +1,42 @@
 import { Bot, ChevronRight, LoaderCircle, Plus } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import { Switch } from './ui/switch';
 import type { AutomationConfigResponse, AutomationRuleConfig } from '../types/automation';
 import { cn } from '../lib/utils';
 import { runWithViewTransition } from '../lib/viewTransitions';
 
+type AutomationActionState = {
+  loading: boolean;
+  error?: string;
+};
+
 function getAutomationPath(ruleId: string) {
   return `/automations/${encodeURIComponent(ruleId)}`;
+}
+
+async function readErrorMessage(response: Response, fallbackMessage: string) {
+  try {
+    const payload = await response.json() as {
+      detail?: string;
+      error?: string;
+      title?: string;
+      errors?: Record<string, string[]>;
+    };
+
+    const validationMessages = Object.values(payload.errors ?? {}).flat().filter(Boolean);
+    return validationMessages[0] ?? payload.detail ?? payload.error ?? payload.title ?? fallbackMessage;
+  } catch {
+    return fallbackMessage;
+  }
+}
+
+function notifyAutomationsChanged() {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.dispatchEvent(new Event('automations:config-changed'));
 }
 
 export function AutomationsNavigationPanel({ className }: { className?: string }) {
@@ -15,6 +45,7 @@ export function AutomationsNavigationPanel({ className }: { className?: string }
   const [rules, setRules] = useState<AutomationRuleConfig[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [actions, setActions] = useState<Record<string, AutomationActionState>>({});
 
   const loadRules = useCallback(async () => {
     try {
@@ -48,6 +79,49 @@ export function AutomationsNavigationPanel({ className }: { className?: string }
     };
   }, [loadRules]);
 
+  const toggleRule = useCallback(async (rule: AutomationRuleConfig, enabled: boolean) => {
+    const previousRules = rules;
+    const nextRules = rules.map((candidate) => (
+      candidate.id === rule.id
+        ? { ...candidate, enabled }
+        : candidate
+    ));
+
+    setRules(nextRules);
+    setActions((current) => ({
+      ...current,
+      [rule.id]: { loading: true },
+    }));
+
+    try {
+      const response = await fetch('/api/automations/rules', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rules: nextRules }),
+      });
+      if (!response.ok) {
+        throw new Error(await readErrorMessage(response, `Unable to ${enabled ? 'enable' : 'disable'} automation.`));
+      }
+
+      const data = (await response.json()) as AutomationConfigResponse;
+      setRules(data.rules ?? nextRules);
+      setActions((current) => ({
+        ...current,
+        [rule.id]: { loading: false },
+      }));
+      notifyAutomationsChanged();
+    } catch (error) {
+      setRules(previousRules);
+      setActions((current) => ({
+        ...current,
+        [rule.id]: {
+          loading: false,
+          error: error instanceof Error ? error.message : `Unable to ${enabled ? 'enable' : 'disable'} automation.`,
+        },
+      }));
+    }
+  }, [rules]);
+
   const activePath = location.pathname;
 
   return (
@@ -79,27 +153,30 @@ export function AutomationsNavigationPanel({ className }: { className?: string }
         {rules.map((rule, index) => {
           const isActive = activePath === getAutomationPath(rule.id);
           const isLastSavedRule = index === rules.length - 1;
+          const action = actions[rule.id];
 
           return (
             <div key={rule.id}>
-              <button
-                type='button'
+              <div
                 data-active={isActive ? 'true' : undefined}
-                onClick={() => {
-                  if (isActive) {
-                    return;
-                  }
-
-                  runWithViewTransition(() => {
-                    navigate(getAutomationPath(rule.id));
-                  }, { direction: 'forward' });
-                }}
                 className={cn(
-                  'flex w-full items-center justify-between gap-2.5 px-3 py-2.5 text-left transition-all duration-100',
+                  'flex items-center gap-2.5 px-3 py-2 text-left transition-all duration-100',
                   isActive ? 'bg-primary/10 text-primary' : 'hover:bg-accent/25',
                 )}
               >
-                <div className='flex min-w-0 items-center gap-2.5'>
+                <button
+                  type='button'
+                  onClick={() => {
+                    if (isActive) {
+                      return;
+                    }
+
+                    runWithViewTransition(() => {
+                      navigate(getAutomationPath(rule.id));
+                    }, { direction: 'forward' });
+                  }}
+                  className='flex min-w-0 flex-1 items-center gap-2.5 text-left'
+                >
                   <div
                     className={cn(
                       'flex h-8 w-8 shrink-0 items-center justify-center',
@@ -108,12 +185,38 @@ export function AutomationsNavigationPanel({ className }: { className?: string }
                   >
                     <Bot className={cn('h-4 w-4', isActive ? 'opacity-100' : 'opacity-60')} />
                   </div>
-                  <div className={cn('min-w-0 truncate font-mono text-sm', isActive ? 'text-primary' : 'text-foreground')}>
-                    {rule.name || 'untitled automation'}
+                  <div className='min-w-0'>
+                    <div className={cn('truncate font-mono text-sm', isActive ? 'text-primary' : 'text-foreground')}>
+                      {rule.name || 'untitled automation'}
+                    </div>
+                    {rule.expression.trim() ? (
+                      <div className='truncate font-mono text-[10px] uppercase tracking-tight text-muted-foreground'>
+                        {rule.expression}
+                      </div>
+                    ) : null}
                   </div>
+                </button>
+
+                <div className='flex shrink-0 items-center gap-1.5'>
+                  {action?.loading ? <LoaderCircle className='h-3.5 w-3.5 animate-spin text-muted-foreground' /> : null}
+                  <Switch
+                    size='sm'
+                    checked={rule.enabled}
+                    aria-label={`Toggle automation ${rule.name || rule.id}`}
+                    disabled={action?.loading}
+                    onCheckedChange={(checked: boolean) => {
+                      void toggleRule(rule, checked);
+                    }}
+                  />
+                  <ChevronRight className={cn('h-4 w-4 shrink-0', isActive ? 'opacity-80' : 'opacity-50')} />
                 </div>
-                <ChevronRight className={cn('h-5 w-5 shrink-0', isActive ? 'opacity-80' : 'opacity-50')} />
-              </button>
+              </div>
+
+              {action?.error ? (
+                <div className='px-4 pb-2 text-[10px] text-rose-400'>
+                  {action.error}
+                </div>
+              ) : null}
 
               {!isLastSavedRule ? (
                 <div aria-hidden='true' className='px-4'>

@@ -40,7 +40,15 @@ type ExpressionValidationState = {
 };
 
 function generateId() {
-  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
+  if (typeof globalThis.crypto?.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID();
+  }
+
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (character) => {
+    const randomNibble = Math.floor(Math.random() * 16);
+    const value = character === 'x' ? randomNibble : ((randomNibble & 0x3) | 0x8);
+    return value.toString(16);
+  });
 }
 
 function getDevice(devices: AutomationDeviceOption[], deviceId: string) {
@@ -210,13 +218,25 @@ export function AutomationsPage({ hideHeader = false, selectedRuleId, createNew 
   const [expressionValidation, setExpressionValidation] = useState<Record<string, ExpressionValidationState>>({});
 
   useEffect(() => {
-    if (config && !initialized) {
-      const normalizedRules = normalizeRules(config.rules);
+    if (!config) {
+      return;
+    }
+
+    const normalizedRules = normalizeRules(config.rules);
+
+    if (!initialized) {
       setSavedRules(normalizedRules);
       setRules(initialDraft ? mergeDraftRules(normalizedRules, initialDraft.rules) : normalizedRules);
       setActiveRuleId((current) => current ?? selectedRuleId ?? initialDraft?.activeRuleId ?? normalizedRules[0]?.id ?? null);
       setInitialized(true);
+      return;
     }
+
+    setSavedRules((current) => areRulesEqual(current, normalizedRules) ? current : normalizedRules);
+    setRules((current) => {
+      const mergedRules = mergeDraftRules(normalizedRules, current);
+      return areRulesEqual(current, mergedRules) ? current : mergedRules;
+    });
   }, [config, initialDraft, initialized, selectedRuleId]);
 
   useEffect(() => {
@@ -442,15 +462,22 @@ export function AutomationsPage({ hideHeader = false, selectedRuleId, createNew 
     try {
       const data = await saveRules(nextSavedRules);
       const normalizedSavedRules = normalizeRules(data.rules);
+      const savedRuleIndex = nextSavedRules.findIndex((savedRule) => savedRule.id === rule.id);
+      const persistedRuleId = normalizedSavedRules[savedRuleIndex]?.id ?? rule.id;
       setSavedRules(normalizedSavedRules);
-      setRules((current) => mergeDraftRules(normalizedSavedRules, current));
+      setRules((current) => {
+        const remappedCurrent = persistedRuleId === rule.id
+          ? current
+          : current.map((candidate) => candidate.id === rule.id ? { ...candidate, id: persistedRuleId } : candidate);
+        return mergeDraftRules(normalizedSavedRules, remappedCurrent);
+      });
       clearDraftState();
       notifyAutomationsChanged();
-      setRuleMessages((current) => ({ ...current, [rule.id]: 'Automation saved and active.' }));
+      setRuleMessages((current) => ({ ...current, [persistedRuleId]: 'Automation saved and active.' }));
 
-      if (createNew) {
+      if (createNew || persistedRuleId !== rule.id) {
         setDraftRuleId(null);
-        navigate(`/automations/${encodeURIComponent(rule.id)}`, { replace: true });
+        navigate(`/automations/${encodeURIComponent(persistedRuleId)}`, { replace: true });
       }
     } catch (err) {
       setRuleMessages((current) => ({ ...current, [rule.id]: err instanceof Error ? err.message : 'Failed to save automation.' }));
@@ -512,12 +539,6 @@ export function AutomationsPage({ hideHeader = false, selectedRuleId, createNew 
         <div className='space-y-4'>
           {visibleRule ? (
             <>
-              <TokenPanel
-                devices={devices}
-                activeRule={visibleRule}
-                onInsert={insertTokenIntoActiveRule}
-              />
-
               <AutomationRuleEditor
                 key={visibleRule.id}
                 devices={devices}
@@ -534,6 +555,12 @@ export function AutomationsPage({ hideHeader = false, selectedRuleId, createNew 
                 onTest={handleTestRule}
                 onSave={handleSaveRule}
                 onActivate={setActiveRuleId}
+              />
+
+              <TokenPanel
+                devices={devices}
+                activeRule={visibleRule}
+                onInsert={insertTokenIntoActiveRule}
               />
             </>
           ) : (

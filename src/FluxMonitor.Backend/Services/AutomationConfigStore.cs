@@ -40,9 +40,20 @@ public sealed class AutomationConfigStore(
             await using var connection = await OpenConnectionAsync(cancellationToken);
             await EnsureSchemaAsync(connection);
 
+            var loadedRules = await LoadRulesAsync(connection);
+            var normalizedRules = NormalizeRuleIds(loadedRules, out var normalizedIdCount);
+
+            if (normalizedIdCount > 0)
+            {
+                await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
+                await PersistRulesAsync(connection, transaction, normalizedRules);
+                await transaction.CommitAsync(cancellationToken);
+                logger.LogInformation("Normalized {RuleCount} automation rule ids to GUIDs while loading configuration.", normalizedIdCount);
+            }
+
             var loadedConfig = new AutomationConfig
             {
-                Rules = await LoadRulesAsync(connection)
+                Rules = normalizedRules
             };
 
             lock (_cacheLock)
@@ -90,7 +101,7 @@ public sealed class AutomationConfigStore(
         if (!HasDatabase)
             throw new InvalidOperationException("Automation rules cannot be saved until PostgreSQL storage is configured.");
 
-        var clonedRules = rules.Select(CloneRule).ToList();
+        var clonedRules = NormalizeRuleIds(rules.Select(CloneRule).ToList(), out var normalizedIdCount);
 
         await using var connection = await OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
@@ -101,6 +112,11 @@ public sealed class AutomationConfigStore(
         lock (_cacheLock)
         {
             _config.Rules = clonedRules;
+        }
+
+        if (normalizedIdCount > 0)
+        {
+            logger.LogInformation("Normalized {RuleCount} automation rule ids to GUIDs while saving configuration.", normalizedIdCount);
         }
 
         logger.LogInformation("Saved {RuleCount} automation rules to PostgreSQL.", clonedRules.Count);
@@ -246,6 +262,47 @@ DO UPDATE SET
             CooldownMinutes = rule.CooldownMinutes
         };
 
+    internal static List<AutomationRuleConfig> NormalizeRuleIds(
+        IReadOnlyList<AutomationRuleConfig> rules,
+        out int normalizedIdCount)
+    {
+        normalizedIdCount = 0;
+
+        var usedIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var normalizedRules = new List<AutomationRuleConfig>(rules.Count);
+
+        foreach (var rule in rules)
+        {
+            var normalizedId = NormalizeRuleId(rule.Id, usedIds);
+            if (!string.Equals(rule.Id, normalizedId, StringComparison.Ordinal))
+            {
+                normalizedIdCount++;
+            }
+
+            normalizedRules.Add(string.Equals(rule.Id, normalizedId, StringComparison.Ordinal)
+                ? CloneRule(rule)
+                : CloneRule(rule, normalizedId));
+        }
+
+        return normalizedRules;
+    }
+
+    private static AutomationRuleConfig CloneRule(AutomationRuleConfig rule, string id)
+        => new()
+        {
+            Id = id,
+            Name = rule.Name,
+            Enabled = rule.Enabled,
+            SourceDeviceId = rule.SourceDeviceId,
+            Expression = rule.Expression,
+            TriggerType = rule.TriggerType,
+            Actions = [.. AutomationRuleValidator.NormalizeActions(rule).Select(CloneAction)],
+            TargetDeviceId = rule.TargetDeviceId,
+            TargetParameterKey = rule.TargetParameterKey,
+            RawValue = rule.RawValue,
+            CooldownMinutes = rule.CooldownMinutes
+        };
+
     private static AutomationActionConfig CloneAction(AutomationActionConfig action)
         => new()
         {
@@ -253,6 +310,28 @@ DO UPDATE SET
             TargetParameterKey = action.TargetParameterKey,
             RawValue = action.RawValue
         };
+
+    private static string NormalizeRuleId(string? id, HashSet<string> usedIds)
+    {
+        var candidate = id?.Trim();
+        if (Guid.TryParse(candidate, out var guid))
+        {
+            var normalizedGuid = guid.ToString();
+            if (usedIds.Add(normalizedGuid))
+            {
+                return normalizedGuid;
+            }
+        }
+
+        string generatedGuid;
+        do
+        {
+            generatedGuid = Guid.NewGuid().ToString();
+        }
+        while (!usedIds.Add(generatedGuid));
+
+        return generatedGuid;
+    }
 
     private static IReadOnlyList<AutomationActionConfig> LoadActions(
         string? json,

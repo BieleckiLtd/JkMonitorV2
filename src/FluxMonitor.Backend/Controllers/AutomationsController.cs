@@ -13,7 +13,10 @@ public sealed class AutomationsController(
     AutomationEvaluator evaluator,
     DeviceStateStore deviceStateStore,
     DeviceConfigStore deviceConfigStore,
-    DeviceDefinitionLoader definitionLoader) : ControllerBase
+    DeviceDefinitionLoader definitionLoader,
+    DeviceStateBroadcaster deviceStateBroadcaster,
+    DeviceDetailInterestStore detailInterestStore,
+    PollTrigger pollTrigger) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<AutomationConfigResponse>> GetConfig(CancellationToken cancellationToken)
@@ -89,13 +92,43 @@ public sealed class AutomationsController(
     }
 
     [HttpGet("devices")]
-    public IActionResult GetAvailableDevices()
+    public async Task<IActionResult> GetAvailableDevices(
+        [FromQuery] bool refreshMissingValues = false,
+        [FromQuery] string[] deviceId = default!,
+        CancellationToken cancellationToken = default)
     {
         var configuredDevices = deviceConfigStore.GetDevices();
-        var runtimeStates = deviceStateStore.GetCurrentDevices()
+        var currentDevices = deviceStateStore.GetCurrentDevices();
+        var devices = BuildDeviceOptions(configuredDevices, currentDevices);
+
+        if (refreshMissingValues)
+        {
+            var requestedDeviceIds = NormalizeDeviceIds(deviceId);
+            var refreshDeviceIds = requestedDeviceIds.Count > 0
+                ? requestedDeviceIds
+                : devices
+                    .Where(HasMissingCurrentValue)
+                    .Select(device => device.Id)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            if (refreshDeviceIds.Count > 0)
+            {
+                currentDevices = await TryRefreshDeviceStatesAsync(currentDevices, refreshDeviceIds, cancellationToken);
+                devices = BuildDeviceOptions(configuredDevices, currentDevices);
+            }
+        }
+
+        return Ok(devices);
+    }
+
+    private AutomationDeviceOption[] BuildDeviceOptions(
+        IReadOnlyList<FluxMonitor.Contracts.Configuration.DeviceConfiguration> configuredDevices,
+        IReadOnlyList<DeviceRuntimeState> currentDevices)
+    {
+        var runtimeStates = currentDevices
             .ToDictionary(device => device.DeviceId, StringComparer.OrdinalIgnoreCase);
 
-        var devices = configuredDevices
+        return configuredDevices
             .OrderBy(device => device.SortOrder)
             .ThenBy(device => device.DisplayName, StringComparer.OrdinalIgnoreCase)
             .Select(device =>
@@ -111,11 +144,36 @@ public sealed class AutomationsController(
                     parameters.Where(parameter => parameter.IsWritable).ToArray());
             })
             .ToArray();
-
-        return Ok(devices);
     }
 
-    private static IReadOnlyList<AutomationParameterOption> BuildParameterList(
+    private async Task<IReadOnlyList<DeviceRuntimeState>> TryRefreshDeviceStatesAsync(
+        IReadOnlyList<DeviceRuntimeState> currentDevices,
+        IReadOnlyCollection<string> deviceIds,
+        CancellationToken cancellationToken)
+    {
+        if (deviceIds.Count == 0)
+            return currentDevices;
+
+        await using var subscription = deviceStateBroadcaster.Subscribe(currentDevices);
+        subscription.Reader.TryRead(out _);
+
+        using var detailLease = detailInterestStore.Acquire(deviceIds);
+        pollTrigger.Signal();
+
+        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        timeoutCts.CancelAfter(TimeSpan.FromSeconds(2));
+
+        try
+        {
+            return await subscription.Reader.ReadAsync(timeoutCts.Token);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            return deviceStateStore.GetCurrentDevices();
+        }
+    }
+
+    internal static IReadOnlyList<AutomationParameterOption> BuildParameterList(
         DeviceDefinition? definition,
         DeviceTelemetrySnapshot? telemetry)
     {
@@ -176,6 +234,34 @@ public sealed class AutomationsController(
                     parameter.RawValue,
                     parameter.Options?.Select(option => new AutomationSelectOption(option.Value, option.Label)).ToArray() ?? []);
             }
+
+            foreach (var value in BuildNumericValueMap(telemetry))
+            {
+                if (parameters.TryGetValue(value.Key, out var parameter))
+                {
+                    if (!HasCurrentValue(parameter))
+                    {
+                        parameters[value.Key] = parameter with
+                        {
+                            NumericValue = value.Value
+                        };
+                    }
+
+                    continue;
+                }
+
+                parameters[value.Key] = new AutomationParameterOption(
+                    value.Key,
+                    value.Key,
+                    "Current",
+                    string.Empty,
+                    false,
+                    value.Value,
+                    null,
+                    null,
+                    null,
+                    []);
+            }
         }
 
         return parameters.Values
@@ -183,6 +269,47 @@ public sealed class AutomationsController(
             .ThenBy(parameter => parameter.Name, StringComparer.OrdinalIgnoreCase)
             .ToArray();
     }
+
+    private static Dictionary<string, decimal?> BuildNumericValueMap(DeviceTelemetrySnapshot telemetry)
+    {
+        var values = new Dictionary<string, decimal?>(telemetry.NumericValues, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var parameter in telemetry.Parameters)
+        {
+            if (!values.ContainsKey(parameter.Key) && GetParameterNumericValue(parameter) is { } value)
+            {
+                values[parameter.Key] = value;
+            }
+        }
+
+        return values;
+    }
+
+    private static decimal? GetParameterNumericValue(DeviceParameter parameter)
+    {
+        if (parameter.NumericValue.HasValue)
+            return parameter.NumericValue.Value;
+        if (parameter.BooleanValue.HasValue)
+            return parameter.BooleanValue.Value ? 1m : 0m;
+        if (parameter.RawValue.HasValue)
+            return parameter.RawValue.Value;
+        return null;
+    }
+
+    private static bool HasCurrentValue(AutomationParameterOption parameter)
+        => parameter.NumericValue.HasValue
+            || !string.IsNullOrWhiteSpace(parameter.StringValue)
+            || parameter.BooleanValue.HasValue
+            || parameter.RawValue.HasValue;
+
+    private static bool HasMissingCurrentValue(AutomationDeviceOption device)
+        => device.Parameters.Any(parameter => !HasCurrentValue(parameter));
+
+    private static HashSet<string> NormalizeDeviceIds(IEnumerable<string> deviceIds)
+        => deviceIds
+            .Where(id => !string.IsNullOrWhiteSpace(id))
+            .Select(id => id.Trim())
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
     private static string GetRuleLabel(AutomationRuleConfig rule, int index)
         => string.IsNullOrWhiteSpace(rule.Name) ? $"Rule {index + 1}" : $"Rule \"{rule.Name}\"";

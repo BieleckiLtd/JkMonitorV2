@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   AutomationConfigResponse,
   AutomationDeviceOption,
@@ -24,6 +24,33 @@ async function readErrorMessage(response: Response, fallbackMessage: string) {
   }
 }
 
+function hasCurrentValue(parameter: AutomationDeviceOption['parameters'][number]) {
+  return parameter.numericValue != null
+    || Boolean(parameter.stringValue?.trim())
+    || parameter.booleanValue != null
+    || parameter.rawValue != null;
+}
+
+function getDevicesWithMissingValues(devices: AutomationDeviceOption[]) {
+  return devices
+    .filter((device) => device.parameters.some((parameter) => !hasCurrentValue(parameter)))
+    .map((device) => device.id);
+}
+
+function buildAutomationDevicesUrl(refreshMissingValues: boolean, deviceIds: string[] = []) {
+  const params = new URLSearchParams();
+  if (refreshMissingValues) {
+    params.set('refreshMissingValues', 'true');
+  }
+
+  for (const deviceId of deviceIds) {
+    params.append('deviceId', deviceId);
+  }
+
+  const query = params.toString();
+  return query ? `/api/automations/devices?${query}` : '/api/automations/devices';
+}
+
 export function useAutomationConfig() {
   const [config, setConfig] = useState<AutomationConfigResponse | null>(null);
   const [isLoading, setIsLoading] = useState(true);
@@ -45,6 +72,17 @@ export function useAutomationConfig() {
 
   useEffect(() => {
     void load();
+  }, [load]);
+
+  useEffect(() => {
+    const handleConfigChanged = () => {
+      void load();
+    };
+
+    window.addEventListener('automations:config-changed', handleConfigChanged);
+    return () => {
+      window.removeEventListener('automations:config-changed', handleConfigChanged);
+    };
   }, [load]);
 
   const saveRules = useCallback(async (rules: AutomationRuleConfig[]) => {
@@ -110,10 +148,11 @@ export function useAutomationLog() {
 
 export function useAutomationMetadata() {
   const [devices, setDevices] = useState<AutomationDeviceOption[]>([]);
+  const attemptedRefreshDeviceIdsRef = useRef(new Set<string>());
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (refreshMissingValues = false, deviceIds: string[] = []) => {
     try {
-      const response = await fetch('/api/automations/devices');
+      const response = await fetch(buildAutomationDevicesUrl(refreshMissingValues, deviceIds), { cache: 'no-store' });
       if (response.ok) {
         setDevices((await response.json()) as AutomationDeviceOption[]);
       }
@@ -121,6 +160,11 @@ export function useAutomationMetadata() {
       // ignore metadata refresh failures
     }
   }, []);
+
+  const reload = useCallback(async () => {
+    attemptedRefreshDeviceIdsRef.current.clear();
+    await load(true);
+  }, [load]);
 
   useEffect(() => {
     void load();
@@ -131,5 +175,20 @@ export function useAutomationMetadata() {
     return () => window.clearInterval(interval);
   }, [load]);
 
-  return { devices, reload: load };
+  useEffect(() => {
+    const unresolvedDeviceIds = getDevicesWithMissingValues(devices)
+      .filter((deviceId) => !attemptedRefreshDeviceIdsRef.current.has(deviceId));
+
+    if (unresolvedDeviceIds.length === 0) {
+      return;
+    }
+
+    for (const deviceId of unresolvedDeviceIds) {
+      attemptedRefreshDeviceIdsRef.current.add(deviceId);
+    }
+
+    void load(true, unresolvedDeviceIds);
+  }, [devices, load]);
+
+  return { devices, reload };
 }
