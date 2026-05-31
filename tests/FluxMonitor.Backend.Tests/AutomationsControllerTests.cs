@@ -8,6 +8,70 @@ namespace FluxMonitor.Backend.Tests;
 public sealed class AutomationsControllerTests
 {
     [Fact]
+    public void HaveDevicesAdvancedSince_IgnoresUpdatesFromOtherDevices()
+    {
+        var devices = new List<DeviceRuntimeState>
+        {
+            new()
+            {
+                DeviceId = "device-1",
+                DisplayName = "Device 1",
+                DefinitionId = "test-device",
+                Enabled = true,
+                IsMaster = false,
+                PollIntervalMilliseconds = 5000,
+                LastPollCompletedAt = DateTimeOffset.Parse("2026-05-31T16:00:00Z")
+            },
+            new()
+            {
+                DeviceId = "device-2",
+                DisplayName = "Device 2",
+                DefinitionId = "test-device",
+                Enabled = true,
+                IsMaster = false,
+                PollIntervalMilliseconds = 5000,
+                LastPollCompletedAt = DateTimeOffset.Parse("2026-05-31T16:00:10Z")
+            }
+        };
+
+        var advanced = AutomationsController.HaveDevicesAdvancedSince(
+            devices,
+            new Dictionary<string, DateTimeOffset?>
+            {
+                ["device-1"] = DateTimeOffset.Parse("2026-05-31T16:00:00Z")
+            });
+
+        Assert.False(advanced);
+    }
+
+    [Fact]
+    public void HaveDevicesAdvancedSince_ReturnsTrue_WhenTargetDeviceCompletesNewPoll()
+    {
+        var devices = new List<DeviceRuntimeState>
+        {
+            new()
+            {
+                DeviceId = "device-1",
+                DisplayName = "Device 1",
+                DefinitionId = "test-device",
+                Enabled = true,
+                IsMaster = false,
+                PollIntervalMilliseconds = 5000,
+                LastPollCompletedAt = DateTimeOffset.Parse("2026-05-31T16:00:11Z")
+            }
+        };
+
+        var advanced = AutomationsController.HaveDevicesAdvancedSince(
+            devices,
+            new Dictionary<string, DateTimeOffset?>
+            {
+                ["device-1"] = DateTimeOffset.Parse("2026-05-31T16:00:00Z")
+            });
+
+        Assert.True(advanced);
+    }
+
+    [Fact]
     public void BuildParameterList_UsesNumericValuesForDefinedEntities()
     {
         var definition = CreateDefinition(new EntityDefinition

@@ -156,6 +156,9 @@ public sealed class AutomationsController(
 
         await using var subscription = deviceStateBroadcaster.Subscribe(currentDevices);
         subscription.Reader.TryRead(out _);
+        var baselinePollCompletedAt = currentDevices
+            .Where(device => deviceIds.Contains(device.DeviceId))
+            .ToDictionary(device => device.DeviceId, device => device.LastPollCompletedAt, StringComparer.OrdinalIgnoreCase);
 
         using var detailLease = detailInterestStore.Acquire(deviceIds);
         pollTrigger.Signal();
@@ -165,7 +168,14 @@ public sealed class AutomationsController(
 
         try
         {
-            return await subscription.Reader.ReadAsync(timeoutCts.Token);
+            while (true)
+            {
+                var nextDevices = await subscription.Reader.ReadAsync(timeoutCts.Token);
+                if (HaveDevicesAdvancedSince(nextDevices, baselinePollCompletedAt))
+                {
+                    return nextDevices;
+                }
+            }
         }
         catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
         {
@@ -304,6 +314,27 @@ public sealed class AutomationsController(
 
     private static bool HasMissingCurrentValue(AutomationDeviceOption device)
         => device.Parameters.Any(parameter => !HasCurrentValue(parameter));
+
+    internal static bool HaveDevicesAdvancedSince(
+        IReadOnlyList<DeviceRuntimeState> devices,
+        IReadOnlyDictionary<string, DateTimeOffset?> baselinePollCompletedAt)
+    {
+        foreach (var (deviceId, baselineCompletedAt) in baselinePollCompletedAt)
+        {
+            var device = devices.FirstOrDefault(candidate => string.Equals(candidate.DeviceId, deviceId, StringComparison.OrdinalIgnoreCase));
+            if (device?.LastPollCompletedAt is not { } refreshedCompletedAt)
+            {
+                return false;
+            }
+
+            if (baselineCompletedAt is { } previousCompletedAt && refreshedCompletedAt <= previousCompletedAt)
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 
     private static HashSet<string> NormalizeDeviceIds(IEnumerable<string> deviceIds)
         => deviceIds
