@@ -45,22 +45,25 @@ describe('useAutomationMetadata', () => {
     vi.unstubAllGlobals();
   });
 
-  it('retries devices with missing values once using refreshMissingValues', async () => {
+  it('loads detail values immediately and keeps them when fast metadata omits them', async () => {
     fetchMock
-      .mockResolvedValueOnce(jsonResponse([createDevice()]))
-      .mockResolvedValueOnce(jsonResponse([createDevice({ booleanValue: true, rawValue: 1 })]));
+      .mockResolvedValueOnce(jsonResponse([createDevice({ booleanValue: true, rawValue: 1 })]))
+      .mockResolvedValueOnce(jsonResponse([createDevice()]));
 
     const { result } = renderHook(() => useAutomationMetadata());
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(2);
-    });
-
-    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/automations/devices');
-    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/automations/devices?refreshMissingValues=true&deviceId=battery-a');
-
-    await waitFor(() => {
       expect(result.current.devices[0]?.parameters[0]?.booleanValue).toBe(true);
     });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe('/api/automations/devices?refreshMissingValues=true');
+
+    await result.current.reload();
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledTimes(2);
+      expect(result.current.devices[0]?.parameters[0]?.booleanValue).toBe(true);
+    });
+
+    expect(fetchMock.mock.calls[1]?.[0]).toBe('/api/automations/devices?refreshMissingValues=true');
   });
 });

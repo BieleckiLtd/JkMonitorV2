@@ -31,6 +31,46 @@ function hasCurrentValue(parameter: AutomationDeviceOption['parameters'][number]
     || parameter.rawValue != null;
 }
 
+function mergeCurrentValue(
+  parameter: AutomationDeviceOption['parameters'][number],
+  previousParameter: AutomationDeviceOption['parameters'][number] | undefined,
+) {
+  if (hasCurrentValue(parameter) || !previousParameter || !hasCurrentValue(previousParameter)) {
+    return parameter;
+  }
+
+  return {
+    ...parameter,
+    numericValue: previousParameter.numericValue,
+    stringValue: previousParameter.stringValue,
+    booleanValue: previousParameter.booleanValue,
+    rawValue: previousParameter.rawValue,
+  };
+}
+
+function mergeDeviceCurrentValues(
+  devices: AutomationDeviceOption[],
+  previousDevices: AutomationDeviceOption[],
+) {
+  const previousDeviceMap = new Map(previousDevices.map((device) => [device.id, device]));
+
+  return devices.map((device) => {
+    const previousDevice = previousDeviceMap.get(device.id);
+    if (!previousDevice) return device;
+
+    const previousParameterMap = new Map([
+      ...previousDevice.parameters.map((parameter) => [parameter.id, parameter] as const),
+      ...previousDevice.writableParameters.map((parameter) => [parameter.id, parameter] as const),
+    ]);
+
+    return {
+      ...device,
+      parameters: device.parameters.map((parameter) => mergeCurrentValue(parameter, previousParameterMap.get(parameter.id))),
+      writableParameters: device.writableParameters.map((parameter) => mergeCurrentValue(parameter, previousParameterMap.get(parameter.id))),
+    };
+  });
+}
+
 function getDevicesWithMissingValues(devices: AutomationDeviceOption[]) {
   return devices
     .filter((device) => device.parameters.some((parameter) => !hasCurrentValue(parameter)))
@@ -154,7 +194,8 @@ export function useAutomationMetadata() {
     try {
       const response = await fetch(buildAutomationDevicesUrl(refreshMissingValues, deviceIds), { cache: 'no-store' });
       if (response.ok) {
-        setDevices((await response.json()) as AutomationDeviceOption[]);
+        const nextDevices = (await response.json()) as AutomationDeviceOption[];
+        setDevices((previousDevices) => mergeDeviceCurrentValues(nextDevices, previousDevices));
       }
     } catch {
       // ignore metadata refresh failures
@@ -167,7 +208,7 @@ export function useAutomationMetadata() {
   }, [load]);
 
   useEffect(() => {
-    void load();
+    void load(true);
     const interval = window.setInterval(() => {
       void load();
     }, 5000);
